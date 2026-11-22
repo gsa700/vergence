@@ -27,16 +27,16 @@
 //!       in millimeters (milestone 4, acceptance 3).
 
 mod cursors;
-mod iso;
 mod db;
 mod fake;
+mod iso;
 mod live;
 mod measure;
 mod parse;
 mod same;
+mod seams;
 mod sharp;
 mod zoomed;
-mod seams;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

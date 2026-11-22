@@ -35,7 +35,10 @@ use std::time::SystemTime;
 use vergence_scene::{Color, Rect};
 use vergence_ui::{AppCommand as C, Bar, BarStyle, BarTab, Role, TabEvent};
 use vergence_widgets::prefs::{Choice, Control, Part, Prefs, Row, Rows};
-use vergence_widgets::{Align, ButtonLook, Element, Input, Length, Padding, Program, Theme, Touch, Waker, Window, button, column, drawing, field, label, panel, row, rule, scroll, vrule};
+use vergence_widgets::{
+    Align, ButtonLook, Element, Input, Length, Padding, Program, Theme, Touch, Waker, Window, button, column, drawing,
+    field, label, panel, row, rule, scroll, vrule,
+};
 
 const APP_ID: &str = "vergence-reader";
 const SECTION: &str = "[reader]";
@@ -85,7 +88,10 @@ enum Loaded {
     /// A PDF that needs its password, open in its helper.
     Locked(vergence_pdf::helper::Viewer),
     /// Why it cannot be shown here, and whether another app might.
-    Problem { why: String, elsewhere: bool },
+    Problem {
+        why: String,
+        elsewhere: bool,
+    },
 }
 
 /// What all windows share (one thread).
@@ -143,13 +149,23 @@ enum Content {
     Pdf(pdf::Pdf),
     /// The helper (taken while a password is tried), the password typed, and
     /// whether the last one was wrong.
-    Locked { viewer: Option<vergence_pdf::helper::Viewer>, password: String, wrong: bool },
-    Problem { why: String, elsewhere: bool },
+    Locked {
+        viewer: Option<vergence_pdf::helper::Viewer>,
+        password: String,
+        wrong: bool,
+    },
+    Problem {
+        why: String,
+        elsewhere: bool,
+    },
 }
 
 impl Tab {
     fn name(&self) -> String {
-        self.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| self.path.display().to_string())
+        self.path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| self.path.display().to_string())
     }
 
     /// The document's own title (its Info /Title) when it has a real one,
@@ -170,8 +186,14 @@ impl Tab {
 /// not a file's name (as many programs write: "Microsoft Word - a.docx").
 fn title_is_real(t: &str) -> bool {
     let low = t.trim().to_lowercase();
-    let file_like = [".pdf", ".doc", ".docx", ".odt", ".rtf", ".txt", ".tex", ".indd", ".ps", ".xls", ".xlsx", ".ppt", ".pptx"].iter().any(|e| low.ends_with(e));
-    low.chars().count() >= 3 && !["untitled", "title", "document", "(anonymous)"].contains(&low.as_str()) && !low.starts_with("microsoft word - ") && !file_like
+    let file_like =
+        [".pdf", ".doc", ".docx", ".odt", ".rtf", ".txt", ".tex", ".indd", ".ps", ".xls", ".xlsx", ".ppt", ".pptx"]
+            .iter()
+            .any(|e| low.ends_with(e));
+    low.chars().count() >= 3
+        && !["untitled", "title", "document", "(anonymous)"].contains(&low.as_str())
+        && !low.starts_with("microsoft word - ")
+        && !file_like
 }
 
 /// Reads a document in a worker: opened in its helper, or why not.
@@ -184,12 +206,17 @@ fn load(path: PathBuf, id: u32, shared: &Shared, waker: Option<Waker>) {
             match pdf::open(&path, waker.clone()) {
                 Ok(pdf::Opened::Ready(d)) => Loaded::Pdf(d),
                 Ok(pdf::Opened::Locked(v)) => Loaded::Locked(v),
-                Err(why) => Loaded::Problem { why: format!("“{name}” could not be shown: {why}"), elsewhere: false },
+                Err(why) => {
+                    Loaded::Problem { why: format!("“{name}” could not be shown: {why}"), elsewhere: false }
+                }
             }
         } else if mime == vergence_types::FOLDER {
             Loaded::Problem { why: "This is a folder.".into(), elsewhere: true }
         } else {
-            Loaded::Problem { why: format!("“{name}” is {} ({mime}), not a PDF document.", vergence_types::describe(mime)), elsewhere: true }
+            Loaded::Problem {
+                why: format!("“{name}” is {} ({mime}), not a PDF document.", vergence_types::describe(mime)),
+                elsewhere: true,
+            }
         };
         out.lock().unwrap_or_else(|e| e.into_inner()).push((id, loaded));
         if let Some(w) = waker {
@@ -201,7 +228,9 @@ fn load(path: PathBuf, id: u32, shared: &Shared, waker: Option<Waker>) {
 /// ~/.config/vergence/desktop.toml.
 fn desktop_text() -> (String, Option<SystemTime>) {
     match vergence_widgets::prefs::desktop_path() {
-        Some(p) => (std::fs::read_to_string(&p).unwrap_or_default(), std::fs::metadata(&p).and_then(|m| m.modified()).ok()),
+        Some(p) => {
+            (std::fs::read_to_string(&p).unwrap_or_default(), std::fs::metadata(&p).and_then(|m| m.modified()).ok())
+        }
         None => (String::new(), None),
     }
 }
@@ -271,7 +300,10 @@ struct Viewer {
 /// (Dave, 2026-11-20: "Reader should remember the last selected tool"):
 /// ~/.local/state/vergence/reader-tool, "hand" or "text".
 fn tool_file() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
     Some(base.join("vergence/reader-tool"))
 }
 
@@ -491,9 +523,17 @@ impl Viewer {
                 let at = match &t.content {
                     Content::Pdf(d) if d.restore.is_none() => {
                         let (page, within) = d.place();
-                        Some(keep::Place { page, within: (within * 10.0).round() / 10.0, mode: pdf::places::mode_text(d.mode) })
+                        Some(keep::Place {
+                            page,
+                            within: (within * 10.0).round() / 10.0,
+                            mode: pdf::places::mode_text(d.mode),
+                        })
                     }
-                    Content::Pdf(d) => d.restore.map(|(page, within)| keep::Place { page, within, mode: pdf::places::mode_text(d.mode) }),
+                    Content::Pdf(d) => d.restore.map(|(page, within)| keep::Place {
+                        page,
+                        within,
+                        mode: pdf::places::mode_text(d.mode),
+                    }),
                     _ => t.kept.clone(),
                 };
                 keep::KeptTab { path: t.path.clone(), at }
@@ -701,7 +741,9 @@ impl Viewer {
                 self.page_field = None;
                 return true;
             }
-            cmd::COPY | cmd::SELECT_ALL | cmd::FIND | cmd::FIND_NEXT | cmd::FIND_PREVIOUS => return self.pdf_text_command(id),
+            cmd::COPY | cmd::SELECT_ALL | cmd::FIND | cmd::FIND_NEXT | cmd::FIND_PREVIOUS => {
+                return self.pdf_text_command(id);
+            }
             _ => return false,
         }
         self.follow_thumb();
@@ -711,7 +753,9 @@ impl Viewer {
     /// Copy, Select All and Find.
     fn pdf_text_command(&mut self, id: u32) -> bool {
         // The first match gone to: where reading was is kept for Back.
-        if matches!(id, cmd::FIND_NEXT | cmd::FIND_PREVIOUS) && self.front_tab().is_some_and(|t| matches!(&t.content, Content::Pdf(d) if d.found.is_none())) {
+        if matches!(id, cmd::FIND_NEXT | cmd::FIND_PREVIOUS)
+            && self.front_tab().is_some_and(|t| matches!(&t.content, Content::Pdf(d) if d.found.is_none()))
+        {
             self.mark();
         }
         let r = self.area.get();
@@ -795,7 +839,13 @@ impl Viewer {
         match input {
             Input::Scroll { x, y, dx, dy } => {
                 let tr = self.thumb_area.get();
-                if self.sidebar && self.side == Side::Pages && *x >= tr.x && *x <= tr.x + tr.w && *y >= tr.y && *y <= tr.y + tr.h {
+                if self.sidebar
+                    && self.side == Side::Pages
+                    && *x >= tr.x
+                    && *x <= tr.x + tr.w
+                    && *y >= tr.y
+                    && *y <= tr.y + tr.h
+                {
                     let Some(d) = self.pdf_mut() else { return false };
                     d.thumb_top += dy;
                     d.clamp_thumbs(tr);
@@ -917,7 +967,10 @@ impl Viewer {
             }
         })
         .multiple(true)
-        .filters(vec![vergence_widgets::filedialog::Filter::of_types("PDF documents", &["application/pdf"]), vergence_widgets::filedialog::Filter::new("All files", &[])]);
+        .filters(vec![
+            vergence_widgets::filedialog::Filter::of_types("PDF documents", &["application/pdf"]),
+            vergence_widgets::filedialog::Filter::new("All files", &[]),
+        ]);
         if let Some(dir) = dir {
             d = d.folder(&dir);
         }
@@ -929,11 +982,12 @@ impl Viewer {
             return;
         }
         let waker = self.waker.clone();
-        let prefs = Prefs::new("Reader", APP_ID, SECTION, true, Box::new(ReaderRows), self.prefs_open.clone()).on_write(move || {
-            if let Some(w) = &waker {
-                w.wake();
-            }
-        });
+        let prefs = Prefs::new("Reader", APP_ID, SECTION, true, Box::new(ReaderRows), self.prefs_open.clone())
+            .on_write(move || {
+                if let Some(w) = &waker {
+                    w.wake();
+                }
+            });
         window.open_window(vergence_widgets::window(prefs));
     }
 
@@ -981,7 +1035,13 @@ impl Viewer {
             }
             cmd::SETTINGS => self.open_settings(window),
             cmd::ABOUT => {
-                let about = vergence_widgets::about::About::new(APP_ID, "Reader", env!("CARGO_PKG_VERSION"), "PDF documents: pages, the outline, links, find and selection, read and drawn apart from the app by Vergence's own PDF engine.", self.theme());
+                let about = vergence_widgets::about::About::new(
+                    APP_ID,
+                    "Reader",
+                    env!("CARGO_PKG_VERSION"),
+                    "PDF documents: pages, the outline, links, find and selection, read and drawn apart from the app by Vergence's own PDF engine.",
+                    self.theme(),
+                );
                 window.open_window(vergence_widgets::window(about));
             }
             _ => {}
@@ -1034,7 +1094,9 @@ impl Viewer {
         let r = self.area.get();
         let c = d.current(r);
         let mut s = match d.view {
-            pdf::View::Two if c + 1 < d.pages.len() && c > 0 => format!("Pages {} and {} of {}", c + 1, c + 2, d.pages.len()),
+            pdf::View::Two if c + 1 < d.pages.len() && c > 0 => {
+                format!("Pages {} and {} of {}", c + 1, c + 2, d.pages.len())
+            }
             _ => format!("Page {} of {}", c + 1, d.pages.len()),
         };
         s.push_str(match d.view {
@@ -1068,7 +1130,13 @@ impl Viewer {
             s => s,
         };
         let contents = side == Side::Contents;
-        let tab = |text: &str, on: bool, m: Msg| button(label(text).size(12.0)).look(if on { ButtonLook::Chosen } else { ButtonLook::Plain }).padding(Padding::hv(3.0, 10.0)).on_press(m).name(text);
+        let tab = |text: &str, on: bool, m: Msg| {
+            button(label(text).size(12.0))
+                .look(if on { ButtonLook::Chosen } else { ButtonLook::Plain })
+                .padding(Padding::hv(3.0, 10.0))
+                .on_press(m)
+                .name(text)
+        };
         let mut tabs = vec![tab("Pages", side == Side::Pages, Msg::SideTab(Side::Pages))];
         if has_outline {
             tabs.push(tab("Contents", contents, Msg::SideTab(Side::Contents)));
@@ -1089,8 +1157,15 @@ impl Viewer {
                     let look = if d.found == Some(i) { ButtonLook::Chosen } else { ButtonLook::Plain };
                     let head = label(format!("Page {}", page + 1)).size(11.0);
                     let head = if d.found == Some(i) { head } else { head.dim() };
-                    let lines = column(vec![head, label(text.clone()).size(12.0).wrap().width(Length::FILL)]).spacing(1.0).width(Length::FILL);
-                    let mut b = button(lines).look(look).padding(Padding::hv(4.0, 8.0)).width(Length::FILL).on_press(Msg::Result(i)).name(format!("Page {}: {text}", page + 1));
+                    let lines = column(vec![head, label(text.clone()).size(12.0).wrap().width(Length::FILL)])
+                        .spacing(1.0)
+                        .width(Length::FILL);
+                    let mut b = button(lines)
+                        .look(look)
+                        .padding(Padding::hv(4.0, 8.0))
+                        .width(Length::FILL)
+                        .on_press(Msg::Result(i))
+                        .name(format!("Page {}: {text}", page + 1));
                     if d.found == Some(i) {
                         b = b.key(2_000_000 + i as u64).keep_in_view();
                     }
@@ -1098,7 +1173,10 @@ impl Viewer {
                 })
                 .collect();
             if items.is_empty() {
-                panel(label(if se.done { "Not found" } else { "Searching…" }).size(12.0).dim()).padding(12.0).width(Length::FILL).height(Length::FILL)
+                panel(label(if se.done { "Not found" } else { "Searching…" }).size(12.0).dim())
+                    .padding(12.0)
+                    .width(Length::FILL)
+                    .height(Length::FILL)
             } else {
                 scroll(column(items).spacing(1.0).width(Length::FILL))
             }
@@ -1108,7 +1186,11 @@ impl Viewer {
             let r = self.area.get();
             let (tops, z) = (d.tops(), d.zoom(r));
             let view = d.top + (r.h * 0.25) / z;
-            let here = outline.as_ref().and_then(|o| o.iter().rposition(|e| e.target.is_some_and(|t| tops.get(t.page).is_some_and(|y| y + t.top.unwrap_or(0.0) <= view))));
+            let here = outline.as_ref().and_then(|o| {
+                o.iter().rposition(|e| {
+                    e.target.is_some_and(|t| tops.get(t.page).is_some_and(|y| y + t.top.unwrap_or(0.0) <= view))
+                })
+            });
             let items: Vec<Element<Msg>> = outline
                 .iter()
                 .flat_map(|o| o.iter().enumerate().take(4000))
@@ -1116,7 +1198,11 @@ impl Viewer {
                     let indent = 8.0 + 12.0 * e.level.min(6) as f32;
                     let look = if Some(i) == here { ButtonLook::Chosen } else { ButtonLook::Plain };
                     let title = if e.title.is_empty() { "(untitled)".to_string() } else { e.title.clone() };
-                    let mut b = button(label(title.clone()).size(12.0).elide().align(Align::Start).width(Length::FILL)).look(look).padding(Padding { top: 3.0, bottom: 3.0, left: indent, right: 8.0 }).width(Length::FILL).name(title);
+                    let mut b = button(label(title.clone()).size(12.0).elide().align(Align::Start).width(Length::FILL))
+                        .look(look)
+                        .padding(Padding { top: 3.0, bottom: 3.0, left: indent, right: 8.0 })
+                        .width(Length::FILL)
+                        .name(title);
                     if e.target.is_some() {
                         b = b.on_press(Msg::Outline(i));
                     }
@@ -1164,7 +1250,8 @@ impl Viewer {
             "Not found".to_string()
         } else {
             let at = d.found.map_or(String::new(), |i| format!("{} of ", i + 1));
-            let going = if se.done { String::new() } else { format!(" (searching, page {} of {})", se.next, d.pages.len()) };
+            let going =
+                if se.done { String::new() } else { format!(" (searching, page {} of {})", se.next, d.pages.len()) };
             format!("{at}{n} found{going}")
         };
         let small = |text: &str, m: Option<Msg>| {
@@ -1176,7 +1263,11 @@ impl Viewer {
         };
         let row_items: Vec<Element<Msg>> = vec![
             label("Find").size(12.0).dim(),
-            field(q.to_string(), Msg::FindText).autofocus().on_submit(Msg::Run(cmd::FIND_NEXT)).name("Find").width(Length::Fixed(260.0)),
+            field(q.to_string(), Msg::FindText)
+                .autofocus()
+                .on_submit(Msg::Run(cmd::FIND_NEXT))
+                .name("Find")
+                .width(Length::Fixed(260.0)),
             small("Previous", (n > 0).then_some(Msg::Run(cmd::FIND_PREVIOUS))),
             small("Next", (n > 0).then_some(Msg::Run(cmd::FIND_NEXT))),
             label(how).size(12.0).dim().elide().width(Length::FILL),
@@ -1184,7 +1275,11 @@ impl Viewer {
         ];
         // A key of its own: its field is new when the bar opens (and so
         // takes the keyboard), not mistaken for what stood in its place.
-        panel(row(row_items).spacing(10.0).align(Align::Center).width(Length::FILL)).radius(0.0).padding(Padding { top: 4.0, bottom: 4.0, left: 12.0, right: 12.0 }).width(Length::FILL).key(0x4649_4e44)
+        panel(row(row_items).spacing(10.0).align(Align::Center).width(Length::FILL))
+            .radius(0.0)
+            .padding(Padding { top: 4.0, bottom: 4.0, left: 12.0, right: 12.0 })
+            .width(Length::FILL)
+            .key(0x4649_4e44)
     }
 
     /// The toolbar: the sidebar; back and forward; the page (a field to
@@ -1192,21 +1287,31 @@ impl Viewer {
     /// whole page, actual size); the views (continuous, one page, two);
     /// turning; Find and Open at the end.
     fn toolbar(&self, t: &Tab, th: &Theme) -> Element<Msg> {
-        use vergence_widgets::toolbar::{Icon, flexible, group, tool, toggle, toolbar};
+        use vergence_widgets::toolbar::{Icon, flexible, group, toggle, tool, toolbar};
         let Content::Pdf(d) = &t.content else {
             return toolbar(vec![flexible(), tool(Icon::Open, "Open…", Some(Msg::Run(cmd::OPEN)))], th);
         };
         let r = self.area.get();
         let c = d.current(r);
         let shown = self.page_field.clone().unwrap_or_else(|| (c + 1).to_string());
-        let mut page = field(shown, Msg::PageField).on_submit(Msg::GoToPage).name("Page number").width(Length::Fixed(48.0)).key(0x5041_4745_0000 + self.page_key);
+        let mut page = field(shown, Msg::PageField)
+            .on_submit(Msg::GoToPage)
+            .name("Page number")
+            .width(Length::Fixed(48.0))
+            .key(0x5041_4745_0000 + self.page_key);
         if self.page_focus {
             page = page.autofocus();
         }
         let items = vec![
             toggle(Icon::Pane, "Sidebar", self.sidebar, Msg::Run(cmd::SIDEBAR)),
-            group(vec![toggle(Icon::TextSelect, "Text tool", !self.hand, Msg::Run(cmd::TOOL_TEXT)), toggle(Icon::Hand, "Hand tool", self.hand, Msg::Run(cmd::TOOL_HAND))]),
-            group(vec![tool(Icon::Back, "Back", (!t.back.is_empty()).then_some(Msg::Run(cmd::BACK))), tool(Icon::Forward, "Forward", (!t.forward.is_empty()).then_some(Msg::Run(cmd::FORWARD)))]),
+            group(vec![
+                toggle(Icon::TextSelect, "Text tool", !self.hand, Msg::Run(cmd::TOOL_TEXT)),
+                toggle(Icon::Hand, "Hand tool", self.hand, Msg::Run(cmd::TOOL_HAND)),
+            ]),
+            group(vec![
+                tool(Icon::Back, "Back", (!t.back.is_empty()).then_some(Msg::Run(cmd::BACK))),
+                tool(Icon::Forward, "Forward", (!t.forward.is_empty()).then_some(Msg::Run(cmd::FORWARD))),
+            ]),
             group(vec![
                 tool(Icon::Previous, "Previous page", (c > 0).then_some(Msg::Run(cmd::PREVIOUS))),
                 page,
@@ -1225,10 +1330,18 @@ impl Viewer {
                 toggle(Icon::OnePage, "One page", d.view == pdf::View::Single, Msg::Run(cmd::VIEW_SINGLE)),
                 toggle(Icon::TwoPages, "Two pages", d.view == pdf::View::Two, Msg::Run(cmd::VIEW_TWO)),
             ]),
-            group(vec![tool(Icon::TurnLeft, "Turn left", Some(Msg::Run(cmd::TURN_LEFT))), tool(Icon::TurnRight, "Turn right", Some(Msg::Run(cmd::TURN_RIGHT)))]),
+            group(vec![
+                tool(Icon::TurnLeft, "Turn left", Some(Msg::Run(cmd::TURN_LEFT))),
+                tool(Icon::TurnRight, "Turn right", Some(Msg::Run(cmd::TURN_RIGHT))),
+            ]),
             flexible(),
             tool(Icon::Info, "Info", Some(Msg::Run(cmd::INFO))),
-            toggle(Icon::Search, "Find", self.finding.is_some(), if self.finding.is_some() { Msg::FindDone } else { Msg::Run(cmd::FIND) }),
+            toggle(
+                Icon::Search,
+                "Find",
+                self.finding.is_some(),
+                if self.finding.is_some() { Msg::FindDone } else { Msg::Run(cmd::FIND) },
+            ),
             tool(Icon::Open, "Open…", Some(Msg::Run(cmd::OPEN))),
         ];
         toolbar(items, th)
@@ -1249,18 +1362,41 @@ impl Viewer {
                 items.push(label(why).size(12.0).dim());
             }
             if let Some(u) = &self.pending_uri {
-                let shown: String = if u.chars().count() > 60 { u.chars().take(57).chain("…".chars()).collect() } else { u.clone() };
+                let shown: String =
+                    if u.chars().count() > 60 { u.chars().take(57).chain("…".chars()).collect() } else { u.clone() };
                 if openable(u) {
                     items.insert(1, label(format!("Open {shown}?")).size(12.0));
-                    items.insert(2, button(label("Open").size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(2.0, 10.0)).on_press(Msg::OpenUri).name("Open the address"));
-                    items.insert(3, button(label("Cancel").size(12.0)).padding(Padding::hv(2.0, 10.0)).on_press(Msg::CancelUri).name("Cancel"));
+                    items.insert(
+                        2,
+                        button(label("Open").size(12.0))
+                            .look(ButtonLook::Accent)
+                            .padding(Padding::hv(2.0, 10.0))
+                            .on_press(Msg::OpenUri)
+                            .name("Open the address"),
+                    );
+                    items.insert(
+                        3,
+                        button(label("Cancel").size(12.0))
+                            .padding(Padding::hv(2.0, 10.0))
+                            .on_press(Msg::CancelUri)
+                            .name("Cancel"),
+                    );
                 } else {
                     items.insert(1, label(format!("Reader does not open links like {shown}")).size(12.0));
-                    items.insert(2, button(label("OK").size(12.0)).padding(Padding::hv(2.0, 10.0)).on_press(Msg::CancelUri).name("OK"));
+                    items.insert(
+                        2,
+                        button(label("OK").size(12.0))
+                            .padding(Padding::hv(2.0, 10.0))
+                            .on_press(Msg::CancelUri)
+                            .name("OK"),
+                    );
                 }
             }
         }
-        panel(row(items).spacing(14.0).align(Align::Center).width(Length::FILL)).radius(0.0).padding(Padding { top: 3.0, bottom: 3.0, left: 12.0, right: 12.0 }).width(Length::FILL)
+        panel(row(items).spacing(14.0).align(Align::Center).width(Length::FILL))
+            .radius(0.0)
+            .padding(Padding { top: 3.0, bottom: 3.0, left: 12.0, right: 12.0 })
+            .width(Length::FILL)
     }
 }
 
@@ -1299,8 +1435,18 @@ impl Program for Viewer {
     /// The server's tabs, one document each (Dave: "Ok, tab view"); each
     /// keeps its own view. + opens a document.
     fn bar(&self) -> Option<Bar> {
-        let tabs = self.tabs.iter().map(|t| BarTab { id: t.id, title: t.title(), closable: true, alert: false, edited: false }).collect();
-        Some(Bar::Tabs { tabs, front: self.front_tab().map_or(0, |t| t.id), plus: true, accent: None, menu: Vec::new() })
+        let tabs = self
+            .tabs
+            .iter()
+            .map(|t| BarTab { id: t.id, title: t.title(), closable: true, alert: false, edited: false })
+            .collect();
+        Some(Bar::Tabs {
+            tabs,
+            front: self.front_tab().map_or(0, |t| t.id),
+            plus: true,
+            accent: None,
+            menu: Vec::new(),
+        })
     }
 
     fn tab(&mut self, event: TabEvent, window: &mut Window) {
@@ -1390,29 +1536,63 @@ impl Program for Viewer {
 
     fn view(&self, t: &Theme) -> Element<Msg> {
         let Some(tab) = self.front_tab() else {
-            return panel(label("Nothing open: Ctrl+O opens a PDF document.").size(13.0).dim()).padding(Padding { top: t.top + 24.0, bottom: 24.0, left: 24.0, right: 24.0 }).width(Length::FILL).height(Length::FILL);
+            return panel(label("Nothing open: Ctrl+O opens a PDF document.").size(13.0).dim())
+                .padding(Padding { top: t.top + 24.0, bottom: 24.0, left: 24.0, right: 24.0 })
+                .width(Length::FILL)
+                .height(Length::FILL);
         };
         let body: Element<Msg> = match &tab.content {
-            Content::Loading => panel(label("Opening…").size(13.0).dim()).padding(24.0).width(Length::FILL).height(Length::FILL),
-            Content::Pdf(d) if self.sidebar => row(vec![self.sidebar_view(d), vrule(), self.pdf_view(d)]).width(Length::FILL).height(Length::FILL),
+            Content::Loading => {
+                panel(label("Opening…").size(13.0).dim()).padding(24.0).width(Length::FILL).height(Length::FILL)
+            }
+            Content::Pdf(d) if self.sidebar => {
+                row(vec![self.sidebar_view(d), vrule(), self.pdf_view(d)]).width(Length::FILL).height(Length::FILL)
+            }
             Content::Pdf(d) => self.pdf_view(d),
             Content::Locked { password, wrong, .. } => {
                 let mut items: Vec<Element<Msg>> = vec![
-                    label(format!("“{}” is protected by a password.", tab.name())).size(13.0).wrap().width(Length::FILL),
-                    field(password.clone(), Msg::Password).secret().autofocus().placeholder("Password").on_submit(Msg::Unlock).name("Password").width(Length::Fixed(280.0)),
+                    label(format!("“{}” is protected by a password.", tab.name()))
+                        .size(13.0)
+                        .wrap()
+                        .width(Length::FILL),
+                    field(password.clone(), Msg::Password)
+                        .secret()
+                        .autofocus()
+                        .placeholder("Password")
+                        .on_submit(Msg::Unlock)
+                        .name("Password")
+                        .width(Length::Fixed(280.0)),
                 ];
                 if *wrong {
                     items.push(label("That password does not open it.").size(12.0).dim());
                 }
-                items.push(button(label("Open").size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(4.0, 12.0)).on_press(Msg::Unlock).name("Open"));
-                panel(column(items).spacing(12.0).width(Length::Fixed(420.0))).padding(24.0).width(Length::FILL).height(Length::FILL)
+                items.push(
+                    button(label("Open").size(12.0))
+                        .look(ButtonLook::Accent)
+                        .padding(Padding::hv(4.0, 12.0))
+                        .on_press(Msg::Unlock)
+                        .name("Open"),
+                );
+                panel(column(items).spacing(12.0).width(Length::Fixed(420.0)))
+                    .padding(24.0)
+                    .width(Length::FILL)
+                    .height(Length::FILL)
             }
             Content::Problem { why, elsewhere } => {
                 let mut items: Vec<Element<Msg>> = vec![label(why.clone()).size(13.0).wrap().width(Length::FILL)];
                 if *elsewhere {
-                    items.push(button(label("Open with its app").size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(4.0, 12.0)).on_press(Msg::OpenWith).name("Open with its app"));
+                    items.push(
+                        button(label("Open with its app").size(12.0))
+                            .look(ButtonLook::Accent)
+                            .padding(Padding::hv(4.0, 12.0))
+                            .on_press(Msg::OpenWith)
+                            .name("Open with its app"),
+                    );
                 }
-                panel(column(items).spacing(12.0).width(Length::Fixed(420.0))).padding(24.0).width(Length::FILL).height(Length::FILL)
+                panel(column(items).spacing(12.0).width(Length::Fixed(420.0)))
+                    .padding(24.0)
+                    .width(Length::FILL)
+                    .height(Length::FILL)
             }
         };
         let mut all = vec![self.toolbar(tab, t), panel(body).radius(0.0).width(Length::FILL).height(Length::FILL)];
@@ -1470,7 +1650,9 @@ impl Program for Viewer {
                 // moves the pages; the Hand only moves them.
                 let hand = self.hand;
                 let spot = self.front_tab().and_then(|t| match &t.content {
-                    Content::Pdf(d) if !hand => d.text_at(r, r.x + x, r.y + y).or_else(|| d.spot_near(r, r.x + x, r.y + y)),
+                    Content::Pdf(d) if !hand => {
+                        d.text_at(r, r.x + x, r.y + y).or_else(|| d.spot_near(r, r.x + x, r.y + y))
+                    }
                     _ => None,
                 });
                 self.selecting = !hand;
@@ -1498,7 +1680,10 @@ impl Program for Viewer {
                             None => d.selection = Some(pdf::Selection { anchor: spot, head: spot }),
                         }
                     }
-                } else if pressed && self.hand && let Some((sx, sy)) = self.drag {
+                } else if pressed
+                    && self.hand
+                    && let Some((sx, sy)) = self.drag
+                {
                     if let Some(d) = self.pdf_mut() {
                         d.scroll(sy - y, x - sx, r);
                     }
@@ -1545,7 +1730,12 @@ impl Program for Viewer {
                 }
             }
             Msg::Unlock => self.unlock(),
-            Msg::ThumbTouch(Touch::Press { x, y }) if x >= self.thumb_area.get().w - pdf::BAR_HIT && self.front_tab().is_some_and(|t| matches!(&t.content, Content::Pdf(d) if d.thumbs_bar(self.thumb_area.get()).is_some())) => {
+            Msg::ThumbTouch(Touch::Press { x, y })
+                if x >= self.thumb_area.get().w - pdf::BAR_HIT
+                    && self.front_tab().is_some_and(
+                        |t| matches!(&t.content, Content::Pdf(d) if d.thumbs_bar(self.thumb_area.get()).is_some()),
+                    ) =>
+            {
                 let tr = self.thumb_area.get();
                 let thumb = match &self.front_tab().map(|t| &t.content) {
                     Some(Content::Pdf(d)) => d.thumbs_bar(tr),
@@ -1567,7 +1757,9 @@ impl Program for Viewer {
                     d.thumbs_bar_to(tr, tr.y + y - grab);
                 }
             }
-            Msg::ThumbTouch(Touch::Release { .. } | Touch::Leave) if self.thumb_bar_drag.is_some() => self.thumb_bar_drag = None,
+            Msg::ThumbTouch(Touch::Release { .. } | Touch::Leave) if self.thumb_bar_drag.is_some() => {
+                self.thumb_bar_drag = None
+            }
             Msg::ThumbTouch(Touch::Press { y, .. }) => {
                 self.mark();
                 let (r, tr) = (self.area.get(), self.thumb_area.get());
@@ -1593,7 +1785,14 @@ impl Program for Viewer {
             }
             Msg::Outline(i) => {
                 let target = self.front_tab().and_then(|t| match &t.content {
-                    Content::Pdf(d) => d.shared.outline.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|o| o.get(i)).and_then(|e| e.target),
+                    Content::Pdf(d) => d
+                        .shared
+                        .outline
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .as_ref()
+                        .and_then(|o| o.get(i))
+                        .and_then(|e| e.target),
                     _ => None,
                 });
                 if let Some(t) = target {
@@ -1731,7 +1930,12 @@ impl Program for Viewer {
             waker.wake();
         }
         // Files asked for before the window could wake (the command line's).
-        let pending: Vec<(u32, PathBuf)> = self.tabs.iter().filter(|t| matches!(t.content, Content::Loading)).map(|t| (t.id, t.path.clone())).collect();
+        let pending: Vec<(u32, PathBuf)> = self
+            .tabs
+            .iter()
+            .filter(|t| matches!(t.content, Content::Loading))
+            .map(|t| (t.id, t.path.clone()))
+            .collect();
         for (id, path) in pending {
             load(path, id, &self.shared.borrow(), Some(waker.clone()));
         }
@@ -1746,7 +1950,8 @@ impl Program for Viewer {
         }
         // Woken by the drawing (its place changed) or a page drawn: look again.
         let mut changed = self.reread() || self.is_pdf();
-        let asked: Vec<Vec<PathBuf>> = std::mem::take(&mut *self.shared.borrow().inbox.lock().unwrap_or_else(|e| e.into_inner()));
+        let asked: Vec<Vec<PathBuf>> =
+            std::mem::take(&mut *self.shared.borrow().inbox.lock().unwrap_or_else(|e| e.into_inner()));
         for paths in asked {
             self.take(&paths);
             // Handed over by a start (or the Open dialog): forward, if the server agrees.
@@ -1756,7 +1961,8 @@ impl Program for Viewer {
         // Tabs dropped on this window.
         let moved: Vec<(u32, u32, Tab)> = {
             let mut s = self.shared.borrow_mut();
-            let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut s.transfers).into_iter().partition(|(into, _, _)| Some(*into) == self.me);
+            let (mine, rest): (Vec<_>, Vec<_>) =
+                std::mem::take(&mut s.transfers).into_iter().partition(|(into, _, _)| Some(*into) == self.me);
             s.transfers = rest;
             mine
         };
@@ -1776,7 +1982,8 @@ impl Program for Viewer {
         let done: Vec<(u32, Loaded)> = {
             let shared = self.shared.borrow();
             let mut all = shared.loaded.lock().unwrap_or_else(|e| e.into_inner());
-            let (mine, rest): (Vec<_>, Vec<_>) = all.drain(..).partition(|(id, _)| self.tabs.iter().any(|t| t.id == *id));
+            let (mine, rest): (Vec<_>, Vec<_>) =
+                all.drain(..).partition(|(id, _)| self.tabs.iter().any(|t| t.id == *id));
             *all = rest;
             mine
         };
@@ -1836,7 +2043,13 @@ impl Program for Viewer {
     }
 
     fn dropped(&mut self, _x: f32, _y: f32, _action: u8, items: &[(String, Vec<u8>)], window: &mut Window) {
-        let paths: Vec<PathBuf> = items.iter().find(|(k, _)| k == "text/uri-list").map(|(_, v)| String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()).unwrap_or_default();
+        let paths: Vec<PathBuf> = items
+            .iter()
+            .find(|(k, _)| k == "text/uri-list")
+            .map(|(_, v)| {
+                String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()
+            })
+            .unwrap_or_default();
         self.take(&paths);
         window.redraw();
     }
@@ -1847,7 +2060,11 @@ impl Program for Viewer {
     }
 
     fn commands(&self) -> Option<(bool, Vec<C>)> {
-        let mut list = vec![C::role(cmd::OPEN, Role::Open).featured(), C::role(cmd::NEW_WINDOW, Role::NewWindow), C::role(cmd::CLOSE_TAB, Role::CloseWindow)];
+        let mut list = vec![
+            C::role(cmd::OPEN, Role::Open).featured(),
+            C::role(cmd::NEW_WINDOW, Role::NewWindow),
+            C::role(cmd::CLOSE_TAB, Role::CloseWindow),
+        ];
         if let Some(Content::Pdf(d)) = self.front_tab().map(|t| &t.content) {
             list.extend([
                 C::role(cmd::ZOOM_IN, Role::ZoomIn).featured(),
@@ -1893,19 +2110,55 @@ struct ReaderRows;
 
 impl Rows for ReaderRows {
     fn parts(&self, text: &str) -> Vec<Part> {
-        let locked = vergence_ui::desktop_pick(text).map(|light| format!("{} for every app: Settings > Appearance > Style", if light { "Light" } else { "Dark" }));
+        let locked = vergence_ui::desktop_pick(text).map(|light| {
+            format!("{} for every app: Settings > Appearance > Style", if light { "Light" } else { "Dark" })
+        });
         let styles = vec![Choice::text("Dark", "dark"), Choice::text("Light", "light")];
         vec![
             Part {
                 title: "Reader".into(),
-                rows: vec![Row::new("ground", "Around the pages", "What shows between and beside the pages.", Control::Choose { choices: vec![Choice::text("Dark", "dark"), Choice::text("Light", "light"), Choice::text("The window's color", "window")], desktop: None, app_default: 0 })],
+                rows: vec![Row::new(
+                    "ground",
+                    "Around the pages",
+                    "What shows between and beside the pages.",
+                    Control::Choose {
+                        choices: vec![
+                            Choice::text("Dark", "dark"),
+                            Choice::text("Light", "light"),
+                            Choice::text("The window's color", "window"),
+                        ],
+                        desktop: None,
+                        app_default: 0,
+                    },
+                )],
             },
             Part {
                 title: "On this desktop".into(),
                 rows: vec![
-                    Row::new("style", "Style", "While the desktop's Style is App default.", Control::Choose { choices: styles.clone(), desktop: Some("Built-in (Light)".into()), app_default: 1 }).locked(locked.clone()),
-                    Row::new("bar-style", "Title bar", "", Control::Choose { choices: styles, desktop: Some("Built-in (Dark)".into()), app_default: 0 }).locked(locked),
-                    Row::new("", "Window places", "Where the desktop puts Reader's windows, for each set of screens.", Control::Button { label: "Forget…".into(), id: 1 }),
+                    Row::new(
+                        "style",
+                        "Style",
+                        "While the desktop's Style is App default.",
+                        Control::Choose {
+                            choices: styles.clone(),
+                            desktop: Some("Built-in (Light)".into()),
+                            app_default: 1,
+                        },
+                    )
+                    .locked(locked.clone()),
+                    Row::new(
+                        "bar-style",
+                        "Title bar",
+                        "",
+                        Control::Choose { choices: styles, desktop: Some("Built-in (Dark)".into()), app_default: 0 },
+                    )
+                    .locked(locked),
+                    Row::new(
+                        "",
+                        "Window places",
+                        "Where the desktop puts Reader's windows, for each set of screens.",
+                        Control::Button { label: "Forget…".into(), id: 1 },
+                    ),
                 ],
             },
         ]
@@ -1913,7 +2166,8 @@ impl Rows for ReaderRows {
 
     fn button(&self, id: u32) {
         if id == 1 {
-            let _ = std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", APP_ID]).spawn();
+            let _ =
+                std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", APP_ID]).spawn();
         }
     }
 }
@@ -1924,12 +2178,25 @@ fn main() {
         println!("vergence-reader {}", env!("CARGO_PKG_VERSION"));
         return;
     }
-    let files: Vec<PathBuf> = args.iter().filter(|a| !a.starts_with("--")).map(|a| vergence_types::path_of_link(a).unwrap_or_else(|| PathBuf::from(a))).map(|p| std::path::absolute(&p).unwrap_or(p)).collect();
+    let files: Vec<PathBuf> = args
+        .iter()
+        .filter(|a| !a.starts_with("--"))
+        .map(|a| vergence_types::path_of_link(a).unwrap_or_else(|| PathBuf::from(a)))
+        .map(|p| std::path::absolute(&p).unwrap_or(p))
+        .collect();
     // One Reader for all its windows: a running one takes the files.
     if hand::hand_over(&files) {
         return;
     }
-    let shared = Rc::new(RefCell::new(Shared { inbox: Arc::default(), loaded: Arc::default(), next_tab: 0, windows: Vec::new(), transfers: Vec::new(), snaps: Vec::new(), pending: Vec::new() }));
+    let shared = Rc::new(RefCell::new(Shared {
+        inbox: Arc::default(),
+        loaded: Arc::default(),
+        next_tab: 0,
+        windows: Vec::new(),
+        transfers: Vec::new(),
+        snaps: Vec::new(),
+        pending: Vec::new(),
+    }));
     // The windows kept from the last run come back, the first here and the
     // rest once it is open; files named on the command line join the first.
     // `[session] restore = false`: the windows kept are forgotten, not

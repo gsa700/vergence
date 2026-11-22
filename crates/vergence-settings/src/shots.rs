@@ -7,7 +7,11 @@
 use super::*;
 
 /// The folders offered, with their names.
-const FOLDERS: [(&str, &str); 3] = [("Pictures \u{203a} Screenshots", "~/Pictures/Screenshots"), ("Desktop", "~/Desktop"), ("Downloads \u{203a} Screenshots", "~/Downloads/Screenshots")];
+const FOLDERS: [(&str, &str); 3] = [
+    ("Pictures \u{203a} Screenshots", "~/Pictures/Screenshots"),
+    ("Desktop", "~/Desktop"),
+    ("Downloads \u{203a} Screenshots", "~/Downloads/Screenshots"),
+];
 
 #[derive(Debug, Clone)]
 pub enum ShotsMsg {
@@ -28,7 +32,10 @@ fn flag(d: &toml::Table, key: &str, default: bool) -> bool {
 }
 
 fn grants_path() -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME").map(std::path::PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")))?;
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")))?;
     Some(base.join("vergence/screenshot-programs"))
 }
 
@@ -40,7 +47,9 @@ pub fn read_grants() -> Vec<(String, String)> {
         .filter_map(|l| {
             let mut f = l.split('\t');
             match (f.next(), f.next(), f.next()) {
-                (Some("allow"), Some(p), name) if p.starts_with('/') => Some((p.to_string(), name.unwrap_or("").to_string())),
+                (Some("allow"), Some(p), name) if p.starts_with('/') => {
+                    Some((p.to_string(), name.unwrap_or("").to_string()))
+                }
                 _ => None,
             }
         })
@@ -62,7 +71,11 @@ fn write_grants(g: &[(String, String)]) {
 impl App {
     pub fn shots_message(&mut self, m: ShotsMsg) {
         if let ShotsMsg::TakeBack(program) = m {
-            let kept: Vec<(String, String)> = if program.is_empty() { Vec::new() } else { read_grants().into_iter().filter(|(p, _)| *p != program).collect() };
+            let kept: Vec<(String, String)> = if program.is_empty() {
+                Vec::new()
+            } else {
+                read_grants().into_iter().filter(|(p, _)| *p != program).collect()
+            };
             write_grants(&kept);
             self.shot_grants = kept;
             return;
@@ -88,7 +101,8 @@ impl App {
 
     pub fn screenshots_page(&self) -> Element<Message> {
         let d = &self.desktop;
-        let folder = table(d).and_then(|t| t.get("folder")).and_then(|v| v.as_str()).unwrap_or("~/Pictures/Screenshots");
+        let folder =
+            table(d).and_then(|t| t.get("folder")).and_then(|v| v.as_str()).unwrap_or("~/Pictures/Screenshots");
         let mut names: Vec<String> = FOLDERS.iter().map(|(n, _)| n.to_string()).collect();
         let at = match FOLDERS.iter().position(|(_, f)| *f == folder) {
             Some(i) => i,
@@ -100,17 +114,37 @@ impl App {
         };
         let every = flag(d, "every-screen", false);
         let programs: Vec<Element<Message>> = if self.shot_grants.is_empty() {
-            vec![label("None yet. A program that asks (Firefox's screenshots, OBS, a color picker) is asked about first.").size(12.0).dim().wrap().width(Length::FILL)]
+            vec![
+                label(
+                    "None yet. A program that asks (Firefox's screenshots, OBS, a color picker) is asked about first.",
+                )
+                .size(12.0)
+                .dim()
+                .wrap()
+                .width(Length::FILL),
+            ]
         } else {
             let mut rows: Vec<Element<Message>> = self
                 .shot_grants
                 .iter()
                 .map(|(p, n)| {
                     let shown = if n.is_empty() { p.rsplit('/').next().unwrap_or(p).to_string() } else { n.clone() };
-                    setting(&shown, p, button(label("Take back")).on_press(Message::Shots(ShotsMsg::TakeBack(p.clone()))).name(format!("Take back {shown}'s screenshots")))
+                    setting(
+                        &shown,
+                        p,
+                        button(label("Take back"))
+                            .on_press(Message::Shots(ShotsMsg::TakeBack(p.clone())))
+                            .name(format!("Take back {shown}'s screenshots")),
+                    )
                 })
                 .collect();
-            rows.push(setting("", "Each asks again the next time.", button(label("Take back all")).on_press(Message::Shots(ShotsMsg::TakeBack(String::new()))).name("Take back every program's screenshots")));
+            rows.push(setting(
+                "",
+                "Each asks again the next time.",
+                button(label("Take back all"))
+                    .on_press(Message::Shots(ShotsMsg::TakeBack(String::new())))
+                    .name("Take back every program's screenshots"),
+            ));
             rows
         };
         self.page_layout(

@@ -45,13 +45,16 @@ fn filter(arg: &str) -> Option<Filter> {
 }
 
 fn usage() -> ExitCode {
-    eprintln!("usage: vergence-choose --open|--save|--folder [--title T] [--accept WORD] [--multiple] [--name NAME] [--in DIR] [--app APP] [--filter F]... [--current N]");
+    eprintln!(
+        "usage: vergence-choose --open|--save|--folder [--title T] [--accept WORD] [--multiple] [--name NAME] [--in DIR] [--app APP] [--filter F]... [--current N]"
+    );
     ExitCode::from(2)
 }
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (mut mode, mut title, mut accept, mut multiple, mut name, mut dir, mut app, mut filters, mut current) = (None, None, None, false, String::new(), None, String::from("portal"), Vec::new(), 0usize);
+    let (mut mode, mut title, mut accept, mut multiple, mut name, mut dir, mut app, mut filters, mut current) =
+        (None, None, None, false, String::new(), None, String::from("portal"), Vec::new(), 0usize);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -73,7 +76,10 @@ fn main() -> ExitCode {
     let out = chosen.clone();
     let done = move |files: Vec<PathBuf>| *out.borrow_mut() = files;
     // Remembered folders per calling app, apart from our own apps'.
-    let id = format!("portal-{}", app.chars().filter(|c| c.is_ascii_alphanumeric() || "-_.".contains(*c)).take(64).collect::<String>());
+    let id = format!(
+        "portal-{}",
+        app.chars().filter(|c| c.is_ascii_alphanumeric() || "-_.".contains(*c)).take(64).collect::<String>()
+    );
     let mut d = match mode.as_str() {
         "--save" => FileDialog::save(&id, title.as_deref().unwrap_or("Save"), &name, theme, done),
         "--folder" => FileDialog::choose_folder(&id, title.as_deref().unwrap_or("Choose a folder"), theme, done),

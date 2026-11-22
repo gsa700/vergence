@@ -95,7 +95,12 @@ impl Clip {
     /// rectangle within a rectangle stays a rectangle.
     pub fn intersect(&self, path: &Path, t: &Transform, rule: FillRule, width: usize, height: usize) -> Clip {
         if let (Clip::Rect(r), Some(n)) = (self, device_rect(path, t)) {
-            return Clip::Rect([r[0].max(n[0]), r[1].max(n[1]), r[2].min(n[2]).max(r[0].max(n[0])), r[3].min(n[3]).max(r[1].max(n[1]))]);
+            return Clip::Rect([
+                r[0].max(n[0]),
+                r[1].max(n[1]),
+                r[2].min(n[2]).max(r[0].max(n[0])),
+                r[3].min(n[3]).max(r[1].max(n[1])),
+            ]);
         }
         let Some(mut mask) = Mask::full(width, height) else { return Clip::Rect([0.0; 4]) };
         if let Clip::Mask(old) = self {
@@ -273,9 +278,18 @@ impl Canvas {
 
     /// draw_image's work; `extent` is the picture's own size in its pixels
     /// (an averaged-down picture's last pixels cover less than a whole one).
-    fn draw_image_in(&mut self, img: &Image, t: &Transform, smooth: bool, alpha: f32, clip: Option<&Clip>, extent: (f64, f64)) {
+    fn draw_image_in(
+        &mut self,
+        img: &Image,
+        t: &Transform,
+        smooth: bool,
+        alpha: f32,
+        clip: Option<&Clip>,
+        extent: (f64, f64),
+    ) {
         let Some(inv) = t.invert() else { return };
-        let corners = [(0.0, 0.0), (extent.0, 0.0), (0.0, extent.1), (extent.0, extent.1)].map(|(x, y)| t.apply(Point::new(x, y)));
+        let corners = [(0.0, 0.0), (extent.0, 0.0), (0.0, extent.1), (extent.0, extent.1)]
+            .map(|(x, y)| t.apply(Point::new(x, y)));
         let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
         for c in corners {
             x0 = x0.min(c.x);
@@ -294,7 +308,12 @@ impl Canvas {
         let sample = |u: f64, v: f64| -> Rgba {
             let px = |x: usize, y: usize| -> [f32; 4] {
                 let i = (y * img.width + x) * 4;
-                [img.data[i] as f32 / 255.0, img.data[i + 1] as f32 / 255.0, img.data[i + 2] as f32 / 255.0, img.data[i + 3] as f32 / 255.0]
+                [
+                    img.data[i] as f32 / 255.0,
+                    img.data[i + 1] as f32 / 255.0,
+                    img.data[i + 2] as f32 / 255.0,
+                    img.data[i + 3] as f32 / 255.0,
+                ]
             };
             if !smooth {
                 let (x, y) = ((u.floor().clamp(0.0, w - 1.0)) as usize, (v.floor().clamp(0.0, h - 1.0)) as usize);
@@ -429,7 +448,8 @@ mod tests {
         // One-pixel black and white columns, 200 wide, drawn 20 wide: gray,
         // not black or white as point sampling would give.
         let (w, h) = (200, 100);
-        let data: Vec<u8> = (0..w * h).flat_map(|i| if i % 2 == 0 { [0, 0, 0, 255] } else { [255, 255, 255, 255] }).collect();
+        let data: Vec<u8> =
+            (0..w * h).flat_map(|i| if i % 2 == 0 { [0, 0, 0, 255] } else { [255, 255, 255, 255] }).collect();
         let img = Image { width: w, height: h, data };
         let mut c = Canvas::new(40, 40).unwrap();
         c.clear([1.0, 0.0, 0.0, 1.0]);
@@ -523,7 +543,13 @@ mod tests {
         p.rect(0.0, 0.0, 5.0, 5.0);
         c.fill(&p, &Transform::new(f64::NAN, 0.0, 0.0, 1.0, 0.0, 0.0), FillRule::NonZero, BLACK, None);
         c.draw_image(&Image { width: 1, height: 1, data: vec![] }, &Transform::IDENTITY, true, 1.0, None);
-        c.draw_image(&Image { width: 1, height: 1, data: vec![1, 2, 3, 255] }, &Transform::scale(0.0, 0.0), true, 1.0, None);
+        c.draw_image(
+            &Image { width: 1, height: 1, data: vec![1, 2, 3, 255] },
+            &Transform::scale(0.0, 0.0),
+            true,
+            1.0,
+            None,
+        );
         assert!(c.data.iter().all(|b| *b == 0));
     }
 
@@ -551,13 +577,26 @@ mod tests {
                 match next() % 4 {
                     0 => p.move_to(num(&mut next), num(&mut next)),
                     1 => p.line_to(num(&mut next), num(&mut next)),
-                    2 => p.cubic_to(num(&mut next), num(&mut next), num(&mut next), num(&mut next), num(&mut next), num(&mut next)),
+                    2 => p.cubic_to(
+                        num(&mut next),
+                        num(&mut next),
+                        num(&mut next),
+                        num(&mut next),
+                        num(&mut next),
+                        num(&mut next),
+                    ),
                     _ => p.close(),
                 };
             }
             let rule = if next() % 2 == 0 { FillRule::NonZero } else { FillRule::EvenOdd };
             c.fill(&p, &Transform::IDENTITY, rule, RED, None);
-            let s = Stroke { width: num(&mut next).abs().min(50.0), cap: Cap::Round, join: Join::Round, dash: vec![num(&mut next).abs().min(20.0), 3.0], ..Default::default() };
+            let s = Stroke {
+                width: num(&mut next).abs().min(50.0),
+                cap: Cap::Round,
+                join: Join::Round,
+                dash: vec![num(&mut next).abs().min(20.0), 3.0],
+                ..Default::default()
+            };
             c.stroke(&p, &Transform::scale(0.5, 2.0), &s, BLACK, None);
         }
     }

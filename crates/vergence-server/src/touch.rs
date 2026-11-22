@@ -84,7 +84,9 @@ pub struct Touch {
 
 /// The ties desktop.toml records.
 pub fn load() -> Vec<(String, String)> {
-    let table = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| t.parse::<toml::Table>().ok());
+    let table = crate::wallpaper::desktop_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|t| t.parse::<toml::Table>().ok());
     let panels = table.as_ref().and_then(|t| t.get("touch")?.get("panel")?.as_array());
     panels
         .into_iter()
@@ -116,7 +118,13 @@ impl Server {
     /// desktop.toml, else the primary screen (as `touch_screen`, without the log).
     pub fn touch_screen_id(&self, panel: &str) -> Option<String> {
         let ids: Vec<String> = self.bus_outputs().iter().map(|o| o.id.clone()).collect();
-        let tied = self.touch.ties.iter().find(|(name, _)| name == panel).map(|(_, screen)| screen.clone()).filter(|id| ids.contains(id));
+        let tied = self
+            .touch
+            .ties
+            .iter()
+            .find(|(name, _)| name == panel)
+            .map(|(_, screen)| screen.clone())
+            .filter(|id| ids.contains(id));
         tied.or_else(|| vergence_profile::primary(self.shelf.primary.as_deref(), &ids).map(str::to_string))
     }
 
@@ -124,10 +132,19 @@ impl Server {
     pub fn touch_screen(&mut self, panel: &str) -> Option<Rectangle<i32, Logical>> {
         let outputs = self.bus_outputs();
         let ids: Vec<String> = outputs.iter().map(|o| o.id.clone()).collect();
-        let tied = self.touch.ties.iter().find(|(name, _)| name == panel).map(|(_, screen)| screen.as_str()).filter(|id| ids.iter().any(|i| i == id));
+        let tied = self
+            .touch
+            .ties
+            .iter()
+            .find(|(name, _)| name == panel)
+            .map(|(_, screen)| screen.as_str())
+            .filter(|id| ids.iter().any(|i| i == id));
         let id = tied.or_else(|| vergence_profile::primary(self.shelf.primary.as_deref(), &ids))?.to_string();
         if self.touch.said.insert(panel.to_string()) {
-            tracing::info!("touch: panel {panel:?} on screen {id}{}", if tied.is_some() { "" } else { " (the primary one: no tie in desktop.toml)" });
+            tracing::info!(
+                "touch: panel {panel:?} on screen {id}{}",
+                if tied.is_some() { "" } else { " (the primary one: no tie in desktop.toml)" }
+            );
         }
         let o = outputs.iter().find(|o| o.id == id)?;
         Some(Rectangle::new((o.x, o.y).into(), (o.width, o.height).into()))
@@ -177,8 +194,22 @@ impl Server {
     /// with the finger from now on (the seat decides). A maximized window stays.
     pub fn touch_move_request(&mut self, surface: &WlSurface, serial: Serial) {
         // The press must be this program's own (§7.3: no moving by another's serial).
-        let Some((n, down)) = self.touch.fingers.iter().find(|(_, (_, s, _))| s.as_ref().is_some_and(|(sr, on)| *sr == serial && on.id().same_client_as(&surface.id()))).map(|(n, (_, _, at))| (*n, *at)) else { return };
-        let Some(window) = self.space.elements().find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface)).cloned() else { return };
+        let Some((n, down)) = self
+            .touch
+            .fingers
+            .iter()
+            .find(|(_, (_, s, _))| {
+                s.as_ref().is_some_and(|(sr, on)| *sr == serial && on.id().same_client_as(&surface.id()))
+            })
+            .map(|(n, (_, _, at))| (*n, *at))
+        else {
+            return;
+        };
+        let Some(window) =
+            self.space.elements().find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface)).cloned()
+        else {
+            return;
+        };
         if self.restore.contains_key(&window) {
             return tracing::info!("touch: a maximized window is not moved by a finger");
         }
@@ -242,7 +273,9 @@ impl Server {
         for o in out {
             match o {
                 Out::PointerTo { .. } => self.pointer_follow(at, time, under),
-                Out::TouchDown(t, n) | Out::TouchMotion(t, n) | Out::TouchUp(t, n) | Out::TouchCancel(t, n) => self.touch_deliver(o, t, n, at, time),
+                Out::TouchDown(t, n) | Out::TouchMotion(t, n) | Out::TouchUp(t, n) | Out::TouchCancel(t, n) => {
+                    self.touch_deliver(o, t, n, at, time)
+                }
                 Out::LongPressTimer(press) => {
                     let _ = self.loop_handle.insert_source(Timer::from_duration(LONG), move |_, _, st| {
                         st.touch_long_press(press);
@@ -334,7 +367,11 @@ impl Server {
         format!(
             "ties: {}\npanels seen: {}\nfingers: {} as the pointer, {} on windows",
             if ties.is_empty() { "none".to_string() } else { ties.join("; ") },
-            if self.touch.said.is_empty() { "none".to_string() } else { self.touch.said.iter().cloned().collect::<Vec<_>>().join("; ") },
+            if self.touch.said.is_empty() {
+                "none".to_string()
+            } else {
+                self.touch.said.iter().cloned().collect::<Vec<_>>().join("; ")
+            },
             pointing,
             on_windows
         )

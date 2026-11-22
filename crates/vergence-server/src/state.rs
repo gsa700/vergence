@@ -282,7 +282,12 @@ impl Server {
         // Key repeat: GNOME's 500 ms / 30 a second until the settings load
         // (settings.rs apply_key_repeat; the settings app's Keyboard page).
         // It was 200 ms, smallvil's: held keys doubled letters (Dave, 2026-11-08).
-        seat.add_keyboard(Default::default(), crate::settings::REPEAT_DELAY as i32, crate::settings::REPEAT_RATE as i32).unwrap();
+        seat.add_keyboard(
+            Default::default(),
+            crate::settings::REPEAT_DELAY as i32,
+            crate::settings::REPEAT_RATE as i32,
+        )
+        .unwrap();
 
         // Notify clients that we have a pointer (mouse)
         // Here we assume that there is always pointer plugged in
@@ -426,38 +431,35 @@ impl Server {
                 // Inside the callback, you should insert the client into the display.
                 //
                 // You may also associate some data with the client when inserting the client.
-                state
-                    .display_handle
-                    .insert_client(client_stream, Arc::new(ClientState::default()))
-                    .unwrap();
+                state.display_handle.insert_client(client_stream, Arc::new(ClientState::default())).unwrap();
             })
             .expect("Failed to init the wayland event source.");
 
         // You also need to add the display itself to the event loop, so that client events will be processed by wayland-server.
         loop_handle
-            .insert_source(
-                Generic::new(display, Interest::READ, Mode::Level),
-                |_, display, state| {
-                    // Safety: we don't drop the display
-                    unsafe {
-                        display.get_mut().dispatch_clients(state).unwrap();
-                    }
-                    Ok(PostAction::Continue)
-                },
-            )
+            .insert_source(Generic::new(display, Interest::READ, Mode::Level), |_, display, state| {
+                // Safety: we don't drop the display
+                unsafe {
+                    display.get_mut().dispatch_clients(state).unwrap();
+                }
+                Ok(PostAction::Continue)
+            })
             .unwrap();
 
         socket_name
     }
-
 }
 
 /// desktop.toml's `[x11] enabled`: whether X11 applications are to run (through
 /// Xwayland). Off unless it says true.
 pub fn x11_wanted() -> bool {
     let Some(home) = std::env::var_os("HOME") else { return false };
-    let text = std::fs::read_to_string(std::path::Path::new(&home).join(".config/vergence/desktop.toml")).unwrap_or_default();
-    text.parse::<toml::Table>().ok().and_then(|t| t.get("x11").and_then(|x| x.get("enabled")).and_then(|v| v.as_bool())).unwrap_or(false)
+    let text =
+        std::fs::read_to_string(std::path::Path::new(&home).join(".config/vergence/desktop.toml")).unwrap_or_default();
+    text.parse::<toml::Table>()
+        .ok()
+        .and_then(|t| t.get("x11").and_then(|x| x.get("enabled")).and_then(|v| v.as_bool()))
+        .unwrap_or(false)
 }
 
 impl Server {
@@ -500,7 +502,8 @@ impl Server {
                 // One scale for all X clients: the densest monitor's (or a number from
                 // VERGENCE_XWAYLAND_SCALE), so X apps draw sharp there and are scaled
                 // down elsewhere (xsettings.rs).
-                let densest = state.space.outputs().map(|o| o.current_scale().fractional_scale()).fold(1.0_f64, f64::max);
+                let densest =
+                    state.space.outputs().map(|o| o.current_scale().fractional_scale()).fold(1.0_f64, f64::max);
                 let scale = match std::env::var("VERGENCE_XWAYLAND_SCALE").ok().as_deref() {
                     None | Some("max") => densest,
                     Some(v) => v.parse::<f64>().ok().filter(|s| *s > 0.0).unwrap_or(densest),
@@ -528,7 +531,12 @@ impl Server {
                 }
                 state.xdisplay = Some(display_number);
                 state.x_scale = scale;
-                state.xsettings_tx = Some(crate::xsettings::publish(display_number, scale, state.pointer_image.size_points(), &state.pointer_image.theme_name));
+                state.xsettings_tx = Some(crate::xsettings::publish(
+                    display_number,
+                    scale,
+                    state.pointer_image.size_points(),
+                    &state.pointer_image.theme_name,
+                ));
                 unsafe {
                     std::env::set_var("DISPLAY", format!(":{display_number}"));
                     // Avalonia takes its scale from Xft.dpi; its env factors MULTIPLY

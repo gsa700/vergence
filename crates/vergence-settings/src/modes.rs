@@ -51,7 +51,11 @@ pub fn rate_words(mhz: u32) -> String {
 
 /// The mode as desktop.toml writes it.
 pub fn mode_text(m: &ModeInfo) -> String {
-    let hz = if m.refresh_mhz % 1000 == 0 { format!("{}", m.refresh_mhz / 1000) } else { format!("{:.3}", m.refresh_mhz as f64 / 1000.0).trim_end_matches('0').to_string() };
+    let hz = if m.refresh_mhz % 1000 == 0 {
+        format!("{}", m.refresh_mhz / 1000)
+    } else {
+        format!("{:.3}", m.refresh_mhz as f64 / 1000.0).trim_end_matches('0').to_string()
+    };
     format!("{}x{}@{hz}", m.width, m.height)
 }
 
@@ -117,11 +121,19 @@ impl App {
         let one = o.modes.len() <= 1;
         let mut rows = vec![setting(
             "Resolution",
-            if one { "The only one this screen offers." } else { "The screen's own pixels; the scale above sizes things on them." },
+            if one {
+                "The only one this screen offers."
+            } else {
+                "The screen's own pixels; the scale above sizes things on them."
+            },
             choice(size_names, at, Message::Resolution).width(Length::Fixed(220.0)).name("Resolution"),
         )];
         if its_rates.len() > 1 {
-            rows.push(setting("Refresh rate", "", choice(rate_names, rate_at, Message::Refresh).width(Length::Fixed(140.0)).name("Refresh rate")));
+            rows.push(setting(
+                "Refresh rate",
+                "",
+                choice(rate_names, rate_at, Message::Refresh).width(Length::Fixed(140.0)).name("Refresh rate"),
+            ));
         } else if let Some(r) = its_rates.first() {
             rows.push(setting("Refresh rate", "", label(rate_words(r.refresh_mhz)).dim()));
         }
@@ -196,19 +208,31 @@ impl Program for KeepDialog {
     }
     fn view(&self, _: &Theme) -> Element<KeepMsg> {
         let left = self.until.saturating_duration_since(Instant::now()).as_secs_f32().ceil() as u32;
-        panel(column(vec![
-            label("Keep this resolution?").size(15.0).weight(600),
-            label(format!("The screen goes back to the earlier one in {left} s unless you keep it.")).dim().wrap().width(Length::FILL),
-            row(vec![
-                space().width(Length::FILL),
-                button(label("Go back").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(KeepMsg::Revert).name("Go back"),
-                button(label("Keep").size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(4.0, 14.0)).on_press(KeepMsg::Keep).name("Keep"),
+        panel(
+            column(vec![
+                label("Keep this resolution?").size(15.0).weight(600),
+                label(format!("The screen goes back to the earlier one in {left} s unless you keep it."))
+                    .dim()
+                    .wrap()
+                    .width(Length::FILL),
+                row(vec![
+                    space().width(Length::FILL),
+                    button(label("Go back").size(12.0))
+                        .padding(Padding::hv(4.0, 12.0))
+                        .on_press(KeepMsg::Revert)
+                        .name("Go back"),
+                    button(label("Keep").size(12.0))
+                        .look(ButtonLook::Accent)
+                        .padding(Padding::hv(4.0, 14.0))
+                        .on_press(KeepMsg::Keep)
+                        .name("Keep"),
+                ])
+                .spacing(8.0)
+                .width(Length::FILL),
             ])
-            .spacing(8.0)
+            .spacing(10.0)
             .width(Length::FILL),
-        ])
-        .spacing(10.0)
-        .width(Length::FILL))
+        )
         .padding(20.0)
         .radius(0.0)
         .width(Length::FILL)
@@ -220,7 +244,14 @@ impl Program for KeepDialog {
         window.close();
     }
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: true, min: (380.0, 150.0), max: (0.0, 0.0), alone: false, frosted: false }
+        vergence_ui::Style {
+            kind: vergence_ui::WinKind::Dialog,
+            modal: true,
+            min: (380.0, 150.0),
+            max: (0.0, 0.0),
+            alone: false,
+            frosted: false,
+        }
     }
     /// The countdown: a thread wakes the dialog twice a second until the
     /// time is up (a new window has no hook to start a timer of its own).
@@ -255,7 +286,13 @@ mod tests {
 
     #[test]
     fn modes_sorted_and_written() {
-        let modes = [m(3840, 2160, 30000, true), m(3840, 2160, 29970, false), m(2560, 1440, 60000, false), m(1920, 1080, 59940, false), m(1920, 1080, 60000, false)];
+        let modes = [
+            m(3840, 2160, 30000, true),
+            m(3840, 2160, 29970, false),
+            m(2560, 1440, 60000, false),
+            m(1920, 1080, 59940, false),
+            m(1920, 1080, 60000, false),
+        ];
         assert_eq!(resolutions(&modes), vec![(3840, 2160), (2560, 1440), (1920, 1080)]);
         let r = rates(&modes, (1920, 1080));
         assert_eq!(r.iter().map(|m| m.refresh_mhz).collect::<Vec<_>>(), vec![60000, 59940], "fastest first");

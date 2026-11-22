@@ -24,7 +24,15 @@ unsafe extern "C" {
     fn xkb_keymap_key_repeats(keymap: *mut c_void, key: u32) -> i32;
     fn xkb_state_new(keymap: *mut c_void) -> *mut c_void;
     fn xkb_state_unref(state: *mut c_void);
-    fn xkb_state_update_mask(state: *mut c_void, depressed: u32, latched: u32, locked: u32, depressed_layout: u32, latched_layout: u32, locked_layout: u32) -> i32;
+    fn xkb_state_update_mask(
+        state: *mut c_void,
+        depressed: u32,
+        latched: u32,
+        locked: u32,
+        depressed_layout: u32,
+        latched_layout: u32,
+        locked_layout: u32,
+    ) -> i32;
     fn xkb_state_key_get_one_sym(state: *mut c_void, key: u32) -> u32;
     fn xkb_state_key_get_utf8(state: *mut c_void, key: u32, buffer: *mut c_char, size: usize) -> i32;
     fn xkb_state_mod_name_is_active(state: *mut c_void, name: *const c_char, kind: i32) -> i32;
@@ -97,7 +105,11 @@ pub struct Pressed {
 
 /// The locale whose compose table applies: LC_ALL, LC_CTYPE, LANG, else "C".
 fn locale() -> String {
-    ["LC_ALL", "LC_CTYPE", "LANG"].iter().filter_map(|v| std::env::var(v).ok()).find(|v| !v.is_empty()).unwrap_or_else(|| "C".into())
+    ["LC_ALL", "LC_CTYPE", "LANG"]
+        .iter()
+        .filter_map(|v| std::env::var(v).ok())
+        .find(|v| !v.is_empty())
+        .unwrap_or_else(|| "C".into())
 }
 
 impl Keyboard {
@@ -135,7 +147,8 @@ impl Keyboard {
                 xkb_context_unref(context);
                 return None;
             }
-            let mut keyboard = Keyboard { context, keymap, state, compose_table: std::ptr::null_mut(), compose: std::ptr::null_mut() };
+            let mut keyboard =
+                Keyboard { context, keymap, state, compose_table: std::ptr::null_mut(), compose: std::ptr::null_mut() };
             keyboard.set_compose_locale(&locale());
             Some(keyboard)
         }
@@ -192,7 +205,8 @@ impl Keyboard {
                     xkb_compose_state_reset(self.compose);
                     let len = (len.max(0) as usize).min(buffer.len() - 1);
                     let bytes: Vec<u8> = buffer[..len].iter().map(|b| *b as u8).collect();
-                    let text = String::from_utf8(bytes).ok().filter(|t| !t.is_empty() && !t.chars().any(char::is_control));
+                    let text =
+                        String::from_utf8(bytes).ok().filter(|t| !t.is_empty() && !t.chars().any(char::is_control));
                     Pressed { sym: if composed != 0 { composed } else { sym }, text, composing: false }
                 }
                 COMPOSE_CANCELLED => {
@@ -231,7 +245,12 @@ impl Keyboard {
         let code = key.saturating_add(EVDEV_OFFSET);
         let mut buffer = [0 as c_char; 64];
         // SAFETY: a live state; the buffer's true size is given, and the library ends what it writes with a zero.
-        let (symbol, len) = unsafe { (xkb_state_key_get_one_sym(self.state, code), xkb_state_key_get_utf8(self.state, code, buffer.as_mut_ptr(), buffer.len())) };
+        let (symbol, len) = unsafe {
+            (
+                xkb_state_key_get_one_sym(self.state, code),
+                xkb_state_key_get_utf8(self.state, code, buffer.as_mut_ptr(), buffer.len()),
+            )
+        };
         let len = (len.max(0) as usize).min(buffer.len() - 1);
         let bytes: Vec<u8> = buffer[..len].iter().map(|b| *b as u8).collect();
         // Text is what would be typed: Enter, Escape and Ctrl+letter are keys, not text.
@@ -323,15 +342,24 @@ mod tests {
         const MULTI_KEY: u32 = 0xff20;
         // ´ then e: nothing, then é.
         assert_eq!(k.compose_with(DEAD_ACUTE, None), Pressed { sym: DEAD_ACUTE, text: None, composing: true });
-        assert_eq!(k.compose_with('e' as u32, Some("e".into())), Pressed { sym: 0xe9, text: Some("é".into()), composing: false });
+        assert_eq!(
+            k.compose_with('e' as u32, Some("e".into())),
+            Pressed { sym: 0xe9, text: Some("é".into()), composing: false }
+        );
         // Compose, o, c: ©.
         assert!(k.compose_with(MULTI_KEY, None).composing);
         assert!(k.compose_with('o' as u32, Some("o".into())).composing);
         assert_eq!(k.compose_with('c' as u32, Some("c".into())).text, Some("©".into()));
         // A sequence that leads nowhere types nothing, and the next key is itself again.
         assert!(k.compose_with(DEAD_ACUTE, None).composing);
-        assert_eq!(k.compose_with('q' as u32, Some("q".into())), Pressed { sym: 'q' as u32, text: None, composing: true });
-        assert_eq!(k.compose_with('q' as u32, Some("q".into())), Pressed { sym: 'q' as u32, text: Some("q".into()), composing: false });
+        assert_eq!(
+            k.compose_with('q' as u32, Some("q".into())),
+            Pressed { sym: 'q' as u32, text: None, composing: true }
+        );
+        assert_eq!(
+            k.compose_with('q' as u32, Some("q".into())),
+            Pressed { sym: 'q' as u32, text: Some("q".into()), composing: false }
+        );
         // A modifier in the middle does not break a sequence; forgetting one does.
         assert!(k.compose_with(DEAD_ACUTE, None).composing);
         assert!(!k.compose_with(0xffe1, None).composing, "Shift is no part of it");

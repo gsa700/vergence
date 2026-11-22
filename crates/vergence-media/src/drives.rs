@@ -46,7 +46,11 @@ pub fn parse_mounts(text: &str) -> Vec<Mount> {
                 what = format!("map {}", f.next()?);
             }
             let (at, kind) = (f.next()?, f.next()?);
-            (!what.starts_with('#')).then(|| Mount { what: unescape(&what), at: PathBuf::from(unescape(at)), kind: kind.to_string() })
+            (!what.starts_with('#')).then(|| Mount {
+                what: unescape(&what),
+                at: PathBuf::from(unescape(at)),
+                kind: kind.to_string(),
+            })
         })
         .collect()
 }
@@ -59,7 +63,11 @@ pub fn mounts() -> Vec<Mount> {
         // no drive ever showed on the desktop or in FileView), and a PATH
         // is not a thing to trust for a system tool anyway.
         let mount = if Path::new("/sbin/mount").exists() { "/sbin/mount" } else { "mount" };
-        std::process::Command::new(mount).arg("-p").output().ok().map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        std::process::Command::new(mount)
+            .arg("-p")
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
     });
     parse_mounts(&text.unwrap_or_default())
 }
@@ -67,7 +75,8 @@ pub fn mounts() -> Vec<Mount> {
 /// Whether a file system type is one reached over the network (NFS, SMB,
 /// sshfs and other FUSE network file systems, WebDAV).
 pub fn network_kind(kind: &str) -> bool {
-    matches!(kind, "nfs" | "nfs4" | "cifs" | "smb3" | "smbfs" | "davfs" | "9p" | "afs") || ["fuse.sshfs", "fusefs.sshfs", "fuse.rclone", "fusefs.rclone", "fuse.gvfsd-fuse"].contains(&kind)
+    matches!(kind, "nfs" | "nfs4" | "cifs" | "smb3" | "smbfs" | "davfs" | "9p" | "afs")
+        || ["fuse.sshfs", "fusefs.sshfs", "fuse.rclone", "fusefs.rclone", "fuse.gvfsd-fuse"].contains(&kind)
 }
 
 /// Disks mounted where removable and extra disks go (network mounts aside).
@@ -107,7 +116,9 @@ pub fn disks_of(table: &[Mount]) -> Vec<PathBuf> {
                 // A label on a disk image's own partitions (Dave, 2026-11-21: the
                 // Fedora ISO brought /media/ANACONDA and its volume as drives): the
                 // image is listed by where it is mounted, not as a stick.
-                Some(node) if node.strip_prefix("/dev").is_ok_and(|l| on_images.iter().any(|i| Path::new(i) == l)) => false,
+                Some(node) if node.strip_prefix("/dev").is_ok_and(|l| on_images.iter().any(|i| Path::new(i) == l)) => {
+                    false
+                }
                 Some(node) => !ejected.iter().any(|(n, ino)| n.as_os_str() == name && Some(*ino) == node_ino(&node)),
                 None => false,
             }
@@ -121,7 +132,13 @@ pub fn disks_of(table: &[Mount]) -> Vec<PathBuf> {
 /// The device node of a drive the automounter lists under /media by
 /// `name` (by name, or by its label), if it is there.
 pub(crate) fn device_of(name: &std::ffi::OsStr) -> Option<PathBuf> {
-    std::iter::once(PathBuf::from("/dev").join(name)).chain(["msdosfs", "ufs", "ext2fs", "ntfs", "exfat", "iso9660", "label", "gpt"].iter().map(|d| PathBuf::from("/dev").join(d).join(name))).find(|p| p.exists())
+    std::iter::once(PathBuf::from("/dev").join(name))
+        .chain(
+            ["msdosfs", "ufs", "ext2fs", "ntfs", "exfat", "iso9660", "label", "gpt"]
+                .iter()
+                .map(|d| PathBuf::from("/dev").join(d).join(name)),
+        )
+        .find(|p| p.exists())
 }
 
 /// FreeBSD: each label and the GEOM provider under it ("msdosfs/USB",
@@ -178,7 +195,12 @@ fn one_per_device(list: &mut Vec<DriveInfo>, labels: &[(String, String)]) {
             continue;
         }
         for j in 0..list.len() {
-            if i != j && keep[j] && keys[i] == keys[j] && list[j].kind == DriveKind::Removable && (rank(&list[j]), j < i) > (rank(&list[i]), false) {
+            if i != j
+                && keep[j]
+                && keys[i] == keys[j]
+                && list[j].kind == DriveKind::Removable
+                && (rank(&list[j]), j < i) > (rank(&list[i]), false)
+            {
                 keep[i] = false;
                 break;
             }
@@ -197,25 +219,35 @@ fn node_ino(p: &Path) -> Option<u64> {
 /// device node's inode), hidden while that node is there; plugged in again,
 /// a drive has a new node and shows.
 fn ejected_file() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
     Some(base.join("vergence/ejected"))
 }
 
 fn ejected_now() -> Vec<(PathBuf, u64)> {
     let text = ejected_file().and_then(|p| fs::read_to_string(p).ok()).unwrap_or_default();
-    text.lines().filter_map(|l| l.split_once('\t')).filter_map(|(n, i)| Some((PathBuf::from(n), i.parse().ok()?))).collect()
+    text.lines()
+        .filter_map(|l| l.split_once('\t'))
+        .filter_map(|(n, i)| Some((PathBuf::from(n), i.parse().ok()?)))
+        .collect()
 }
 
 /// Notes a drive under /media as ejected (its device node now), so the lists
 /// leave it out until it is plugged in again.
 pub fn note_ejected(path: &Path) {
-    let (Some(name), Some(file)) = (path.strip_prefix("/media").ok().and_then(|n| n.file_name()), ejected_file()) else { return };
+    let (Some(name), Some(file)) = (path.strip_prefix("/media").ok().and_then(|n| n.file_name()), ejected_file())
+    else {
+        return;
+    };
     let Some(ino) = device_of(name).and_then(|d| node_ino(&d)) else { return };
     let mut all = ejected_now();
     all.retain(|(n, _)| n.as_os_str() != name);
     all.push((PathBuf::from(name), ino));
     let keep = all.len().saturating_sub(32);
-    let text: String = all[keep..].iter().map(|(n, i)| format!("{}\t{i}\n", n.to_string_lossy().replace(['\t', '\n'], " "))).collect();
+    let text: String =
+        all[keep..].iter().map(|(n, i)| format!("{}\t{i}\n", n.to_string_lossy().replace(['\t', '\n'], " "))).collect();
     if let Some(d) = file.parent() {
         let _ = fs::create_dir_all(d);
     }
@@ -245,7 +277,6 @@ pub fn network_mounts() -> Vec<PathBuf> {
     out
 }
 
-
 /// Every drive now, as the server lists it (drives milestone 1): the disks
 /// where drives are mounted (and, on FreeBSD, the drives the automounter
 /// lists before they are mounted), then the network's mounts. A disk of the
@@ -264,21 +295,40 @@ pub fn scan() -> Vec<DriveInfo> {
         if m.is_some_and(gone) {
             continue;
         }
-        let device = m.map(|m| m.what.clone()).or_else(|| at.file_name().and_then(device_of).map(|p| p.to_string_lossy().into_owned())).unwrap_or_default();
+        let device = m
+            .map(|m| m.what.clone())
+            .or_else(|| at.file_name().and_then(device_of).map(|p| p.to_string_lossy().into_owned()))
+            .unwrap_or_default();
         let kind = match m {
             Some(_) if device.starts_with("/dev/md") || device.starts_with("/dev/loop") => DriveKind::Image,
             // A disk image's own partition, mounted by the automounter under its label.
-            Some(_) if device.strip_prefix("/dev/").is_some_and(|l| on_images.iter().any(|i| i == l)) => DriveKind::Image,
+            Some(_) if device.strip_prefix("/dev/").is_some_and(|l| on_images.iter().any(|i| i == l)) => {
+                DriveKind::Image
+            }
             Some(m) if matches!(m.kind.as_str(), "cd9660" | "iso9660" | "udf") => DriveKind::Optical,
             // Listed by the automounter and not mounted yet: a drive plugged in.
             None => DriveKind::Removable,
             Some(_) if removable(&device) => DriveKind::Removable,
             Some(_) => DriveKind::Internal,
         };
-        out.push(DriveInfo { name: name_of(&at), path: at.to_string_lossy().into_owned(), kind, mounted: m.is_some(), ejectable: kind != DriveKind::Internal, device });
+        out.push(DriveInfo {
+            name: name_of(&at),
+            path: at.to_string_lossy().into_owned(),
+            kind,
+            mounted: m.is_some(),
+            ejectable: kind != DriveKind::Internal,
+            device,
+        });
     }
     for m in table.iter().filter(|m| network_kind(&m.kind)) {
-        out.push(DriveInfo { name: name_of(&m.at), path: m.at.to_string_lossy().into_owned(), kind: DriveKind::Network, mounted: true, ejectable: true, device: m.what.clone() });
+        out.push(DriveInfo {
+            name: name_of(&m.at),
+            path: m.at.to_string_lossy().into_owned(),
+            kind: DriveKind::Network,
+            mounted: true,
+            ejectable: true,
+            device: m.what.clone(),
+        });
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
     out.dedup_by(|a, b| a.path == b.path);
@@ -347,7 +397,14 @@ mod tests {
     #[test]
     fn a_stick_by_its_label_and_its_device_is_one_drive() {
         let labels = parse_glabel("msdosfs/USB  N/A  da0s1\n");
-        let d = |path: &str, device: &str, mounted: bool| DriveInfo { name: path.rsplit('/').next().unwrap().into(), path: path.into(), kind: DriveKind::Removable, mounted, ejectable: true, device: device.into() };
+        let d = |path: &str, device: &str, mounted: bool| DriveInfo {
+            name: path.rsplit('/').next().unwrap().into(),
+            path: path.into(),
+            kind: DriveKind::Removable,
+            mounted,
+            ejectable: true,
+            device: device.into(),
+        };
         // Neither mounted: the one by its label.
         let mut l = vec![d("/media/USB", "/dev/msdosfs/USB", false), d("/media/da0s1", "/dev/da0s1", false)];
         one_per_device(&mut l, &labels);

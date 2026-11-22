@@ -1,0 +1,4 @@
+# One format for the tree (tree milestone 1, step 1; Dave, 2026-11-21: width 120).
+# "Max" keeps what fits in the width on one line, as the code was written.
+max_width = 120
+use_small_heuristics = "Max"

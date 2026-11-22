@@ -35,7 +35,10 @@ use std::time::SystemTime;
 use vergence_scene::{Color, Image, Rect};
 use vergence_ui::{AppCommand as C, Bar, BarStyle, Role};
 use vergence_widgets::prefs::{Choice, Control, Part, Prefs, Row, Rows};
-use vergence_widgets::{Align, AreaOptions, ButtonLook, Element, Input, Length, Padding, Program, TextDoc, Theme, Touch, Waker, Window, button, column, drawing, label, panel, row, rule, text_area};
+use vergence_widgets::{
+    Align, AreaOptions, ButtonLook, Element, Input, Length, Padding, Program, TextDoc, Theme, Touch, Waker, Window,
+    button, column, drawing, label, panel, row, rule, text_area,
+};
 
 const APP_ID: &str = "vergence-closeup";
 const SECTION: &str = "[closeup]";
@@ -69,12 +72,22 @@ mod cmd {
 /// What a file turned out to be, from the worker that read it.
 enum Loaded {
     /// Width, height, and each frame's delay and levels (pictures.rs).
-    Picture { width: u32, height: u32, frames: Vec<(u32, Vec<Arc<Image>>)> },
-    Text { text: String, cut: bool },
+    Picture {
+        width: u32,
+        height: u32,
+        frames: Vec<(u32, Vec<Arc<Image>>)>,
+    },
+    Text {
+        text: String,
+        cut: bool,
+    },
     /// A PDF: handed to Reader, which shows documents.
     HandedOver,
     /// Why it cannot be shown here, and whether another app might.
-    Problem { why: String, elsewhere: bool },
+    Problem {
+        why: String,
+        elsewhere: bool,
+    },
 }
 
 /// What all windows share (one thread).
@@ -116,7 +129,10 @@ enum Content {
 
 impl Tab {
     fn name(&self) -> String {
-        self.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| self.path.display().to_string())
+        self.path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| self.path.display().to_string())
     }
 }
 
@@ -130,7 +146,10 @@ fn load(path: PathBuf, id: u32, shared: &Shared, waker: Option<Waker>) {
             // Documents are Reader's (Reader milestone 1).
             match std::process::Command::new("vergence-reader").arg(&path).spawn() {
                 Ok(_) => Loaded::HandedOver,
-                Err(e) => Loaded::Problem { why: format!("PDF documents open in Reader, which could not be started: {e}"), elsewhere: false },
+                Err(e) => Loaded::Problem {
+                    why: format!("PDF documents open in Reader, which could not be started: {e}"),
+                    elsewhere: false,
+                },
             }
         } else if mime.starts_with("image/") {
             match vergence_decode::decode_file(&path, None) {
@@ -148,12 +167,19 @@ fn load(path: PathBuf, id: u32, shared: &Shared, waker: Option<Waker>) {
                         .collect();
                     Loaded::Picture { width: w, height: h, frames }
                 }
-                Err(e) => Loaded::Problem { why: format!("“{}” could not be shown: {e}", path.file_name().unwrap_or_default().to_string_lossy()), elsewhere: !matches!(e, vergence_decode::Error::Io(_)) },
+                Err(e) => Loaded::Problem {
+                    why: format!(
+                        "“{}” could not be shown: {e}",
+                        path.file_name().unwrap_or_default().to_string_lossy()
+                    ),
+                    elsewhere: !matches!(e, vergence_decode::Error::Io(_)),
+                },
             }
         } else if vergence_types::is_a(mime, vergence_types::TEXT) {
             use std::io::Read;
             let mut bytes = Vec::new();
-            match vergence_types::open_regular(&path).and_then(|f| f.take(MAX_TEXT as u64 + 1).read_to_end(&mut bytes)) {
+            match vergence_types::open_regular(&path).and_then(|f| f.take(MAX_TEXT as u64 + 1).read_to_end(&mut bytes))
+            {
                 Ok(_) => {
                     let cut = bytes.len() > MAX_TEXT;
                     bytes.truncate(MAX_TEXT);
@@ -174,7 +200,10 @@ fn load(path: PathBuf, id: u32, shared: &Shared, waker: Option<Waker>) {
         } else if mime == vergence_types::FOLDER {
             Loaded::Problem { why: "This is a folder.".into(), elsewhere: true }
         } else {
-            Loaded::Problem { why: format!("Close-Up does not show {} ({mime}) yet.", vergence_types::describe(mime)), elsewhere: true }
+            Loaded::Problem {
+                why: format!("Close-Up does not show {} ({mime}) yet.", vergence_types::describe(mime)),
+                elsewhere: true,
+            }
         };
         out.lock().unwrap_or_else(|e| e.into_inner()).push((id, loaded));
         if let Some(w) = waker {
@@ -186,14 +215,23 @@ fn load(path: PathBuf, id: u32, shared: &Shared, waker: Option<Waker>) {
 /// ~/.config/vergence/desktop.toml.
 fn desktop_text() -> (String, Option<SystemTime>) {
     match vergence_widgets::prefs::desktop_path() {
-        Some(p) => (std::fs::read_to_string(&p).unwrap_or_default(), std::fs::metadata(&p).and_then(|m| m.modified()).ok()),
+        Some(p) => {
+            (std::fs::read_to_string(&p).unwrap_or_default(), std::fs::metadata(&p).and_then(|m| m.modified()).ok())
+        }
         None => (String::new(), None),
     }
 }
 
 /// The picture's place and the zoom it is drawn at: (zoom, x, y, w, h) in
 /// points, for a place `r` at `scale`.
-fn placed(r: Rect, scale: f32, (w, h): (u32, u32), zoom: Option<f32>, pan: (f32, f32), small_actual: bool) -> (f32, f32, f32, f32, f32) {
+fn placed(
+    r: Rect,
+    scale: f32,
+    (w, h): (u32, u32),
+    zoom: Option<f32>,
+    pan: (f32, f32),
+    small_actual: bool,
+) -> (f32, f32, f32, f32, f32) {
     let scale = scale.max(0.25);
     let z = zoom.unwrap_or_else(|| {
         let fit = (r.w * scale / w as f32).min(r.h * scale / h as f32);
@@ -206,7 +244,9 @@ fn placed(r: Rect, scale: f32, (w, h): (u32, u32), zoom: Option<f32>, pan: (f32,
 /// A pan kept so the picture cannot be lost: centered on an axis where it
 /// is smaller than the place, else no edge further in than the place's.
 fn clamp_pan(r: Rect, dw: f32, dh: f32, pan: (f32, f32)) -> (f32, f32) {
-    let axis = |room: f32, size: f32, p: f32| if size <= room { 0.0 } else { p.clamp(-(size - room) / 2.0, (size - room) / 2.0) };
+    let axis = |room: f32, size: f32, p: f32| {
+        if size <= room { 0.0 } else { p.clamp(-(size - room) / 2.0, (size - room) / 2.0) }
+    };
     (axis(r.w, dw, pan.0), axis(r.h, dh, pan.1))
 }
 
@@ -261,14 +301,28 @@ impl Program for SaveQuestion {
         self.theme.clone()
     }
     fn view(&self, _: &Theme) -> Element<Answer> {
-        let b = |text: &str, a: Answer, look: ButtonLook| -> Element<Answer> { button(label(text).size(12.0)).look(look).padding(Padding::hv(4.0, 12.0)).on_press(a).name(text) };
+        let b = |text: &str, a: Answer, look: ButtonLook| -> Element<Answer> {
+            button(label(text).size(12.0)).look(look).padding(Padding::hv(4.0, 12.0)).on_press(a).name(text)
+        };
         let save = if self.copy { "Save as PNG" } else { "Save" };
         let how = if self.copy { "Saved as a PNG beside it; the original is kept. " } else { "" };
         panel(
             column(vec![
-                label(format!("Save the changes to “{}”?", self.name)).size(15.0).weight(600).wrap().width(Length::FILL),
+                label(format!("Save the changes to “{}”?", self.name))
+                    .size(15.0)
+                    .weight(600)
+                    .wrap()
+                    .width(Length::FILL),
                 label(format!("{how}If you don't save them, they are lost.")).dim().wrap().width(Length::FILL),
-                row(vec![b("Don't save", Answer::Discard, ButtonLook::Normal), vergence_widgets::space().width(Length::FILL), b("Cancel", Answer::Cancel, ButtonLook::Normal), b(save, Answer::Save, ButtonLook::Accent)]).spacing(8.0).align(Align::Center).width(Length::FILL),
+                row(vec![
+                    b("Don't save", Answer::Discard, ButtonLook::Normal),
+                    vergence_widgets::space().width(Length::FILL),
+                    b("Cancel", Answer::Cancel, ButtonLook::Normal),
+                    b(save, Answer::Save, ButtonLook::Accent),
+                ])
+                .spacing(8.0)
+                .align(Align::Center)
+                .width(Length::FILL),
             ])
             .spacing(10.0)
             .width(Length::FILL),
@@ -283,7 +337,14 @@ impl Program for SaveQuestion {
         window.close();
     }
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: true, min: (420.0, 150.0), max: (0.0, 0.0), alone: false, frosted: false }
+        vergence_ui::Style {
+            kind: vergence_ui::WinKind::Dialog,
+            modal: true,
+            min: (420.0, 150.0),
+            max: (0.0, 0.0),
+            alone: false,
+            frosted: false,
+        }
     }
 }
 
@@ -295,8 +356,6 @@ impl Drop for SaveQuestion {
         }
     }
 }
-
-
 
 #[derive(Debug, Clone)]
 enum Msg {
@@ -375,7 +434,16 @@ impl Viewer {
             s.next_tab += 1;
             s.next_tab
         };
-        self.tabs.push(Tab { id, path: p, content: Content::Loading, zoom: None, pan: (0.0, 0.0), frame: 0, edited: false, crop: None });
+        self.tabs.push(Tab {
+            id,
+            path: p,
+            content: Content::Loading,
+            zoom: None,
+            pan: (0.0, 0.0),
+            frame: 0,
+            edited: false,
+            crop: None,
+        });
         self.front = id;
     }
 
@@ -393,7 +461,16 @@ impl Viewer {
                 s.next_tab
             };
             load(p.clone(), id, &self.shared.borrow(), self.waker.clone());
-            self.tabs.push(Tab { id, path: p, content: Content::Loading, zoom: None, pan: (0.0, 0.0), frame: 0, edited: false, crop: None });
+            self.tabs.push(Tab {
+                id,
+                path: p,
+                content: Content::Loading,
+                zoom: None,
+                pan: (0.0, 0.0),
+                frame: 0,
+                edited: false,
+                crop: None,
+            });
             self.front = id;
             if self.preview {
                 // A preview shows one file: the newest.
@@ -434,16 +511,6 @@ impl Viewer {
         let (_, _, _, dw, dh) = placed(r, scale, (w, h), Some(z), (0.0, 0.0), small);
         t.pan = clamp_pan(r, dw, dh, pan);
     }
-
-
-
-
-
-
-
-
-
-
 
     fn fit(&mut self) {
         if let Some(t) = self.front_mut() {
@@ -574,7 +641,11 @@ impl Viewer {
             }
         })
         .multiple(true)
-        .filters(vec![vergence_widgets::filedialog::Filter::of_types("Pictures", &["image/*"]), vergence_widgets::filedialog::Filter::of_types("Text", &["text/plain"]), vergence_widgets::filedialog::Filter::new("All files", &[])]);
+        .filters(vec![
+            vergence_widgets::filedialog::Filter::of_types("Pictures", &["image/*"]),
+            vergence_widgets::filedialog::Filter::of_types("Text", &["text/plain"]),
+            vergence_widgets::filedialog::Filter::new("All files", &[]),
+        ]);
         if let Some(dir) = dir {
             d = d.folder(&dir);
         }
@@ -586,11 +657,12 @@ impl Viewer {
             return;
         }
         let waker = self.waker.clone();
-        let prefs = Prefs::new("Close-Up", APP_ID, SECTION, true, Box::new(CloseupRows), self.prefs_open.clone()).on_write(move || {
-            if let Some(w) = &waker {
-                w.wake();
-            }
-        });
+        let prefs = Prefs::new("Close-Up", APP_ID, SECTION, true, Box::new(CloseupRows), self.prefs_open.clone())
+            .on_write(move || {
+                if let Some(w) = &waker {
+                    w.wake();
+                }
+            });
         window.open_window(vergence_widgets::window(prefs));
     }
 
@@ -655,7 +727,13 @@ impl Viewer {
             cmd::OPEN_WITH => self.open_with(false),
             cmd::SETTINGS => self.open_settings(window),
             cmd::ABOUT => {
-                let about = vergence_widgets::about::About::new(APP_ID, "Close-Up", env!("CARGO_PKG_VERSION"), "A file's contents in full: pictures (PNG, JPEG, GIF, WebP, BMP, SVG), decoded apart from the app, and text. The step after FileView's Preview. PDF documents open in Reader.", self.theme());
+                let about = vergence_widgets::about::About::new(
+                    APP_ID,
+                    "Close-Up",
+                    env!("CARGO_PKG_VERSION"),
+                    "A file's contents in full: pictures (PNG, JPEG, GIF, WebP, BMP, SVG), decoded apart from the app, and text. The step after FileView's Preview. PDF documents open in Reader.",
+                    self.theme(),
+                );
                 window.open_window(vergence_widgets::window(about));
             }
             _ => {}
@@ -690,12 +768,18 @@ impl Viewer {
             let dest = Rect::new(x, y, dw, dh);
             // Transparency shows over a checkerboard, under the picture only.
             let cell = 8.0;
-            let vis = Rect::new(dest.x.max(r.x), dest.y.max(r.y), (dest.x + dest.w).min(r.x + r.w) - dest.x.max(r.x), (dest.y + dest.h).min(r.y + r.h) - dest.y.max(r.y));
+            let vis = Rect::new(
+                dest.x.max(r.x),
+                dest.y.max(r.y),
+                (dest.x + dest.w).min(r.x + r.w) - dest.x.max(r.x),
+                (dest.y + dest.h).min(r.y + r.h) - dest.y.max(r.y),
+            );
             if vis.w > 0.0 && vis.h > 0.0 {
                 scene.push_clip(vis, 0.0);
                 scene.fill(vis, Color::rgb(0xcc, 0xcc, 0xcc));
                 let (x0, y0) = (((vis.x - dest.x) / cell).floor() as i32, ((vis.y - dest.y) / cell).floor() as i32);
-                let (x1, y1) = (((vis.x + vis.w - dest.x) / cell).ceil() as i32, ((vis.y + vis.h - dest.y) / cell).ceil() as i32);
+                let (x1, y1) =
+                    (((vis.x + vis.w - dest.x) / cell).ceil() as i32, ((vis.y + vis.h - dest.y) / cell).ceil() as i32);
                 if ((x1 - x0) as i64 * (y1 - y0) as i64) < 40_000 {
                     for cy in y0..y1 {
                         for cx in x0..x1 {
@@ -731,30 +815,37 @@ impl Viewer {
         .height(Length::FILL)
     }
 
-
-
-
-
     /// The toolbar: through the folder, zoom, turn; Open at the end.
     fn toolbar(&self, t: &Tab, th: &Theme) -> Element<Msg> {
-        use vergence_widgets::toolbar::{Icon, flexible, group, tool, toggle, toolbar};
+        use vergence_widgets::toolbar::{Icon, flexible, group, toggle, tool, toolbar};
         let picture = matches!(t.content, Content::Picture { .. });
         let still = matches!(&t.content, Content::Picture { frames, .. } if frames.len() == 1);
         let on = |c: u32| picture.then_some(Msg::Run(c));
         let many = picture && pictures::siblings(&t.path).len() > 1;
         let step = |c: u32| many.then_some(Msg::Run(c));
         let items = vec![
-            group(vec![tool(Icon::Previous, "Previous picture", step(cmd::PREVIOUS)), tool(Icon::Next, "Next picture", step(cmd::NEXT))]),
+            group(vec![
+                tool(Icon::Previous, "Previous picture", step(cmd::PREVIOUS)),
+                tool(Icon::Next, "Next picture", step(cmd::NEXT)),
+            ]),
             group(vec![
                 tool(Icon::ZoomOut, "Zoom out", on(cmd::ZOOM_OUT)),
                 tool(Icon::ZoomIn, "Zoom in", on(cmd::ZOOM_IN)),
-                if picture { toggle(Icon::Fit, "Fit to the window", t.zoom.is_none(), Msg::Run(cmd::FIT)) } else { tool(Icon::Fit, "Fit to the window", None) },
+                if picture {
+                    toggle(Icon::Fit, "Fit to the window", t.zoom.is_none(), Msg::Run(cmd::FIT))
+                } else {
+                    tool(Icon::Fit, "Fit to the window", None)
+                },
                 tool(Icon::Actual, "Actual size", on(cmd::ACTUAL)),
             ]),
             group(vec![
                 tool(Icon::TurnLeft, "Turn left", on(cmd::TURN_LEFT)),
                 tool(Icon::TurnRight, "Turn right", on(cmd::TURN_RIGHT)),
-                if still { toggle(Icon::Crop, "Crop", t.crop.is_some(), Msg::Run(cmd::CROP)) } else { tool(Icon::Crop, "Crop", None) },
+                if still {
+                    toggle(Icon::Crop, "Crop", t.crop.is_some(), Msg::Run(cmd::CROP))
+                } else {
+                    tool(Icon::Crop, "Crop", None)
+                },
             ]),
             flexible(),
             tool(Icon::Open, "Open…", Some(Msg::Run(cmd::OPEN))),
@@ -772,7 +863,11 @@ impl Viewer {
                 }
                 items.push(label(vergence_types::describe(vergence_types::of_file(&t.path))).size(12.0).dim());
                 if let Some(z) = self.zoom_now() {
-                    items.push(label(format!("{:.0}%{}", z * 100.0, if t.zoom.is_none() { " (fitted)" } else { "" })).size(12.0).dim());
+                    items.push(
+                        label(format!("{:.0}%{}", z * 100.0, if t.zoom.is_none() { " (fitted)" } else { "" }))
+                            .size(12.0)
+                            .dim(),
+                    );
                 }
                 let list = pictures::siblings(&t.path);
                 if list.len() > 1
@@ -782,25 +877,44 @@ impl Viewer {
                 }
                 match t.crop {
                     Some(None) => items.push(label("Drag over the part to keep").size(12.0).dim()),
-                    Some(Some(_)) => items.push(button(label("Crop").size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(2.0, 10.0)).on_press(Msg::Crop).name("Crop")),
+                    Some(Some(_)) => items.push(
+                        button(label("Crop").size(12.0))
+                            .look(ButtonLook::Accent)
+                            .padding(Padding::hv(2.0, 10.0))
+                            .on_press(Msg::Crop)
+                            .name("Crop"),
+                    ),
                     None => {}
                 }
                 if t.edited {
                     let png = t.path.extension().is_some_and(|e| e.eq_ignore_ascii_case("png"));
                     let what = if png { "Save" } else { "Save as PNG" };
-                    items.push(button(label(what).size(12.0)).padding(Padding::hv(2.0, 10.0)).on_press(Msg::Run(cmd::SAVE)).name(what));
+                    items.push(
+                        button(label(what).size(12.0))
+                            .padding(Padding::hv(2.0, 10.0))
+                            .on_press(Msg::Run(cmd::SAVE))
+                            .name(what),
+                    );
                 }
             }
             Content::Text { cut, .. } => {
                 if *cut {
                     items.push(label(format!("the first {} MB", MAX_TEXT >> 20)).size(12.0).dim());
                 }
-                items.push(button(label("Open in Edit").size(12.0)).padding(Padding::hv(2.0, 10.0)).on_press(Msg::OpenInEditor).name("Open in Edit"));
+                items.push(
+                    button(label("Open in Edit").size(12.0))
+                        .padding(Padding::hv(2.0, 10.0))
+                        .on_press(Msg::OpenInEditor)
+                        .name("Open in Edit"),
+                );
             }
             _ => {}
         }
         let _ = th;
-        panel(row(items).spacing(14.0).align(Align::Center).width(Length::FILL)).radius(0.0).padding(Padding { top: 3.0, bottom: 3.0, left: 12.0, right: 12.0 }).width(Length::FILL)
+        panel(row(items).spacing(14.0).align(Align::Center).width(Length::FILL))
+            .radius(0.0)
+            .padding(Padding { top: 3.0, bottom: 3.0, left: 12.0, right: 12.0 })
+            .width(Length::FILL)
     }
 }
 
@@ -836,25 +950,45 @@ impl Program for Viewer {
 
     fn view(&self, t: &Theme) -> Element<Msg> {
         let Some(tab) = self.front_tab() else {
-            return panel(label("Nothing open: Ctrl+O opens a picture.").size(13.0).dim()).padding(Padding { top: t.top + 24.0, bottom: 24.0, left: 24.0, right: 24.0 }).width(Length::FILL).height(Length::FILL);
+            return panel(label("Nothing open: Ctrl+O opens a picture.").size(13.0).dim())
+                .padding(Padding { top: t.top + 24.0, bottom: 24.0, left: 24.0, right: 24.0 })
+                .width(Length::FILL)
+                .height(Length::FILL);
         };
         let body: Element<Msg> = match &tab.content {
-            Content::Loading => panel(label("Opening…").size(13.0).dim()).padding(24.0).width(Length::FILL).height(Length::FILL),
+            Content::Loading => {
+                panel(label("Opening…").size(13.0).dim()).padding(24.0).width(Length::FILL).height(Length::FILL)
+            }
             Content::Picture { width, height, frames } => self.picture_view(tab, *width, *height, frames),
             Content::Text { doc, .. } => text_area(doc).key(tab.id as u64).name(tab.name()),
             Content::Problem { why, elsewhere } => {
                 let mut items: Vec<Element<Msg>> = vec![label(why.clone()).size(13.0).wrap().width(Length::FILL)];
                 if *elsewhere {
-                    items.push(button(label("Open with its app").size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(4.0, 12.0)).on_press(Msg::OpenWith).name("Open with its app"));
+                    items.push(
+                        button(label("Open with its app").size(12.0))
+                            .look(ButtonLook::Accent)
+                            .padding(Padding::hv(4.0, 12.0))
+                            .on_press(Msg::OpenWith)
+                            .name("Open with its app"),
+                    );
                 }
-                panel(column(items).spacing(12.0).width(Length::Fixed(420.0))).padding(24.0).width(Length::FILL).height(Length::FILL)
+                panel(column(items).spacing(12.0).width(Length::Fixed(420.0)))
+                    .padding(24.0)
+                    .width(Length::FILL)
+                    .height(Length::FILL)
             }
         };
         let mut all = Vec::new();
         if !self.preview {
             all.push(self.toolbar(tab, t));
         }
-        all.push(panel(body).padding(Padding { top: if self.preview { t.top } else { 0.0 }, ..Padding::default() }).radius(0.0).width(Length::FILL).height(Length::FILL));
+        all.push(
+            panel(body)
+                .padding(Padding { top: if self.preview { t.top } else { 0.0 }, ..Padding::default() })
+                .radius(0.0)
+                .width(Length::FILL)
+                .height(Length::FILL),
+        );
         if !self.preview {
             all.push(rule());
             all.push(self.status(tab, t));
@@ -866,7 +1000,8 @@ impl Program for Viewer {
         match m {
             Msg::Touch(Touch::Press { x, y }) => {
                 let now = std::time::Instant::now();
-                let double = self.last_press.is_some_and(|t| now.duration_since(t) < std::time::Duration::from_millis(400));
+                let double =
+                    self.last_press.is_some_and(|t| now.duration_since(t) < std::time::Duration::from_millis(400));
                 self.last_press = Some(now);
                 let r = self.area.get();
                 self.pointer.set((r.x + x, r.y + y));
@@ -925,7 +1060,10 @@ impl Program for Viewer {
             // The wheel zooms about the pointer.
             Input::Scroll { x, y, dy, .. } if *dy != 0.0 => {
                 let r = self.area.get();
-                if *x >= r.x && *x <= r.x + r.w && *y >= r.y && *y <= r.y + r.h
+                if *x >= r.x
+                    && *x <= r.x + r.w
+                    && *y >= r.y
+                    && *y <= r.y + r.h
                     && let Some(z) = self.zoom_now()
                 {
                     let k = 1.0015f32.powf(-dy.clamp(-200.0, 200.0) * 10.0);
@@ -1035,7 +1173,12 @@ impl Program for Viewer {
             waker.wake();
         }
         // Files asked for before the window could wake (the command line's).
-        let pending: Vec<(u32, PathBuf)> = self.tabs.iter().filter(|t| matches!(t.content, Content::Loading)).map(|t| (t.id, t.path.clone())).collect();
+        let pending: Vec<(u32, PathBuf)> = self
+            .tabs
+            .iter()
+            .filter(|t| matches!(t.content, Content::Loading))
+            .map(|t| (t.id, t.path.clone()))
+            .collect();
         for (id, path) in pending {
             load(path, id, &self.shared.borrow(), Some(waker.clone()));
         }
@@ -1058,8 +1201,10 @@ impl Program for Viewer {
             return true;
         }
         // Woken by the drawing (its place changed) or a PDF's page drawn: look again.
-        let mut changed = self.reread() || self.front_tab().is_some_and(|t| matches!(t.content, Content::Picture { .. }));
-        let asked: Vec<Vec<PathBuf>> = std::mem::take(&mut *self.shared.borrow().inbox.lock().unwrap_or_else(|e| e.into_inner()));
+        let mut changed =
+            self.reread() || self.front_tab().is_some_and(|t| matches!(t.content, Content::Picture { .. }));
+        let asked: Vec<Vec<PathBuf>> =
+            std::mem::take(&mut *self.shared.borrow().inbox.lock().unwrap_or_else(|e| e.into_inner()));
         for paths in asked {
             self.take(&paths, false, window);
             // Handed over by a start (or the Open dialog): forward, if the server agrees.
@@ -1069,7 +1214,8 @@ impl Program for Viewer {
         let done: Vec<(u32, Loaded)> = {
             let shared = self.shared.borrow();
             let mut all = shared.loaded.lock().unwrap_or_else(|e| e.into_inner());
-            let (mine, rest): (Vec<_>, Vec<_>) = all.drain(..).partition(|(id, _)| self.tabs.iter().any(|t| t.id == *id));
+            let (mine, rest): (Vec<_>, Vec<_>) =
+                all.drain(..).partition(|(id, _)| self.tabs.iter().any(|t| t.id == *id));
             *all = rest;
             mine
         };
@@ -1087,7 +1233,13 @@ impl Program for Viewer {
                 t.content = match loaded {
                     Loaded::Picture { width, height, frames } => Content::Picture { width, height, frames },
                     Loaded::Text { text, cut } => {
-                        let options = AreaOptions { editable: false, complete: false, spell: false, current_line: false, ..AreaOptions::default() };
+                        let options = AreaOptions {
+                            editable: false,
+                            complete: false,
+                            spell: false,
+                            current_line: false,
+                            ..AreaOptions::default()
+                        };
                         Content::Text { doc: TextDoc::with_options(&text, options), cut }
                     }
                     Loaded::HandedOver => continue,
@@ -1120,11 +1272,21 @@ impl Program for Viewer {
 
     /// A file dropped here takes this window's place (more, windows of their own).
     fn drag_over(&mut self, _x: f32, _y: f32, kinds: &[String], _ctrl: bool) -> u8 {
-        if !self.preview && kinds.iter().any(|k| k == "text/uri-list") { vergence_ui::DROP_COPY } else { vergence_ui::DROP_NONE }
+        if !self.preview && kinds.iter().any(|k| k == "text/uri-list") {
+            vergence_ui::DROP_COPY
+        } else {
+            vergence_ui::DROP_NONE
+        }
     }
 
     fn dropped(&mut self, _x: f32, _y: f32, _action: u8, items: &[(String, Vec<u8>)], window: &mut Window) {
-        let paths: Vec<PathBuf> = items.iter().find(|(k, _)| k == "text/uri-list").map(|(_, v)| String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()).unwrap_or_default();
+        let paths: Vec<PathBuf> = items
+            .iter()
+            .find(|(k, _)| k == "text/uri-list")
+            .map(|(_, v)| {
+                String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()
+            })
+            .unwrap_or_default();
         self.take(&paths, true, window);
         window.redraw();
     }
@@ -1175,7 +1337,13 @@ impl Program for Viewer {
         if self.asking.is_none() {
             let answer = Rc::new(Cell::new(None));
             let copy = !t.path.extension().is_some_and(|e| e.eq_ignore_ascii_case("png"));
-            let q = SaveQuestion { name: t.name(), copy, answer: answer.clone(), waker: self.waker.clone(), theme: self.theme() };
+            let q = SaveQuestion {
+                name: t.name(),
+                copy,
+                answer: answer.clone(),
+                waker: self.waker.clone(),
+                theme: self.theme(),
+            };
             self.asking = Some(answer);
             window.open_window(vergence_widgets::window(q));
         }
@@ -1188,24 +1356,79 @@ struct CloseupRows;
 impl Rows for CloseupRows {
     fn parts(&self, text: &str) -> Vec<Part> {
         let opacity = vergence_ui::opacity_setting(text, "[appearance]");
-        let locked = vergence_ui::desktop_pick(text).map(|light| format!("{} for every app: Settings > Appearance > Style", if light { "Light" } else { "Dark" }));
+        let locked = vergence_ui::desktop_pick(text).map(|light| {
+            format!("{} for every app: Settings > Appearance > Style", if light { "Light" } else { "Dark" })
+        });
         let styles = vec![Choice::text("Dark", "dark"), Choice::text("Light", "light")];
         vec![
             Part {
                 title: "Close-Up".into(),
                 rows: vec![
-                    Row::new("ground", "Around a picture", "What shows where the picture does not reach.", Control::Choose { choices: vec![Choice::text("Dark", "dark"), Choice::text("Light", "light"), Choice::text("The window's color", "window")], desktop: None, app_default: 0 }),
-                    Row::new("small-actual", "Small pictures at actual size", "Fitting never makes a picture larger than it is.", Control::Switch { default: true }),
-                    Row::new("animate", "Play animations", "GIF and WebP pictures that move.", Control::Switch { default: true }),
+                    Row::new(
+                        "ground",
+                        "Around a picture",
+                        "What shows where the picture does not reach.",
+                        Control::Choose {
+                            choices: vec![
+                                Choice::text("Dark", "dark"),
+                                Choice::text("Light", "light"),
+                                Choice::text("The window's color", "window"),
+                            ],
+                            desktop: None,
+                            app_default: 0,
+                        },
+                    ),
+                    Row::new(
+                        "small-actual",
+                        "Small pictures at actual size",
+                        "Fitting never makes a picture larger than it is.",
+                        Control::Switch { default: true },
+                    ),
+                    Row::new(
+                        "animate",
+                        "Play animations",
+                        "GIF and WebP pictures that move.",
+                        Control::Switch { default: true },
+                    ),
                 ],
             },
             Part {
                 title: "On this desktop".into(),
                 rows: vec![
-                    Row::new("style", "Style", "While the desktop's Style is App default.", Control::Choose { choices: styles.clone(), desktop: Some("Built-in (Dark)".into()), app_default: 0 }).locked(locked.clone()),
-                    Row::new("bar-style", "Title bar", "", Control::Choose { choices: styles, desktop: Some("Built-in (Dark)".into()), app_default: 0 }).locked(locked),
-                    Row::new("opacity", "Opacity", "30 to 100: how much of the window's ground shows.", Control::Percent { min: 30, desktop: format!("Desktop default ({:.0})", opacity * 100.0), now: (opacity * 100.0).round() as u32 }),
-                    Row::new("", "Window places", "Where the desktop puts Close-Up's windows, for each set of screens.", Control::Button { label: "Forget…".into(), id: 1 }),
+                    Row::new(
+                        "style",
+                        "Style",
+                        "While the desktop's Style is App default.",
+                        Control::Choose {
+                            choices: styles.clone(),
+                            desktop: Some("Built-in (Dark)".into()),
+                            app_default: 0,
+                        },
+                    )
+                    .locked(locked.clone()),
+                    Row::new(
+                        "bar-style",
+                        "Title bar",
+                        "",
+                        Control::Choose { choices: styles, desktop: Some("Built-in (Dark)".into()), app_default: 0 },
+                    )
+                    .locked(locked),
+                    Row::new(
+                        "opacity",
+                        "Opacity",
+                        "30 to 100: how much of the window's ground shows.",
+                        Control::Percent {
+                            min: 30,
+                            desktop: format!("Desktop default ({:.0})", opacity * 100.0),
+                            now: (opacity * 100.0).round() as u32,
+                        },
+                    ),
+                    Row::new(
+                        "",
+                        "Window places",
+                        "Where the desktop puts Close-Up's windows, for each set of screens.",
+                        Control::Button { label: "Forget…".into(), id: 1 },
+                    ),
                 ],
             },
         ]
@@ -1213,7 +1436,8 @@ impl Rows for CloseupRows {
 
     fn button(&self, id: u32) {
         if id == 1 {
-            let _ = std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", APP_ID]).spawn();
+            let _ =
+                std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", APP_ID]).spawn();
         }
     }
 }
@@ -1225,7 +1449,12 @@ fn main() {
         return;
     }
     let preview = args.iter().any(|a| a == "--preview");
-    let files: Vec<PathBuf> = args.iter().filter(|a| !a.starts_with("--")).map(|a| vergence_types::path_of_link(a).unwrap_or_else(|| PathBuf::from(a))).map(|p| std::path::absolute(&p).unwrap_or(p)).collect();
+    let files: Vec<PathBuf> = args
+        .iter()
+        .filter(|a| !a.starts_with("--"))
+        .map(|a| vergence_types::path_of_link(a).unwrap_or_else(|| PathBuf::from(a)))
+        .map(|p| std::path::absolute(&p).unwrap_or(p))
+        .collect();
     // One Close-Up for all its windows: a running one takes the files.
     if !preview && hand::hand_over(&files) {
         return;
@@ -1258,7 +1487,13 @@ mod tests {
         let r = Rect::new(0.0, 0.0, 800.0, 600.0);
         // 4000 x 3000 at scale 2: fitted to 800 x 600 points, a zoom of 0.4.
         let (z, x, y, w, h) = placed(r, 2.0, (4000, 3000), None, (0.0, 0.0), true);
-        assert!((z - 0.4).abs() < 1e-4 && x.abs() < 1e-3 && y.abs() < 1e-3 && (w - 800.0).abs() < 1e-3 && (h - 600.0).abs() < 1e-3);
+        assert!(
+            (z - 0.4).abs() < 1e-4
+                && x.abs() < 1e-3
+                && y.abs() < 1e-3
+                && (w - 800.0).abs() < 1e-3
+                && (h - 600.0).abs() < 1e-3
+        );
         // A small picture stays at actual size (one pixel a pixel), centered.
         let (z, x, _, w, _) = placed(r, 2.0, (200, 100), None, (0.0, 0.0), true);
         assert_eq!((z, w), (1.0, 100.0));

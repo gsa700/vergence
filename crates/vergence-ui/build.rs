@@ -5,7 +5,11 @@
 // usual place is added.
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    let from_pkg_config = std::process::Command::new("pkg-config").args(["--libs-only-L", "xkbcommon"]).output().ok().filter(|o| o.status.success());
+    let from_pkg_config = std::process::Command::new("pkg-config")
+        .args(["--libs-only-L", "xkbcommon"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success());
     match from_pkg_config {
         Some(out) => {
             for dir in String::from_utf8_lossy(&out.stdout).split_whitespace().filter_map(|a| a.strip_prefix("-L")) {

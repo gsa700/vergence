@@ -284,7 +284,10 @@ impl<'a> Lexer<'a> {
             }
             self.pos += 1;
             if b == b'#'
-                && let (Some(h), Some(l)) = (self.data.get(self.pos).and_then(|c| hexval(*c)), self.data.get(self.pos + 1).and_then(|c| hexval(*c)))
+                && let (Some(h), Some(l)) = (
+                    self.data.get(self.pos).and_then(|c| hexval(*c)),
+                    self.data.get(self.pos + 1).and_then(|c| hexval(*c)),
+                )
             {
                 out.push(h << 4 | l);
                 self.pos += 2;
@@ -411,13 +414,19 @@ pub fn number(w: &[u8]) -> Option<Object> {
         b'+' | b'-' => &w[1..],
         _ => w,
     };
-    if body.is_empty() || !body.iter().all(|b| b.is_ascii_digit() || *b == b'.') || body.iter().filter(|b| **b == b'.').count() > 1 || body == b"." {
+    if body.is_empty()
+        || !body.iter().all(|b| b.is_ascii_digit() || *b == b'.')
+        || body.iter().filter(|b| **b == b'.').count() > 1
+        || body == b"."
+    {
         return None;
     }
     let s = std::str::from_utf8(w).ok()?;
     if !body.contains(&b'.') {
         // Too large for 64 bits: a real (some writers emit huge integers).
-        return Some(s.parse::<i64>().map(Object::Int).unwrap_or_else(|_| Object::Real(s.parse::<f64>().unwrap_or(0.0))));
+        return Some(
+            s.parse::<i64>().map(Object::Int).unwrap_or_else(|_| Object::Real(s.parse::<f64>().unwrap_or(0.0))),
+        );
     }
     let s = if s.ends_with('.') { format!("{s}0") } else { s.to_string() };
     let s = s.replacen("-.", "-0.", 1).replacen("+.", "0.", 1);

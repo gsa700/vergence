@@ -48,10 +48,22 @@ fn main() {
             Err(e) => println!("  status: {e}"),
         }
         if let Ok(Some(g)) = c.signal() {
-            println!("  signal {} dBm ({} bars), {:?} Mb/s, {:?}", g.rssi, wpa::bars(g.rssi), g.link_mbps, g.freq.and_then(wpa::band_channel));
+            println!(
+                "  signal {} dBm ({} bars), {:?} Mb/s, {:?}",
+                g.rssi,
+                wpa::bars(g.rssi),
+                g.link_mbps,
+                g.freq.and_then(wpa::band_channel)
+            );
         }
         for k in c.networks().unwrap_or_default() {
-            println!("  known {} {:?}{}{}", k.id, k.ssid, if k.current { " current" } else { "" }, if k.disabled { " disabled" } else { "" });
+            println!(
+                "  known {} {:?}{}{}",
+                k.id,
+                k.ssid,
+                if k.current { " current" } else { "" },
+                if k.disabled { " disabled" } else { "" }
+            );
         }
         if scan {
             let events = wpa::Events::attach(&path);
@@ -67,7 +79,14 @@ fn main() {
                 }
             }
             for b in wpa::by_network(c.scan_results().unwrap_or_default()) {
-                println!("  {:>4} dBm {} {:?} {:?} {}", b.signal, "|".repeat(wpa::bars(b.signal) as usize), b.security, wpa::band_channel(b.freq), b.ssid);
+                println!(
+                    "  {:>4} dBm {} {:?} {:?} {}",
+                    b.signal,
+                    "|".repeat(wpa::bars(b.signal) as usize),
+                    b.security,
+                    wpa::band_channel(b.freq),
+                    b.ssid
+                );
             }
         }
     }

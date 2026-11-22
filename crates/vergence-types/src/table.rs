@@ -18,7 +18,13 @@ pub struct Row {
     pub parent: Option<&'static str>,
 }
 
-const fn r(mime: &'static str, name: &'static str, icon: &'static str, globs: &'static [&'static str], parent: Option<&'static str>) -> Row {
+const fn r(
+    mime: &'static str,
+    name: &'static str,
+    icon: &'static str,
+    globs: &'static [&'static str],
+    parent: Option<&'static str>,
+) -> Row {
     Row { mime, name, icon, globs, parent }
 }
 
@@ -40,7 +46,13 @@ pub static ROWS: &[Row] = &[
     r("inode/directory", "Folder", "folder", &[], None),
     r("application/octet-stream", "Binary file", EXEC, &[], None),
     // Text.
-    r("text/plain", "Plain text", TEXT, &["*.txt", "*.text", "*.conf", "*.cfg", "README", "INSTALL", "COPYING", "LICENSE", "NEWS", "AUTHORS"], None),
+    r(
+        "text/plain",
+        "Plain text",
+        TEXT,
+        &["*.txt", "*.text", "*.conf", "*.cfg", "README", "INSTALL", "COPYING", "LICENSE", "NEWS", "AUTHORS"],
+        None,
+    ),
     r("text/x-log", "Log", TEXT, &["*.log"], None),
     r("text/markdown", "Markdown", TEXT, &["*.md", "*.markdown", "*.mkd"], None),
     r("text/csv", "Comma-separated values", SHEET, &["*.csv"], None),
@@ -118,12 +130,48 @@ pub static ROWS: &[Row] = &[
     r("application/postscript", "PostScript document", DOC, &["*.ps", "*.eps"], None),
     r("application/epub+zip", "EPUB book", DOC, &["*.epub"], Some("application/zip")),
     r("application/vnd.oasis.opendocument.text", "OpenDocument text", DOC, &["*.odt"], Some("application/zip")),
-    r("application/vnd.oasis.opendocument.spreadsheet", "OpenDocument spreadsheet", SHEET, &["*.ods"], Some("application/zip")),
-    r("application/vnd.oasis.opendocument.presentation", "OpenDocument presentation", SLIDES, &["*.odp"], Some("application/zip")),
-    r("application/vnd.oasis.opendocument.graphics", "OpenDocument drawing", IMAGE, &["*.odg"], Some("application/zip")),
-    r("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Word document", DOC, &["*.docx"], Some("application/zip")),
-    r("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Excel spreadsheet", SHEET, &["*.xlsx"], Some("application/zip")),
-    r("application/vnd.openxmlformats-officedocument.presentationml.presentation", "PowerPoint presentation", SLIDES, &["*.pptx"], Some("application/zip")),
+    r(
+        "application/vnd.oasis.opendocument.spreadsheet",
+        "OpenDocument spreadsheet",
+        SHEET,
+        &["*.ods"],
+        Some("application/zip"),
+    ),
+    r(
+        "application/vnd.oasis.opendocument.presentation",
+        "OpenDocument presentation",
+        SLIDES,
+        &["*.odp"],
+        Some("application/zip"),
+    ),
+    r(
+        "application/vnd.oasis.opendocument.graphics",
+        "OpenDocument drawing",
+        IMAGE,
+        &["*.odg"],
+        Some("application/zip"),
+    ),
+    r(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "Word document",
+        DOC,
+        &["*.docx"],
+        Some("application/zip"),
+    ),
+    r(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Excel spreadsheet",
+        SHEET,
+        &["*.xlsx"],
+        Some("application/zip"),
+    ),
+    r(
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "PowerPoint presentation",
+        SLIDES,
+        &["*.pptx"],
+        Some("application/zip"),
+    ),
     r("application/msword", "Word document (old)", DOC, &["*.doc"], None),
     r("application/vnd.ms-excel", "Excel spreadsheet (old)", SHEET, &["*.xls"], None),
     r("application/vnd.ms-powerpoint", "PowerPoint presentation (old)", SLIDES, &["*.ppt"], None),
@@ -135,9 +183,21 @@ pub static ROWS: &[Row] = &[
     r("application/x-xz", "XZ file", PACKAGE, &["*.xz"], None),
     r("application/x-xz-compressed-tar", "Tar archive (xz)", PACKAGE, &["*.tar.xz", "*.txz"], Some("application/x-xz")),
     r("application/zstd", "Zstandard file", PACKAGE, &["*.zst"], None),
-    r("application/x-zstd-compressed-tar", "Tar archive (zstd)", PACKAGE, &["*.tar.zst", "*.tzst"], Some("application/zstd")),
+    r(
+        "application/x-zstd-compressed-tar",
+        "Tar archive (zstd)",
+        PACKAGE,
+        &["*.tar.zst", "*.tzst"],
+        Some("application/zstd"),
+    ),
     r("application/x-bzip2", "Bzip2 file", PACKAGE, &["*.bz2"], None),
-    r("application/x-bzip-compressed-tar", "Tar archive (bzip2)", PACKAGE, &["*.tar.bz2", "*.tbz2"], Some("application/x-bzip2")),
+    r(
+        "application/x-bzip-compressed-tar",
+        "Tar archive (bzip2)",
+        PACKAGE,
+        &["*.tar.bz2", "*.tbz2"],
+        Some("application/x-bzip2"),
+    ),
     r("application/x-lz4", "LZ4 file", PACKAGE, &["*.lz4"], None),
     r("application/x-7z-compressed", "7-Zip archive", PACKAGE, &["*.7z"], None),
     r("application/vnd.rar", "RAR archive", PACKAGE, &["*.rar"], None),

@@ -26,9 +26,17 @@ pub struct Kind {
 }
 
 pub const KINDS: &[Kind] = &[
-    Kind { name: "Web browser", detail: "Web links, and web pages saved as files.", types: || vec!["x-scheme-handler/https", "x-scheme-handler/http", "text/html", "application/xhtml+xml"] },
+    Kind {
+        name: "Web browser",
+        detail: "Web links, and web pages saved as files.",
+        types: || vec!["x-scheme-handler/https", "x-scheme-handler/http", "text/html", "application/xhtml+xml"],
+    },
     Kind { name: "Mail", detail: "Mail links (mailto:).", types: || vec!["x-scheme-handler/mailto"] },
-    Kind { name: "Text", detail: "Plain text, and every kind of it without an app of its own.", types: || vec!["text/plain"] },
+    Kind {
+        name: "Text",
+        detail: "Plain text, and every kind of it without an app of its own.",
+        types: || vec!["text/plain"],
+    },
     Kind { name: "Pictures", detail: "PNG, JPEG, GIF, WebP and the rest.", types: || vergence_types::of_kind("image") },
     Kind { name: "PDF", detail: "PDF documents.", types: || vec!["application/pdf"] },
     Kind { name: "Music", detail: "MP3, FLAC, Ogg, WAV and the rest.", types: || vergence_types::of_kind("audio") },
@@ -67,7 +75,11 @@ fn write_terminal_entry(program: &str) -> std::io::Result<()> {
     let Some(&(_, name, exec)) = TERMINAL_EDITORS.iter().find(|(p, _, _)| *p == program) else {
         return Err(std::io::Error::other("not a terminal editor this knows"));
     };
-    let data = std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share"))).ok_or_else(|| std::io::Error::other("no home folder"))?;
+    let data = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")))
+        .ok_or_else(|| std::io::Error::other("no home folder"))?;
     let dir = data.join("applications");
     std::fs::create_dir_all(&dir)?;
     let to = dir.join(terminal_entry_id(program));
@@ -130,7 +142,11 @@ impl App {
 
     /// What an app is called, by its desktop id.
     fn entry_name(&self, id: &str) -> String {
-        self.apps.iter().find(|e| vergence_shell::open::desktop_id(&e.id) == id).map(|e| e.name.clone()).unwrap_or_else(|| id.trim_end_matches(".desktop").to_string())
+        self.apps
+            .iter()
+            .find(|e| vergence_shell::open::desktop_id(&e.id) == id)
+            .map(|e| e.name.clone())
+            .unwrap_or_else(|| id.trim_end_matches(".desktop").to_string())
     }
 
     /// Whether Vergence's own list chooses for this type.
@@ -149,7 +165,11 @@ impl App {
                 let first = (kind.types)()[0];
                 let apps = vergence_shell::open::apps_for(first, &self.apps, &self.default_lists);
                 if apps.is_empty() {
-                    return setting(kind.name, kind.detail, label("No app installed opens these").size(12.0).dim().width(Length::Fixed(230.0)));
+                    return setting(
+                        kind.name,
+                        kind.detail,
+                        label("No app installed opens these").size(12.0).dim().width(Length::Fixed(230.0)),
+                    );
                 }
                 // The menu: the apps that open it, best first (the first is today's
                 // default), and last "Not chosen here" while Vergence's list chooses.
@@ -157,7 +177,11 @@ impl App {
                 let mut names: Vec<String> = apps.iter().map(|a| self.entry_name(a)).collect();
                 // Text: terminal editors on the PATH not yet made into entries.
                 let terminals: Vec<String> = if first == "text/plain" {
-                    TERMINAL_EDITORS.iter().filter(|(p, _, _)| vergence_shell::apps::on_path(p) && !apps.contains(&terminal_entry_id(p))).map(|(p, _, _)| p.to_string()).collect()
+                    TERMINAL_EDITORS
+                        .iter()
+                        .filter(|(p, _, _)| vergence_shell::apps::on_path(p) && !apps.contains(&terminal_entry_id(p)))
+                        .map(|(p, _, _)| p.to_string())
+                        .collect()
                 } else {
                     Vec::new()
                 };

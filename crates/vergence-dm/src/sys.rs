@@ -3,9 +3,9 @@
 //! process no debugger of the same user can attach to, no core files.
 //! Each says what it relies on; Linux and FreeBSD differ where marked.
 
-use std::ffi::{c_int, c_void};
 #[cfg(target_os = "linux")]
 use std::ffi::c_long;
+use std::ffi::{c_int, c_void};
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 
@@ -102,8 +102,11 @@ pub fn on_console(pid: u32) -> bool {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let out = std::process::Command::new("/bin/ps").args(["-o", "tt=", "-p", &pid.to_string()]).env_clear().output();
-        out.ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).is_some_and(|t| t.len() >= 2 && t.starts_with('v') && t[1..].chars().all(|c| c.is_ascii_hexdigit()))
+        let out =
+            std::process::Command::new("/bin/ps").args(["-o", "tt=", "-p", &pid.to_string()]).env_clear().output();
+        out.ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .is_some_and(|t| t.len() >= 2 && t.starts_with('v') && t[1..].chars().all(|c| c.is_ascii_hexdigit()))
     }
 }
 

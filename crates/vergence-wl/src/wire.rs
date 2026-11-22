@@ -210,7 +210,17 @@ mod tests {
 
     #[test]
     fn a_message_is_built_and_taken_apart() {
-        let (bytes, fds) = Writer::new(7, 3).uint(42).int(-5).fixed(1.5).string("hello").object(9).array(&[1, 2, 3, 4, 5]).string("").fd(11).finish().unwrap();
+        let (bytes, fds) = Writer::new(7, 3)
+            .uint(42)
+            .int(-5)
+            .fixed(1.5)
+            .string("hello")
+            .object(9)
+            .array(&[1, 2, 3, 4, 5])
+            .string("")
+            .fd(11)
+            .finish()
+            .unwrap();
         assert_eq!(fds, [11]);
         assert_eq!(bytes.len() % 4, 0);
         let h = split(&bytes).unwrap().unwrap();

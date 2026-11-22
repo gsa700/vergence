@@ -52,7 +52,11 @@ impl Server {
             let icon = (out.len() < MAX_APP_ICONS && !item.icon.is_empty())
                 .then(|| self.shelf_icon(&item.icon, APP_ICON as u32))
                 .flatten()
-                .filter(|i| i.width == APP_ICON as u32 && i.height == APP_ICON as u32 && i.rgba.len() == (APP_ICON as usize).pow(2) * 4);
+                .filter(|i| {
+                    i.width == APP_ICON as u32
+                        && i.height == APP_ICON as u32
+                        && i.rgba.len() == (APP_ICON as usize).pow(2) * 4
+                });
             out.push(AppInfo {
                 key: item.key.clone(),
                 name: item.name.clone(),
@@ -82,14 +86,18 @@ impl Server {
             };
         }
         let Some(t) = w.toplevel() else { return true };
-        let Some(id) = smithay::reexports::wayland_server::Resource::client(t.wl_surface()).map(|c| c.id()) else { return true };
+        let Some(id) = smithay::reexports::wayland_server::Resource::client(t.wl_surface()).map(|c| c.id()) else {
+            return true;
+        };
         match t.client().send_ping(smithay::utils::SERIAL_COUNTER.next_serial()) {
             // Sent: the last one was answered.
             Ok(()) => {
                 self.pinged.insert(id, now);
                 true
             }
-            Err(smithay::wayland::shell::PingError::PingAlreadyPending(_)) => self.pinged.get(&id).is_none_or(|since| now.duration_since(*since) < NOT_RESPONDING),
+            Err(smithay::wayland::shell::PingError::PingAlreadyPending(_)) => {
+                self.pinged.get(&id).is_none_or(|since| now.duration_since(*since) < NOT_RESPONDING)
+            }
             Err(_) => true,
         }
     }
@@ -115,14 +123,19 @@ impl Server {
             return Err(format!("{key} is not running"));
         };
         let own = std::process::id();
-        let pids: BTreeSet<u32> = windows.iter().filter_map(|w| self.window_pid(w)).filter(|p| *p > 1 && *p != own).collect();
+        let pids: BTreeSet<u32> =
+            windows.iter().filter_map(|w| self.window_pid(w)).filter(|p| *p > 1 && *p != own).collect();
         if pids.is_empty() {
             return Err(format!("no process known for {}", item.name));
         }
         for p in &pids {
             // SAFETY: kill(2) with a pid and a signal number; no memory is passed.
             let r = unsafe { kill(*p as i32, SIGTERM) };
-            tracing::info!("force quit: {} pid {p} {}", item.name, if r == 0 { "asked to end" } else { "could not be signalled" });
+            tracing::info!(
+                "force quit: {} pid {p} {}",
+                item.name,
+                if r == 0 { "asked to end" } else { "could not be signalled" }
+            );
         }
         let pids: Vec<u32> = pids.into_iter().collect();
         self.quitting.insert(key.to_string(), pids.clone());
@@ -134,7 +147,10 @@ impl Server {
                 if alive(*p) {
                     // SAFETY: as above.
                     let r = unsafe { kill(*p as i32, SIGKILL) };
-                    tracing::info!("force quit: {name} pid {p} still there after {GRACE:?}: {}", if r == 0 { "killed" } else { "could not be killed" });
+                    tracing::info!(
+                        "force quit: {name} pid {p} still there after {GRACE:?}: {}",
+                        if r == 0 { "killed" } else { "could not be killed" }
+                    );
                 } else {
                     tracing::info!("force quit: {name} pid {p} ended when asked");
                 }

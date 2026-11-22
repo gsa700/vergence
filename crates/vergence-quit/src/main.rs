@@ -12,7 +12,10 @@ use std::time::Duration;
 use vergence_protocol::bus::{AppInfo, ClientMsg, ServerMsg};
 use vergence_scene::Image;
 use vergence_ui::{AppCommand as C, BarStyle, Role};
-use vergence_widgets::{Align, ButtonLook, Element, Input, Length, Padding, Program, Theme, Waker, Window, button, column, label, panel, picture, row, scroll, space};
+use vergence_widgets::{
+    Align, ButtonLook, Element, Input, Length, Padding, Program, Theme, Waker, Window, button, column, label, panel,
+    picture, row, scroll, space,
+};
 
 const APP_ID: &str = "vergence-quit";
 
@@ -46,7 +49,8 @@ impl ForceQuit {
     fn new() -> ForceQuit {
         let (mail, inbox) = channel();
         let (outbox, _) = channel();
-        let desktop = vergence_widgets::prefs::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+        let desktop =
+            vergence_widgets::prefs::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
         ForceQuit { apps: Vec::new(), picked: None, asking: false, status: String::new(), inbox, outbox, mail, desktop }
     }
 
@@ -66,7 +70,9 @@ fn bus_thread(mail: Sender<Mail>, quits: Receiver<String>, waker: Waker) {
         };
         loop {
             while let Ok(key) = quits.try_recv() {
-                if let Ok(ServerMsg::Error { message, .. }) = bus.request(|serial| ClientMsg::ForceQuit { serial, app: key.clone() }) {
+                if let Ok(ServerMsg::Error { message, .. }) =
+                    bus.request(|serial| ClientMsg::ForceQuit { serial, app: key.clone() })
+                {
                     let _ = mail.send(Mail::Failed(message));
                 }
             }
@@ -82,7 +88,9 @@ fn bus_thread(mail: Sender<Mail>, quits: Receiver<String>, waker: Waker) {
             }
             // Asked to end one: at once; else look again in two seconds.
             if let Ok(key) = quits.recv_timeout(Duration::from_secs(2)) {
-                if let Ok(ServerMsg::Error { message, .. }) = bus.request(|serial| ClientMsg::ForceQuit { serial, app: key.clone() }) {
+                if let Ok(ServerMsg::Error { message, .. }) =
+                    bus.request(|serial| ClientMsg::ForceQuit { serial, app: key.clone() })
+                {
                     let _ = mail.send(Mail::Failed(message));
                 }
                 std::thread::sleep(Duration::from_millis(300));
@@ -127,7 +135,8 @@ impl Program for ForceQuit {
                         .filter(|a| a.key != APP_ID)
                         .map(|a| {
                             let side = a.icon_side as u32;
-                            let img = (!a.icon.is_empty()).then(|| Arc::new(Image { width: side, height: side, rgba: a.icon.clone() }));
+                            let img = (!a.icon.is_empty())
+                                .then(|| Arc::new(Image { width: side, height: side, rgba: a.icon.clone() }));
                             (a, img)
                         })
                         .collect();
@@ -146,12 +155,25 @@ impl Program for ForceQuit {
     }
 
     fn view(&self, t: &Theme) -> Element<Msg> {
-        let intro = label("If an application has stopped answering, choose it and press Force Quit.").size(12.0).dim().wrap().width(Length::FILL);
+        let intro = label("If an application has stopped answering, choose it and press Force Quit.")
+            .size(12.0)
+            .dim()
+            .wrap()
+            .width(Length::FILL);
         let mut rows: Vec<Element<Msg>> = Vec::new();
         for (a, img) in &self.apps {
             let icon: Element<Msg> = match img {
                 Some(i) => picture(i.clone()),
-                None => panel(label(a.name.chars().next().unwrap_or('?').to_uppercase().to_string()).weight(700).align(Align::Center).width(Length::FILL)).color(t.card).radius(6.0).width(Length::Fixed(32.0)).height(Length::Fixed(32.0)),
+                None => panel(
+                    label(a.name.chars().next().unwrap_or('?').to_uppercase().to_string())
+                        .weight(700)
+                        .align(Align::Center)
+                        .width(Length::FILL),
+                )
+                .color(t.card)
+                .radius(6.0)
+                .width(Length::Fixed(32.0))
+                .height(Length::Fixed(32.0)),
             };
             let mut words = vec![label(a.name.clone())];
             if a.quitting {
@@ -161,26 +183,47 @@ impl Program for ForceQuit {
             }
             let picked = self.picked.as_deref() == Some(a.key.as_str());
             rows.push(
-                button(row(vec![icon, column(words).spacing(1.0).width(Length::FILL)]).spacing(10.0).align(Align::Center).width(Length::FILL))
-                    .look(if picked { ButtonLook::Accent } else { ButtonLook::Plain })
-                    .padding(Padding::hv(6.0, 8.0))
-                    .on_press(Msg::Pick(a.key.clone()))
-                    .width(Length::FILL)
-                    .name(if a.responding { a.name.clone() } else { format!("{} (not responding)", a.name) }),
+                button(
+                    row(vec![icon, column(words).spacing(1.0).width(Length::FILL)])
+                        .spacing(10.0)
+                        .align(Align::Center)
+                        .width(Length::FILL),
+                )
+                .look(if picked { ButtonLook::Accent } else { ButtonLook::Plain })
+                .padding(Padding::hv(6.0, 8.0))
+                .on_press(Msg::Pick(a.key.clone()))
+                .width(Length::FILL)
+                .name(if a.responding {
+                    a.name.clone()
+                } else {
+                    format!("{} (not responding)", a.name)
+                }),
             );
         }
         if self.apps.is_empty() {
             rows.push(label(if self.status.is_empty() { "No applications are running." } else { "" }).dim());
         }
-        let list = panel(scroll(column(rows).spacing(2.0).width(Length::FILL))).color(t.card).radius(10.0).padding(4.0).width(Length::FILL).height(Length::FILL);
+        let list = panel(scroll(column(rows).spacing(2.0).width(Length::FILL)))
+            .color(t.card)
+            .radius(10.0)
+            .padding(4.0)
+            .width(Length::FILL)
+            .height(Length::FILL);
         let bottom: Element<Msg> = match (self.asking, self.picked_name()) {
             (true, Some(name)) => column(vec![
                 label(format!("Force {name} to quit?")).weight(600),
                 label("Anything not saved in it is lost.").size(12.0).dim(),
                 row(vec![
                     space().width(Length::FILL),
-                    button(label("Cancel").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Msg::Cancel).name("Cancel"),
-                    button(label("Force Quit").size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(4.0, 14.0)).on_press(Msg::Quit).name("Force Quit"),
+                    button(label("Cancel").size(12.0))
+                        .padding(Padding::hv(4.0, 12.0))
+                        .on_press(Msg::Cancel)
+                        .name("Cancel"),
+                    button(label("Force Quit").size(12.0))
+                        .look(ButtonLook::Accent)
+                        .padding(Padding::hv(4.0, 14.0))
+                        .on_press(Msg::Quit)
+                        .name("Force Quit"),
                 ])
                 .spacing(8.0)
                 .align(Align::Center)
@@ -189,7 +232,10 @@ impl Program for ForceQuit {
             .spacing(4.0)
             .width(Length::FILL),
             _ => {
-                let quit = button(label("Force Quit").size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(4.0, 14.0)).name("Force Quit");
+                let quit = button(label("Force Quit").size(12.0))
+                    .look(ButtonLook::Accent)
+                    .padding(Padding::hv(4.0, 14.0))
+                    .name("Force Quit");
                 row(vec![
                     label(self.status.clone()).size(11.0).dim().wrap().width(Length::FILL),
                     if self.picked.is_some() { quit.on_press(Msg::Ask) } else { quit },
@@ -245,7 +291,13 @@ impl Program for ForceQuit {
 
     fn command(&mut self, id: u32, window: &mut Window) {
         if id == 1 {
-            let about = vergence_widgets::about::About::new(APP_ID, "Force Quit", env!("CARGO_PKG_VERSION"), "Ends an application that has stopped answering, at once. Ctrl+Alt+Escape opens it anywhere.", self.theme());
+            let about = vergence_widgets::about::About::new(
+                APP_ID,
+                "Force Quit",
+                env!("CARGO_PKG_VERSION"),
+                "Ends an application that has stopped answering, at once. Ctrl+Alt+Escape opens it anywhere.",
+                self.theme(),
+            );
             window.open_window(vergence_widgets::window(about));
         }
     }

@@ -127,9 +127,17 @@ pub fn build(desktop: Option<&str>, xsettings: Option<&str>, cursor_points: u32)
     put(LOOK, "under-bar", SettingValue::U32((text("under-bar").as_deref() == Some("more")) as u32));
     // The title bars' shade (vergence-look bar_look_shaded), kept as 100 + the
     // step, a u32 (0 is unset).
-    let shade = appearance.get("bar-shade").and_then(|v| v.as_integer()).unwrap_or(0).clamp(vergence_look::BAR_SHADE_MIN as i64, vergence_look::BAR_SHADE_MAX as i64);
+    let shade = appearance
+        .get("bar-shade")
+        .and_then(|v| v.as_integer())
+        .unwrap_or(0)
+        .clamp(vergence_look::BAR_SHADE_MIN as i64, vergence_look::BAR_SHADE_MAX as i64);
     put(LOOK, "bar-shade", SettingValue::U32((100 + shade) as u32));
-    put(LOOK, "reduce-transparency", SettingValue::Bool(appearance.get("reduce-transparency").and_then(|v| v.as_bool()).unwrap_or(false)));
+    put(
+        LOOK,
+        "reduce-transparency",
+        SettingValue::Bool(appearance.get("reduce-transparency").and_then(|v| v.as_bool()).unwrap_or(false)),
+    );
     // Size of controls (look milestone 1, step 8): the desktop's, and each
     // screen's own ("size:<monitor id>", 3 for Automatic: Large where a touch
     // panel is, the desktop's elsewhere).
@@ -139,10 +147,14 @@ pub fn build(desktop: Option<&str>, xsettings: Option<&str>, cursor_points: u32)
         Some("standard") => 1,
         _ => 3,
     };
-    put(LOOK, "size", SettingValue::U32(match step(text("controls").as_deref()) {
-        3 => 1,
-        s => s,
-    }));
+    put(
+        LOOK,
+        "size",
+        SettingValue::U32(match step(text("controls").as_deref()) {
+            3 => 1,
+            s => s,
+        }),
+    );
     let screens = desktop
         .and_then(|t| t.parse::<toml::Table>().ok())
         .and_then(|t| t.get("displays").and_then(|d| d.get("screen")).and_then(|s| s.as_array()).cloned())
@@ -157,25 +169,52 @@ pub fn build(desktop: Option<&str>, xsettings: Option<&str>, cursor_points: u32)
         .and_then(|t| t.parse::<toml::Table>().ok())
         .and_then(|t| t.get("keyboard").and_then(|a| a.as_table()).cloned())
         .unwrap_or_default();
-    let int = |k: &str, default: u32, lo: u32, hi: u32| keyboard.get(k).and_then(|v| v.as_integer()).map_or(default, |v| (v.max(0) as u32).clamp(lo, hi));
+    let int = |k: &str, default: u32, lo: u32, hi: u32| {
+        keyboard.get(k).and_then(|v| v.as_integer()).map_or(default, |v| (v.max(0) as u32).clamp(lo, hi))
+    };
     let rate = int("repeat-rate", REPEAT_RATE, 1, 100);
     put(KEYBOARD, "repeat", SettingValue::Bool(keyboard.get("repeat").and_then(|v| v.as_bool()).unwrap_or(true)));
     put(KEYBOARD, "delay", SettingValue::U32(int("repeat-delay", REPEAT_DELAY, 100, 2000)));
     put(KEYBOARD, "repeat-interval", SettingValue::U32((1000 + rate / 2) / rate));
 
     // Mice and touchpads (pointer.rs), under GNOME's names.
-    let table = |name: &str| desktop.and_then(|t| t.parse::<toml::Table>().ok()).and_then(|t| t.get(name).and_then(|a| a.as_table()).cloned()).unwrap_or_default();
+    let table = |name: &str| {
+        desktop
+            .and_then(|t| t.parse::<toml::Table>().ok())
+            .and_then(|t| t.get(name).and_then(|a| a.as_table()).cloned())
+            .unwrap_or_default()
+    };
     let (mouse, pad) = (table("mouse"), table("touchpad"));
-    let speed = |t: &toml::Table| t.get("speed").and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64))).filter(|v| v.is_finite()).unwrap_or(0.0).clamp(-1.0, 1.0);
+    let speed = |t: &toml::Table| {
+        t.get("speed")
+            .and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64)))
+            .filter(|v| v.is_finite())
+            .unwrap_or(0.0)
+            .clamp(-1.0, 1.0)
+    };
     let flag = |t: &toml::Table, k: &str, d: bool| t.get(k).and_then(|v| v.as_bool()).unwrap_or(d);
-    let lines = |t: &toml::Table| t.get("scroll-lines").and_then(|v| v.as_integer()).map_or(crate::pointer::SCROLL_LINES, |v| v.clamp(1, 10) as u32);
+    let lines = |t: &toml::Table| {
+        t.get("scroll-lines")
+            .and_then(|v| v.as_integer())
+            .map_or(crate::pointer::SCROLL_LINES, |v| v.clamp(1, 10) as u32)
+    };
     put(MOUSE, "speed", SettingValue::F64(speed(&mouse)));
-    put(MOUSE, "accel-profile", SettingValue::Str(if flag(&mouse, "acceleration", true) { "default" } else { "flat" }.into()));
+    put(
+        MOUSE,
+        "accel-profile",
+        SettingValue::Str(if flag(&mouse, "acceleration", true) { "default" } else { "flat" }.into()),
+    );
     put(MOUSE, "natural-scroll", SettingValue::Bool(flag(&mouse, "natural-scroll", false)));
     put(MOUSE, "left-handed", SettingValue::Bool(flag(&mouse, "left-handed", false)));
     put(MOUSE, "middle-click-emulation", SettingValue::Bool(flag(&mouse, "middle-click", false)));
     put(MOUSE, "scroll-lines", SettingValue::U32(lines(&mouse)));
-    put(MOUSE, "double-click", SettingValue::I32(mouse.get("double-click").and_then(|v| v.as_integer()).map_or(400, |v| v.clamp(100, 2000) as i32)));
+    put(
+        MOUSE,
+        "double-click",
+        SettingValue::I32(
+            mouse.get("double-click").and_then(|v| v.as_integer()).map_or(400, |v| v.clamp(100, 2000) as i32),
+        ),
+    );
     put(TOUCHPAD, "speed", SettingValue::F64(speed(&pad)));
     put(TOUCHPAD, "tap-to-click", SettingValue::Bool(flag(&pad, "tap-to-click", true)));
     put(TOUCHPAD, "tap-and-drag", SettingValue::Bool(flag(&pad, "tap-and-drag", true)));
@@ -184,10 +223,18 @@ pub fn build(desktop: Option<&str>, xsettings: Option<&str>, cursor_points: u32)
     put(TOUCHPAD, "two-finger-scrolling-enabled", SettingValue::Bool(!edge));
     put(TOUCHPAD, "edge-scrolling-enabled", SettingValue::Bool(edge));
     put(TOUCHPAD, "disable-while-typing", SettingValue::Bool(flag(&pad, "disable-while-typing", true)));
-    put(TOUCHPAD, "click-method", SettingValue::Str(if pad.get("click").and_then(|v| v.as_str()) == Some("fingers") { "fingers" } else { "areas" }.into()));
+    put(
+        TOUCHPAD,
+        "click-method",
+        SettingValue::Str(
+            if pad.get("click").and_then(|v| v.as_str()) == Some("fingers") { "fingers" } else { "areas" }.into(),
+        ),
+    );
     put(TOUCHPAD, "scroll-lines", SettingValue::U32(lines(&pad)));
 
-    let xs = xsettings.and_then(|t| vergence_xsettings::from_toml(t).map_err(|e| tracing::warn!("settings.toml: {e}")).ok()).unwrap_or_default();
+    let xs = xsettings
+        .and_then(|t| vergence_xsettings::from_toml(t).map_err(|e| tracing::warn!("settings.toml: {e}")).ok())
+        .unwrap_or_default();
     let xstr = |k: &str| match xs.get(k) {
         Some(vergence_xsettings::Value::Str(s)) if !s.is_empty() => Some(s.clone()),
         _ => None,
@@ -218,7 +265,11 @@ pub fn build(desktop: Option<&str>, xsettings: Option<&str>, cursor_points: u32)
     // Which window buttons, and on which side ("close,minimize:" or
     // ":minimize,maximize,close"): the server's own title bars follow it too.
     // Unset, the default (on the left) is published, so apps follow it as well.
-    put(WM, "button-layout", SettingValue::Str(xstr("Gtk/DecorationLayout").unwrap_or_else(|| vergence_bar::DEFAULT_LAYOUT.to_string())));
+    put(
+        WM,
+        "button-layout",
+        SettingValue::Str(xstr("Gtk/DecorationLayout").unwrap_or_else(|| vergence_bar::DEFAULT_LAYOUT.to_string())),
+    );
     // Cursor size in points (the same on every monitor): the server's, not
     // XSETTINGS' pixel value, which is scaled for X apps.
     put(INTERFACE, "cursor-size", SettingValue::I32(cursor_points as i32));
@@ -286,7 +337,7 @@ impl Server {
         }
         if diff.iter().any(|s| s.namespace == KEYBOARD) {
             self.apply_key_repeat();
-        self.notes.config = crate::notify::load();
+            self.notes.config = crate::notify::load();
         }
         if diff.iter().any(|s| s.namespace == MOUSE || s.namespace == TOUCHPAD) {
             self.apply_pointer_settings();
@@ -306,8 +357,14 @@ impl Server {
     pub fn key_repeat(&self) -> (i32, i32) {
         let get = |k: &str| self.settings.current.get(&(KEYBOARD.to_string(), k.to_string()));
         let on = !matches!(get("repeat"), Some(SettingValue::Bool(false)));
-        let delay = match get("delay") { Some(SettingValue::U32(v)) => *v, _ => REPEAT_DELAY };
-        let interval = match get("repeat-interval") { Some(SettingValue::U32(v)) if *v > 0 => *v, _ => 1000 / REPEAT_RATE };
+        let delay = match get("delay") {
+            Some(SettingValue::U32(v)) => *v,
+            _ => REPEAT_DELAY,
+        };
+        let interval = match get("repeat-interval") {
+            Some(SettingValue::U32(v)) if *v > 0 => *v,
+            _ => 1000 / REPEAT_RATE,
+        };
         let rate = if on { (1000 / interval).max(1) } else { 0 };
         (rate as i32, delay as i32)
     }
@@ -327,60 +384,64 @@ impl Server {
         self.settings.current = load();
         self.settings.stamps = stamps();
         self.apply_key_repeat();
-        let res = self.loop_handle.insert_source(Timer::from_duration(std::time::Duration::from_secs(1)), |_, _, state| {
-            // vdm hears the main screen once it can (lock.rs; a no-op when told).
-            state.tell_vdm_main_screen();
-            let now = stamps();
-            if now != state.settings.stamps {
-                state.settings.stamps = now;
-                // Screens' scale and arrangement (displays.rs), when they changed.
-                let displays = crate::displays::load();
-                if displays != state.displays {
-                    state.displays = displays;
-                    crate::drm::displays_changed(state);
+        let res =
+            self.loop_handle.insert_source(Timer::from_duration(std::time::Duration::from_secs(1)), |_, _, state| {
+                // vdm hears the main screen once it can (lock.rs; a no-op when told).
+                state.tell_vdm_main_screen();
+                let now = stamps();
+                if now != state.settings.stamps {
+                    state.settings.stamps = now;
+                    // Screens' scale and arrangement (displays.rs), when they changed.
+                    let displays = crate::displays::load();
+                    if displays != state.displays {
+                        state.displays = displays;
+                        crate::drm::displays_changed(state);
+                    }
+                    // Idle times (energy.rs).
+                    state.energy_reload();
+                    // The shelf's settings and the primary screen (shelf.rs).
+                    state.shelf_reload();
+                    // The clock's [clock] (tiles.rs).
+                    state.tiles_reload();
+                    // Snapping's choices (snap.rs).
+                    state.snap_reload();
+                    // Title bar styles of apps not ours (decor.rs).
+                    let bars = crate::decor::app_bars();
+                    if bars != state.app_bars {
+                        state.app_bars = bars;
+                        state.redraw_all();
+                    }
+                    // Notifications' choices (notify.rs).
+                    state.notify_reload();
+                    // Wallpaper tint's switch (tint.rs).
+                    state.tint_reload();
+                    // The magnifier's [magnifier] (zoom.rs).
+                    state.zoom_reload();
+                    // X11 applications turned on (state.rs).
+                    state.x11_follow();
+                    let new = load();
+                    let diff = changed(&state.settings.current, &new);
+                    state.settings.current = new;
+                    if !diff.is_empty() {
+                        tracing::info!(
+                            "settings: {} changed",
+                            diff.iter().map(|s| format!("{} {}", s.namespace, s.key)).collect::<Vec<_>>().join(", ")
+                        );
+                        state.bus_settings_changed(&diff);
+                        state.dbus_settings_changed(&diff);
+                        state.theme_changed(&diff);
+                        state.notify_restyle();
+                    }
                 }
-                // Idle times (energy.rs).
-                state.energy_reload();
-                // The shelf's settings and the primary screen (shelf.rs).
-                state.shelf_reload();
-                // The clock's [clock] (tiles.rs).
-                state.tiles_reload();
-                // Snapping's choices (snap.rs).
-                state.snap_reload();
-                // Title bar styles of apps not ours (decor.rs).
-                let bars = crate::decor::app_bars();
-                if bars != state.app_bars {
-                    state.app_bars = bars;
-                    state.redraw_all();
-                }
-                // Notifications' choices (notify.rs).
-                state.notify_reload();
-                // Wallpaper tint's switch (tint.rs).
-                state.tint_reload();
-                // The magnifier's [magnifier] (zoom.rs).
-                state.zoom_reload();
-                // X11 applications turned on (state.rs).
-                state.x11_follow();
-                let new = load();
-                let diff = changed(&state.settings.current, &new);
-                state.settings.current = new;
-                if !diff.is_empty() {
-                    tracing::info!("settings: {} changed", diff.iter().map(|s| format!("{} {}", s.namespace, s.key)).collect::<Vec<_>>().join(", "));
-                    state.bus_settings_changed(&diff);
-                    state.dbus_settings_changed(&diff);
-                    state.theme_changed(&diff);
-                    state.notify_restyle();
-                }
-            }
-            // Applications installed or removed since the last look (shelf.rs).
-            state.shelf_tick();
-            state.tiles_tick();
-            state.lock_tick();
-            state.greeter_tick();
-            state.elevate_tick();
-            state.session_tick();
-            TimeoutAction::ToDuration(std::time::Duration::from_secs(1))
-        });
+                // Applications installed or removed since the last look (shelf.rs).
+                state.shelf_tick();
+                state.tiles_tick();
+                state.lock_tick();
+                state.greeter_tick();
+                state.elevate_tick();
+                state.session_tick();
+                TimeoutAction::ToDuration(std::time::Duration::from_secs(1))
+            });
         if let Err(e) = res {
             tracing::warn!("settings: {e}");
         }

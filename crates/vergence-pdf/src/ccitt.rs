@@ -89,7 +89,15 @@ pub struct Params {
 
 impl Default for Params {
     fn default() -> Params {
-        Params { k: 0, columns: 1728, rows: 0, end_of_line: false, byte_align: false, end_of_block: true, black_is_1: false }
+        Params {
+            k: 0,
+            columns: 1728,
+            rows: 0,
+            end_of_line: false,
+            byte_align: false,
+            end_of_block: true,
+            black_is_1: false,
+        }
     }
 }
 
@@ -178,7 +186,17 @@ enum Mode {
 }
 
 fn mode(b: &mut Bits) -> Option<Mode> {
-    let codes = [(1, 0b1, Mode::Vertical(0)), (3, 0b011, Mode::Vertical(1)), (3, 0b010, Mode::Vertical(-1)), (3, 0b001, Mode::Horizontal), (4, 0b0001, Mode::Pass), (6, 0b000011, Mode::Vertical(2)), (6, 0b000010, Mode::Vertical(-2)), (7, 0b0000011, Mode::Vertical(3)), (7, 0b0000010, Mode::Vertical(-3))];
+    let codes = [
+        (1, 0b1, Mode::Vertical(0)),
+        (3, 0b011, Mode::Vertical(1)),
+        (3, 0b010, Mode::Vertical(-1)),
+        (3, 0b001, Mode::Horizontal),
+        (4, 0b0001, Mode::Pass),
+        (6, 0b000011, Mode::Vertical(2)),
+        (6, 0b000010, Mode::Vertical(-2)),
+        (7, 0b0000011, Mode::Vertical(3)),
+        (7, 0b0000010, Mode::Vertical(-3)),
+    ];
     for (len, code, m) in codes {
         if b.peek(len) == code {
             b.skip(len as usize);

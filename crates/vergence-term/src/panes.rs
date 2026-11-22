@@ -71,11 +71,19 @@ fn divide(room: Rect, axis: Axis, share: f32) -> (Rect, Rect, Rect) {
     match axis {
         Axis::Side => {
             let w = ((room.w - DIVIDER) * share).round().max(0.0);
-            (Rect::new(room.x, room.y, w, room.h), Rect::new(room.x + w + DIVIDER, room.y, (room.w - w - DIVIDER).max(0.0), room.h), Rect::new(room.x + w, room.y, DIVIDER, room.h))
+            (
+                Rect::new(room.x, room.y, w, room.h),
+                Rect::new(room.x + w + DIVIDER, room.y, (room.w - w - DIVIDER).max(0.0), room.h),
+                Rect::new(room.x + w, room.y, DIVIDER, room.h),
+            )
         }
         Axis::Stack => {
             let h = ((room.h - DIVIDER) * share).round().max(0.0);
-            (Rect::new(room.x, room.y, room.w, h), Rect::new(room.x, room.y + h + DIVIDER, room.w, (room.h - h - DIVIDER).max(0.0)), Rect::new(room.x, room.y + h, room.w, DIVIDER))
+            (
+                Rect::new(room.x, room.y, room.w, h),
+                Rect::new(room.x, room.y + h + DIVIDER, room.w, (room.h - h - DIVIDER).max(0.0)),
+                Rect::new(room.x, room.y + h, room.w, DIVIDER),
+            )
         }
     }
 }
@@ -126,7 +134,12 @@ impl Node {
     pub fn split(&mut self, id: u64, axis: Axis, new: u64) -> bool {
         match self {
             Node::Leaf(own) if *own == id => {
-                *self = Node::Split { axis, share: 0.5, first: Box::new(Node::Leaf(id)), second: Box::new(Node::Leaf(new)) };
+                *self = Node::Split {
+                    axis,
+                    share: 0.5,
+                    first: Box::new(Node::Leaf(id)),
+                    second: Box::new(Node::Leaf(new)),
+                };
                 true
             }
             Node::Leaf(_) => false,
@@ -187,9 +200,13 @@ mod tests {
         assert_eq!(tree.leaves(), vec![1, 2, 3]);
         assert_eq!(panes[1], (2, Rect::new(401.0, 36.0, 400.0, 200.0)));
         assert_eq!(panes[2], (3, Rect::new(401.0, 237.0, 400.0, 200.0)));
-        assert_eq!((dividers.len(), dividers[1].path.as_slice(), dividers[1].line), (2, &[true][..], Rect::new(401.0, 236.0, 400.0, 1.0)));
+        assert_eq!(
+            (dividers.len(), dividers[1].path.as_slice(), dividers[1].line),
+            (2, &[true][..], Rect::new(401.0, 236.0, 400.0, 1.0))
+        );
         // Every unit of the room is a pane's or a line's.
-        let covered: f32 = panes.iter().map(|(_, r)| r.w * r.h).sum::<f32>() + dividers.iter().map(|d| d.line.w * d.line.h).sum::<f32>();
+        let covered: f32 = panes.iter().map(|(_, r)| r.w * r.h).sum::<f32>()
+            + dividers.iter().map(|d| d.line.w * d.line.h).sum::<f32>();
         assert_eq!(covered, ROOM.w * ROOM.h);
     }
 
@@ -202,7 +219,11 @@ mod tests {
         assert!(!tree.remove(9));
         assert!(tree.remove(2));
         assert_eq!(tree.leaves(), vec![1, 3]);
-        assert_eq!(tree.layout(ROOM).0[1], (3, Rect::new(401.0, 36.0, 400.0, 401.0)), "its neighbor has the whole right side");
+        assert_eq!(
+            tree.layout(ROOM).0[1],
+            (3, Rect::new(401.0, 36.0, 400.0, 401.0)),
+            "its neighbor has the whole right side"
+        );
         assert!(tree.remove(1));
         assert_eq!(tree, Node::Leaf(3));
     }
@@ -214,10 +235,19 @@ mod tests {
         tree.split(2, Axis::Stack, 3);
         let (_, dividers) = tree.layout(ROOM);
         let (upright, level) = (&dividers[0], &dividers[1]);
-        assert!(upright.holds(403.0, 100.0) && upright.holds(397.0, 400.0) && !upright.holds(410.0, 100.0) && !upright.holds(400.0, 20.0));
+        assert!(
+            upright.holds(403.0, 100.0)
+                && upright.holds(397.0, 400.0)
+                && !upright.holds(410.0, 100.0)
+                && !upright.holds(400.0, 20.0)
+        );
         assert!(level.holds(600.0, 238.0) && !level.holds(300.0, 236.0), "only across its own split");
         assert_eq!(upright.share_at(200.0, 0.0), 0.25);
-        assert_eq!((upright.share_at(-50.0, 0.0), upright.share_at(5000.0, 0.0)), (0.1, 0.9), "neither side is squeezed out");
+        assert_eq!(
+            (upright.share_at(-50.0, 0.0), upright.share_at(5000.0, 0.0)),
+            (0.1, 0.9),
+            "neither side is squeezed out"
+        );
         tree.set_share(&upright.path, 0.25);
         tree.set_share(&level.path, level.share_at(0.0, 36.0 + 300.0));
         let (panes, _) = tree.layout(ROOM);

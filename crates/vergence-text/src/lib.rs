@@ -164,7 +164,15 @@ impl Fonts {
     }
 
     pub fn new(db: FontDb) -> Fonts {
-        Fonts { db, loaded: Vec::new(), by_entry: HashMap::new(), fallbacks: HashMap::new(), cache: HashMap::new(), front: vec![None; FRONT], cache_bytes: 0 }
+        Fonts {
+            db,
+            loaded: Vec::new(),
+            by_entry: HashMap::new(),
+            fallbacks: HashMap::new(),
+            cache: HashMap::new(),
+            front: vec![None; FRONT],
+            cache_bytes: 0,
+        }
     }
 
     pub fn db(&self) -> &FontDb {
@@ -224,7 +232,16 @@ impl Fonts {
             font.set_variation(tag, *value);
         }
         let units = font.units_per_em().filter(|u| *u > 0.0)?;
-        Some(Loaded { entry, weight, font, units, kerning, x_height, opsz_axis, opsz: if opsz_axis.is_some() { opsz } else { 0 } })
+        Some(Loaded {
+            entry,
+            weight,
+            font,
+            units,
+            kerning,
+            x_height,
+            opsz_axis,
+            opsz: if opsz_axis.is_some() { opsz } else { 0 },
+        })
     }
 
     /// The instance of `face` for text `size` units tall (text milestone 1,
@@ -263,7 +280,11 @@ impl Fonts {
     pub fn metrics(&self, face: FaceId, size: f32) -> Metrics {
         let l = &self.loaded[face.0 as usize];
         let k = size / l.units;
-        Metrics { ascent: l.font.ascent_unscaled() * k, descent: -l.font.descent_unscaled() * k, line_gap: l.font.line_gap_unscaled() * k }
+        Metrics {
+            ascent: l.font.ascent_unscaled() * k,
+            descent: -l.font.descent_unscaled() * k,
+            line_gap: l.font.line_gap_unscaled() * k,
+        }
     }
 
     /// The glyph for `c` in `face`, or in the nearest face that has it. If
@@ -333,7 +354,12 @@ impl Fonts {
             return None;
         }
         let key = GlyphKey { face, glyph, size: (em_px * 64.0).round() as u32, sub_x: sub_x & 3 };
-        let slot = (glyph.wrapping_mul(0x9e37_79b1) ^ key.size.wrapping_mul(0x85eb_ca6b) ^ ((face.0 as u32) << 7) ^ key.sub_x as u32) as usize >> 3 & (FRONT - 1);
+        let slot = (glyph.wrapping_mul(0x9e37_79b1)
+            ^ key.size.wrapping_mul(0x85eb_ca6b)
+            ^ ((face.0 as u32) << 7)
+            ^ key.sub_x as u32) as usize
+            >> 3
+            & (FRONT - 1);
         if let Some((k, bitmap)) = &self.front[slot]
             && *k == key
         {
@@ -364,7 +390,8 @@ impl Fonts {
         // Small text: the x-height on a whole pixel, strokes a little wider (hint.rs).
         let ky = hint::x_height_scale(l.x_height * em_px / l.units, em_px);
         let scale = PxScale { x: s, y: s * ky };
-        let outline = l.font.outline_glyph(glyph_id(glyph).with_scale_and_position(scale, point(sub_x as f32 / 4.0, 0.0)))?;
+        let outline =
+            l.font.outline_glyph(glyph_id(glyph).with_scale_and_position(scale, point(sub_x as f32 / 4.0, 0.0)))?;
         let b = outline.px_bounds();
         let (w, h) = ((b.max.x - b.min.x).max(0.0) as usize, (b.max.y - b.min.y).max(0.0) as usize);
         if w == 0 || h == 0 || w.checked_mul(h)? > MAX_BITMAP {
@@ -436,13 +463,21 @@ mod tests {
         let (mut fonts, face) = mono();
         let (_, a) = fonts.glyph(face, 'A');
         let first = fonts.raster(face, a, 48.0, 0).expect("A has an outline");
-        assert!(first.width > 8 && first.width < 64 && first.height > 16 && first.height < 64, "{} x {}", first.width, first.height);
+        assert!(
+            first.width > 8 && first.width < 64 && first.height > 16 && first.height < 64,
+            "{} x {}",
+            first.width,
+            first.height
+        );
         assert_eq!(first.alpha.len(), (first.width * first.height) as usize);
         assert!(first.alpha.iter().any(|v| *v > 200), "some of it is solid");
         assert!(first.alpha.iter().any(|v| *v == 0), "some of it is empty");
         assert!(first.top < 0 && first.top > -64, "it stands on the baseline: top {}", first.top);
         assert_eq!(fonts.cached(), 1);
-        assert!(fonts.raster(face, a, 48.0, 0).is_some_and(|again| Arc::ptr_eq(&again, &first)), "the same bitmap, not a copy");
+        assert!(
+            fonts.raster(face, a, 48.0, 0).is_some_and(|again| Arc::ptr_eq(&again, &first)),
+            "the same bitmap, not a copy"
+        );
         assert_eq!(fonts.cached(), 1, "the second request was answered from the cache");
         // Another sub-pixel position and another size are other bitmaps.
         assert!(fonts.raster(face, a, 48.0, 2).is_some());

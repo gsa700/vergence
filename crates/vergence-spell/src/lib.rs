@@ -54,7 +54,13 @@ impl User {
         let stamp = std::fs::metadata(p).and_then(|m| m.modified()).ok();
         if stamp != self.stamp {
             self.stamp = stamp;
-            self.words = std::fs::read_to_string(p).unwrap_or_default().lines().map(str::trim).filter(|w| !w.is_empty() && w.len() <= 64).map(str::to_string).collect();
+            self.words = std::fs::read_to_string(p)
+                .unwrap_or_default()
+                .lines()
+                .map(str::trim)
+                .filter(|w| !w.is_empty() && w.len() <= 64)
+                .map(str::to_string)
+                .collect();
         }
     }
 }
@@ -63,7 +69,11 @@ static SPELLER: OnceLock<Option<Speller>> = OnceLock::new();
 
 /// The speller for this process (None if no list was found).
 pub fn speller() -> Option<&'static Speller> {
-    SPELLER.get_or_init(|| list_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| Speller::from_list(&t, user_path()))).as_ref()
+    SPELLER
+        .get_or_init(|| {
+            list_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| Speller::from_list(&t, user_path()))
+        })
+        .as_ref()
 }
 
 /// Where the list is: $VERGENCE_WORDS; beside an installed program
@@ -72,7 +82,11 @@ fn list_path() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("VERGENCE_WORDS").map(PathBuf::from).filter(|p| p.is_file()) {
         return Some(p);
     }
-    if let Some(p) = std::env::current_exe().ok().and_then(|e| e.parent()?.parent().map(|d| d.join("share/vergence/words/en_US.txt"))).filter(|p| p.is_file()) {
+    if let Some(p) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent()?.parent().map(|d| d.join("share/vergence/words/en_US.txt")))
+        .filter(|p| p.is_file())
+    {
         return Some(p);
     }
     let dev = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/words/en_US.txt");
@@ -80,7 +94,10 @@ fn list_path() -> Option<PathBuf> {
 }
 
 fn user_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
+    let base = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
     Some(base.join("vergence/words.txt"))
 }
 
@@ -152,7 +169,11 @@ impl Speller {
         }
         let mut sorted: Vec<Box<str>> = words.keys().cloned().collect();
         sorted.sort();
-        Speller { words, sorted, user: Mutex::new(User { path: user, words: HashSet::new(), stamp: None, looked: None }) }
+        Speller {
+            words,
+            sorted,
+            user: Mutex::new(User { path: user, words: HashSet::new(), stamp: None, looked: None }),
+        }
     }
 
     /// Whether a listed form allows `w`: itself, a lower-case word
@@ -181,7 +202,8 @@ impl Speller {
         // (2026-11-15: any capitalized word passed once "vergence" was the user's).
         u.words.iter().any(|form| {
             let f = form.to_lowercase();
-            (f == key && Speller::allows(form, &w)) || (format!("{f}'s") == key && Speller::allows(&format!("{form}'s"), &w))
+            (f == key && Speller::allows(form, &w))
+                || (format!("{f}'s") == key && Speller::allows(&format!("{form}'s"), &w))
         })
     }
 
@@ -375,7 +397,9 @@ pub fn words_to_check(line: &str) -> Vec<(usize, usize)> {
             if c.is_alphanumeric() || c == '_' {
                 j += c.len_utf8();
                 end = j;
-            } else if (c == '\'' || c == '\u{2019}') && line[j + c.len_utf8()..].chars().next().is_some_and(char::is_alphabetic) {
+            } else if (c == '\'' || c == '\u{2019}')
+                && line[j + c.len_utf8()..].chars().next().is_some_and(char::is_alphabetic)
+            {
                 j += c.len_utf8();
             } else {
                 break;
@@ -417,7 +441,20 @@ mod tests {
     #[test]
     fn words_are_checked_in_their_cases() {
         let s = sp(None);
-        for ok in ["the", "The", "THE", "color", "Paris", "PARIS", "NASA", "iPhone", "IPHONE", "don't", "don\u{2019}t", "Don't"] {
+        for ok in [
+            "the",
+            "The",
+            "THE",
+            "color",
+            "Paris",
+            "PARIS",
+            "NASA",
+            "iPhone",
+            "IPHONE",
+            "don't",
+            "don\u{2019}t",
+            "Don't",
+        ] {
             assert!(s.check(ok), "{ok}");
         }
         for bad in ["teh", "colour", "paris", "Nasa", "iphone", "Iphone", "dont", "tHe"] {

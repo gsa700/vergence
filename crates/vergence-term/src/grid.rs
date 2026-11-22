@@ -135,7 +135,12 @@ pub struct Grid {
 /// emoji, 0 for combining marks, else 1.
 pub fn width(c: char) -> usize {
     let u = c as u32;
-    if (0x0300..=0x036f).contains(&u) || (0x200b..=0x200f).contains(&u) || (0xfe00..=0xfe0f).contains(&u) || (0x1ab0..=0x1aff).contains(&u) || (0x20d0..=0x20ff).contains(&u) {
+    if (0x0300..=0x036f).contains(&u)
+        || (0x200b..=0x200f).contains(&u)
+        || (0xfe00..=0xfe0f).contains(&u)
+        || (0x1ab0..=0x1aff).contains(&u)
+        || (0x20d0..=0x20ff).contains(&u)
+    {
         return 0;
     }
     let wide = [
@@ -525,7 +530,9 @@ impl Perform for Grid {
         let private_q = private == Some(b'?');
         match last {
             'A' => self.cy = self.cy.saturating_sub(p(0, 1)).max(if self.cy >= self.top { self.top } else { 0 }),
-            'B' | 'e' => self.cy = (self.cy + p(0, 1)).min(if self.cy <= self.bottom { self.bottom } else { self.rows - 1 }),
+            'B' | 'e' => {
+                self.cy = (self.cy + p(0, 1)).min(if self.cy <= self.bottom { self.bottom } else { self.rows - 1 })
+            }
             'C' | 'a' => self.cx = (self.cx + p(0, 1)).min(self.cols - 1),
             'D' => self.cx = self.cx.saturating_sub(p(0, 1)),
             'E' => {

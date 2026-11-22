@@ -2,7 +2,9 @@
 //! with line numbers, wrapping, indenting, undo and the clipboard, and a
 //! status line. Nothing is saved.
 //! `cargo run --release -p vergence-widgets --example varea [FILE]`.
-use vergence_widgets::{Align, Element, Length, Padding, Program, TextDoc, Theme, Window, column, label, panel, row, run, space, text_area};
+use vergence_widgets::{
+    Align, Element, Length, Padding, Program, TextDoc, Theme, Window, column, label, panel, row, run, space, text_area,
+};
 
 #[derive(Debug, Clone)]
 enum Msg {
@@ -30,16 +32,29 @@ impl Program for Area {
         let chosen = if a == b { String::new() } else { format!("{} chosen   ", d.selected_text().chars().count()) };
         let status = row(vec![
             space().width(Length::FILL),
-            label(format!("{chosen}Line {l}, Column {c}   {} lines   Spaces: {}", d.buffer().line_count(), d.options().tab_width)).size(12.0).dim(),
+            label(format!(
+                "{chosen}Line {l}, Column {c}   {} lines   Spaces: {}",
+                d.buffer().line_count(),
+                d.options().tab_width
+            ))
+            .size(12.0)
+            .dim(),
         ])
         .align(Align::Center)
         .width(Length::FILL);
-        let status = panel(status).padding(Padding { top: 4.0, bottom: 4.0, left: 12.0, right: 12.0 }).radius(0.0).width(Length::FILL);
-        panel(column(vec![text_area(&self.doc).on_change(Msg::Changed).name("Text"), status]).width(Length::FILL).height(Length::FILL))
-            .padding(Padding { top: theme.top, ..Padding::default() })
+        let status = panel(status)
+            .padding(Padding { top: 4.0, bottom: 4.0, left: 12.0, right: 12.0 })
             .radius(0.0)
-            .width(Length::FILL)
-            .height(Length::FILL)
+            .width(Length::FILL);
+        panel(
+            column(vec![text_area(&self.doc).on_change(Msg::Changed).name("Text"), status])
+                .width(Length::FILL)
+                .height(Length::FILL),
+        )
+        .padding(Padding { top: theme.top, ..Padding::default() })
+        .radius(0.0)
+        .width(Length::FILL)
+        .height(Length::FILL)
     }
     fn update(&mut self, _: Msg, _: &mut Window) {}
 }

@@ -220,7 +220,9 @@ impl Buffer {
             q = self.prev_char(q);
         }
         let kind = self.char_at(self.prev_char(q)).map(word_kind);
-        while q != Pos::default() && self.char_at(self.prev_char(q)).is_some_and(|c| !c.is_whitespace() && Some(word_kind(c)) == kind) {
+        while q != Pos::default()
+            && self.char_at(self.prev_char(q)).is_some_and(|c| !c.is_whitespace() && Some(word_kind(c)) == kind)
+        {
             q = self.prev_char(q);
         }
         q
@@ -385,7 +387,16 @@ impl<P: Copy + Eq + Ord + std::fmt::Debug> History<P> {
     /// Makes an edit on `text` and records it: replaces `from..to` with
     /// `with`. `sel` is the selection before the edit; returns where the
     /// inserted text ends (the caret after it, usually).
-    pub fn edit<T: Editable<Pos = P>>(&mut self, text: &mut T, from: P, to: P, with: &str, sel: Sel<P>, kind: Kind, now: Instant) -> P {
+    pub fn edit<T: Editable<Pos = P>>(
+        &mut self,
+        text: &mut T,
+        from: P,
+        to: P,
+        with: &str,
+        sel: Sel<P>,
+        kind: Kind,
+        now: Instant,
+    ) -> P {
         let (from, to) = (from.min(to), from.max(to));
         let removed = text.slice(from, to);
         if removed.is_empty() && with.is_empty() {
@@ -570,7 +581,15 @@ mod tests {
         let mut h = History::default();
         let mut at = p(0, 0);
         for (i, c) in "hello".chars().enumerate() {
-            at = h.edit(&mut b, at, at, &c.to_string(), (at, at), Kind::Typing, t0 + Duration::from_millis(i as u64 * 100));
+            at = h.edit(
+                &mut b,
+                at,
+                at,
+                &c.to_string(),
+                (at, at),
+                Kind::Typing,
+                t0 + Duration::from_millis(i as u64 * 100),
+            );
         }
         // A pause: a new step.
         let later = t0 + Duration::from_secs(5);

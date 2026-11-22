@@ -20,24 +20,27 @@
 //! Timers: a program's own ids for [`Window::wake_at`] are below 2^63; the
 //! toolkit keeps those above for its widgets.
 
-mod element;
 pub mod about;
 pub mod chart;
 pub mod edit;
+mod element;
 pub mod filedialog;
 pub mod files;
+mod layout;
 pub mod prefs;
 pub mod session;
 pub mod textarea;
-pub mod toolbar;
-mod layout;
 mod theme;
+pub mod toolbar;
 mod ui;
 
 use std::io;
 use std::time::Instant;
 
-pub use element::{Align, ButtonLook, Element, Fit, Length, Padding, Touch, Weight, button, choice, column, drawing, field, label, panel, picture, row, rule, scroll, slider, space, stack, switch, vrule};
+pub use element::{
+    Align, ButtonLook, Element, Fit, Length, Padding, Touch, Weight, button, choice, column, drawing, field, label,
+    panel, picture, row, rule, scroll, slider, space, stack, switch, vrule,
+};
 pub use layout::{Id, Line, Measure};
 pub use textarea::{AreaOptions, CODE_SPACING, PROSE_SPACING, TextDoc, WeakDoc, Words, text_area};
 pub use theme::{Theme, parse_hex, tint_amount};
@@ -530,7 +533,10 @@ impl<P: Program> vergence_ui::App for Host<P> {
     fn shown(&mut self, frame: &Frame, draw_ms: f64) -> bool {
         if self.print_frames {
             // `drawn_by` is the frame before's; this one's is told with the next.
-            eprintln!("frame {} {:.2} ms, scene {:.2} ms (before: {})", frame.number, draw_ms, self.scene_ms, frame.drawn_by);
+            eprintln!(
+                "frame {} {:.2} ms, scene {:.2} ms (before: {})",
+                frame.number, draw_ms, self.scene_ms, frame.drawn_by
+            );
         }
         true
     }
@@ -610,8 +616,14 @@ impl<P: Program> vergence_ui::App for Host<P> {
                 self.input(&Input::Touch { id: finger, phase: Phase::Cancelled, x, y }, window);
                 self.held = Some(finger);
                 let modifiers = vergence_ui::Modifiers::default();
-                self.input(&Input::Button { button: vergence_ui::Button::Right, pressed: true, x, y, modifiers }, window);
-                self.input(&Input::Button { button: vergence_ui::Button::Right, pressed: false, x, y, modifiers }, window);
+                self.input(
+                    &Input::Button { button: vergence_ui::Button::Right, pressed: true, x, y, modifiers },
+                    window,
+                );
+                self.input(
+                    &Input::Button { button: vergence_ui::Button::Right, pressed: false, x, y, modifiers },
+                    window,
+                );
             }
             return;
         }
@@ -660,7 +672,12 @@ impl<P: Program> Host<P> {
             self.scale = frame.scale;
             self.stale |= self.program.scale(frame.scale);
         }
-        if self.stale || self.laid_at != (frame.width, frame.height) || self.theme.top != frame.top || self.tint != frame.tint || self.theme.text_factor != frame.text {
+        if self.stale
+            || self.laid_at != (frame.width, frame.height)
+            || self.theme.top != frame.top
+            || self.tint != frame.tint
+            || self.theme.text_factor != frame.text
+        {
             self.theme = self.program.theme();
             self.theme.top = frame.top;
             // Text as large on this screen as on any (Frame::text).
@@ -726,7 +743,29 @@ impl<P: Program> Host<P> {
 pub fn window<P: Program + 'static>(program: P) -> Box<dyn vergence_ui::App> {
     let theme = program.theme();
     let title_sent = program.title();
-    Box::new(Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: false, print_frames: false, scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent, hold: None, held: None, fit: FitToContent::Wanted, waker: None, scrolls_told: Default::default(), native: false })
+    Box::new(Host {
+        program,
+        ui: Ui::new(),
+        theme,
+        stale: true,
+        laid_at: (0.0, 0.0),
+        scale: 0.0,
+        print_tree: false,
+        print_frames: false,
+        scene_ms: 0.0,
+        meaning_sent: None,
+        bar_sent: None,
+        commands_sent: None,
+        bar_style_sent: None,
+        tint: None,
+        title_sent,
+        hold: None,
+        held: None,
+        fit: FitToContent::Wanted,
+        waker: None,
+        scrolls_told: Default::default(),
+        native: false,
+    })
 }
 
 /// Opens the program's window and runs until it is closed. `size` is the
@@ -734,7 +773,29 @@ pub fn window<P: Program + 'static>(program: P) -> Box<dyn vergence_ui::App> {
 pub fn run<P: Program>(program: P, size: (u32, u32)) -> io::Result<()> {
     let theme = program.theme();
     let title_sent = program.title();
-    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent, hold: None, held: None, fit: FitToContent::Wanted, waker: None, scrolls_told: Default::default(), native: false };
+    let mut host = Host {
+        program,
+        ui: Ui::new(),
+        theme,
+        stale: true,
+        laid_at: (0.0, 0.0),
+        scale: 0.0,
+        print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"),
+        print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"),
+        scene_ms: 0.0,
+        meaning_sent: None,
+        bar_sent: None,
+        commands_sent: None,
+        bar_style_sent: None,
+        tint: None,
+        title_sent,
+        hold: None,
+        held: None,
+        fit: FitToContent::Wanted,
+        waker: None,
+        scrolls_told: Default::default(),
+        native: false,
+    };
     vergence_ui::run(&mut host, size)
 }
 

@@ -13,8 +13,8 @@
 
 pub mod actions;
 pub mod appmenu;
-pub mod autostart;
 pub mod apps;
+pub mod autostart;
 pub mod desktop;
 pub mod icons;
 pub mod launcher;
@@ -178,7 +178,12 @@ pub fn dock(screen: Rect, at: &Placement, items: usize) -> Option<Rect> {
             if screen.w < w || screen.h < h {
                 return None;
             }
-            Some(Rect::new((screen.x + x).clamp(screen.x, screen.right() - w), (screen.y + y).clamp(screen.y, screen.bottom() - h), w, h))
+            Some(Rect::new(
+                (screen.x + x).clamp(screen.x, screen.right() - w),
+                (screen.y + y).clamp(screen.y, screen.bottom() - h),
+                w,
+                h,
+            ))
         }
     }
 }
@@ -361,9 +366,15 @@ mod tests {
         assert_eq!(moved, Rect::new(1280 + 1860 - 500, 100, 500, 400));
         assert!(work_area(LARGE, &RIGHT).holds(&moved));
         // The other edges move it the other ways.
-        assert_eq!(clear_of_dock(Rect::new(1290, 100, 500, 400), LARGE, &at(Edge::Left)), Rect::new(1340, 100, 500, 400));
+        assert_eq!(
+            clear_of_dock(Rect::new(1290, 100, 500, 400), LARGE, &at(Edge::Left)),
+            Rect::new(1340, 100, 500, 400)
+        );
         assert_eq!(clear_of_dock(Rect::new(1500, 10, 500, 400), LARGE, &at(Edge::Top)), Rect::new(1500, 60, 500, 400));
-        assert_eq!(clear_of_dock(Rect::new(1500, 700, 500, 400), LARGE, &at(Edge::Bottom)), Rect::new(1500, 620, 500, 400));
+        assert_eq!(
+            clear_of_dock(Rect::new(1500, 700, 500, 400), LARGE, &at(Edge::Bottom)),
+            Rect::new(1500, 620, 500, 400)
+        );
         // One the band does not touch stays.
         let clear = Rect::new(1300, 50, 600, 400);
         assert_eq!(clear_of_dock(clear, LARGE, &RIGHT), clear);
@@ -390,8 +401,14 @@ mod tests {
         assert_eq!(settle(upright(20, 500), true, &screens), Some((0, Place::Edge(Edge::Left))));
         assert_eq!(settle(upright(600, 190), true, &screens), Some((0, Place::Edge(Edge::Top))));
         // Away from every edge: it floats where it was dropped, as it stood.
-        assert_eq!(settle(upright(2000, 400), true, &screens), Some((1, Place::Free { x: 720, y: 400, upright: true })));
-        assert_eq!(settle(Rect::new(500, 500, 144, 48), false, &screens), Some((0, Place::Free { x: 500, y: 320, upright: false })));
+        assert_eq!(
+            settle(upright(2000, 400), true, &screens),
+            Some((1, Place::Free { x: 720, y: 400, upright: true }))
+        );
+        assert_eq!(
+            settle(Rect::new(500, 500, 144, 48), false, &screens),
+            Some((0, Place::Free { x: 500, y: 320, upright: false }))
+        );
         // Dropped off every screen (above the small one): the nearest screen's nearest edge.
         assert_eq!(settle(upright(600, 20), true, &screens), Some((0, Place::Edge(Edge::Top))));
         assert_eq!(settle(upright(0, 0), true, &[]), None);

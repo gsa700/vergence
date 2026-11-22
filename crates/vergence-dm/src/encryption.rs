@@ -45,19 +45,34 @@ pub fn found() -> Result<Vec<String>, String> {
     // Linux: eCryptfs mounts; and any volume /etc/crypttab names, opened at
     // boot or not (a home unlocked later by pam_mount counts too).
     if let Ok(m) = std::fs::read_to_string("/proc/mounts") {
-        out.extend(m.lines().filter(|l| l.split_whitespace().nth(2) == Some("ecryptfs")).map(|l| format!("{} (eCryptfs)", l.split_whitespace().nth(1).unwrap_or("?"))));
+        out.extend(
+            m.lines()
+                .filter(|l| l.split_whitespace().nth(2) == Some("ecryptfs"))
+                .map(|l| format!("{} (eCryptfs)", l.split_whitespace().nth(1).unwrap_or("?"))),
+        );
     }
     if let Ok(t) = std::fs::read_to_string("/etc/crypttab") {
-        out.extend(t.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(|l| format!("{} (crypttab)", l.split_whitespace().next().unwrap_or("?"))));
+        out.extend(
+            t.lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(|l| format!("{} (crypttab)", l.split_whitespace().next().unwrap_or("?"))),
+        );
     }
     // ZFS native encryption, on either, where ZFS is there.
     for zfs in ["/sbin/zfs", "/usr/sbin/zfs", "/usr/bin/zfs"] {
         if !std::path::Path::new(zfs).is_file() {
             continue;
         }
-        match std::process::Command::new(zfs).args(["get", "-H", "-o", "name,value", "encryption"]).env_clear().output() {
+        match std::process::Command::new(zfs).args(["get", "-H", "-o", "name,value", "encryption"]).env_clear().output()
+        {
             Ok(o) if o.status.success() => out.extend(zfs_encrypted(&String::from_utf8_lossy(&o.stdout))),
-            Ok(o) => return Err(format!("zfs could not say whether its datasets are encrypted ({})", String::from_utf8_lossy(&o.stderr).trim())),
+            Ok(o) => {
+                return Err(format!(
+                    "zfs could not say whether its datasets are encrypted ({})",
+                    String::from_utf8_lossy(&o.stderr).trim()
+                ));
+            }
             Err(e) => return Err(format!("zfs could not be asked ({e})")),
         }
         break;
@@ -83,6 +98,9 @@ mod tests {
     #[test]
     fn zfs_encryption_is_read() {
         assert!(zfs_encrypted("zroot\toff\nzroot/ROOT\toff\n").is_empty());
-        assert_eq!(zfs_encrypted("tank\toff\ntank/home\taes-256-gcm\n"), vec!["tank/home (ZFS aes-256-gcm)".to_string()]);
+        assert_eq!(
+            zfs_encrypted("tank\toff\ntank/home\taes-256-gcm\n"),
+            vec!["tank/home (ZFS aes-256-gcm)".to_string()]
+        );
     }
 }

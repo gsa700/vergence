@@ -15,8 +15,18 @@ fn main() {
     let faces = &fonts.db().faces;
     let files: std::collections::BTreeSet<_> = faces.iter().map(|e| &e.path).collect();
     let families: std::collections::BTreeSet<_> = faces.iter().map(|e| e.info.family.as_str()).collect();
-    println!("{} faces in {} files, {} families, indexed in {:.1} ms", faces.len(), files.len(), families.len(), scan.as_secs_f64() * 1e3);
-    println!("{} fixed-pitch, {} variable in weight", faces.iter().filter(|e| e.info.monospace).count(), faces.iter().filter(|e| e.info.weight_axis.is_some()).count());
+    println!(
+        "{} faces in {} files, {} families, indexed in {:.1} ms",
+        faces.len(),
+        files.len(),
+        families.len(),
+        scan.as_secs_f64() * 1e3
+    );
+    println!(
+        "{} fixed-pitch, {} variable in weight",
+        faces.iter().filter(|e| e.info.monospace).count(),
+        faces.iter().filter(|e| e.info.weight_axis.is_some()).count()
+    );
 
     for (family, weight) in [("monospace", 400), ("monospace", 700), ("sans-serif", 400), ("serif", 400)] {
         match fonts.face(family, weight, false) {
@@ -33,8 +43,17 @@ fn main() {
         let t = Instant::now();
         let (face, glyph) = fonts.glyph(mono, c);
         let took = t.elapsed();
-        let size = fonts.raster(face, glyph, 48.0, 0).map(|b| format!("{}x{} px at 48", b.width, b.height)).unwrap_or_else(|| "no outline".into());
+        let size = fonts
+            .raster(face, glyph, 48.0, 0)
+            .map(|b| format!("{}x{} px at 48", b.width, b.height))
+            .unwrap_or_else(|| "no outline".into());
         let n = fonts.name(face);
-        println!("U+{:04X} {c}: {} {} glyph {glyph} ({size}; found in {:.2} ms)", c as u32, n.family, n.weight, took.as_secs_f64() * 1e3);
+        println!(
+            "U+{:04X} {c}: {} {} glyph {glyph} ({size}; found in {:.2} ms)",
+            c as u32,
+            n.family,
+            n.weight,
+            took.as_secs_f64() * 1e3
+        );
     }
 }

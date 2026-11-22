@@ -59,7 +59,8 @@ pub struct Formats {
 
 fn fourcc_name(code: u32) -> String {
     // Names shorter than four letters are padded with spaces ("C8  ").
-    let name: String = code.to_le_bytes().iter().map(|b| if b.is_ascii_graphic() || *b == b' ' { *b as char } else { '?' }).collect();
+    let name: String =
+        code.to_le_bytes().iter().map(|b| if b.is_ascii_graphic() || *b == b' ' { *b as char } else { '?' }).collect();
     name.trim_end().to_string()
 }
 
@@ -81,9 +82,16 @@ fn slot_of(path: &std::path::Path) -> Option<String> {
 
 /// What an EGL context renders to and imports (the drawing GPU's, from drm.rs).
 pub fn formats_of(context: &EGLContext) -> Formats {
-    let render = context.dmabuf_render_formats().iter().copied().collect::<smithay::backend::allocator::format::FormatSet>();
-    let texture = context.dmabuf_texture_formats().iter().copied().collect::<smithay::backend::allocator::format::FormatSet>();
-    Formats { render_count: render.iter().count(), texture_count: texture.iter().count(), render_linear: linear_xrgb(&render), texture_linear: linear_xrgb(&texture) }
+    let render =
+        context.dmabuf_render_formats().iter().copied().collect::<smithay::backend::allocator::format::FormatSet>();
+    let texture =
+        context.dmabuf_texture_formats().iter().copied().collect::<smithay::backend::allocator::format::FormatSet>();
+    Formats {
+        render_count: render.iter().count(),
+        texture_count: texture.iter().count(),
+        render_linear: linear_xrgb(&render),
+        texture_linear: linear_xrgb(&texture),
+    }
 }
 
 fn linear_xrgb(formats: &smithay::backend::allocator::format::FormatSet) -> bool {
@@ -95,8 +103,17 @@ fn linear_xrgb(formats: &smithay::backend::allocator::format::FormatSet) -> bool
 /// through logind fails, "Invalid argument" (Techbench, Fedora, 2026-11-17:
 /// its only GPU showed no driver and no screens), and a second EGL display
 /// on it would share, and on drop could end, the session's own.
-fn probe_one(session: &mut smithay::backend::session::libseat::LibSeatSession, path: &std::path::Path, drawing: Option<(&DrmDeviceFd, &Formats)>) -> GpuInfo {
-    let mut info = GpuInfo { path: path.display().to_string(), slot: slot_of(path), primary: drawing.is_some(), ..Default::default() };
+fn probe_one(
+    session: &mut smithay::backend::session::libseat::LibSeatSession,
+    path: &std::path::Path,
+    drawing: Option<(&DrmDeviceFd, &Formats)>,
+) -> GpuInfo {
+    let mut info = GpuInfo {
+        path: path.display().to_string(),
+        slot: slot_of(path),
+        primary: drawing.is_some(),
+        ..Default::default()
+    };
     let fd = match drawing {
         Some((fd, _)) => fd.clone(),
         None => match session.open(path, OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK) {
@@ -114,7 +131,10 @@ fn probe_one(session: &mut smithay::backend::session::libseat::LibSeatSession, p
         Ok(res) => {
             for h in res.connectors() {
                 if let Ok(c) = fd.get_connector(*h, false) {
-                    info.connectors.push((format!("{}-{}", c.interface().as_str(), c.interface_id()), c.state() == connector::State::Connected));
+                    info.connectors.push((
+                        format!("{}-{}", c.interface().as_str(), c.interface_id()),
+                        c.state() == connector::State::Connected,
+                    ));
                 }
             }
         }
@@ -143,9 +163,19 @@ fn probe_one(session: &mut smithay::backend::session::libseat::LibSeatSession, p
         let gbm = GbmDevice::new(fd.clone()).map_err(|e| format!("gbm: {e}"))?;
         let display = unsafe { EGLDisplay::new(gbm) }.map_err(|e| format!("egl: {e}"))?;
         let context = EGLContext::new(&display).map_err(|e| format!("egl context: {e}"))?;
-        let render = context.dmabuf_render_formats().iter().copied().collect::<smithay::backend::allocator::format::FormatSet>();
-        let texture = context.dmabuf_texture_formats().iter().copied().collect::<smithay::backend::allocator::format::FormatSet>();
-        Ok(Formats { render_count: render.iter().count(), texture_count: texture.iter().count(), render_linear: linear_xrgb(&render), texture_linear: linear_xrgb(&texture) })
+        let render =
+            context.dmabuf_render_formats().iter().copied().collect::<smithay::backend::allocator::format::FormatSet>();
+        let texture = context
+            .dmabuf_texture_formats()
+            .iter()
+            .copied()
+            .collect::<smithay::backend::allocator::format::FormatSet>();
+        Ok(Formats {
+            render_count: render.iter().count(),
+            texture_count: texture.iter().count(),
+            render_linear: linear_xrgb(&render),
+            texture_linear: linear_xrgb(&texture),
+        })
     })();
     match rendered {
         Ok(f) => info.render = Some(f),
@@ -156,7 +186,13 @@ fn probe_one(session: &mut smithay::backend::session::libseat::LibSeatSession, p
 
 /// Probe every GPU on the seat; `primary` is the path drm.rs draws with,
 /// `fd` its open descriptor and `formats` what its renderer offers.
-pub fn probe(session: &mut smithay::backend::session::libseat::LibSeatSession, seat: &str, primary: &std::path::Path, fd: &DrmDeviceFd, formats: &Formats) -> Vec<GpuInfo> {
+pub fn probe(
+    session: &mut smithay::backend::session::libseat::LibSeatSession,
+    seat: &str,
+    primary: &std::path::Path,
+    fd: &DrmDeviceFd,
+    formats: &Formats,
+) -> Vec<GpuInfo> {
     let paths = all_gpus(seat).unwrap_or_default();
     let mut out = Vec::new();
     for path in paths {
@@ -168,7 +204,8 @@ pub fn probe(session: &mut smithay::backend::session::libseat::LibSeatSession, s
 }
 
 fn log(g: &GpuInfo) {
-    let screens: Vec<String> = g.connectors.iter().map(|(n, on)| if *on { format!("{n} (screen)") } else { n.clone() }).collect();
+    let screens: Vec<String> =
+        g.connectors.iter().map(|(n, on)| if *on { format!("{n} (screen)") } else { n.clone() }).collect();
     tracing::info!(
         "gpu: {}{} {} driver {}, connectors {}, scanout {}",
         g.path,
@@ -220,7 +257,13 @@ impl Server {
         }
         let mut out = String::new();
         for g in &self.gpus {
-            out.push_str(&format!("{}{}  driver {}{}\n", g.path, g.slot.as_deref().map(|s| format!(" [{s}]")).unwrap_or_default(), g.driver, if g.primary { "  (draws the session)" } else { "" }));
+            out.push_str(&format!(
+                "{}{}  driver {}{}\n",
+                g.path,
+                g.slot.as_deref().map(|s| format!(" [{s}]")).unwrap_or_default(),
+                g.driver,
+                if g.primary { "  (draws the session)" } else { "" }
+            ));
             for (n, on) in &g.connectors {
                 out.push_str(&format!("  {n}{}\n", if *on { "  screen connected" } else { "" }));
             }

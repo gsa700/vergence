@@ -51,8 +51,12 @@ fn near(a: Option<u32>, b: Option<u32>) -> bool {
 
 fn tint_wanted_from_file() -> bool {
     let Some(home) = std::env::var_os("HOME") else { return true };
-    let text = std::fs::read_to_string(std::path::Path::new(&home).join(".config/vergence/desktop.toml")).unwrap_or_default();
-    text.parse::<toml::Table>().ok().and_then(|t| t.get("appearance").and_then(|a| a.get("wallpaper-tint")).and_then(|v| v.as_bool())).unwrap_or(true)
+    let text =
+        std::fs::read_to_string(std::path::Path::new(&home).join(".config/vergence/desktop.toml")).unwrap_or_default();
+    text.parse::<toml::Table>()
+        .ok()
+        .and_then(|t| t.get("appearance").and_then(|a| a.get("wallpaper-tint")).and_then(|v| v.as_bool()))
+        .unwrap_or(true)
 }
 
 impl Server {
@@ -64,7 +68,9 @@ impl Server {
     /// Whether windows are tinted now: the switch, dark style, neither Reduce
     /// transparency nor High contrast.
     fn tinting(&self) -> bool {
-        let high_contrast = self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "contrast".to_string())) == Some(&vergence_protocol::bus::SettingValue::U32(1));
+        let high_contrast =
+            self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "contrast".to_string()))
+                == Some(&vergence_protocol::bus::SettingValue::U32(1));
         self.tint_on && !self.light_style() && !self.reduce_transparency() && !high_contrast
     }
 
@@ -78,9 +84,13 @@ impl Server {
             .filter_map(|o| Some((o.clone(), self.space.output_geometry(o)?)))
             .max_by_key(|(_, g)| g.intersection(geo).map_or(0, |i| i.size.w as i64 * i.size.h as i64))?;
         let grid = self.wallpaper.as_ref()?.grids.get(&out.name())?;
-        let cell = |v: i32, from: i32, size: i32, n: usize| (((v - from).clamp(0, size - 1) as i64 * n as i64) / size.max(1) as i64) as usize;
-        let (x0, x1) = (cell(geo.loc.x, og.loc.x, og.size.w, GRID_W), cell(geo.loc.x + geo.size.w, og.loc.x, og.size.w, GRID_W));
-        let (y0, y1) = (cell(geo.loc.y, og.loc.y, og.size.h, GRID_H), cell(geo.loc.y + geo.size.h, og.loc.y, og.size.h, GRID_H));
+        let cell = |v: i32, from: i32, size: i32, n: usize| {
+            (((v - from).clamp(0, size - 1) as i64 * n as i64) / size.max(1) as i64) as usize
+        };
+        let (x0, x1) =
+            (cell(geo.loc.x, og.loc.x, og.size.w, GRID_W), cell(geo.loc.x + geo.size.w, og.loc.x, og.size.w, GRID_W));
+        let (y0, y1) =
+            (cell(geo.loc.y, og.loc.y, og.size.h, GRID_H), cell(geo.loc.y + geo.size.h, og.loc.y, og.size.h, GRID_H));
         let (mut r, mut g, mut b, mut n) = (0u32, 0u32, 0u32, 0u32);
         for y in y0..=y1.min(GRID_H - 1) {
             for x in x0..=x1.min(GRID_W - 1) {
@@ -107,7 +117,13 @@ impl Server {
             let rgb = if on { self.wallpaper_under(&w) } else { None };
             let changed = last.is_none_or(|(_, _, r, _)| !near(r, rgb));
             if changed && let Some(n) = w.native() {
-                self.bus_send(n.client, vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::Tint { window: n.id, rgb }));
+                self.bus_send(
+                    n.client,
+                    vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::Tint {
+                        window: n.id,
+                        rgb,
+                    }),
+                );
             }
             let rgb = if changed { rgb } else { last.and_then(|(_, _, r, _)| r) };
             self.tints.sent.insert(w, Sent { rgb, at, grids, when: Instant::now() });

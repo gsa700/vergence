@@ -34,7 +34,11 @@ impl Server {
 
     /// Where content can go on every monitor (below a title bar if `titled`).
     fn content_areas(&self, titled: bool) -> Vec<Rectangle<i32, Logical>> {
-        self.space.outputs().filter_map(|o| self.space.output_geometry(o)).map(|g| content_area(self.work_area(g), if titled { self.bar_h_in(g) } else { 0 })).collect()
+        self.space
+            .outputs()
+            .filter_map(|o| self.space.output_geometry(o))
+            .map(|g| content_area(self.work_area(g), if titled { self.bar_h_in(g) } else { 0 }))
+            .collect()
     }
 
     /// Does `rect` (content) lie wholly on one monitor, below its title bar if titled?
@@ -49,7 +53,11 @@ impl Server {
     /// exactly where they were put, as long as they can always be grabbed).
     pub fn bar_on_a_monitor(&self, rect: Rectangle<i32, Logical>, titled: bool) -> bool {
         let h = crate::decor::TITLE_H;
-        let bar = if titled { Rectangle::new((rect.loc.x, rect.loc.y - h).into(), (rect.size.w, h).into()) } else { Rectangle::new(rect.loc, (rect.size.w, h.min(rect.size.h)).into()) };
+        let bar = if titled {
+            Rectangle::new((rect.loc.x, rect.loc.y - h).into(), (rect.size.w, h).into())
+        } else {
+            Rectangle::new(rect.loc, (rect.size.w, h.min(rect.size.h)).into())
+        };
         self.space.outputs().filter_map(|o| self.space.output_geometry(o)).any(|g| g.contains_rect(bar))
     }
 
@@ -168,7 +176,8 @@ impl Server {
             let Some(geo) = self.space.element_geometry(&w) else { continue };
             // Its monitor is still here: the same place on it.
             let kept = anchors.iter().find(|(a, _, _)| *a == w).and_then(|(_, mon, off)| {
-                let o = self.space.outputs().find(|o| crate::memory::monitor_id_of(o).as_deref() == Some(mon.as_str()))?;
+                let o =
+                    self.space.outputs().find(|o| crate::memory::monitor_id_of(o).as_deref() == Some(mon.as_str()))?;
                 self.space.output_geometry(o).map(|g| g.loc + *off)
             });
             if let Some(loc) = kept {
@@ -183,15 +192,10 @@ impl Server {
                 continue;
             }
             // Rescue: nearest monitor (by center distance), fitted, centered.
-            let Some(out) = self
-                .space
-                .outputs()
-                .filter_map(|o| self.space.output_geometry(o))
-                .min_by_key(|g| {
-                    let (cx, cy) = (g.loc.x + g.size.w / 2, g.loc.y + g.size.h / 2);
-                    ((cx - center.0) as i64).pow(2) + ((cy - center.1) as i64).pow(2)
-                })
-            else {
+            let Some(out) = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).min_by_key(|g| {
+                let (cx, cy) = (g.loc.x + g.size.w / 2, g.loc.y + g.size.h / 2);
+                ((cx - center.0) as i64).pow(2) + ((cy - center.1) as i64).pow(2)
+            }) else {
                 continue;
             };
             if self.restore.contains_key(&w) {
@@ -210,7 +214,8 @@ impl Server {
         // The pointer, if its monitor went.
         if let Some(p) = self.seat.get_pointer() {
             let at = p.current_location();
-            let on = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).any(|g| g.to_f64().contains(at));
+            let on =
+                self.space.outputs().filter_map(|o| self.space.output_geometry(o)).any(|g| g.to_f64().contains(at));
             let first = self.space.outputs().next().and_then(|o| self.space.output_geometry(o));
             if !on && let Some(g) = first {
                 let c = ((g.loc.x + g.size.w / 2) as f64, (g.loc.y + g.size.h / 2) as f64);

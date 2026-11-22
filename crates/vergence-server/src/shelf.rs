@@ -60,7 +60,10 @@ use std::{
     time::SystemTime,
 };
 
-use smithay::{reexports::calloop::channel::{Event, channel}, utils::IsAlive};
+use smithay::{
+    reexports::calloop::channel::{Event, channel},
+    utils::IsAlive,
+};
 use vergence_scene::{Color, Image, Point as ScenePoint, Rect as SceneRect, Scene};
 use vergence_shell::{Edge, Place, Placement, Rect, desktop::Entry, running};
 
@@ -111,21 +114,31 @@ fn decode(path: &Path, pixels: u32) -> Option<Icon> {
         return None;
     }
     let pixels = pixels.clamp(8, 512);
-    let p = vergence_decode::decode_file(path, Some((pixels, pixels))).map_err(|e| tracing::info!("icon {}: {e}", path.display())).ok()?;
+    let p = vergence_decode::decode_file(path, Some((pixels, pixels)))
+        .map_err(|e| tracing::info!("icon {}: {e}", path.display()))
+        .ok()?;
     let (w, h) = (p.width, p.height);
     if w == 0 || h == 0 || w > MAX_ICON_SIDE || h > MAX_ICON_SIDE {
         return None;
     }
     let picture = image::RgbaImage::from_raw(w, h, p.frames.into_iter().next()?.rgba)?;
     let scale = pixels as f32 / w.max(h) as f32;
-    let (nw, nh) = (((w as f32 * scale).round() as u32).clamp(1, pixels), ((h as f32 * scale).round() as u32).clamp(1, pixels));
-    let fitted = if (nw, nh) == (w, h) { picture } else { image::imageops::resize(&picture, nw, nh, image::imageops::FilterType::CatmullRom) };
+    let (nw, nh) =
+        (((w as f32 * scale).round() as u32).clamp(1, pixels), ((h as f32 * scale).round() as u32).clamp(1, pixels));
+    let fitted = if (nw, nh) == (w, h) {
+        picture
+    } else {
+        image::imageops::resize(&picture, nw, nh, image::imageops::FilterType::CatmullRom)
+    };
     Some(Icon { width: nw, height: nh, rgba: fitted.into_raw() })
 }
 
 /// When each directory that can hold desktop entries was last changed.
 fn apps_stamp() -> Vec<Option<SystemTime>> {
-    vergence_shell::apps::data_dirs().iter().map(|d| std::fs::metadata(d.join("applications")).and_then(|m| m.modified()).ok()).collect()
+    vergence_shell::apps::data_dirs()
+        .iter()
+        .map(|d| std::fs::metadata(d.join("applications")).and_then(|m| m.modified()).ok())
+        .collect()
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
@@ -236,7 +249,9 @@ impl ShelfConfig {
     /// The dock's place as vergence-shell reckons with it.
     pub fn placement(&self) -> Placement {
         let place = match self.place.as_deref() {
-            Some("free") => Place::Free { x: self.x.unwrap_or(0), y: self.y.unwrap_or(0), upright: self.upright.unwrap_or(true) },
+            Some("free") => {
+                Place::Free { x: self.x.unwrap_or(0), y: self.y.unwrap_or(0), upright: self.upright.unwrap_or(true) }
+            }
             _ => Place::Edge(match self.edge.as_deref() {
                 Some("left") => Edge::Left,
                 Some("top") => Edge::Top,
@@ -245,7 +260,12 @@ impl ShelfConfig {
                 _ => Edge::Bottom,
             }),
         };
-        Placement { place, gap: self.gap.unwrap_or(vergence_shell::GAP), keep_clear: self.keep_clear.unwrap_or(true), size: self.size.unwrap_or(vergence_shell::STRIP_W) }
+        Placement {
+            place,
+            gap: self.gap.unwrap_or(vergence_shell::GAP),
+            keep_clear: self.keep_clear.unwrap_or(true),
+            size: self.size.unwrap_or(vergence_shell::STRIP_W),
+        }
     }
 }
 
@@ -278,7 +298,16 @@ fn set_place(shelf: &mut toml::Table, screen: Option<&str>, place: Place) {
     match place {
         Place::Edge(edge) => {
             shelf.insert("place".into(), "edge".into());
-            shelf.insert("edge".into(), match edge { Edge::Left => "left", Edge::Right => "right", Edge::Top => "top", Edge::Bottom => "bottom" }.into());
+            shelf.insert(
+                "edge".into(),
+                match edge {
+                    Edge::Left => "left",
+                    Edge::Right => "right",
+                    Edge::Top => "top",
+                    Edge::Bottom => "bottom",
+                }
+                .into(),
+            );
         }
         Place::Free { x, y, upright } => {
             shelf.insert("place".into(), "free".into());
@@ -492,7 +521,13 @@ impl Shelf {
     /// The shelf as desktop.toml has it, with nothing drawn yet.
     pub fn load() -> Shelf {
         let (config, primary) = load();
-        Shelf { config, primary, apps: vergence_shell::apps::installed(), apps_stamp: apps_stamp(), ..Default::default() }
+        Shelf {
+            config,
+            primary,
+            apps: vergence_shell::apps::installed(),
+            apps_stamp: apps_stamp(),
+            ..Default::default()
+        }
     }
 }
 
@@ -523,7 +558,8 @@ impl Server {
         // The windows that are someone's (not menus or tooltips), oldest first;
         // the minimized ones with them.
         self.shelf.minimized.retain(|(w, _)| w.alive());
-        let open: Vec<Win> = self.space.elements().cloned().chain(self.shelf.minimized.iter().map(|(w, _)| w.clone())).collect();
+        let open: Vec<Win> =
+            self.space.elements().cloned().chain(self.shelf.minimized.iter().map(|(w, _)| w.clone())).collect();
         self.shelf.order.retain(|w| w.alive() && open.contains(w));
         for w in open {
             if !self.shelf.order.contains(&w) {
@@ -545,13 +581,20 @@ impl Server {
             classes.push((if id.class.is_empty() { id.instance } else { id.class }, active));
             windows.push(w);
         }
-        let items: Vec<(running::Item, Vec<Win>)> = running::items(&self.shelf.apps, &self.shelf.config.pinned, &classes).into_iter().map(|item| {
-            let theirs = item.windows.iter().map(|i| windows[*i].clone()).collect();
-            (item, theirs)
-        }).collect();
+        let items: Vec<(running::Item, Vec<Win>)> =
+            running::items(&self.shelf.apps, &self.shelf.config.pinned, &classes)
+                .into_iter()
+                .map(|item| {
+                    let theirs = item.windows.iter().map(|i| windows[*i].clone()).collect();
+                    (item, theirs)
+                })
+                .collect();
         // An application is starting until a window more of it is there, or it has had its time.
         let now = std::time::Instant::now();
-        self.shelf.starting.retain(|(key, since, had)| now.duration_since(*since) < STARTING && items.iter().find(|(i, _)| i.key == *key).map_or(0, |(_, w)| w.len()) <= *had);
+        self.shelf.starting.retain(|(key, since, had)| {
+            now.duration_since(*since) < STARTING
+                && items.iter().find(|(i, _)| i.key == *key).map_or(0, |(_, w)| w.len()) <= *had
+        });
         items
     }
 
@@ -561,7 +604,8 @@ impl Server {
             return None;
         }
         // The icon theme chosen in Settings; Vergence's when none is (2026-11-18).
-        let theme = match self.settings.current.get(&(crate::settings::INTERFACE.to_string(), "icon-theme".to_string())) {
+        let theme = match self.settings.current.get(&(crate::settings::INTERFACE.to_string(), "icon-theme".to_string()))
+        {
             Some(vergence_protocol::bus::SettingValue::Str(t)) if !t.is_empty() => t.clone(),
             _ => vergence_shell::icons::THEME.to_string(),
         };
@@ -608,7 +652,9 @@ impl Server {
                 self.shelf.decoder = Some(jobs);
             }
         }
-        let sent = self.shelf.decoder.as_ref().is_some_and(|d: &std::sync::mpsc::Sender<(String, String, u32)>| d.send((theme, name.to_string(), pixels)).is_ok());
+        let sent = self.shelf.decoder.as_ref().is_some_and(|d: &std::sync::mpsc::Sender<(String, String, u32)>| {
+            d.send((theme, name.to_string(), pixels)).is_ok()
+        });
         self.shelf.icons.insert(key, if sent { Asked::Pending } else { Asked::Done(None) });
         None
     }
@@ -662,7 +708,10 @@ impl Server {
         // application dragged from the launcher over the dock has a place too.
         let new = self.shelf.lift.as_ref().is_some_and(|l| l.from == FROM_LAUNCHER && l.to.is_some());
         let items = items + self.dock_places().len() + usize::from(new);
-        let mut dock = self.shelf.dragged.or_else(|| self.shelf_screen().and_then(|s| vergence_shell::dock(rect(s), &at, items)).map(rectangle));
+        let mut dock = self
+            .shelf
+            .dragged
+            .or_else(|| self.shelf_screen().and_then(|s| vergence_shell::dock(rect(s), &at, items)).map(rectangle));
         // Hidden: moved out past its edge as far as it is slid away.
         // Out or away as the mode says, judged where the dock stands when out.
         if self.shelf_hides()
@@ -705,7 +754,11 @@ impl Server {
     /// The dock hides itself now: `hide` is set, it is at an edge, and it is
     /// not being held or dragged.
     fn shelf_hides(&self) -> bool {
-        self.shelf.config.hide.mode() != Hide::Never && matches!(self.shelf.config.placement().place, Place::Edge(_)) && self.shelf.held.is_none() && self.shelf.dragged.is_none() && !self.shelf.moving
+        self.shelf.config.hide.mode() != Hide::Never
+            && matches!(self.shelf.config.placement().place, Place::Edge(_))
+            && self.shelf.held.is_none()
+            && self.shelf.dragged.is_none()
+            && !self.shelf.moving
     }
 
     /// Whether the dock should be out now, standing at `full` when it is.
@@ -718,7 +771,10 @@ impl Server {
             Hide::Always => false,
             // Out unless a window on the desktop overlaps where it stands.
             // The desktop's icons are no window to make way for (desktop.rs).
-            Hide::Windows => !self.space.elements().any(|w| !self.is_desktop(w) && self.space.element_geometry(w).is_some_and(|g| g.overlaps(full))),
+            Hide::Windows => !self
+                .space
+                .elements()
+                .any(|w| !self.is_desktop(w) && self.space.element_geometry(w).is_some_and(|g| g.overlaps(full))),
         }
     }
 
@@ -750,7 +806,9 @@ impl Server {
         let _ = self.loop_handle.insert_source(tick, move |_, _, state| {
             state.redraw_all();
             match state.shelf.slide {
-                Some((since, to)) if to == out && since.elapsed() < SLIDE => smithay::reexports::calloop::timer::TimeoutAction::ToDuration(std::time::Duration::from_millis(16)),
+                Some((since, to)) if to == out && since.elapsed() < SLIDE => {
+                    smithay::reexports::calloop::timer::TimeoutAction::ToDuration(std::time::Duration::from_millis(16))
+                }
                 Some((_, to)) if to == out => {
                     state.shelf.slide = None;
                     state.shelf.out = out;
@@ -789,7 +847,10 @@ impl Server {
         let margin = 24.0;
         let near = self.shelf.dock.is_some_and(|d| {
             let d = d.to_f64();
-            at.x >= d.loc.x - margin && at.x <= d.loc.x + d.size.w + margin && at.y >= d.loc.y - margin && at.y <= d.loc.y + d.size.h + margin
+            at.x >= d.loc.x - margin
+                && at.x <= d.loc.x + d.size.w + margin
+                && at.y >= d.loc.y - margin
+                && at.y <= d.loc.y + d.size.h + margin
         });
         if near || self.menu.is_some() || self.launcher_is_open() {
             self.shelf.away = None;
@@ -797,7 +858,10 @@ impl Server {
             self.shelf.away = Some(std::time::Instant::now());
             let wait = smithay::reexports::calloop::timer::Timer::from_duration(AWAY);
             let _ = self.loop_handle.insert_source(wait, |_, _, state| {
-                if state.shelf.away.is_some_and(|t| t.elapsed() >= AWAY - std::time::Duration::from_millis(20)) && state.menu.is_none() && !state.launcher_is_open() {
+                if state.shelf.away.is_some_and(|t| t.elapsed() >= AWAY - std::time::Duration::from_millis(20))
+                    && state.menu.is_none()
+                    && !state.launcher_is_open()
+                {
                     // Back to what the mode says (the next frame decides).
                     state.shelf.peek = false;
                     state.shelf.away = None;
@@ -811,13 +875,19 @@ impl Server {
     /// What a screen leaves for windows: all of it, less the dock's band if the
     /// shelf is on it, at an edge, and windows are to keep clear.
     pub fn work_area(&self, screen: Rectangle<i32, Logical>) -> Rectangle<i32, Logical> {
-        if self.shelf_screen() == Some(screen) { rectangle(vergence_shell::work_area(rect(screen), &self.shelf_placement())) } else { screen }
+        if self.shelf_screen() == Some(screen) {
+            rectangle(vergence_shell::work_area(rect(screen), &self.shelf_placement()))
+        } else {
+            screen
+        }
     }
 
     /// A window's place moved clear of the dock's band, if the band would cover part of it.
     pub fn clear_of_shelf(&self, window: Rectangle<i32, Logical>) -> Rectangle<i32, Logical> {
         match self.shelf_screen() {
-            Some(screen) => rectangle(vergence_shell::clear_of_dock(rect(window), rect(screen), &self.shelf_placement())),
+            Some(screen) => {
+                rectangle(vergence_shell::clear_of_dock(rect(window), rect(screen), &self.shelf_placement()))
+            }
             None => window,
         }
     }
@@ -841,7 +911,10 @@ impl Server {
         // "Move dock": the dock follows the pointer, its middle under it.
         if self.shelf.moving && self.shelf.held.is_none() {
             if let Some(dock) = self.shelf.dock {
-                let to = Rectangle::new((at.x.round() as i32 - dock.size.w / 2, at.y.round() as i32 - dock.size.h / 2).into(), dock.size);
+                let to = Rectangle::new(
+                    (at.x.round() as i32 - dock.size.w / 2, at.y.round() as i32 - dock.size.h / 2).into(),
+                    dock.size,
+                );
                 if self.shelf.dragged != Some(to) {
                     self.shelf.dragged = Some(to);
                     self.redraw_all();
@@ -856,7 +929,10 @@ impl Server {
             if held.dragging {
                 match held.grip {
                     Grip::Dock => {
-                        let to = Rectangle::new((held.dock.loc.x + dx.round() as i32, held.dock.loc.y + dy.round() as i32).into(), held.dock.size);
+                        let to = Rectangle::new(
+                            (held.dock.loc.x + dx.round() as i32, held.dock.loc.y + dy.round() as i32).into(),
+                            held.dock.size,
+                        );
                         if self.shelf.dragged != Some(to) {
                             self.shelf.dragged = Some(to);
                             self.shelf.named = false;
@@ -878,7 +954,9 @@ impl Server {
             }
         }
         let upright = self.shelf.config.placement().upright();
-        let over = self.shelf.dock.and_then(|d| running::item_at(rect(d), self.shelf.names.len(), upright, at.x.floor() as i32, at.y.floor() as i32));
+        let over = self.shelf.dock.and_then(|d| {
+            running::item_at(rect(d), self.shelf.names.len(), upright, at.x.floor() as i32, at.y.floor() as i32)
+        });
         if over == self.shelf.hover {
             return;
         }
@@ -900,7 +978,10 @@ impl Server {
             // not running, its name.
             let rest = smithay::reexports::calloop::timer::Timer::from_duration(std::time::Duration::from_millis(500));
             let _ = self.loop_handle.insert_source(rest, move |_, _, state| {
-                let busy = state.shelf.held.is_some() || state.shelf.lift.is_some() || state.shelf.dragged.is_some() || state.menu_is_open();
+                let busy = state.shelf.held.is_some()
+                    || state.shelf.lift.is_some()
+                    || state.shelf.dragged.is_some()
+                    || state.menu_is_open();
                 if let Some(i) = over.filter(|_| state.shelf.hover == over && !busy)
                     && state.shelf_items().get(i).is_some_and(|(_, ws)| !ws.is_empty())
                 {
@@ -928,7 +1009,12 @@ impl Server {
         tracing::info!("shelf: minimized {:?}", self.window_title(w));
         self.shelf.minimized.push((w.clone(), at));
         if self.motion_wanted() {
-            self.shelf.motions.push(Motion { window: w.clone(), place: Rectangle::new(at, w.geometry().size), start: std::time::Instant::now(), back: false });
+            self.shelf.motions.push(Motion {
+                window: w.clone(),
+                place: Rectangle::new(at, w.geometry().size),
+                start: std::time::Instant::now(),
+                back: false,
+            });
         }
         self.space.unmap_elem(w);
         w.set_activated(false);
@@ -950,7 +1036,10 @@ impl Server {
 
     /// Motion on the desktop is wanted (the settings' reduce-motion is off).
     pub fn motion_wanted(&self) -> bool {
-        !matches!(self.settings.current.get(&(crate::settings::INTERFACE.to_string(), "enable-animations".to_string())), Some(vergence_protocol::bus::SettingValue::Bool(false)))
+        !matches!(
+            self.settings.current.get(&(crate::settings::INTERFACE.to_string(), "enable-animations".to_string())),
+            Some(vergence_protocol::bus::SettingValue::Bool(false))
+        )
     }
 
     /// Bring a minimized window back to where it was, in front, with the
@@ -978,7 +1067,12 @@ impl Server {
             let gone = now.duration_since(self.shelf.motions.remove(i).start).min(MOTION);
             start = now - (MOTION - gone);
         }
-        self.shelf.motions.push(Motion { window: w.clone(), place: Rectangle::new(at, w.geometry().size), start, back: true });
+        self.shelf.motions.push(Motion {
+            window: w.clone(),
+            place: Rectangle::new(at, w.geometry().size),
+            start,
+            back: true,
+        });
         self.redraw_all();
     }
 
@@ -989,7 +1083,9 @@ impl Server {
             return;
         }
         let now = std::time::Instant::now();
-        let (done, going): (Vec<Motion>, Vec<Motion>) = std::mem::take(&mut self.shelf.motions).into_iter().partition(|m| !m.window.alive() || now.duration_since(m.start) >= MOTION);
+        let (done, going): (Vec<Motion>, Vec<Motion>) = std::mem::take(&mut self.shelf.motions)
+            .into_iter()
+            .partition(|m| !m.window.alive() || now.duration_since(m.start) >= MOTION);
         self.shelf.motions = going;
         for m in done {
             if m.back {
@@ -1001,7 +1097,12 @@ impl Server {
 
     /// The pictures of the windows on their way, as far as each has come:
     /// smaller and fainter towards its application's icon on the dock.
-    pub fn shelf_motion_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
+    pub fn shelf_motion_elements(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Vec<SceneElement> {
         if self.shelf.motions.is_empty() {
             return Vec::new();
         }
@@ -1022,13 +1123,23 @@ impl Server {
             let factor = 1.0 + (small - 1.0) * e;
             let from = (m.place.loc.x as f64 + w / 2.0, m.place.loc.y as f64 + h / 2.0);
             let to = (icon.loc.x as f64 + icon.size.w as f64 / 2.0, icon.loc.y as f64 + icon.size.h as f64 / 2.0);
-            let corner: Point<f64, Logical> = (from.0 + (to.0 - from.0) * e - w * factor / 2.0, from.1 + (to.1 - from.1) * e - h * factor / 2.0).into();
+            let corner: Point<f64, Logical> =
+                (from.0 + (to.0 - from.0) * e - w * factor / 2.0, from.1 + (to.1 - from.1) * e - h * factor / 2.0)
+                    .into();
             // Drawn at its own place, made smaller about its corner, then moved.
             let origin = (m.place.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
-            let render_loc = (m.place.loc - m.window.geometry().loc - out.loc).to_f64().to_physical(scale).to_i32_round();
+            let render_loc =
+                (m.place.loc - m.window.geometry().loc - out.loc).to_f64().to_physical(scale).to_i32_round();
             let shift = (corner - m.place.loc.to_f64()).to_physical(scale).to_i32_round::<i32>();
-            let surfaces: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = m.window.render_elements(renderer, render_loc, scale.into(), (1.0 - 0.7 * e) as f32);
-            elements.extend(surfaces.into_iter().map(|s| SceneElement::Moving(RelocateRenderElement::from_element(RescaleRenderElement::from_element(s, origin, factor), shift, Relocate::Relative))));
+            let surfaces: Vec<WaylandSurfaceRenderElement<GlesRenderer>> =
+                m.window.render_elements(renderer, render_loc, scale.into(), (1.0 - 0.7 * e) as f32);
+            elements.extend(surfaces.into_iter().map(|s| {
+                SceneElement::Moving(RelocateRenderElement::from_element(
+                    RescaleRenderElement::from_element(s, origin, factor),
+                    shift,
+                    Relocate::Relative,
+                ))
+            }));
         }
         elements
     }
@@ -1042,7 +1153,8 @@ impl Server {
         // Its screen may have gone meanwhile: then onto the one under the pointer.
         let size = w.geometry().size;
         let center: Point<i32, Logical> = (at.x + size.w / 2, at.y + size.h / 2).into();
-        let on_a_screen = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).any(|g| g.contains(center));
+        let on_a_screen =
+            self.space.outputs().filter_map(|o| self.space.output_geometry(o)).any(|g| g.contains(center));
         if !on_a_screen && let Some(out) = self.output_at_pointer() {
             let area = self.work_area(out);
             at = (area.loc.x + 40, area.loc.y + 40).into();
@@ -1088,7 +1200,13 @@ impl Server {
         let grip = if alt {
             Grip::Dock
         } else {
-            match running::item_at(rect(dock), self.shelf.names.len(), upright, at.x.floor() as i32, at.y.floor() as i32) {
+            match running::item_at(
+                rect(dock),
+                self.shelf.names.len(),
+                upright,
+                at.x.floor() as i32,
+                at.y.floor() as i32,
+            ) {
                 Some(i) => Grip::Item(i),
                 None => self.tile_under(at).map_or(Grip::Head, Grip::Tile),
             }
@@ -1104,7 +1222,15 @@ impl Server {
         if self.shelf.lift.is_none() {
             let items = self.shelf_items();
             let Some((item, _)) = items.get(index) else { return };
-            self.shelf.lift = Some(Lift { from: index, key: item.key.clone(), name: item.name.clone(), icon: item.icon.clone(), pinned: item.pinned, at, to: Some(index) });
+            self.shelf.lift = Some(Lift {
+                from: index,
+                key: item.key.clone(),
+                name: item.name.clone(),
+                icon: item.icon.clone(),
+                pinned: item.pinned,
+                at,
+                to: Some(index),
+            });
             self.shelf.named = false;
             tracing::info!("shelf: {} lifted", item.name);
         }
@@ -1140,8 +1266,14 @@ impl Server {
         // One from the launcher has a place of its own to land in.
         let count = self.shelf.names.len() + usize::from(self.shelf_lifting_new());
         let upright = self.shelf.config.placement().upright();
-        let near = Rectangle::new((dock.loc.x - OFF_DOCK, dock.loc.y - OFF_DOCK).into(), (dock.size.w + 2 * OFF_DOCK, dock.size.h + 2 * OFF_DOCK).into());
-        let to = near.to_f64().contains(at).then(|| running::gap_at(rect(dock), count, upright, at.x.floor() as i32, at.y.floor() as i32));
+        let near = Rectangle::new(
+            (dock.loc.x - OFF_DOCK, dock.loc.y - OFF_DOCK).into(),
+            (dock.size.w + 2 * OFF_DOCK, dock.size.h + 2 * OFF_DOCK).into(),
+        );
+        let to = near
+            .to_f64()
+            .contains(at)
+            .then(|| running::gap_at(rect(dock), count, upright, at.x.floor() as i32, at.y.floor() as i32));
         if let Some(lift) = self.shelf.lift.as_mut() {
             lift.at = at;
             lift.to = to;
@@ -1152,7 +1284,10 @@ impl Server {
     /// Whether a drag on the dock is under way (an item lifted, the dock
     /// dragged, or "Move dock"): Escape puts it all back.
     pub fn shelf_busy(&self) -> bool {
-        self.shelf.moving || self.shelf.lift.is_some() || self.tiles.lift.is_some() || self.shelf.held.is_some_and(|(_, h)| h.dragging)
+        self.shelf.moving
+            || self.shelf.lift.is_some()
+            || self.tiles.lift.is_some()
+            || self.shelf.held.is_some_and(|(_, h)| h.dragging)
     }
 
     /// Escape during a drag on the dock: everything goes back where it was.
@@ -1173,7 +1308,10 @@ impl Server {
         let Some(dock) = self.shelf.dock else { return };
         let at = self.pointer_location();
         self.shelf.moving = true;
-        self.shelf.dragged = Some(Rectangle::new((at.x.round() as i32 - dock.size.w / 2, at.y.round() as i32 - dock.size.h / 2).into(), dock.size));
+        self.shelf.dragged = Some(Rectangle::new(
+            (at.x.round() as i32 - dock.size.w / 2, at.y.round() as i32 - dock.size.h / 2).into(),
+            dock.size,
+        ));
         self.redraw_all();
     }
 
@@ -1216,7 +1354,15 @@ impl Server {
                 match place {
                     Place::Edge(edge) => {
                         c.place = Some("edge".into());
-                        c.edge = Some(match edge { Edge::Left => "left", Edge::Right => "right", Edge::Top => "top", Edge::Bottom => "bottom" }.into());
+                        c.edge = Some(
+                            match edge {
+                                Edge::Left => "left",
+                                Edge::Right => "right",
+                                Edge::Top => "top",
+                                Edge::Bottom => "bottom",
+                            }
+                            .into(),
+                        );
                     }
                     Place::Free { x, y, upright } => {
                         c.place = Some("free".into());
@@ -1236,7 +1382,8 @@ impl Server {
         let items = self.shelf_items();
         let Some(strip) = self.shelf_dock(items.len()) else { return };
         let upright = self.shelf.config.placement().upright();
-        let Some(index) = running::item_at(rect(strip), items.len(), upright, at.x.floor() as i32, at.y.floor() as i32) else {
+        let Some(index) = running::item_at(rect(strip), items.len(), upright, at.x.floor() as i32, at.y.floor() as i32)
+        else {
             // The dock's head is the apps button.
             let side = self.shelf_size();
             let head = Rectangle::new(strip.loc, (side, side).into());
@@ -1290,7 +1437,9 @@ impl Server {
                 tracing::info!("shelf: {} pinned from the launcher", lift.name);
                 Some(p)
             }
-            Some(to) if known && keys.get(lift.from).is_some_and(|(k, _)| *k == lift.key) => running::dropped(&self.shelf.config.pinned, &keys, lift.from, to),
+            Some(to) if known && keys.get(lift.from).is_some_and(|(k, _)| *k == lift.key) => {
+                running::dropped(&self.shelf.config.pinned, &keys, lift.from, to)
+            }
             None if lift.pinned => {
                 tracing::info!("shelf: {} removed from the dock", lift.name);
                 Some(self.shelf.config.pinned.iter().filter(|p| **p != lift.key).cloned().collect())
@@ -1312,7 +1461,10 @@ impl Server {
         let items = self.shelf_items();
         items
             .iter()
-            .filter(|(item, windows)| !windows.is_empty() && self.shelf.apps.iter().any(|e| e.id == item.key && !e.terminal && !e.exec.is_empty()))
+            .filter(|(item, windows)| {
+                !windows.is_empty()
+                    && self.shelf.apps.iter().any(|e| e.id == item.key && !e.terminal && !e.exec.is_empty())
+            })
             .map(|(item, _)| item.key.clone())
             .collect()
     }
@@ -1333,7 +1485,8 @@ impl Server {
         let Some(dock) = self.shelf_dock(items.len()) else { return };
         let upright = self.shelf.config.placement().upright();
         let towards = self.shelf_side(dock);
-        let Some(index) = running::item_at(rect(dock), items.len(), upright, at.x.floor() as i32, at.y.floor() as i32) else {
+        let Some(index) = running::item_at(rect(dock), items.len(), upright, at.x.floor() as i32, at.y.floor() as i32)
+        else {
             // The apps button or an empty part: the dock's own menu.
             let side = self.shelf_size();
             let head = Rectangle::new(dock.loc, (side, side).into());
@@ -1345,8 +1498,15 @@ impl Server {
         let known = self.shelf.apps.iter().any(|e| e.id == item.key);
         let mut acts = Vec::new();
         if known {
-            acts.push((Act::Start(item.key.clone()), if windows.is_empty() { "Open" } else { "New window" }.to_string()));
-            acts.push(if item.pinned { (Act::Unpin(item.key.clone()), "Unpin".to_string()) } else { (Act::Pin(item.key.clone()), "Pin".to_string()) });
+            acts.push((
+                Act::Start(item.key.clone()),
+                if windows.is_empty() { "Open" } else { "New window" }.to_string(),
+            ));
+            acts.push(if item.pinned {
+                (Act::Unpin(item.key.clone()), "Unpin".to_string())
+            } else {
+                (Act::Pin(item.key.clone()), "Pin".to_string())
+            });
             acts.push((Act::AddToDesktop(item.key.clone()), "Add to desktop".to_string()));
         }
         // Only where window memory has places for it (settings milestone 2).
@@ -1391,7 +1551,9 @@ impl Server {
             Act::AddToDesktop(id) => self.add_to_desktop(&id),
             Act::MoveDock => self.shelf_move_start(),
             Act::ForgetPlaces(app) => {
-                if let Err(e) = crate::spawn(std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", &app])) {
+                if let Err(e) = crate::spawn(
+                    std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", &app]),
+                ) {
                     tracing::warn!("shelf: the settings app could not be started: {e}");
                 }
             }
@@ -1404,7 +1566,8 @@ impl Server {
     /// tried whole and as "foo").
     fn shelf_places_name(&mut self, key: &str, windows: &[Win]) -> Option<String> {
         let known: Vec<String> = self.places_apps().into_iter().map(|(a, _)| a).collect();
-        let mut names: Vec<String> = windows.iter().filter_map(|w| self.window_identity(w)).map(|id| id.app_name()).collect();
+        let mut names: Vec<String> =
+            windows.iter().filter_map(|w| self.window_identity(w)).map(|id| id.app_name()).collect();
         let id = key.trim_end_matches(".desktop").to_lowercase();
         names.push(id.clone());
         if let Some(last) = id.rsplit('.').next() {
@@ -1424,7 +1587,10 @@ impl Server {
     /// the middle of its screen (the windows' side, at an edge).
     pub fn shelf_side(&self, dock: Rectangle<i32, Logical>) -> Edge {
         let screen = self.shelf_screen().unwrap_or(dock);
-        let (dx, dy) = (dock.loc.x + dock.size.w / 2 - (screen.loc.x + screen.size.w / 2), dock.loc.y + dock.size.h / 2 - (screen.loc.y + screen.size.h / 2));
+        let (dx, dy) = (
+            dock.loc.x + dock.size.w / 2 - (screen.loc.x + screen.size.w / 2),
+            dock.loc.y + dock.size.h / 2 - (screen.loc.y + screen.size.h / 2),
+        );
         match (self.shelf.config.placement().upright(), dx > 0, dy > 0) {
             (true, true, _) => Edge::Left,
             (true, false, _) => Edge::Right,
@@ -1445,7 +1611,14 @@ impl Server {
         // The desktop's icons fill the work area (desktop.rs).
         self.desktops_replace();
         match now {
-            Some(r) => tracing::info!("shelf: {:?}; its screen's work area {},{} {}x{} points", self.shelf.config.placement().place, r.loc.x, r.loc.y, r.size.w, r.size.h),
+            Some(r) => tracing::info!(
+                "shelf: {:?}; its screen's work area {},{} {}x{} points",
+                self.shelf.config.placement().place,
+                r.loc.x,
+                r.loc.y,
+                r.size.w,
+                r.size.h
+            ),
             None => tracing::info!("shelf: no screen for it"),
         }
         // A maximized window fills its screen's work area, which has just changed.
@@ -1463,17 +1636,44 @@ impl Server {
         let w = self.work_area(s);
         let items = self.shelf_items();
         let hidden = if self.shelf_hides() && self.shelf_shown() <= 0.0 { " (away now)" } else { "" };
-        let Some(dock) = self.shelf_dock(items.len()).or_else(|| vergence_shell::dock(rect(s), &at, items.len() + self.dock_places().len()).map(rectangle)) else {
+        let Some(dock) = self
+            .shelf_dock(items.len())
+            .or_else(|| vergence_shell::dock(rect(s), &at, items.len() + self.dock_places().len()).map(rectangle))
+        else {
             return "no shelf: its screen is too small for it".into();
         };
         let mut out = format!(
             "dock {},{} {}x{} {:?} gap {} keep-clear {} on screen {},{} {}x{}; work area {},{} {}x{}; hide {}{hidden}",
-            dock.loc.x, dock.loc.y, dock.size.w, dock.size.h, at.place, at.gap, at.keep_clear, s.loc.x, s.loc.y, s.size.w, s.size.h, w.loc.x, w.loc.y, w.size.w, w.size.h, format!("{:?}", self.shelf.config.hide.mode()).to_lowercase()
+            dock.loc.x,
+            dock.loc.y,
+            dock.size.w,
+            dock.size.h,
+            at.place,
+            at.gap,
+            at.keep_clear,
+            s.loc.x,
+            s.loc.y,
+            s.size.w,
+            s.size.h,
+            w.loc.x,
+            w.loc.y,
+            w.size.w,
+            w.size.h,
+            format!("{:?}", self.shelf.config.hide.mode()).to_lowercase()
         );
         for (i, (item, windows)) in items.iter().enumerate() {
-            let place = running::slot(rect(dock), i, at.upright()).map_or("no room".to_string(), |s| format!("{},{}", s.x, s.y));
+            let place = running::slot(rect(dock), i, at.upright())
+                .map_or("no room".to_string(), |s| format!("{},{}", s.x, s.y));
             let away = windows.iter().filter(|w| self.is_minimized(w)).count();
-            out.push_str(&format!("\n{i} {:?} \"{}\" icon \"{}\" windows {}{}{} at {place}", item.key, item.name, item.icon, windows.len(), if away > 0 { format!(" ({away} minimized)") } else { String::new() }, if item.focused { " focused" } else { "" }));
+            out.push_str(&format!(
+                "\n{i} {:?} \"{}\" icon \"{}\" windows {}{}{} at {place}",
+                item.key,
+                item.name,
+                item.icon,
+                windows.len(),
+                if away > 0 { format!(" ({away} minimized)") } else { String::new() },
+                if item.focused { " focused" } else { "" }
+            ));
         }
         out
     }
@@ -1486,7 +1686,9 @@ impl Server {
     /// The accent the settings name (Appearance), or the default.
     pub fn accent(&self) -> Color {
         match self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "accent-color".to_string())) {
-            Some(vergence_protocol::bus::SettingValue::Rgb(r, g, b)) => Color::rgb((r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8),
+            Some(vergence_protocol::bus::SettingValue::Rgb(r, g, b)) => {
+                Color::rgb((r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)
+            }
             _ => {
                 let a = vergence_look::ACCENT;
                 Color::rgb(a.0, a.1, a.2)
@@ -1495,7 +1697,12 @@ impl Server {
     }
 
     /// The strip's picture on `out`, if it is on that screen.
-    pub fn shelf_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
+    pub fn shelf_elements(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Vec<SceneElement> {
         // A full-screen window in front on this screen: no dock over it (fullscreen.rs).
         if self.fullscreen_covers(out) {
             return Vec::new();
@@ -1515,7 +1722,10 @@ impl Server {
         // (overview milestone 1, step 2; Dave, 2026-11-18: "Mac and Windows
         // both keep dots under running apps when minimized ... that is how
         // you know there is something there"). The icon is never faint.
-        let counts: Vec<(usize, usize)> = items.iter().map(|(_, windows)| (windows.len(), windows.iter().filter(|w| self.is_minimized(w)).count())).collect();
+        let counts: Vec<(usize, usize)> = items
+            .iter()
+            .map(|(_, windows)| (windows.len(), windows.iter().filter(|w| self.is_minimized(w)).count()))
+            .collect();
         // One that is starting says so with a mark that grows and shrinks, ten
         // steps a second (a still one where motion is not wanted).
         let moving = self.motion_wanted();
@@ -1524,7 +1734,12 @@ impl Server {
         self.shelf.attention.retain(|w| w.alive());
         let asking: Vec<Option<bool>> = items
             .iter()
-            .map(|(_, windows)| windows.iter().any(|w| self.shelf.attention.contains(w)).then(|| !moving || (self.start_time.elapsed().as_millis() / 500) % 2 == 0))
+            .map(|(_, windows)| {
+                windows
+                    .iter()
+                    .any(|w| self.shelf.attention.contains(w))
+                    .then(|| !moving || (self.start_time.elapsed().as_millis() / 500) % 2 == 0)
+            })
             .collect();
         let starting: Vec<Option<u8>> = items
             .iter()
@@ -1564,7 +1779,13 @@ impl Server {
         // the frost, drawn under the picture; Reduce transparency (or no frost
         // on this renderer) leaves the dock as its own setting says, solid if that.
         let frost = self.frost_program(renderer);
-        let glass = if frost.is_some() { 0 } else if self.reduce_transparency() { 255 } else { (self.shelf_opacity() * 255.0).round() as u8 };
+        let glass = if frost.is_some() {
+            0
+        } else if self.reduce_transparency() {
+            255
+        } else {
+            (self.shelf_opacity() * 255.0).round() as u8
+        };
         glass.hash(&mut hasher);
         light.hash(&mut hasher);
         (accent.r, accent.g, accent.b).hash(&mut hasher);
@@ -1583,8 +1804,17 @@ impl Server {
             let (w, h) = (strip.size.w as f32, strip.size.h as f32);
             let mut scene = Scene::new(w, h);
             let panel = s.dock;
-            scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, Color::rgba(panel.0, panel.1, panel.2, glass));
-            scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, color(s.dock_edge));
+            scene.fill_rounded(
+                SceneRect::new(0.0, 0.0, w, h),
+                vergence_look::RADIUS,
+                Color::rgba(panel.0, panel.1, panel.2, glass),
+            );
+            scene.stroke(
+                SceneRect::new(0.0, 0.0, w, h),
+                vergence_look::RADIUS,
+                vergence_look::EDGE,
+                color(s.dock_edge),
+            );
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
             let face = fonts.face("sans-serif", 700, false).or_else(|| fonts.face("sans-serif", 400, false));
             // The apps button at its head, saying the apps live there (Dave,
@@ -1620,7 +1850,8 @@ impl Server {
                 };
                 // A mark `long` points along the edge, 3 thick, centered on the slot.
                 let along_edge = |long: f32| -> SceneRect {
-                    let (down, along) = (slot.y as f32 + (slot.h as f32 - long) / 2.0, slot.x as f32 + (slot.w as f32 - long) / 2.0);
+                    let (down, along) =
+                        (slot.y as f32 + (slot.h as f32 - long) / 2.0, slot.x as f32 + (slot.w as f32 - long) / 2.0);
                     match outside {
                         Edge::Left => SceneRect::new(3.0, down, 3.0, long),
                         Edge::Right => SceneRect::new(w - 6.0, down, 3.0, long),
@@ -1654,7 +1885,12 @@ impl Server {
                         let (x, y) = if vertical { (row.x - 1.5, row.y + off) } else { (row.x + off, row.y - 2.0) };
                         let dot = SceneRect::new(x, y, d, d);
                         if i >= shown - hollow {
-                            scene.stroke(SceneRect::new(dot.x + 0.75, dot.y + 0.75, d - 1.5, d - 1.5), (d - 1.5) / 2.0, 1.5, mark);
+                            scene.stroke(
+                                SceneRect::new(dot.x + 0.75, dot.y + 0.75, d - 1.5, d - 1.5),
+                                (d - 1.5) / 2.0,
+                                1.5,
+                                mark,
+                            );
                         } else {
                             scene.fill_rounded(dot, d / 2.0, mark);
                         }
@@ -1664,18 +1900,31 @@ impl Server {
                     Some(icon) => {
                         // In the middle of its square, at its own shape.
                         let (iw, ih) = (icon.width as f32 / scale as f32, icon.height as f32 / scale as f32);
-                        let picture = scene.image(Image { width: icon.width, height: icon.height, rgba: icon.rgba.clone() });
-                        scene.draw_image(picture, SceneRect::new(square.x + (square.w - iw) / 2.0, square.y + (square.h - ih) / 2.0, iw, ih), if faint { 0.45 } else { 1.0 });
+                        let picture =
+                            scene.image(Image { width: icon.width, height: icon.height, rgba: icon.rgba.clone() });
+                        scene.draw_image(
+                            picture,
+                            SceneRect::new(square.x + (square.w - iw) / 2.0, square.y + (square.h - ih) / 2.0, iw, ih),
+                            if faint { 0.45 } else { 1.0 },
+                        );
                     }
                     None => {
                         // No icon (yet, or at all): a tile with the name's first letter.
                         scene.fill_rounded(square, vergence_look::RADIUS, color(s.tile));
-                        let letter: String = item.name.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().collect()).unwrap_or_else(|| "?".into());
+                        let letter: String = item
+                            .name
+                            .chars()
+                            .find(|c| c.is_alphanumeric())
+                            .map(|c| c.to_uppercase().collect())
+                            .unwrap_or_else(|| "?".into());
                         if let Some(face) = face {
                             let size = 18.0 * k;
                             let m = fonts.metrics(face, size);
                             let (_, width) = fonts.layout(face, size, &letter);
-                            let origin = ScenePoint::new(square.x + (square.w - width) / 2.0, square.y + ((square.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round());
+                            let origin = ScenePoint::new(
+                                square.x + (square.w - width) / 2.0,
+                                square.y + ((square.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round(),
+                            );
                             vergence_render::text(&mut scene, fonts, face, size, color(s.tile_ink), origin, &letter);
                         }
                     }
@@ -1688,9 +1937,15 @@ impl Server {
                 let Some(slot) = vergence_shell::tiles::slot(local, order.len(), j, upright) else { break };
                 if j == 0 {
                     let (a, b) = if upright {
-                        (ScenePoint::new(slot.x as f32 + 10.0, slot.y as f32 + 0.5), ScenePoint::new((slot.x + slot.w) as f32 - 10.0, slot.y as f32 + 0.5))
+                        (
+                            ScenePoint::new(slot.x as f32 + 10.0, slot.y as f32 + 0.5),
+                            ScenePoint::new((slot.x + slot.w) as f32 - 10.0, slot.y as f32 + 0.5),
+                        )
                     } else {
-                        (ScenePoint::new(slot.x as f32 + 0.5, slot.y as f32 + 10.0), ScenePoint::new(slot.x as f32 + 0.5, (slot.y + slot.h) as f32 - 10.0))
+                        (
+                            ScenePoint::new(slot.x as f32 + 0.5, slot.y as f32 + 10.0),
+                            ScenePoint::new(slot.x as f32 + 0.5, (slot.y + slot.h) as f32 - 10.0),
+                        )
                     };
                     scene.line(a, b, 1.0, color(s.separator));
                 }
@@ -1700,35 +1955,81 @@ impl Server {
                     // The drawer: nine dots, and how many it holds in the
                     // color of the worst state among them.
                     crate::tiles::Shown::Drawer(count, worst) => {
-                        let (cx, cy) = (slot.x as f32 + slot.w as f32 / 2.0, slot.y as f32 + slot.h as f32 / 2.0 - 4.0 * k);
+                        let (cx, cy) =
+                            (slot.x as f32 + slot.w as f32 / 2.0, slot.y as f32 + slot.h as f32 / 2.0 - 4.0 * k);
                         for d in 0..9 {
                             let (col, row) = ((d % 3) as f32 - 1.0, (d / 3) as f32 - 1.0);
-                            scene.fill_rounded(SceneRect::new(cx + (col * 7.0 - 1.75) * k, cy + (row * 7.0 - 1.75) * k, 3.5 * k, 3.5 * k), 1.75 * k, color(s.mark));
+                            scene.fill_rounded(
+                                SceneRect::new(
+                                    cx + (col * 7.0 - 1.75) * k,
+                                    cy + (row * 7.0 - 1.75) * k,
+                                    3.5 * k,
+                                    3.5 * k,
+                                ),
+                                1.75 * k,
+                                color(s.mark),
+                            );
                         }
                         let n = count.to_string();
                         let ink = crate::tiles::state_ink(*worst, light, s.tile_ink);
                         let ns = 9.5 * k;
                         let lm = fonts.metrics(small, ns);
                         let lw = fonts.layout(small, ns, &n).1;
-                        vergence_render::text(&mut scene, fonts, small, ns, ink, ScenePoint::new(slot.x as f32 + (slot.w as f32 - lw) / 2.0, (cy + 12.0 * k + lm.ascent).round()), &n);
+                        vergence_render::text(
+                            &mut scene,
+                            fonts,
+                            small,
+                            ns,
+                            ink,
+                            ScenePoint::new(
+                                slot.x as f32 + (slot.w as f32 - lw) / 2.0,
+                                (cy + 12.0 * k + lm.ascent).round(),
+                            ),
+                            &n,
+                        );
                         continue;
                     }
                 };
                 let ink = crate::tiles::state_ink(tile.state, light, s.tile_ink);
                 let (vs, ls) = (13.0 * k, 9.5 * k);
                 let (vm, lm) = (fonts.metrics(big, vs), fonts.metrics(small, ls));
-                let (vh, lh) = (vm.ascent + vm.descent, if tile.label.is_empty() { 0.0 } else { lm.ascent + lm.descent });
+                let (vh, lh) =
+                    (vm.ascent + vm.descent, if tile.label.is_empty() { 0.0 } else { lm.ascent + lm.descent });
                 let top = slot.y as f32 + (slot.h as f32 - vh - lh) / 2.0;
                 let vw = fonts.layout(big, vs, &tile.value).1;
-                vergence_render::text(&mut scene, fonts, big, vs, ink, ScenePoint::new(slot.x as f32 + (slot.w as f32 - vw) / 2.0, (top + vm.ascent).round()), &tile.value);
+                vergence_render::text(
+                    &mut scene,
+                    fonts,
+                    big,
+                    vs,
+                    ink,
+                    ScenePoint::new(slot.x as f32 + (slot.w as f32 - vw) / 2.0, (top + vm.ascent).round()),
+                    &tile.value,
+                );
                 if !tile.label.is_empty() {
                     let lw = fonts.layout(small, ls, &tile.label).1;
                     let dim = if tile.state == vergence_protocol::tile::TileState::Fine { color(s.mark) } else { ink };
-                    vergence_render::text(&mut scene, fonts, small, ls, dim, ScenePoint::new(slot.x as f32 + (slot.w as f32 - lw) / 2.0, (top + vh + lm.ascent).round()), &tile.label);
+                    vergence_render::text(
+                        &mut scene,
+                        fonts,
+                        small,
+                        ls,
+                        dim,
+                        ScenePoint::new(slot.x as f32 + (slot.w as f32 - lw) / 2.0, (top + vh + lm.ascent).round()),
+                        &tile.label,
+                    );
                 }
             }
-            let buffer = match vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) {
-                Ok(p) => MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None),
+            let buffer = match vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0))
+            {
+                Ok(p) => MemoryRenderBuffer::from_slice(
+                    &p.data,
+                    Fourcc::Abgr8888,
+                    (p.width as i32, p.height as i32),
+                    1,
+                    Transform::Normal,
+                    None,
+                ),
                 Err(e) => {
                     tracing::warn!("shelf: its picture could not be drawn: {e}");
                     return Vec::new();
@@ -1740,7 +2041,13 @@ impl Server {
         // The name of the application the pointer rests on, beside its icon on the
         // side the windows are.
         let mut elements = Vec::new();
-        let named = self.shelf.hover.filter(|_| self.shelf.named && !self.menu_is_open() && self.shelf.dragged.is_none() && self.shelf.lift.is_none()).and_then(|i| Some((running::slot(rect(strip), i, upright)?, self.shelf.names.get(i)?.clone())));
+        let named = self
+            .shelf
+            .hover
+            .filter(|_| {
+                self.shelf.named && !self.menu_is_open() && self.shelf.dragged.is_none() && self.shelf.lift.is_none()
+            })
+            .and_then(|i| Some((running::slot(rect(strip), i, upright)?, self.shelf.names.get(i)?.clone())));
         if let Some((slot, name)) = named {
             let key = (name.clone(), scale.to_bits(), light);
             if self.shelf.label.as_ref().map(|(k, _, _)| k) != Some(&key) {
@@ -1752,12 +2059,34 @@ impl Server {
                     let (w, h) = ((width + 20.0).ceil().min(480.0), 28.0);
                     let mut scene = Scene::new(w, h);
                     scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, color(s.menu));
-                    scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, color(s.edge));
+                    scene.stroke(
+                        SceneRect::new(0.0, 0.0, w, h),
+                        vergence_look::RADIUS,
+                        vergence_look::EDGE,
+                        color(s.edge),
+                    );
                     scene.push_clip(SceneRect::new(8.0, 0.0, w - 16.0, h), 0.0);
-                    vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink), ScenePoint::new(10.0, ((h - (m.ascent + m.descent)) / 2.0 + m.ascent).round()), &name);
+                    vergence_render::text(
+                        &mut scene,
+                        fonts,
+                        face,
+                        size,
+                        color(s.menu_ink),
+                        ScenePoint::new(10.0, ((h - (m.ascent + m.descent)) / 2.0 + m.ascent).round()),
+                        &name,
+                    );
                     scene.pop_clip();
-                    if let Ok(p) = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) {
-                        let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+                    if let Ok(p) =
+                        vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0))
+                    {
+                        let buffer = MemoryRenderBuffer::from_slice(
+                            &p.data,
+                            Fourcc::Abgr8888,
+                            (p.width as i32, p.height as i32),
+                            1,
+                            Transform::Normal,
+                            None,
+                        );
                         self.shelf.label = Some((key, buffer, w as i32));
                     }
                 }
@@ -1771,12 +2100,23 @@ impl Server {
                     Edge::Bottom => (across, strip.loc.y + strip.size.h + 8),
                 };
                 // Kept on its screen.
-                let (x, y) = (x.min(out.loc.x + out.size.w - w).max(out.loc.x), y.min(out.loc.y + out.size.h - 28).max(out.loc.y));
+                let (x, y) = (
+                    x.min(out.loc.x + out.size.w - w).max(out.loc.x),
+                    y.min(out.loc.y + out.size.h - 28).max(out.loc.y),
+                );
                 let area: Rectangle<i32, Logical> = Rectangle::new((x, y).into(), (*w, 28).into());
                 let a = (area.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
                 let b = (area.loc + area.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
                 let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
-                if let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(area.size), Kind::Unspecified) {
+                if let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(
+                    renderer,
+                    a.to_f64(),
+                    buffer,
+                    None,
+                    Some(src),
+                    Some(area.size),
+                    Kind::Unspecified,
+                ) {
                     elements.push(SceneElement::Memory(el));
                 }
             }
@@ -1790,7 +2130,15 @@ impl Server {
         let a = (strip.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let b = (strip.loc + strip.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
-        if let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(strip.size), Kind::Unspecified) {
+        if let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            a.to_f64(),
+            buffer,
+            None,
+            Some(src),
+            Some(strip.size),
+            Kind::Unspecified,
+        ) {
             elements.push(SceneElement::Memory(el));
         }
         // Behind it, the frost of what is behind the dock.
@@ -1829,7 +2177,13 @@ impl Server {
     /// The picture of a lifted item, its icon's middle under the pointer:
     /// its icon (or letter), and while it is held off the dock and pinned,
     /// "Remove" beside it.
-    fn shelf_ghost(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64, light: bool) -> Option<SceneElement> {
+    fn shelf_ghost(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+        light: bool,
+    ) -> Option<SceneElement> {
         let lift = self.shelf.lift.clone()?;
         if !out.to_f64().contains(lift.at) {
             return None;
@@ -1860,17 +2214,38 @@ impl Server {
             match &icon {
                 Some(icon) => {
                     let (iw, ih) = (icon.width as f32 / scale as f32, icon.height as f32 / scale as f32);
-                    let picture = scene.image(Image { width: icon.width, height: icon.height, rgba: icon.rgba.clone() });
-                    scene.draw_image(picture, SceneRect::new(square.x + (side - iw) / 2.0, square.y + (side - ih) / 2.0, iw, ih), if removing { 0.5 } else { 0.85 });
+                    let picture =
+                        scene.image(Image { width: icon.width, height: icon.height, rgba: icon.rgba.clone() });
+                    scene.draw_image(
+                        picture,
+                        SceneRect::new(square.x + (side - iw) / 2.0, square.y + (side - ih) / 2.0, iw, ih),
+                        if removing { 0.5 } else { 0.85 },
+                    );
                 }
                 // No icon yet: a tile with the name's first letter, as on the dock.
                 None => {
                     scene.fill_rounded(square, vergence_look::RADIUS, color(s.tile));
-                    let letter: String = lift.name.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().collect()).unwrap_or_else(|| "?".into());
+                    let letter: String = lift
+                        .name
+                        .chars()
+                        .find(|c| c.is_alphanumeric())
+                        .map(|c| c.to_uppercase().collect())
+                        .unwrap_or_else(|| "?".into());
                     if let Some(bold) = fonts.face("sans-serif", 700, false) {
                         let m = fonts.metrics(bold, 18.0);
                         let lw = fonts.layout(bold, 18.0, &letter).1;
-                        vergence_render::text(&mut scene, fonts, bold, 18.0, color(s.tile_ink), ScenePoint::new(square.x + (side - lw) / 2.0, (square.y + (side - (m.ascent + m.descent)) / 2.0 + m.ascent).round()), &letter);
+                        vergence_render::text(
+                            &mut scene,
+                            fonts,
+                            bold,
+                            18.0,
+                            color(s.tile_ink),
+                            ScenePoint::new(
+                                square.x + (side - lw) / 2.0,
+                                (square.y + (side - (m.ascent + m.descent)) / 2.0 + m.ascent).round(),
+                            ),
+                            &letter,
+                        );
                     }
                 }
             }
@@ -1879,21 +2254,47 @@ impl Server {
                 let at = SceneRect::new(if left { 0.0 } else { side + 8.0 }, (h - 28.0) / 2.0, label_w, 28.0);
                 scene.fill_rounded(at, vergence_look::RADIUS, color(s.menu));
                 scene.stroke(at, vergence_look::RADIUS, vergence_look::EDGE, color(s.edge));
-                vergence_render::text(&mut scene, fonts, face, 13.5, color(s.menu_ink), ScenePoint::new(at.x + 10.0, (at.y + (28.0 - (m.ascent + m.descent)) / 2.0 + m.ascent).round()), words);
+                vergence_render::text(
+                    &mut scene,
+                    fonts,
+                    face,
+                    13.5,
+                    color(s.menu_ink),
+                    ScenePoint::new(at.x + 10.0, (at.y + (28.0 - (m.ascent + m.descent)) / 2.0 + m.ascent).round()),
+                    words,
+                );
             }
             let p = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)).ok()?;
-            let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+            let buffer = MemoryRenderBuffer::from_slice(
+                &p.data,
+                Fourcc::Abgr8888,
+                (p.width as i32, p.height as i32),
+                1,
+                Transform::Normal,
+                None,
+            );
             self.shelf.ghost = Some((key, buffer, w as i32, h as i32));
         }
         let (_, buffer, w, h) = self.shelf.ghost.as_ref()?;
         let half = icon_side / 2;
         let removing = self.shelf.ghost.as_ref().is_some_and(|(k, ..)| k.2 && k.4);
         let x = if removing { lift.at.x.round() as i32 + half - w } else { lift.at.x.round() as i32 - half };
-        let area: Rectangle<i32, Logical> = Rectangle::new((x, lift.at.y.round() as i32 - h / 2).into(), (*w, *h).into());
+        let area: Rectangle<i32, Logical> =
+            Rectangle::new((x, lift.at.y.round() as i32 - h / 2).into(), (*w, *h).into());
         let a = (area.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let b = (area.loc + area.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
-        MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(area.size), Kind::Unspecified).ok().map(SceneElement::Memory)
+        MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            a.to_f64(),
+            buffer,
+            None,
+            Some(src),
+            Some(area.size),
+            Kind::Unspecified,
+        )
+        .ok()
+        .map(SceneElement::Memory)
     }
 
     /// Starts an application from its desktop entry, with files or links
@@ -1909,8 +2310,13 @@ impl Server {
         let key = entry.id.clone();
         for argv in commands {
             let Some((program, rest)) = argv.split_first() else { continue };
-            let pid = crate::spawn(std::process::Command::new(program).args(rest)).map_err(|e| format!("{} could not be started: {e}", entry.name))?;
-            tracing::info!("shelf: started {} (pid {pid}){}", entry.name, if files.is_empty() { String::new() } else { format!(" with {} file(s)", files.len()) });
+            let pid = crate::spawn(std::process::Command::new(program).args(rest))
+                .map_err(|e| format!("{} could not be started: {e}", entry.name))?;
+            tracing::info!(
+                "shelf: started {} (pid {pid}){}",
+                entry.name,
+                if files.is_empty() { String::new() } else { format!(" with {} file(s)", files.len()) }
+            );
         }
         let had = self.shelf_items().iter().find(|(i, _)| i.key == key).map_or(0, |(_, w)| w.len());
         self.shelf.starting.retain(|(k, ..)| *k != key);
@@ -1928,12 +2334,15 @@ impl Server {
             return Err(format!("more than {} items", vergence_protocol::bus::MAX_OPEN));
         }
         // Only whole paths and links: a relative path would be the server's own directory's.
-        if let Some(bad) = items.iter().find(|i| !i.starts_with('/') && vergence_types::of_link(i).is_none() && vergence_types::path_of_link(i).is_none()) {
+        if let Some(bad) = items.iter().find(|i| {
+            !i.starts_with('/') && vergence_types::of_link(i).is_none() && vergence_types::path_of_link(i).is_none()
+        }) {
             return Err(format!("{bad}: not a whole path or a link"));
         }
         let parsed: Vec<vergence_shell::open::Item> = items.iter().map(|i| vergence_shell::open::item(i)).collect();
         let lists = vergence_types::lists();
-        let (groups, mut failed) = vergence_shell::open::plan(&parsed, (!app.is_empty()).then_some(app), &self.shelf.apps, &lists);
+        let (groups, mut failed) =
+            vergence_shell::open::plan(&parsed, (!app.is_empty()).then_some(app), &self.shelf.apps, &lists);
         for (entry, files) in groups {
             if let Err(e) = self.start_entry(&entry, &files) {
                 failed.push(e);
@@ -1947,7 +2356,9 @@ impl Server {
     /// The dock's item under `at`, if any (a drop onto an app's icon; drag.rs).
     pub fn dock_item_at(&mut self, at: Point<f64, Logical>) -> Option<running::Item> {
         let upright = self.shelf.config.placement().upright();
-        let i = self.shelf.dock.and_then(|d| running::item_at(rect(d), self.shelf.names.len(), upright, at.x.floor() as i32, at.y.floor() as i32))?;
+        let i = self.shelf.dock.and_then(|d| {
+            running::item_at(rect(d), self.shelf.names.len(), upright, at.x.floor() as i32, at.y.floor() as i32)
+        })?;
         self.shelf_items().into_iter().nth(i).map(|(item, _)| item)
     }
 }

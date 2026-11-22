@@ -31,7 +31,8 @@ pub struct BatteryPage {
 }
 
 /// The history's ranges, in seconds, and their names.
-const RANGES: [(u64, &str, &str); 2] = [(24 * 3600, "Last 24 hours", "24 hours ago"), (7 * 24 * 3600, "Last 7 days", "7 days ago")];
+const RANGES: [(u64, &str, &str); 2] =
+    [(24 * 3600, "Last 24 hours", "24 hours ago"), (7 * 24 * 3600, "Last 7 days", "7 days ago")];
 
 impl App {
     /// Whether the machine has a battery (the sidebar shows the page then).
@@ -109,7 +110,9 @@ impl App {
             let left = match (b.state, b.minutes) {
                 (State::Discharging, Some(m)) => Some(("Time left", format!("About {}", duration_text(m)))),
                 (State::Charging, Some(m)) => Some(("Full in", format!("About {}", duration_text(m)))),
-                (State::Discharging, None) | (State::Charging, None) => Some(("Time left", "Working it out\u{2026}".into())),
+                (State::Discharging, None) | (State::Charging, None) => {
+                    Some(("Time left", "Working it out\u{2026}".into()))
+                }
                 _ => None,
             };
             if let Some((name, text)) = left {
@@ -124,8 +127,14 @@ impl App {
             let chart: Vec<f64> = self.battery.history.iter().copied().collect();
             rows.push(setting(
                 "Drawing now",
-                if b.state == State::Discharging { "The last two minutes." } else { "Shown on battery: on power the charger feeds the machine." },
-                row(vec![power_chart(chart), value(now).width(Length::Fixed(120.0)).align(Align::End)]).spacing(12.0).align(Align::Center),
+                if b.state == State::Discharging {
+                    "The last two minutes."
+                } else {
+                    "Shown on battery: on power the charger feeds the machine."
+                },
+                row(vec![power_chart(chart), value(now).width(Length::Fixed(120.0)).align(Align::End)])
+                    .spacing(12.0)
+                    .align(Align::Center),
             ));
             let title = if p.batteries.len() > 1 { b.name.clone() } else { "Battery".into() };
             items.push(self.group(Some(&title), rows));
@@ -139,7 +148,11 @@ impl App {
             let names: Vec<String> = RANGES.iter().map(|(_, n, _)| n.to_string()).collect();
             let sum = history::summary(&shown);
             let words = if sum.on_battery < 60 {
-                if shown.is_empty() { "Nothing kept yet: a line is written every minute.".to_string() } else { "Not on battery in this time.".to_string() }
+                if shown.is_empty() {
+                    "Nothing kept yet: a line is written every minute.".to_string()
+                } else {
+                    "Not on battery in this time.".to_string()
+                }
             } else {
                 let mut w = format!("On battery {}, {}% used", duration_text((sum.on_battery / 60) as u32), sum.used);
                 if let Some(a) = sum.avg_watts {
@@ -151,7 +164,8 @@ impl App {
             let chart = panel(
                 column(vec![
                     charge_chart(shown, from, to),
-                    row(vec![label(ago).size(10.0).dim(), space().width(Length::FILL), label("now").size(10.0).dim()]).width(Length::FILL),
+                    row(vec![label(ago).size(10.0).dim(), space().width(Length::FILL), label("now").size(10.0).dim()])
+                        .width(Length::FILL),
                 ])
                 .spacing(2.0)
                 .width(Length::FILL),
@@ -161,9 +175,15 @@ impl App {
             items.push(self.group(
                 Some("History"),
                 vec![
-                    setting("Charge", &words, choice(names, Some(self.battery.range), Message::BatteryRange).width(Length::Fixed(150.0)).name("History range")),
-                    chart,
-                ],
+                        setting(
+                            "Charge",
+                            &words,
+                            choice(names, Some(self.battery.range), Message::BatteryRange)
+                                .width(Length::Fixed(150.0))
+                                .name("History range"),
+                        ),
+                        chart,
+                    ],
             ));
         }
         // The GPUs: an awake discrete one is the usual drain.
@@ -174,9 +194,18 @@ impl App {
                 .gpus
                 .iter()
                 .map(|g| {
-                    let name = if g.driver.is_empty() { format!("{} graphics", g.vendor) } else { format!("{} graphics ({})", g.vendor, g.driver) };
+                    let name = if g.driver.is_empty() {
+                        format!("{} graphics", g.vendor)
+                    } else {
+                        format!("{} graphics ({})", g.vendor, g.driver)
+                    };
                     let (word, note) = match g.awake {
-                        Some(true) if several && g.vendor == "NVIDIA" || several && g.vendor == "AMD" && g.driver != "amdgpu-igpu" => ("Awake", "Draws several watts while awake; it sleeps when nothing uses it."),
+                        Some(true)
+                            if several && g.vendor == "NVIDIA"
+                                || several && g.vendor == "AMD" && g.driver != "amdgpu-igpu" =>
+                        {
+                            ("Awake", "Draws several watts while awake; it sleeps when nothing uses it.")
+                        }
                         Some(true) => ("Awake", "Draws the screens."),
                         Some(false) => ("Asleep", "Uses next to no power."),
                         None => ("\u{2014}", "The system does not say whether it sleeps."),
@@ -199,7 +228,11 @@ impl App {
                 };
                 adv.push(setting(&format!("Health: {h}%"), &detail, space()));
             } else if let Some(f) = b.full_wh {
-                adv.push(setting("Holds when full", &format!("{f:.1} Wh (its design capacity is not reported)."), space()));
+                adv.push(setting(
+                    "Holds when full",
+                    &format!("{f:.1} Wh (its design capacity is not reported)."),
+                    space(),
+                ));
             }
             if let Some(c) = b.cycles {
                 adv.push(setting("Charge cycles", &c.to_string(), space()));
@@ -208,7 +241,16 @@ impl App {
                 adv.push(setting("Voltage", &format!("{v:.2} V"), space()));
             }
             if !b.model.is_empty() || !b.technology.is_empty() {
-                adv.push(setting("Battery", &[b.model.as_str(), b.technology.as_str()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(", "), space()));
+                adv.push(setting(
+                    "Battery",
+                    &[b.model.as_str(), b.technology.as_str()]
+                        .iter()
+                        .filter(|s| !s.is_empty())
+                        .copied()
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    space(),
+                ));
             }
         }
         for g in &self.battery.gpus {
@@ -293,7 +335,12 @@ fn power_chart<M: 'static>(samples: Vec<f64>) -> Element<M> {
         let x0 = r.x + r.w - step * (samples.len() - 1) as f32;
         let ink = t.accent;
         for (i, pair) in samples.windows(2).enumerate() {
-            scene.line(Point::new(x0 + step * i as f32, y_of(pair[0])), Point::new(x0 + step * (i + 1) as f32, y_of(pair[1])), 1.8, ink);
+            scene.line(
+                Point::new(x0 + step * i as f32, y_of(pair[0])),
+                Point::new(x0 + step * (i + 1) as f32, y_of(pair[1])),
+                1.8,
+                ink,
+            );
         }
     })
     .width(Length::Fixed(180.0))

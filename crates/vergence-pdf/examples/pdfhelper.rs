@@ -20,5 +20,12 @@ fn main() {
     writeln!(out, "P6 {} {} 255", t.width, t.height).unwrap();
     let rgb: Vec<u8> = t.rgba.chunks(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
     out.write_all(&rgb).unwrap();
-    println!("page {} of {}: {} x {} px in {} ms (helper)", page + 1, v.info.pages.len(), t.width, t.height, t0.elapsed().as_millis());
+    println!(
+        "page {} of {}: {} x {} px in {} ms (helper)",
+        page + 1,
+        v.info.pages.len(),
+        t.width,
+        t.height,
+        t0.elapsed().as_millis()
+    );
 }

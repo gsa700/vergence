@@ -48,15 +48,15 @@
 //! Ctrl+C copies when text is selected (and is the interrupt key when
 //! none is); Ctrl+V pastes. Ctrl+Shift+C and Ctrl+Shift+V do the same.
 
+mod confirm;
 #[cfg(test)]
 mod fuzz;
 #[allow(dead_code)]
 mod grid;
-mod confirm;
-mod prefs;
 mod menu;
 mod mouse;
 mod panes;
+mod prefs;
 #[allow(dead_code)]
 mod program;
 mod pty;
@@ -68,8 +68,8 @@ mod vt;
 use std::{
     cell::RefCell,
     collections::HashMap,
-    rc::Rc,
     io::Write,
+    rc::Rc,
     sync::{
         Arc, Mutex, MutexGuard,
         atomic::{AtomicBool, AtomicU8, Ordering},
@@ -77,7 +77,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use vergence_ui::bar::{self, BAR_H, Layout, Part, WinButton};
 use grid::{Cell, Color as CellColor, Grid, MouseMode};
 use menu::{Item, Menu};
 use panes::{Axis, Divider, Node};
@@ -85,6 +84,7 @@ use scrollbar::Scrollbar;
 use select::{Pos, Selection, Unit};
 use vergence_scene::{CELL_GLYPH, CELL_UNDERLINE, Cell as SceneCell, Color, Glyph, Point, Rect, Scene};
 use vergence_text::{FaceId, Fonts};
+use vergence_ui::bar::{self, BAR_H, Layout, Part, WinButton};
 use vergence_ui::{App, Button, Cursor, Edges, Frame, Input, Modifiers, Waker, Window, sym};
 
 /// Space around the cells, in reference units.
@@ -112,14 +112,18 @@ struct Settings {
 fn font_name(value: &str, family: &str, points: f32) -> (String, f32) {
     let value = value.trim();
     match value.rsplit_once(' ') {
-        Some((name, size)) if size.parse::<f32>().is_ok_and(|s| (4.0..=96.0).contains(&s)) => (name.trim().to_string(), size.parse::<f32>().unwrap_or(points) * 96.0 / 72.0),
+        Some((name, size)) if size.parse::<f32>().is_ok_and(|s| (4.0..=96.0).contains(&s)) => {
+            (name.trim().to_string(), size.parse::<f32>().unwrap_or(points) * 96.0 / 72.0)
+        }
         _ if !value.is_empty() => (value.to_string(), points * 96.0 / 72.0),
         _ => (family.to_string(), points * 96.0 / 72.0),
     }
 }
 
 fn config_path(name: &str) -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")));
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")));
     base.map(|b| b.join("vergence").join(name))
 }
 
@@ -163,7 +167,10 @@ impl Settings {
         if let Some(f) = vergence_ui::table_value(&desktop, "[terminal]", "font").filter(|f| !f.trim().is_empty()) {
             s.mono_family = f;
         }
-        if let Some(z) = vergence_ui::table_value(&desktop, "[terminal]", "font-size").and_then(|z| z.parse::<f32>().ok()).filter(|z| (4.0..=96.0).contains(z)) {
+        if let Some(z) = vergence_ui::table_value(&desktop, "[terminal]", "font-size")
+            .and_then(|z| z.parse::<f32>().ok())
+            .filter(|z| (4.0..=96.0).contains(z))
+        {
             s.mono_size = z;
         }
         s
@@ -177,9 +184,11 @@ impl Settings {
                 (k.trim().trim_matches('"') == key).then(|| v.trim().trim_matches('"').to_string())
             })
         };
-        let (left, right) = bar::decoration_layout(&value("Gtk/DecorationLayout").unwrap_or_else(|| bar::DEFAULT_LAYOUT.into()));
+        let (left, right) =
+            bar::decoration_layout(&value("Gtk/DecorationLayout").unwrap_or_else(|| bar::DEFAULT_LAYOUT.into()));
         let (ui_family, ui_size) = font_name(&value("Gtk/FontName").unwrap_or_default(), "sans-serif", 11.0);
-        let (mono_family, mono_size) = font_name(&value("Gtk/MonospaceFontName").unwrap_or_default(), "monospace", 12.0);
+        let (mono_family, mono_size) =
+            font_name(&value("Gtk/MonospaceFontName").unwrap_or_default(), "monospace", 12.0);
         Settings { left, right, light: false, ui_family, ui_size, mono_family, mono_size }
     }
 }
@@ -276,7 +285,10 @@ const TANGO: Palette = Palette {
     bg: rgb(0x2e3436),
     fg: rgb(0xd3d7cf),
     accent: rgb(0x729fcf),
-    ansi: [0x2e3436, 0xcc0000, 0x4e9a06, 0xc4a000, 0x3465a4, 0x75507b, 0x06989a, 0xd3d7cf, 0x555753, 0xef2929, 0x8ae234, 0xfce94f, 0x729fcf, 0xad7fa8, 0x34e2e2, 0xeeeeec],
+    ansi: [
+        0x2e3436, 0xcc0000, 0x4e9a06, 0xc4a000, 0x3465a4, 0x75507b, 0x06989a, 0xd3d7cf, 0x555753, 0xef2929, 0x8ae234,
+        0xfce94f, 0x729fcf, 0xad7fa8, 0x34e2e2, 0xeeeeec,
+    ],
     floor: 0.0,
 };
 
@@ -285,19 +297,26 @@ const CATPPUCCIN: Palette = Palette {
     bg: rgb(0x1e1e2e),
     fg: rgb(0xcdd6f4),
     accent: rgb(0x89b4fa),
-    ansi: [0x45475a, 0xf38ba8, 0xa6e3a1, 0xf9e2af, 0x89b4fa, 0xf5c2e7, 0x94e2d5, 0xbac2de, 0x585b70, 0xf38ba8, 0xa6e3a1, 0xf9e2af, 0x89b4fa, 0xf5c2e7, 0x94e2d5, 0xa6adc8],
+    ansi: [
+        0x45475a, 0xf38ba8, 0xa6e3a1, 0xf9e2af, 0x89b4fa, 0xf5c2e7, 0x94e2d5, 0xbac2de, 0x585b70, 0xf38ba8, 0xa6e3a1,
+        0xf9e2af, 0x89b4fa, 0xf5c2e7, 0x94e2d5, 0xa6adc8,
+    ],
     floor: 0.0,
 };
 
 /// Tango on white, for the light desktop.
-const TANGO_LIGHT: Palette = Palette { bg: rgb(0xffffff), fg: rgb(0x2e3436), accent: rgb(0x3465a4), ansi: TANGO.ansi, floor: LIGHT_FLOOR };
+const TANGO_LIGHT: Palette =
+    Palette { bg: rgb(0xffffff), fg: rgb(0x2e3436), accent: rgb(0x3465a4), ansi: TANGO.ansi, floor: LIGHT_FLOOR };
 
 /// Catppuccin Latte, the light one.
 const LATTE: Palette = Palette {
     bg: rgb(0xeff1f5),
     fg: rgb(0x4c4f69),
     accent: rgb(0x1e66f5),
-    ansi: [0x5c5f77, 0xd20f39, 0x40a02b, 0xdf8e1d, 0x1e66f5, 0xea76cb, 0x179299, 0xacb0be, 0x6c6f85, 0xd20f39, 0x40a02b, 0xdf8e1d, 0x1e66f5, 0xea76cb, 0x179299, 0xbcc0cc],
+    ansi: [
+        0x5c5f77, 0xd20f39, 0x40a02b, 0xdf8e1d, 0x1e66f5, 0xea76cb, 0x179299, 0xacb0be, 0x6c6f85, 0xd20f39, 0x40a02b,
+        0xdf8e1d, 0x1e66f5, 0xea76cb, 0x179299, 0xbcc0cc,
+    ],
     floor: LIGHT_FLOOR,
 };
 
@@ -494,15 +513,34 @@ impl Session {
     /// Starts the user's shell, or `command` (`-e`), on a new terminal of
     /// cols x rows. Its output is read and parsed on a thread of its own,
     /// which wakes the window.
-    fn start(cols: usize, rows: usize, waker: Waker, command: Option<Vec<String>>, cwd: Option<&str>) -> std::io::Result<Session> {
+    fn start(
+        cols: usize,
+        rows: usize,
+        waker: Waker,
+        command: Option<Vec<String>>,
+        cwd: Option<&str>,
+    ) -> std::io::Result<Session> {
         let is_command = matches!(command.as_deref(), Some([_, ..]));
         let pty = match command.as_deref() {
             Some([program, args @ ..]) => pty::Pty::spawn(program, args, cols as u16, rows as u16, cwd)?,
-            _ => pty::Pty::spawn(&std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()), &[], cols as u16, rows as u16, cwd)?,
+            _ => pty::Pty::spawn(
+                &std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()),
+                &[],
+                cols as u16,
+                rows as u16,
+                cwd,
+            )?,
         };
         let reader = pty.reader()?;
         let mut replies = reader.try_clone()?;
-        let screen = Arc::new(Mutex::new(Screen { grid: Grid::new(cols, rows), parser: vt::Parser::new(), scroll: 0, exited: false, copied: None, selection: None }));
+        let screen = Arc::new(Mutex::new(Screen {
+            grid: Grid::new(cols, rows),
+            parser: vt::Parser::new(),
+            scroll: 0,
+            exited: false,
+            copied: None,
+            selection: None,
+        }));
         let shared = screen.clone();
         let news = Arc::new(AtomicU8::new(0));
         let said = news.clone();
@@ -556,7 +594,14 @@ impl Session {
             said.fetch_or(NEWS_STATE, Ordering::SeqCst);
             waker.wake();
         })?;
-        Ok(Session { screen, pty, title: String::new(), news, root_seen: std::cell::Cell::new(None), command: is_command })
+        Ok(Session {
+            screen,
+            pty,
+            title: String::new(),
+            news,
+            root_seen: std::cell::Cell::new(None),
+            command: is_command,
+        })
     }
 
     fn label(&self) -> String {
@@ -816,7 +861,14 @@ impl Terminal {
             while self.dragged_lines.abs() >= WHEEL_LINES {
                 let up = self.dragged_lines > 0;
                 self.dragged_lines -= if up { WHEEL_LINES } else { -WHEEL_LINES };
-                self.report(id, area, if up { mouse::Action::WheelUp } else { mouse::Action::WheelDown }, x, y, Modifiers::default());
+                self.report(
+                    id,
+                    area,
+                    if up { mouse::Action::WheelUp } else { mouse::Action::WheelDown },
+                    x,
+                    y,
+                    Modifiers::default(),
+                );
             }
             return;
         }
@@ -878,7 +930,11 @@ impl Terminal {
             blink: term_flag(&config("desktop.toml"), "blink", true),
             ask_close: term_flag(&config("desktop.toml"), "ask-close", true),
             blink_on: true,
-            bar_style: vergence_ui::bar_style_setting(&config("desktop.toml"), "[terminal]", vergence_ui::BarStyle::Desktop),
+            bar_style: vergence_ui::bar_style_setting(
+                &config("desktop.toml"),
+                "[terminal]",
+                vergence_ui::BarStyle::Desktop,
+            ),
             bar_style_told: None,
 
             waker: None,
@@ -926,13 +982,20 @@ impl Terminal {
     /// Tell the program what this window keeps (its token, its tabs' working
     /// directories), for the state file (program.rs).
     fn keep(&mut self) {
-        let tabs = self.tabs.iter().filter_map(|t| t.session(t.active)).filter_map(|s| program::cwd_of(s.pty.pid())).collect();
+        let tabs =
+            self.tabs.iter().filter_map(|t| t.session(t.active)).filter_map(|s| program::cwd_of(s.pty.pid())).collect();
         self.program.borrow_mut().update(self.key, program::WindowState { token: self.token.clone(), tabs });
     }
 
     /// Another window of this process: sharing its program, opened for a
     /// later start's request or to restore one kept from the last run.
-    fn window_for(&self, present: String, start_dirs: Vec<String>, start_cwd: Option<String>, run: Option<Vec<String>>) -> Terminal {
+    fn window_for(
+        &self,
+        present: String,
+        start_dirs: Vec<String>,
+        start_cwd: Option<String>,
+        run: Option<Vec<String>>,
+    ) -> Terminal {
         let mut t = Terminal::new();
         t.program = self.program.clone();
         t.key = t.program.borrow_mut().add();
@@ -950,7 +1013,8 @@ impl Terminal {
     /// Windows asked for by later starts, and windows from the last run still
     /// to open: whichever window hears first opens them.
     fn open_asked(&mut self, window: &mut Window) {
-        let asked: Vec<program::OpenRequest> = std::mem::take(&mut *self.inbox.lock().unwrap_or_else(|e| e.into_inner()));
+        let asked: Vec<program::OpenRequest> =
+            std::mem::take(&mut *self.inbox.lock().unwrap_or_else(|e| e.into_inner()));
         for r in asked {
             let run = (!r.run.is_empty()).then_some(r.run);
             let cwd = (!r.cwd.is_empty()).then_some(r.cwd);
@@ -968,7 +1032,8 @@ impl Terminal {
         t.moved = vec![tab];
         t.ask = place;
         // As large as the window it came from (Dave, 2026-11-12).
-        t.ask_size = (self.width > 0.0 && self.height > 0.0).then(|| (self.width.round() as u32, self.height.round() as u32));
+        t.ask_size =
+            (self.width > 0.0 && self.height > 0.0).then(|| (self.width.round() as u32, self.height.round() as u32));
         window.open_window(Box::new(t));
     }
 
@@ -981,7 +1046,8 @@ impl Terminal {
         let i = self.tabs.iter().position(|t| t.id == id)?;
         let front = self.tabs.get(self.shown).map(|t| t.id);
         let tab = self.tabs.remove(i);
-        self.shown = front.and_then(|f| self.tabs.iter().position(|t| t.id == f)).unwrap_or_else(|| i.min(self.tabs.len() - 1));
+        self.shown =
+            front.and_then(|f| self.tabs.iter().position(|t| t.id == f)).unwrap_or_else(|| i.min(self.tabs.len() - 1));
         self.held = None;
         self.retitle(window);
         self.keep();
@@ -1007,7 +1073,12 @@ impl Terminal {
         tab.active = leaves[if at > 0 { at - 1 } else { 1 }];
         self.held = None;
         window.redraw();
-        Some(Tab { id: NEXT_TAB.fetch_add(1, Ordering::SeqCst), tree: Node::Leaf(id), panes: vec![(id, session)], active: id })
+        Some(Tab {
+            id: NEXT_TAB.fetch_add(1, Ordering::SeqCst),
+            tree: Node::Leaf(id),
+            panes: vec![(id, session)],
+            active: id,
+        })
     }
 
     /// Tabs other windows of the process sent here (a tab joined to this window).
@@ -1091,9 +1162,7 @@ impl Terminal {
         let cwd = if self.start_dirs.is_empty() { self.start_cwd.clone() } else { Some(self.start_dirs.remove(0)) };
         // `-e`'s program runs in the first terminal only; the others get the shell.
         match Session::start(cols, rows, waker, self.run.take(), cwd.as_deref()) {
-            Ok(session) => {
-                Some((NEXT_PANE.fetch_add(1, Ordering::SeqCst), session))
-            }
+            Ok(session) => Some((NEXT_PANE.fetch_add(1, Ordering::SeqCst), session)),
             Err(e) => {
                 eprintln!("vergence-term: could not start the program: {e}");
                 None
@@ -1108,7 +1177,14 @@ impl Terminal {
             return;
         }
         let rows = Box::new(prefs::TermRows::new());
-        window.open_window(vergence_widgets::window(vergence_widgets::prefs::Prefs::new("Terminal", "vergence-term", "[terminal]", true, rows, self.prefs_open.clone())));
+        window.open_window(vergence_widgets::window(vergence_widgets::prefs::Prefs::new(
+            "Terminal",
+            "vergence-term",
+            "[terminal]",
+            true,
+            rows,
+            self.prefs_open.clone(),
+        )));
     }
 
     /// A new window of this terminal, with a shell of its own.
@@ -1132,7 +1208,12 @@ impl Terminal {
 
     fn new_tab(&mut self, window: &mut Window) {
         if let Some((id, session)) = self.start(self.fits.0, self.fits.1) {
-            self.tabs.push(Tab { id: NEXT_TAB.fetch_add(1, Ordering::SeqCst), tree: Node::Leaf(id), panes: vec![(id, session)], active: id });
+            self.tabs.push(Tab {
+                id: NEXT_TAB.fetch_add(1, Ordering::SeqCst),
+                tree: Node::Leaf(id),
+                panes: vec![(id, session)],
+                active: id,
+            });
             self.shown = self.tabs.len() - 1;
             self.retitle(window);
         }
@@ -1191,7 +1272,10 @@ impl Terminal {
             let s = lock(&s.screen);
             (s.grid.cols, s.grid.rows)
         });
-        let Some((id, session)) = self.start(size.map_or(self.fits.0, |s| s.0), size.map_or(self.fits.1, |s| s.1)) else { return };
+        let Some((id, session)) = self.start(size.map_or(self.fits.0, |s| s.0), size.map_or(self.fits.1, |s| s.1))
+        else {
+            return;
+        };
         let tab = &mut self.tabs[self.shown];
         if tab.tree.split(active, axis, id) {
             tab.panes.push((id, session));
@@ -1252,7 +1336,12 @@ impl Terminal {
         if index < self.tabs.len() && index != self.shown {
             if self.measuring {
                 self.asked = Some((index, self.frame_now, Instant::now()));
-                eprintln!("press for tab {index} at {:.3}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64() % 1000.0));
+                eprintln!(
+                    "press for tab {index} at {:.3}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0.0, |d| d.as_secs_f64() % 1000.0)
+                );
             }
             self.shown = index;
             self.held = None;
@@ -1421,11 +1510,17 @@ impl Terminal {
         self.over = pane.map(|(id, _)| id);
         let divider = if part.is_none() { self.areas().1.into_iter().find(|d| d.holds(x, y)) } else { None };
         let cursor = if let Some(d) = divider {
-            Cursor::Resize(if d.axis == Axis::Side { Edges { right: true, ..Edges::default() } } else { Edges { bottom: true, ..Edges::default() } })
+            Cursor::Resize(if d.axis == Axis::Side {
+                Edges { right: true, ..Edges::default() }
+            } else {
+                Edges { bottom: true, ..Edges::default() }
+            })
         } else if let Some((id, area)) = pane {
             // The scrollbar's edge and a program that has the mouse get the arrow; text, the text bar.
             let on_bar = self.scrollbar(id, area).is_some_and(|bar| bar.holds(x, y));
-            let theirs = !on_bar && !self.shift && self.report(id, area, mouse::Action::Motion(None), x, y, Modifiers::default());
+            let theirs = !on_bar
+                && !self.shift
+                && self.report(id, area, mouse::Action::Motion(None), x, y, Modifiers::default());
             if on_bar || theirs { Cursor::Default } else { Cursor::Text }
         } else {
             Cursor::Default
@@ -1516,7 +1611,9 @@ impl Terminal {
             INSERT => return csi("2~"),
             sym::DELETE => return csi("3~"),
             s if (F1..F1 + 4).contains(&s) => return Some(vec![0x1b, b'O', b'P' + (s - F1) as u8]),
-            s if (F1 + 4..F1 + 12).contains(&s) => return csi(["15~", "17~", "18~", "19~", "20~", "21~", "23~", "24~"][(s - F1 - 4) as usize]),
+            s if (F1 + 4..F1 + 12).contains(&s) => {
+                return csi(["15~", "17~", "18~", "19~", "20~", "21~", "23~", "24~"][(s - F1 - 4) as usize]);
+            }
             0x20 if m.ctrl => return Some(vec![0]),
             _ => {}
         }
@@ -1573,7 +1670,14 @@ struct PaneLook<'a> {
 }
 
 /// Draws one terminal in its room.
-fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId, u32>, s: &Screen, area: Rect, look: &PaneLook) {
+fn draw_pane(
+    scene: &mut Scene,
+    fonts: &mut Fonts,
+    numbers: &mut HashMap<FaceId, u32>,
+    s: &Screen,
+    area: Rect,
+    look: &PaneLook,
+) {
     let (p, mt, size) = (look.palette, look.metrics, look.size);
     let (cw, ch) = (mt.cell_w, mt.cell_h);
     let (left, first) = (area.x + PAD, area.y + PAD);
@@ -1583,7 +1687,8 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
     let mut plain: [[Option<(u32, u32)>; 128]; 2] = [[None; 128]; 2];
     // Under the window's bar, above the top row: the lines before it, as many
     // as reach into the strip (look milestone 1). The alternate screen has none.
-    let extra = if s.grid.alt || look.above <= 0.0 { 0 } else { (((look.above + PAD) / ch).ceil() as usize).min(top_line) };
+    let extra =
+        if s.grid.alt || look.above <= 0.0 { 0 } else { (((look.above + PAD) / ch).ceil() as usize).min(top_line) };
     scene.push_clip(area, 0.0);
     // The screen is one grid of cells ([`vergence_scene::Command::Cells`]): each
     // cell its ground (none where it is the terminal's own), its ink, its glyph.
@@ -1614,7 +1719,13 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
             if st.dim {
                 ink.a = 153;
             }
-            let mut out = SceneCell { ground: if ground == p.bg { Color::rgba(0, 0, 0, 0) } else { ground }, ink, glyph: 0, font: 0, flags: if st.underline { CELL_UNDERLINE } else { 0 } };
+            let mut out = SceneCell {
+                ground: if ground == p.bg { Color::rgba(0, 0, 0, 0) } else { ground },
+                ink,
+                glyph: 0,
+                font: 0,
+                flags: if st.underline { CELL_UNDERLINE } else { 0 },
+            };
             if cell.width != 0 && cell.c != ' ' {
                 let own = if st.bold { mt.bold } else { mt.regular };
                 let (font, glyph) = match plain[st.bold as usize].get_mut(cell.c as usize) {
@@ -1636,7 +1747,17 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
                     let (face, glyph) = fonts.glyph(own, mark);
                     let font = font_number(scene, fonts, numbers, face);
                     let after = fonts.advance(face, glyph, size) < cw * 0.5;
-                    marks.push((r, font, ink, Point::new(left, top + mt.baseline), Glyph { id: glyph, x: (col + if after { cell.width.max(1) as usize } else { 0 }) as f32 * cw, y: 0.0 }));
+                    marks.push((
+                        r,
+                        font,
+                        ink,
+                        Point::new(left, top + mt.baseline),
+                        Glyph {
+                            id: glyph,
+                            x: (col + if after { cell.width.max(1) as usize } else { 0 }) as f32 * cw,
+                            y: 0.0,
+                        },
+                    ));
                 }
             }
             cells.push(out);
@@ -1664,7 +1785,10 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
     // What is selected, tinted over its text.
     for r in 0..s.grid.rows {
         if let Some((a, b)) = selection.and_then(|sel| sel.span(top_line + r, s.grid.cols)) {
-            scene.fill(Rect::new(left + a as f32 * cw, first + r as f32 * ch, (b + 1 - a) as f32 * cw, ch), Color::rgba(p.accent.r, p.accent.g, p.accent.b, 89));
+            scene.fill(
+                Rect::new(left + a as f32 * cw, first + r as f32 * ch, (b + 1 - a) as f32 * cw, ch),
+                Color::rgba(p.accent.r, p.accent.g, p.accent.b, 89),
+            );
         }
     }
     // The cursor: a block where the keys go, an outline elsewhere. It moves down with the
@@ -1680,7 +1804,15 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
         };
         if look.keyboard {
             if look.cursor_on {
-                scene.fill(shape, Color::rgba(p.accent.r, p.accent.g, p.accent.b, if look.cursor == CursorShape::Block { 178 } else { 230 }));
+                scene.fill(
+                    shape,
+                    Color::rgba(
+                        p.accent.r,
+                        p.accent.g,
+                        p.accent.b,
+                        if look.cursor == CursorShape::Block { 178 } else { 230 },
+                    ),
+                );
             }
         } else if look.cursor == CursorShape::Block {
             scene.stroke(at, 0.0, 1.0, p.accent);
@@ -1691,7 +1823,13 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
     // The scrollbar: faint at the live screen, clearer while scrolled back or held.
     if let Some(bar) = s.scrollbar(area) {
         scene.fill_rounded(bar.track, scrollbar::RADIUS, Color::rgba(p.fg.r, p.fg.g, p.fg.b, 15));
-        let alpha = if look.thumb_held { 166 } else if s.scroll > 0 { 128 } else { 64 };
+        let alpha = if look.thumb_held {
+            166
+        } else if s.scroll > 0 {
+            128
+        } else {
+            64
+        };
         scene.fill_rounded(bar.thumb, scrollbar::RADIUS, Color::rgba(p.fg.r, p.fg.g, p.fg.b, alpha));
     }
     // Scrolled back: how far, in the top right corner (left of the scrollbar).
@@ -1701,7 +1839,11 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
         let at = Rect::new(area.x + area.w - width - PAD - scrollbar::GRAB, first, width, ch + 4.0);
         scene.fill_rounded(at, bar::RADIUS, Color::rgba(p.accent.r, p.accent.g, p.accent.b, 235));
         let font = font_number(scene, fonts, numbers, mt.regular);
-        let glyphs = label.chars().enumerate().map(|(i, c)| Glyph { id: fonts.glyph(mt.regular, c).1, x: i as f32 * cw, y: 0.0 }).collect();
+        let glyphs = label
+            .chars()
+            .enumerate()
+            .map(|(i, c)| Glyph { id: fonts.glyph(mt.regular, c).1, x: i as f32 * cw, y: 0.0 })
+            .collect();
         scene.glyphs(font, size, p.bg, Point::new(at.x + 8.0, at.y + 2.0 + mt.baseline), glyphs);
     }
     scene.pop_clip();
@@ -1775,7 +1917,9 @@ fn term_flag(desktop: &str, key: &str, default: bool) -> bool {
 
 /// Lines each tab keeps (the settings' `scrollback`, 1,000 to 1,000,000).
 fn scrollback_of(desktop: &str) -> usize {
-    vergence_ui::table_value(desktop, "[terminal]", "scrollback").and_then(|v| v.parse::<usize>().ok()).map_or(10_000, |n| n.clamp(1_000, 1_000_000))
+    vergence_ui::table_value(desktop, "[terminal]", "scrollback")
+        .and_then(|v| v.parse::<usize>().ok())
+        .map_or(10_000, |n| n.clamp(1_000, 1_000_000))
 }
 
 /// The cursor's blink: on and off this long.
@@ -1838,7 +1982,14 @@ impl App for Terminal {
         if !self.asking.get() {
             self.asking.set(true);
             let theme = vergence_widgets::Theme::from_desktop(&config("desktop.toml"), true, "[terminal]");
-            window.open_window(vergence_widgets::window(confirm::CloseDialog { heading, detail, close: self.close_now.clone(), open: self.asking.clone(), waker: self.waker.clone(), theme }));
+            window.open_window(vergence_widgets::window(confirm::CloseDialog {
+                heading,
+                detail,
+                close: self.close_now.clone(),
+                open: self.asking.clone(),
+                waker: self.waker.clone(),
+                theme,
+            }));
         }
         false
     }
@@ -1871,7 +2022,16 @@ impl App for Terminal {
             return None;
         }
         let bar = vergence_ui::Bar::Tabs {
-            tabs: tabs.iter().map(|(id, title, root)| vergence_ui::BarTab { id: *id, title: title.chars().take(200).collect(), closable: true, alert: *root, edited: false }).collect(),
+            tabs: tabs
+                .iter()
+                .map(|(id, title, root)| vergence_ui::BarTab {
+                    id: *id,
+                    title: title.chars().take(200).collect(),
+                    closable: true,
+                    alert: *root,
+                    edited: false,
+                })
+                .collect(),
             front,
             plus: true,
             accent: Some(page),
@@ -1942,7 +2102,13 @@ impl App for Terminal {
             cmd::SETTINGS => return self.open_settings(window),
             cmd::ABOUT => {
                 let theme = vergence_widgets::Theme::from_desktop(&config("desktop.toml"), true, "[terminal]");
-                let about = vergence_widgets::about::About::new("vergence-term", "Terminal", env!("CARGO_PKG_VERSION"), "A terminal: tabs, and sections side by side or stacked.", theme);
+                let about = vergence_widgets::about::About::new(
+                    "vergence-term",
+                    "Terminal",
+                    env!("CARGO_PKG_VERSION"),
+                    "A terminal: tabs, and sections side by side or stacked.",
+                    theme,
+                );
                 return window.open_window(vergence_widgets::window(about));
             }
             cmd::ZOOM_IN => return self.zoom_by(Some(ZOOM_STEP), window),
@@ -2054,7 +2220,12 @@ impl App for Terminal {
         }
         for _ in 0..self.open_with {
             match self.start(self.fits.0, self.fits.1) {
-                Some((id, session)) => self.tabs.push(Tab { id: NEXT_TAB.fetch_add(1, Ordering::SeqCst), tree: Node::Leaf(id), panes: vec![(id, session)], active: id }),
+                Some((id, session)) => self.tabs.push(Tab {
+                    id: NEXT_TAB.fetch_add(1, Ordering::SeqCst),
+                    tree: Node::Leaf(id),
+                    panes: vec![(id, session)],
+                    active: id,
+                }),
                 None => std::process::exit(1),
             }
         }
@@ -2084,7 +2255,8 @@ impl App for Terminal {
             }
             TIMER_ROOT => {
                 let now_root: Vec<bool> = self.tabs.iter().map(Tab::as_root).collect();
-                let told: Vec<bool> = self.bar_told.as_ref().map(|(tabs, ..)| tabs.iter().map(|t| t.2).collect()).unwrap_or_default();
+                let told: Vec<bool> =
+                    self.bar_told.as_ref().map(|(tabs, ..)| tabs.iter().map(|t| t.2).collect()).unwrap_or_default();
                 if now_root != told {
                     window.redraw();
                 }
@@ -2143,7 +2315,8 @@ impl App for Terminal {
             // worked out again at the next frame, and the grids follow it.
             self.palette = palette();
             self.opacity = vergence_ui::opacity_setting(&config("desktop.toml"), "[terminal]");
-            self.bar_style = vergence_ui::bar_style_setting(&config("desktop.toml"), "[terminal]", vergence_ui::BarStyle::Desktop);
+            self.bar_style =
+                vergence_ui::bar_style_setting(&config("desktop.toml"), "[terminal]", vergence_ui::BarStyle::Desktop);
             let desktop = config("desktop.toml");
             self.cursor_shape = CursorShape::of(&desktop);
             (self.blink, self.ask_close) = (term_flag(&desktop, "blink", true), term_flag(&desktop, "ask-close", true));
@@ -2189,7 +2362,9 @@ impl App for Terminal {
         }
         // Panes whose program has ended go; a tab goes with its last pane, the window with its last tab.
         while ended {
-            let gone = self.tabs.iter().enumerate().find_map(|(index, tab)| tab.panes.iter().find(|(_, s)| lock(&s.screen).exited).map(|(id, _)| (index, *id)));
+            let gone = self.tabs.iter().enumerate().find_map(|(index, tab)| {
+                tab.panes.iter().find(|(_, s)| lock(&s.screen).exited).map(|(id, _)| (index, *id))
+            });
             let Some((index, id)) = gone else { break };
             self.close_pane(index, id, window);
             if self.tabs.is_empty() {
@@ -2236,7 +2411,10 @@ impl App for Terminal {
                     if self.finger_pointer.is_none() {
                         let modifiers = Modifiers { shift: false, ctrl: false, alt: false, logo: false };
                         self.input(&Input::PointerMoved { x: from.0, y: from.1 }, window);
-                        self.input(&Input::Button { button: Button::Left, pressed: true, x: from.0, y: from.1, modifiers }, window);
+                        self.input(
+                            &Input::Button { button: Button::Left, pressed: true, x: from.0, y: from.1, modifiers },
+                            window,
+                        );
                     }
                     self.finger_pointer = Some((x, y));
                     self.input(&Input::PointerMoved { x, y }, window);
@@ -2337,7 +2515,9 @@ impl App for Terminal {
                     window.set_maximized(self.maximized);
                 }
                 (Button::Left, Some(Part::Tab(i))) => self.show_tab(i, window),
-                (Button::Left, Some(Part::CloseTab(i))) | (Button::Middle, Some(Part::Tab(i) | Part::CloseTab(i))) => self.close_tab(i, window),
+                (Button::Left, Some(Part::CloseTab(i))) | (Button::Middle, Some(Part::Tab(i) | Part::CloseTab(i))) => {
+                    self.close_tab(i, window)
+                }
                 (Button::Left, Some(Part::Plus)) => self.new_tab(window),
                 (Button::Left, Some(Part::Bar)) => {
                     // Twice on the bare bar: larger or back. Once: the user moves the window.
@@ -2407,7 +2587,8 @@ impl App for Terminal {
                 };
                 if let Some(forward) = step {
                     let n = self.tabs.len().max(1);
-                    return self.show_tab(if forward { (self.shown + 1) % n } else { (self.shown + n - 1) % n }, window);
+                    return self
+                        .show_tab(if forward { (self.shown + 1) % n } else { (self.shown + n - 1) % n }, window);
                 }
                 // Ctrl+V pastes, with Shift or without (Dave, 2026-11-09). The control
                 // character it used to send (the shell's "take the next key as it is") is
@@ -2429,7 +2610,12 @@ impl App for Terminal {
                 // The scrollback: with Shift, PageUp and PageDown a page, Home and End
                 // its two ends. On the alternate screen there is none, and the keys
                 // are the program's.
-                if m.shift && !m.ctrl && !m.alt && !s.grid.alt && matches!(*key, sym::PAGE_UP | sym::PAGE_DOWN | sym::HOME | sym::END) {
+                if m.shift
+                    && !m.ctrl
+                    && !m.alt
+                    && !s.grid.alt
+                    && matches!(*key, sym::PAGE_UP | sym::PAGE_DOWN | sym::HOME | sym::END)
+                {
                     let page = s.grid.rows.saturating_sub(1).max(1) as isize;
                     s.scroll_by(match *key {
                         sym::PAGE_UP => page,
@@ -2472,7 +2658,8 @@ impl App for Terminal {
                 let mut s = lock(&session.screen);
                 if s.grid.alt {
                     // A full-screen program has no scrollback: the wheel is its arrow keys.
-                    let key = if s.grid.app_cursor { "\x1bO" } else { "\x1b[" }.to_string() + if notches < 0 { "A" } else { "B" };
+                    let key = if s.grid.app_cursor { "\x1bO" } else { "\x1b[" }.to_string()
+                        + if notches < 0 { "A" } else { "B" };
                     drop(s);
                     session.pty.write(key.repeat((notches.unsigned_abs() * WHEEL_LINES as usize).min(60)).as_bytes());
                 } else {
@@ -2501,7 +2688,11 @@ impl App for Terminal {
                 eprintln!("frame {}", frame.number);
             }
             if let Some((tab, after, when)) = self.asked.take() {
-                eprintln!("tab {tab} asked after frame {after}, drawn in frame {}, {:.1} ms later", frame.number, when.elapsed().as_secs_f64() * 1000.0);
+                eprintln!(
+                    "tab {tab} asked after frame {after}, drawn in frame {}, {:.1} ms later",
+                    frame.number,
+                    when.elapsed().as_secs_f64() * 1000.0
+                );
             }
             self.frame_now = frame.number;
         }
@@ -2522,13 +2713,24 @@ impl App for Terminal {
         if self.metrics.is_none() {
             // The settings' fonts, or the machine's own if it does not have them.
             let mono = &self.settings.mono_family;
-            self.metrics = fonts.face(mono, 400, false).or_else(|| fonts.face("monospace", 400, false)).map(|regular| {
-                let bold = fonts.face(mono, 700, false).or_else(|| fonts.face("monospace", 700, false)).unwrap_or(regular);
-                let ui = fonts.face(&self.settings.ui_family, 400, false).or_else(|| fonts.face("sans-serif", 400, false));
-                let m = fonts.metrics(regular, size);
-                let (face, glyph) = fonts.glyph(regular, 'M');
-                Metrics { regular, bold, ui, cell_w: fonts.advance(face, glyph, size), cell_h: (m.ascent + m.descent + m.line_gap).ceil(), baseline: m.ascent.round() }
-            });
+            self.metrics =
+                fonts.face(mono, 400, false).or_else(|| fonts.face("monospace", 400, false)).map(|regular| {
+                    let bold =
+                        fonts.face(mono, 700, false).or_else(|| fonts.face("monospace", 700, false)).unwrap_or(regular);
+                    let ui = fonts
+                        .face(&self.settings.ui_family, 400, false)
+                        .or_else(|| fonts.face("sans-serif", 400, false));
+                    let m = fonts.metrics(regular, size);
+                    let (face, glyph) = fonts.glyph(regular, 'M');
+                    Metrics {
+                        regular,
+                        bold,
+                        ui,
+                        cell_w: fonts.advance(face, glyph, size),
+                        cell_h: (m.ascent + m.descent + m.line_gap).ceil(),
+                        baseline: m.ascent.round(),
+                    }
+                });
         }
         let (panes, dividers) = self.areas();
         // A selection held past the top or bottom edge: the view moves a line at a time and
@@ -2544,7 +2746,12 @@ impl App for Terminal {
         // Columns stop short of the scrollbar at the right edge (Dave's list,
         // 2026-11-16: the text ran under it), always, so a terminal's width
         // does not change when its first line scrolls away.
-        let fit = |w: f32, h: f32| ((((w - PAD - RIGHT_GUTTER) / cw).floor().max(2.0) as usize).min(2000), (((h - 2.0 * PAD) / ch).floor().max(1.0) as usize).min(1000));
+        let fit = |w: f32, h: f32| {
+            (
+                (((w - PAD - RIGHT_GUTTER) / cw).floor().max(2.0) as usize).min(2000),
+                (((h - 2.0 * PAD) / ch).floor().max(1.0) as usize).min(1000),
+            )
+        };
         // The server draws the bar on the native road: the room starts at the top
         // then, or below the strip we draw under its bar.
         self.own_bar = !frame.bar_by_server;
@@ -2570,8 +2777,34 @@ impl App for Terminal {
         if !frame.bar_by_server {
             let titles: Vec<String> = self.tabs.iter().map(Tab::label).collect();
             let alerts: Vec<bool> = self.tabs.iter().map(Tab::as_root).collect();
-            let layout = Layout::new(frame.width, self.tabs.len(), self.shown, &self.settings.left, &self.settings.right);
-            bar::draw(&mut scene, fonts, &layout, &bar::Look { bar: vergence_look::bar_look(self.settings.light), frosted: false, focused: self.focused, pane: p.bg, pane_ink: p.fg, font: mt.ui, font_size: self.settings.ui_size, titles: &titles, alerts: &alerts, edited: &[], title: "", shown: self.shown, hover: self.hover, dragged: None, tools: &[], tool_names: &[], app_icon: None, menu_open: false, root: false });
+            let layout =
+                Layout::new(frame.width, self.tabs.len(), self.shown, &self.settings.left, &self.settings.right);
+            bar::draw(
+                &mut scene,
+                fonts,
+                &layout,
+                &bar::Look {
+                    bar: vergence_look::bar_look(self.settings.light),
+                    frosted: false,
+                    focused: self.focused,
+                    pane: p.bg,
+                    pane_ink: p.fg,
+                    font: mt.ui,
+                    font_size: self.settings.ui_size,
+                    titles: &titles,
+                    alerts: &alerts,
+                    edited: &[],
+                    title: "",
+                    shown: self.shown,
+                    hover: self.hover,
+                    dragged: None,
+                    tools: &[],
+                    tool_names: &[],
+                    app_icon: None,
+                    menu_open: false,
+                    root: false,
+                },
+            );
         }
 
         let Some(tab) = self.tabs.get(self.shown) else { return scene };
@@ -2594,7 +2827,16 @@ impl App for Terminal {
             }
             // A pane along the top of a window that draws under its bar fills the strip above it.
             let above = if !self.own_bar && area.y <= self.bar_h + 0.5 { self.bar_h } else { 0.0 };
-            let look = PaneLook { palette: p, metrics: mt, size, keyboard: active && self.focused, thumb_held: active && matches!(self.held, Some(Held::Thumb(_))), above, cursor: self.cursor_shape, cursor_on: !self.blink || self.blink_on };
+            let look = PaneLook {
+                palette: p,
+                metrics: mt,
+                size,
+                keyboard: active && self.focused,
+                thumb_held: active && matches!(self.held, Some(Held::Thumb(_))),
+                above,
+                cursor: self.cursor_shape,
+                cursor_on: !self.blink || self.blink_on,
+            };
             draw_pane(&mut scene, fonts, &mut numbers, s, *area, &look);
         }
         // The lines between panes; the one held, in the accent.
@@ -2603,7 +2845,14 @@ impl App for Terminal {
             scene.fill(d.line, if held { p.accent } else { Color::rgba(p.fg.r, p.fg.g, p.fg.b, 56) });
         }
         if let Some(menu) = &self.menu {
-            menu.draw(&mut scene, fonts, mt.ui, vergence_look::text_size(self.settings.ui_size, self.text), p.accent, self.menu_hover);
+            menu.draw(
+                &mut scene,
+                fonts,
+                mt.ui,
+                vergence_look::text_size(self.settings.ui_size, self.text),
+                p.accent,
+                self.menu_hover,
+            );
         }
         self.last_commands = scene.commands.len();
         scene
@@ -2633,10 +2882,14 @@ fn main() {
         }
         terminal.run = Some(run);
     }
-    if let Some(n) = args.iter().position(|a| a == "--tabs").and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<usize>().ok()) {
+    if let Some(n) =
+        args.iter().position(|a| a == "--tabs").and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<usize>().ok())
+    {
         terminal.open_with = n.clamp(1, 64);
     }
-    if let Some(n) = args.iter().position(|a| a == "--panes").and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<usize>().ok()) {
+    if let Some(n) =
+        args.iter().position(|a| a == "--panes").and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<usize>().ok())
+    {
         terminal.open_panes = n.clamp(1, 16);
     }
     terminal.open_maximized = args.iter().any(|a| a == "--maximized");
@@ -2645,7 +2898,8 @@ fn main() {
     // window and is done. A terminal started to be measured keeps a process of
     // its own.
     let measured = args.iter().any(|a| a == "--tabs" || a == "--panes") || std::env::var_os("VTERM_FRAMES").is_some();
-    let native = std::env::var_os("VERGENCE_BUS").is_some() && std::env::var("VERGENCE_UI_WAYLAND").as_deref() != Ok("1");
+    let native =
+        std::env::var_os("VERGENCE_BUS").is_some() && std::env::var("VERGENCE_UI_WAYLAND").as_deref() != Ok("1");
     if !measured {
         let cwd = std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
         if program::hand_over(&program::OpenRequest { cwd, run: terminal.run.clone().unwrap_or_default() }) {
@@ -2685,7 +2939,10 @@ mod tests {
         assert!(same(&palette_from("[terminal]\nscheme = \"Tango\"\n"), &TANGO));
         assert!(same(&palette_from("[appearance]\ncolor-scheme = \"light\"\n"), &LATTE));
         assert!(same(&palette_from("[appearance]\ncolor-scheme = \"default\"\n"), &CATPPUCCIN));
-        assert!(same(&palette_from("[appearance]\ncolor-scheme = \"light\"\n[terminal]\nscheme = \"tango\"\n"), &TANGO_LIGHT));
+        assert!(same(
+            &palette_from("[appearance]\ncolor-scheme = \"light\"\n[terminal]\nscheme = \"tango\"\n"),
+            &TANGO_LIGHT
+        ));
         // A key of the same name in another section is not ours.
         assert!(same(&palette_from("[wallpaper]\nscheme = \"tango\"\ncontrast = \"high\"\n"), &CATPPUCCIN));
         // High contrast: the text on black or white; the 16 colors stay.
@@ -2702,7 +2959,14 @@ mod tests {
 
     #[test]
     fn the_scrollback_keys_reach_its_ends() {
-        let mut s = Screen { grid: Grid::new(10, 4), parser: vt::Parser::new(), scroll: 0, exited: false, copied: None, selection: None };
+        let mut s = Screen {
+            grid: Grid::new(10, 4),
+            parser: vt::Parser::new(),
+            scroll: 0,
+            exited: false,
+            copied: None,
+            selection: None,
+        };
         for i in 0..10 {
             let line = format!("line {i}\r\n");
             s.parser.advance(&mut s.grid, line.as_bytes());
@@ -2765,22 +3029,38 @@ mod tests {
 
     #[test]
     fn the_settings_file_is_followed() {
-        let s = Settings::from_text("[settings]\n\"Gtk/DecorationLayout\" = \"close,minimize:\"\n\"Gtk/FontName\" = \"Adwaita Sans 10\"\n\"Gtk/MonospaceFontName\" = \"Adwaita Mono 11\"\n");
+        let s = Settings::from_text(
+            "[settings]\n\"Gtk/DecorationLayout\" = \"close,minimize:\"\n\"Gtk/FontName\" = \"Adwaita Sans 10\"\n\"Gtk/MonospaceFontName\" = \"Adwaita Mono 11\"\n",
+        );
         assert_eq!((s.left.as_slice(), s.right.len()), (&[WinButton::Close, WinButton::Minimize][..], 0));
         assert_eq!((s.ui_family.as_str(), s.mono_family.as_str()), ("Adwaita Sans", "Adwaita Mono"));
         assert!((s.ui_size - 13.333).abs() < 0.01 && (s.mono_size - 14.667).abs() < 0.01);
         // Nothing set: buttons on the right, the machine's own fonts at 10 points.
         let s = Settings::from_text("");
         // No layout chosen: vergence-bar's default, on the left (2026-11-12).
-        assert_eq!((s.left.as_slice(), s.right.len()), (&[WinButton::Close, WinButton::Minimize, WinButton::Maximize][..], 0));
+        assert_eq!(
+            (s.left.as_slice(), s.right.len()),
+            (&[WinButton::Close, WinButton::Minimize, WinButton::Maximize][..], 0)
+        );
         assert_eq!((s.ui_family.as_str(), s.mono_family.as_str()), ("sans-serif", "monospace"));
         assert_eq!(font_name("Cantarell", "sans-serif", 10.0).0, "Cantarell");
-        assert_eq!(font_name("Noto Sans 400", "sans-serif", 10.0), ("Noto Sans 400".to_string(), 10.0 * 96.0 / 72.0), "a size that is not one is part of the name");
+        assert_eq!(
+            font_name("Noto Sans 400", "sans-serif", 10.0),
+            ("Noto Sans 400".to_string(), 10.0 * 96.0 / 72.0),
+            "a size that is not one is part of the name"
+        );
     }
 
     #[test]
     fn the_view_scrolls_within_the_scrollback() {
-        let mut s = Screen { grid: Grid::new(20, 4), parser: vt::Parser::new(), scroll: 0, exited: false, copied: None, selection: None };
+        let mut s = Screen {
+            grid: Grid::new(20, 4),
+            parser: vt::Parser::new(),
+            scroll: 0,
+            exited: false,
+            copied: None,
+            selection: None,
+        };
         for i in 0..10 {
             let line = format!("line {i}\r\n");
             s.parser.advance(&mut s.grid, line.as_bytes());
@@ -2801,10 +3081,16 @@ mod tests {
     /// stays (red stays reddest).
     #[test]
     fn the_remembered_answer_is_the_worked_out_one() {
-        for (ink, ground) in [(rgb(0xef2929), rgb(0xffffff)), (rgb(0x2e3436), rgb(0xffffff)), (rgb(0xeeeeec), rgb(0x000000))] {
+        for (ink, ground) in
+            [(rgb(0xef2929), rgb(0xffffff)), (rgb(0x2e3436), rgb(0xffffff)), (rgb(0xeeeeec), rgb(0x000000))]
+        {
             let worked = readable(ink, ground, LIGHT_FLOOR);
             assert_eq!(readable_cached(ink, ground, LIGHT_FLOOR, LIGHT_FLOOR.to_bits()), worked);
-            assert_eq!(readable_cached(ink, ground, LIGHT_FLOOR, LIGHT_FLOOR.to_bits()), worked, "and again from memory");
+            assert_eq!(
+                readable_cached(ink, ground, LIGHT_FLOOR, LIGHT_FLOOR.to_bits()),
+                worked,
+                "and again from memory"
+            );
         }
     }
 
@@ -2827,5 +3113,4 @@ mod tests {
         let on_black = readable(rgb(0xeeeeec), rgb(0x000000), LIGHT_FLOOR);
         assert_eq!(on_black, rgb(0xeeeeec));
     }
-
 }

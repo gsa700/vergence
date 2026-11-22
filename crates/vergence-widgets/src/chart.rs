@@ -24,7 +24,12 @@ pub fn chart<M: 'static>(series: Vec<Vec<f64>>, top: Option<f64>, slots: usize, 
             let c = if k == 0 { t.accent } else { Color::rgba(t.accent.r, t.accent.g, t.accent.b, 110) };
             let x0 = r.x + r.w - step * (s.len() - 1) as f32;
             for (i, p) in s.windows(2).enumerate() {
-                scene.line(Point::new(x0 + step * i as f32, y_of(p[0])), Point::new(x0 + step * (i + 1) as f32, y_of(p[1])), 1.6, c);
+                scene.line(
+                    Point::new(x0 + step * i as f32, y_of(p[0])),
+                    Point::new(x0 + step * (i + 1) as f32, y_of(p[1])),
+                    1.6,
+                    c,
+                );
             }
         }
     })

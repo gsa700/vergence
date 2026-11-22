@@ -86,8 +86,18 @@ fn main() {
             // The outline and every page's links (step 6).
             let entries = vergence_pdf::outline::outline(&doc, &pages);
             let links: usize = (0..pages.len()).map(|i| vergence_pdf::outline::links(&doc, &pages, i).len()).sum();
-            OUTLINE.with(|o| o.set((o.get().0 + entries.len(), o.get().1 + links, o.get().2 + usize::from(!entries.is_empty()))));
-            Ok::<_, Error>((doc.repaired(), doc.encrypted(), pages.len(), empty, bad, doc.needs_password(), doc.encryption_revision()))
+            OUTLINE.with(|o| {
+                o.set((o.get().0 + entries.len(), o.get().1 + links, o.get().2 + usize::from(!entries.is_empty())))
+            });
+            Ok::<_, Error>((
+                doc.repaired(),
+                doc.encrypted(),
+                pages.len(),
+                empty,
+                bad,
+                doc.needs_password(),
+                doc.encryption_revision(),
+            ))
         });
         let took = at.elapsed();
         t.slowest.push((took, f.clone()));
@@ -134,7 +144,12 @@ fn main() {
                     }
                 }
                 if list && (repaired || bad > 0) {
-                    println!("{}{}  {}", if repaired { "repaired " } else { "" }, if bad > 0 { format!("{bad} bad streams") } else { String::new() }, f.display());
+                    println!(
+                        "{}{}  {}",
+                        if repaired { "repaired " } else { "" },
+                        if bad > 0 { format!("{bad} bad streams") } else { String::new() },
+                        f.display()
+                    );
                 }
             }
         }
@@ -144,11 +159,21 @@ fn main() {
     println!("not PDF {}  no catalog {}  PANICS {}", t.not_pdf, t.no_catalog, t.panics);
     let (entries, links, with) = OUTLINE.with(|o| o.get());
     println!("outlines: {with} files, {entries} entries; links: {links}");
-    println!("pages {}  (empty content {}; content streams that did not decode cleanly {})", t.pages, t.empty_pages, t.bad_streams);
+    println!(
+        "pages {}  (empty content {}; content streams that did not decode cleanly {})",
+        t.pages, t.empty_pages, t.bad_streams
+    );
     println!("encrypted by revision {:?}; need a password {}", t.revisions, t.locked);
-    println!("not encrypted: pages {}, files with no pages {}, content streams not clean {}", t.pages_plain, t.no_pages_plain, t.bad_plain);
+    println!(
+        "not encrypted: pages {}, files with no pages {}, content streams not clean {}",
+        t.pages_plain, t.no_pages_plain, t.bad_plain
+    );
     println!("slowest:");
     for (d, p) in &t.slowest {
-        println!("  {:.0} ms  {}", d.as_secs_f64() * 1000.0, p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+        println!(
+            "  {:.0} ms  {}",
+            d.as_secs_f64() * 1000.0,
+            p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+        );
     }
 }

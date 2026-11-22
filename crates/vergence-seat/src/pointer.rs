@@ -185,7 +185,9 @@ impl Seat {
                     self.begin(Grab::Move { window: w, button }, out);
                 }
             }
-            Target::Server(Part::Edge(w, e)) if left => self.begin(Grab::Resize { window: w, edges: Some(e), button }, out),
+            Target::Server(Part::Edge(w, e)) if left => {
+                self.begin(Grab::Resize { window: w, edges: Some(e), button }, out)
+            }
             Target::Server(Part::Close(w)) if left => {
                 out.push(Out::Close(w));
                 p.swallow(button);
@@ -208,7 +210,14 @@ impl Seat {
                 p.swallow(button);
             }
             // The frame's other buttons do nothing.
-            Target::Server(Part::Title(_) | Part::Edge(..) | Part::Close(_) | Part::Maximize(_) | Part::Minimize(_) | Part::AppMenu(_)) => p.swallow(button),
+            Target::Server(
+                Part::Title(_)
+                | Part::Edge(..)
+                | Part::Close(_)
+                | Part::Maximize(_)
+                | Part::Minimize(_)
+                | Part::AppMenu(_),
+            ) => p.swallow(button),
             Target::Server(Part::Desktop) => {
                 if left {
                     out.push(Out::Unfocus);
@@ -333,7 +342,11 @@ mod tests {
         let out = seat.button(BTN_LEFT, true, Some(button), Default::default(), 0);
         assert!(out.contains(&Out::AppMenu(W1)));
         assert!(out.contains(&Out::Focus(W1)));
-        assert!(seat.button(BTN_LEFT, false, Some(button), Default::default(), 5).iter().all(|o| !matches!(o, Out::Release(..))));
+        assert!(
+            seat.button(BTN_LEFT, false, Some(button), Default::default(), 5)
+                .iter()
+                .all(|o| !matches!(o, Out::Release(..)))
+        );
         seat.menu_opened(Menu::AppMenu);
         let list = Target::Server(Part::AppList);
         assert!(seat.button(BTN_LEFT, true, Some(list), Default::default(), 10).contains(&Out::Press(list, BTN_LEFT)));
@@ -352,9 +365,16 @@ mod tests {
         assert!(out.contains(&Out::WindowMenu { window: W1, on_button: false }));
         assert!(!out.iter().any(|o| matches!(o, Out::MoveBegin(_))));
         // Its release goes nowhere.
-        assert!(seat.button(BTN_RIGHT, false, Some(bar), Default::default(), 10).iter().all(|o| !matches!(o, Out::Release(..))));
+        assert!(
+            seat.button(BTN_RIGHT, false, Some(bar), Default::default(), 10)
+                .iter()
+                .all(|o| !matches!(o, Out::Release(..)))
+        );
         let max = Target::Server(Part::Maximize(W2));
-        assert!(seat.button(BTN_RIGHT, true, Some(max), Default::default(), 20).contains(&Out::WindowMenu { window: W2, on_button: true }));
+        assert!(
+            seat.button(BTN_RIGHT, true, Some(max), Default::default(), 20)
+                .contains(&Out::WindowMenu { window: W2, on_button: true })
+        );
         // A left click there still maximizes.
         seat.button(BTN_RIGHT, false, Some(max), Default::default(), 30);
         assert!(seat.button(BTN_LEFT, true, Some(max), Default::default(), 40).contains(&Out::Maximize(W2)));
@@ -382,7 +402,10 @@ mod tests {
         assert_eq!(seat.button(BTN_RIGHT, true, Some(s2()), Default::default(), 1), vec![Out::Press(s1(), BTN_RIGHT)]);
         assert_eq!(seat.button(BTN_LEFT, false, Some(s2()), Default::default(), 2), vec![Out::Release(s1(), BTN_LEFT)]);
         // The last release lets go: the pointer is on what is under it.
-        assert_eq!(seat.button(BTN_RIGHT, false, Some(s2()), Default::default(), 3), vec![Out::Release(s1(), BTN_RIGHT), Out::Leave(s1()), Out::Enter(s2())]);
+        assert_eq!(
+            seat.button(BTN_RIGHT, false, Some(s2()), Default::default(), 3),
+            vec![Out::Release(s1(), BTN_RIGHT), Out::Leave(s1()), Out::Enter(s2())]
+        );
     }
 
     #[test]
@@ -437,10 +460,15 @@ mod tests {
     fn the_frame_buttons_act_at_the_press_and_swallow_the_release() {
         let mut seat = Seat::new();
         let close = Some(Target::Server(Part::Close(W1)));
-        assert_eq!(seat.button(BTN_LEFT, true, close, Default::default(), 0), vec![Out::Enter(close.unwrap()), Out::Focus(W1), Out::Close(W1)]);
+        assert_eq!(
+            seat.button(BTN_LEFT, true, close, Default::default(), 0),
+            vec![Out::Enter(close.unwrap()), Out::Focus(W1), Out::Close(W1)]
+        );
         assert!(seat.button(BTN_LEFT, false, close, Default::default(), 1).is_empty());
         let edge = Some(Target::Server(Part::Edge(W2, Edges::LEFT)));
-        assert!(seat.button(BTN_LEFT, true, edge, Default::default(), 2).contains(&Out::ResizeBegin(W2, Some(Edges::LEFT))));
+        assert!(
+            seat.button(BTN_LEFT, true, edge, Default::default(), 2).contains(&Out::ResizeBegin(W2, Some(Edges::LEFT)))
+        );
     }
 
     #[test]
@@ -448,8 +476,14 @@ mod tests {
         let mut seat = Seat::new();
         seat.menu_opened(Menu::Menu);
         let menu = Some(Target::Server(Part::Menu));
-        assert_eq!(seat.button(BTN_LEFT, true, menu, Default::default(), 0), vec![Out::Enter(menu.unwrap()), Out::Press(menu.unwrap(), BTN_LEFT)]);
-        assert_eq!(seat.button(BTN_LEFT, false, menu, Default::default(), 1), vec![Out::Release(menu.unwrap(), BTN_LEFT)]);
+        assert_eq!(
+            seat.button(BTN_LEFT, true, menu, Default::default(), 0),
+            vec![Out::Enter(menu.unwrap()), Out::Press(menu.unwrap(), BTN_LEFT)]
+        );
+        assert_eq!(
+            seat.button(BTN_LEFT, false, menu, Default::default(), 1),
+            vec![Out::Release(menu.unwrap(), BTN_LEFT)]
+        );
         // Outside: closed, and the window under it hears nothing of it.
         assert_eq!(seat.button(BTN_LEFT, true, Some(s1()), Default::default(), 2), vec![Out::CloseMenu]);
         assert_eq!(seat.menu(), None);
@@ -483,10 +517,20 @@ mod tests {
         let out = seat.lock();
         assert!(out.contains(&Out::Leave(s1())), "the window under the pointer is left");
         let lock = Target::Server(Part::Lock);
-        assert!(seat.motion(Some(s2())).iter().all(|o| !matches!(o, Out::Enter(t) | Out::Motion(t) if *t == s2())), "no window hears the pointer");
-        assert!(seat.button(BTN_LEFT, true, Some(s2()), alt(), 0).iter().all(|o| !matches!(o, Out::Press(t, _) if *t != lock)), "Alt+drag moves nothing");
+        assert!(
+            seat.motion(Some(s2())).iter().all(|o| !matches!(o, Out::Enter(t) | Out::Motion(t) if *t == s2())),
+            "no window hears the pointer"
+        );
+        assert!(
+            seat.button(BTN_LEFT, true, Some(s2()), alt(), 0)
+                .iter()
+                .all(|o| !matches!(o, Out::Press(t, _) if *t != lock)),
+            "Alt+drag moves nothing"
+        );
         assert_eq!(seat.grab(), None);
-        assert!(seat.axis(Some(s2())).iter().all(|o| matches!(o, Out::Axis(t) if *t == lock) || !matches!(o, Out::Axis(_))));
+        assert!(
+            seat.axis(Some(s2())).iter().all(|o| matches!(o, Out::Axis(t) if *t == lock) || !matches!(o, Out::Axis(_)))
+        );
     }
 
     #[test]
@@ -496,7 +540,10 @@ mod tests {
         seat.button(BTN_LEFT, true, Some(dock), Default::default(), 0);
         // Dragged off the dock: the dock still hears where it went and the release.
         assert_eq!(seat.motion(Some(s1())), vec![Out::Motion(dock)]);
-        assert_eq!(seat.button(BTN_LEFT, false, Some(s1()), Default::default(), 1), vec![Out::Release(dock, BTN_LEFT), Out::Leave(dock), Out::Enter(s1())]);
+        assert_eq!(
+            seat.button(BTN_LEFT, false, Some(s1()), Default::default(), 1),
+            vec![Out::Release(dock, BTN_LEFT), Out::Leave(dock), Out::Enter(s1())]
+        );
     }
 
     #[test]
@@ -518,10 +565,16 @@ mod tests {
         seat.button(BTN_LEFT, true, Some(bar), Default::default(), 0);
         // Another window's request: refused.
         assert!(seat.grab_from_press(W2, None).is_empty());
-        assert_eq!(seat.grab_from_press(W1, Some(Edges::BOTTOM)), vec![Out::Leave(bar), Out::ResizeBegin(W1, Some(Edges::BOTTOM))]);
+        assert_eq!(
+            seat.grab_from_press(W1, Some(Edges::BOTTOM)),
+            vec![Out::Leave(bar), Out::ResizeBegin(W1, Some(Edges::BOTTOM))]
+        );
         assert_eq!(seat.motion(Some(s2())), vec![Out::GrabMotion]);
         // The press's release ends it; the window never hears it.
-        assert_eq!(seat.button(BTN_LEFT, false, Some(s2()), Default::default(), 1), vec![Out::GrabEnd(W1), Out::Enter(s2())]);
+        assert_eq!(
+            seat.button(BTN_LEFT, false, Some(s2()), Default::default(), 1),
+            vec![Out::GrabEnd(W1), Out::Enter(s2())]
+        );
     }
 
     #[test]

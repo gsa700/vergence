@@ -8,12 +8,14 @@
 //! With a folder, each embedded program is also written there as
 //! `<resource name>.bin`, to look into.
 
-use vergence_pdf::object::{Dict, Object};
 use vergence_pdf::Document;
+use vergence_pdf::object::{Dict, Object};
 
 fn show(doc: &Document, label: &str, font: &Object, dump: Option<&str>) {
     let Some(f) = doc.resolve(font).as_dict().cloned() else { return };
-    let name = |d: &Dict, k: &str| doc.get_in(d, k).as_name().map(|n| String::from_utf8_lossy(n).into_owned()).unwrap_or_else(|| "-".into());
+    let name = |d: &Dict, k: &str| {
+        doc.get_in(d, k).as_name().map(|n| String::from_utf8_lossy(n).into_owned()).unwrap_or_else(|| "-".into())
+    };
     let mut desc = doc.get_in(&f, "FontDescriptor").as_dict().cloned();
     let mut detail = String::new();
     if let Some(Object::Array(kids)) = Some(doc.get_in(&f, "DescendantFonts"))
@@ -25,7 +27,8 @@ fn show(doc: &Document, label: &str, font: &Object, dump: Option<&str>) {
     let embedded = desc.as_ref().map_or("no descriptor".to_string(), |d| {
         for k in ["FontFile", "FontFile2", "FontFile3"] {
             if let Object::Stream(s) = doc.get_in(d, k) {
-                let sub = s.dict.name("Subtype").map(|n| format!(" /{}", String::from_utf8_lossy(n))).unwrap_or_default();
+                let sub =
+                    s.dict.name("Subtype").map(|n| format!(" /{}", String::from_utf8_lossy(n))).unwrap_or_default();
                 let data = doc.stream(&s).data;
                 if let Some(dir) = dump {
                     let _ = std::fs::write(format!("{dir}/{}.bin", label.replace('/', "_")), &data);

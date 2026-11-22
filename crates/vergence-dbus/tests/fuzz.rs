@@ -106,7 +106,8 @@ fn value(rng: &mut Rng, depth: usize) -> Value {
             let k = value(rng, 9); // depth 9: basic kinds only
             let v = value(rng, depth + 1);
             let n = rng.below(5);
-            let items = (0..n).map(|_| Value::Entry(Box::new(same_shape(rng, &k)), Box::new(same_shape(rng, &v)))).collect();
+            let items =
+                (0..n).map(|_| Value::Entry(Box::new(same_shape(rng, &k)), Box::new(same_shape(rng, &v)))).collect();
             Value::Array(Value::Entry(Box::new(k), Box::new(v)).signature(), items)
         }
         _ => {
@@ -156,7 +157,11 @@ fn message(rng: &mut Rng) -> (Message, Vec<Value>) {
         1 => Message::signal(&dest, PATHS[rng.below(4)], "org.example.Iface", "Changed", &a),
         _ => {
             let call = Message::method_call(&dest, "/", "org.example.Iface", "M", &[]);
-            if rng.below(2) == 0 { Message::method_return(&call, ":1.1", &a) } else { Message::error(&call, ":1.1", "org.example.Error", "text") }
+            if rng.below(2) == 0 {
+                Message::method_return(&call, ":1.1", &a)
+            } else {
+                Message::error(&call, ":1.1", "org.example.Error", "text")
+            }
         }
     };
     // (`big` is left alone: the constructors marshal the body at once, in
@@ -176,7 +181,10 @@ fn messages_round_trip() {
         assert_eq!(frame_len(&bytes).unwrap(), Some(bytes.len()), "{m:?}");
         let p = Message::parse(&bytes).unwrap_or_else(|e| panic!("{e:?}: {m:?}"));
         assert_eq!(p.args().unwrap_or_else(|e| panic!("{e:?}: {m:?}")), a);
-        assert_eq!((p.kind, p.big, p.serial, &p.path, &p.member, &p.destination), (m.kind, m.big, m.serial, &m.path, &m.member, &m.destination));
+        assert_eq!(
+            (p.kind, p.big, p.serial, &p.path, &p.member, &p.destination),
+            (m.kind, m.big, m.serial, &m.path, &m.member, &m.destination)
+        );
         assert_eq!(p.serialize(), bytes);
     }
 }
@@ -214,7 +222,11 @@ fn random_messages_never_panic() {
             let big_body = rng.below(10) == 0;
             let body = rng.below(if big_body { 2000 } else { 64 });
             let mut b = vec![if rng.below(4) == 0 { b'B' } else { b'l' }, 1 + rng.below(5) as u8, rng.next() as u8, 1];
-            let (body_w, fields_w) = if b[0] == b'B' { ((body as u32).to_be_bytes(), (fields as u32).to_be_bytes()) } else { ((body as u32).to_le_bytes(), (fields as u32).to_le_bytes()) };
+            let (body_w, fields_w) = if b[0] == b'B' {
+                ((body as u32).to_be_bytes(), (fields as u32).to_be_bytes())
+            } else {
+                ((body as u32).to_le_bytes(), (fields as u32).to_le_bytes())
+            };
             b.extend(body_w);
             b.extend((rng.next() as u32).to_le_bytes());
             b.extend(fields_w);
@@ -232,7 +244,20 @@ fn random_messages_never_panic() {
 #[test]
 fn auth_never_panics() {
     let mut rng = Rng::new(4);
-    const TOKENS: [&str; 12] = ["AUTH", " ", "EXTERNAL", "31303030", "DATA", "BEGIN", "NEGOTIATE_UNIX_FD", "CANCEL", "ERROR", "\r\n", "\0", "zz"];
+    const TOKENS: [&str; 12] = [
+        "AUTH",
+        " ",
+        "EXTERNAL",
+        "31303030",
+        "DATA",
+        "BEGIN",
+        "NEGOTIATE_UNIX_FD",
+        "CANCEL",
+        "ERROR",
+        "\r\n",
+        "\0",
+        "zz",
+    ];
     for _ in 0..iters() {
         let mut a = Auth::new(1000, "0123456789abcdef0123456789abcdef");
         if rng.below(3) == 0 {
@@ -261,7 +286,24 @@ fn auth_never_panics() {
 #[test]
 fn match_rules_never_panic() {
     let mut rng = Rng::new(5);
-    const TOKENS: [&str; 16] = ["type", "=", "'", "signal", "'", ",", "sender", "member", "path", "path_namespace", "arg", "0", "99999999999999999999", "path", "\\'", "eavesdrop='true'"];
+    const TOKENS: [&str; 16] = [
+        "type",
+        "=",
+        "'",
+        "signal",
+        "'",
+        ",",
+        "sender",
+        "member",
+        "path",
+        "path_namespace",
+        "arg",
+        "0",
+        "99999999999999999999",
+        "path",
+        "\\'",
+        "eavesdrop='true'",
+    ];
     for _ in 0..iters() {
         let text: String = if rng.below(4) == 0 {
             rng.string(60)

@@ -254,8 +254,24 @@ pub fn frost(rgba: &[u8], width: usize, height: usize, rows: usize, f: &Frost) -
 mod tests {
     use super::*;
 
-    const DARK: Frost = Frost { tint: [51, 61, 82], strength: 0.5, ink: [235, 235, 235], need: 7.0, radius: 14.0, invert: false, cap: false };
-    const LIGHT: Frost = Frost { tint: [228, 230, 235], strength: 0.5, ink: [29, 29, 31], need: 5.85, radius: 14.0, invert: false, cap: false };
+    const DARK: Frost = Frost {
+        tint: [51, 61, 82],
+        strength: 0.5,
+        ink: [235, 235, 235],
+        need: 7.0,
+        radius: 14.0,
+        invert: false,
+        cap: false,
+    };
+    const LIGHT: Frost = Frost {
+        tint: [228, 230, 235],
+        strength: 0.5,
+        ink: [29, 29, 31],
+        need: 5.85,
+        radius: 14.0,
+        invert: false,
+        cap: false,
+    };
 
     fn picture(width: usize, height: usize, at: impl Fn(usize, usize) -> [u8; 4]) -> Vec<u8> {
         let mut v = Vec::with_capacity(width * height * 4);
@@ -269,7 +285,9 @@ mod tests {
 
     fn worst(out: &[u8], ink: [u8; 3]) -> f32 {
         let ink = ink.map(|v| v as f32 / 255.0);
-        out.chunks(4).map(|p| contrast(ink, [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0])).fold(f32::MAX, f32::min)
+        out.chunks(4)
+            .map(|p| contrast(ink, [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0]))
+            .fold(f32::MAX, f32::min)
     }
 
     /// Light text on a dark window under a light bar, inverted, shows as
@@ -280,7 +298,12 @@ mod tests {
         let plain = frost(&text, 32, 16, 16, &LIGHT);
         let inverted = frost(&text, 32, 16, 16, &Frost { invert: true, ..LIGHT });
         let mean = |p: &[u8]| p.chunks(4).map(|c| c[0] as u32).sum::<u32>() / (p.len() / 4) as u32;
-        assert!(mean(&inverted) > mean(&plain), "the dark ground inverted is light: {} vs {}", mean(&inverted), mean(&plain));
+        assert!(
+            mean(&inverted) > mean(&plain),
+            "the dark ground inverted is light: {} vs {}",
+            mean(&inverted),
+            mean(&plain)
+        );
         assert!(worst(&inverted, LIGHT.ink) >= LIGHT.need - 0.1, "the ink still reads");
     }
 
@@ -292,13 +315,27 @@ mod tests {
     fn over_a_dark_window_inverted_the_focused_light_bar_is_not_the_dimmer() {
         let text = picture(32, 16, |x, y| if (x + y) % 5 == 0 { [235, 235, 235, 255] } else { [46, 52, 54, 255] });
         let focused = frost(&text, 32, 16, 16, &Frost { invert: true, ..LIGHT });
-        let unfocused = frost(&text, 32, 16, 16, &Frost { tint: [240, 240, 241], ink: [112, 112, 116], need: 4.05, invert: true, ..LIGHT });
+        let unfocused = frost(
+            &text,
+            32,
+            16,
+            16,
+            &Frost { tint: [240, 240, 241], ink: [112, 112, 116], need: 4.05, invert: true, ..LIGHT },
+        );
         let mean = |p: &[u8]| p.chunks(4).map(|c| c[0] as f32).sum::<f32>() / (p.len() / 4) as f32;
-        assert!(mean(&focused) >= 185.0 && mean(&unfocused) - mean(&focused) <= 40.0, "focused {} unfocused {}", mean(&focused), mean(&unfocused));
+        assert!(
+            mean(&focused) >= 185.0 && mean(&unfocused) - mean(&focused) <= 40.0,
+            "focused {} unfocused {}",
+            mean(&focused),
+            mean(&unfocused)
+        );
         // Not inverted, the focused bar was far dimmer: the gap this fixes.
         let before = frost(&text, 32, 16, 16, &LIGHT);
         assert!(mean(&before) < mean(&focused) - 20.0, "before {} after {}", mean(&before), mean(&focused));
-        let spread = |p: &[u8]| { let v: Vec<u8> = p.chunks(4).map(|c| c[0]).collect(); v.iter().max().unwrap() - v.iter().min().unwrap() };
+        let spread = |p: &[u8]| {
+            let v: Vec<u8> = p.chunks(4).map(|c| c[0]).collect();
+            v.iter().max().unwrap() - v.iter().min().unwrap()
+        };
         assert!(spread(&focused) >= 8, "the text under it still shows: spread {}", spread(&focused));
     }
 
@@ -343,7 +380,15 @@ mod tests {
     fn a_sharp_edge_is_softened() {
         let (w, h) = (40, 30);
         let p = picture(w, h, |x, _| if x == 20 { [255, 255, 255, 255] } else { [0, 0, 0, 255] });
-        let f = Frost { tint: [0, 0, 0], strength: 0.0, ink: [255, 255, 255], need: 1.0, radius: 6.0, invert: false, cap: false };
+        let f = Frost {
+            tint: [0, 0, 0],
+            strength: 0.0,
+            ink: [255, 255, 255],
+            need: 1.0,
+            radius: 6.0,
+            invert: false,
+            cap: false,
+        };
         let out = frost(&p, w, h, 10, &f);
         let at = |x: usize| out[(5 * w + x) * 4];
         assert!(at(20) < 200, "the line itself is spread out: {}", at(20));
@@ -360,10 +405,16 @@ mod tests {
         let page = picture(32, 16, |x, _| if x % 8 == 0 { [20, 20, 20, 255] } else { [255, 255, 255, 255] });
         let f = Frost { tint, cap: true, ..LIGHT };
         let out = frost(&page, 32, 16, 16, &f);
-        assert!(out.chunks(4).all(|p| p[0] <= tint[0] && p[1] <= tint[1] && p[2] <= tint[2]), "nothing lighter than the ground");
+        assert!(
+            out.chunks(4).all(|p| p[0] <= tint[0] && p[1] <= tint[1] && p[2] <= tint[2]),
+            "nothing lighter than the ground"
+        );
         assert!(out.chunks(4).any(|p| p[0] + 8 < tint[0]), "the text still shows, darker");
         let open = frost(&page, 32, 16, 16, &Frost { tint, ..LIGHT });
-        assert!(open.chunks(4).any(|p| p[0] > tint[0]), "without the cap the white shows lighter (what washed the bar out)");
+        assert!(
+            open.chunks(4).any(|p| p[0] > tint[0]),
+            "without the cap the white shows lighter (what washed the bar out)"
+        );
         assert!(worst(&out, LIGHT.ink) >= LIGHT.need - 0.1, "the ink still reads");
     }
 

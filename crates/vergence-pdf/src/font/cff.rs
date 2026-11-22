@@ -19,15 +19,235 @@ const MAX_OPS: usize = 100_000;
 /// CFF's standard strings 0-228 (the ISOAdobe charset's names); 229-390
 /// (the expert set, rare in body text) are not kept.
 const STD_STRINGS: [&str; 229] = [
-    ".notdef", "space", "exclam", "quotedbl", "numbersign", "dollar", "percent", "ampersand", "quoteright", "parenleft", "parenright", "asterisk", "plus", "comma", "hyphen", "period", "slash", "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "colon", "semicolon", "less", "equal", "greater", "question", "at",
-    "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
-    "bracketleft", "backslash", "bracketright", "asciicircum", "underscore", "quoteleft",
-    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
-    "braceleft", "bar", "braceright", "asciitilde", "exclamdown", "cent", "sterling", "fraction", "yen", "florin", "section", "currency", "quotesingle", "quotedblleft", "guillemotleft", "guilsinglleft", "guilsinglright", "fi", "fl", "endash", "dagger", "daggerdbl", "periodcentered", "paragraph", "bullet", "quotesinglbase", "quotedblbase", "quotedblright", "guillemotright", "ellipsis", "perthousand", "questiondown", "grave", "acute", "circumflex", "tilde", "macron", "breve", "dotaccent", "dieresis", "ring", "cedilla", "hungarumlaut", "ogonek", "caron", "emdash",
-    "AE", "ordfeminine", "Lslash", "Oslash", "OE", "ordmasculine", "ae", "dotlessi", "lslash", "oslash", "oe", "germandbls",
-    "onesuperior", "logicalnot", "mu", "trademark", "Eth", "onehalf", "plusminus", "Thorn", "onequarter", "divide", "brokenbar", "degree", "thorn", "threequarters", "twosuperior", "registered", "minus", "eth", "multiply", "threesuperior", "copyright",
-    "Aacute", "Acircumflex", "Adieresis", "Agrave", "Aring", "Atilde", "Ccedilla", "Eacute", "Ecircumflex", "Edieresis", "Egrave", "Iacute", "Icircumflex", "Idieresis", "Igrave", "Ntilde", "Oacute", "Ocircumflex", "Odieresis", "Ograve", "Otilde", "Scaron", "Uacute", "Ucircumflex", "Udieresis", "Ugrave", "Yacute", "Ydieresis", "Zcaron",
-    "aacute", "acircumflex", "adieresis", "agrave", "aring", "atilde", "ccedilla", "eacute", "ecircumflex", "edieresis", "egrave", "iacute", "icircumflex", "idieresis", "igrave", "ntilde", "oacute", "ocircumflex", "odieresis", "ograve", "otilde", "scaron", "uacute", "ucircumflex", "udieresis", "ugrave", "yacute", "ydieresis", "zcaron",
+    ".notdef",
+    "space",
+    "exclam",
+    "quotedbl",
+    "numbersign",
+    "dollar",
+    "percent",
+    "ampersand",
+    "quoteright",
+    "parenleft",
+    "parenright",
+    "asterisk",
+    "plus",
+    "comma",
+    "hyphen",
+    "period",
+    "slash",
+    "zero",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "colon",
+    "semicolon",
+    "less",
+    "equal",
+    "greater",
+    "question",
+    "at",
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P",
+    "Q",
+    "R",
+    "S",
+    "T",
+    "U",
+    "V",
+    "W",
+    "X",
+    "Y",
+    "Z",
+    "bracketleft",
+    "backslash",
+    "bracketright",
+    "asciicircum",
+    "underscore",
+    "quoteleft",
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f",
+    "g",
+    "h",
+    "i",
+    "j",
+    "k",
+    "l",
+    "m",
+    "n",
+    "o",
+    "p",
+    "q",
+    "r",
+    "s",
+    "t",
+    "u",
+    "v",
+    "w",
+    "x",
+    "y",
+    "z",
+    "braceleft",
+    "bar",
+    "braceright",
+    "asciitilde",
+    "exclamdown",
+    "cent",
+    "sterling",
+    "fraction",
+    "yen",
+    "florin",
+    "section",
+    "currency",
+    "quotesingle",
+    "quotedblleft",
+    "guillemotleft",
+    "guilsinglleft",
+    "guilsinglright",
+    "fi",
+    "fl",
+    "endash",
+    "dagger",
+    "daggerdbl",
+    "periodcentered",
+    "paragraph",
+    "bullet",
+    "quotesinglbase",
+    "quotedblbase",
+    "quotedblright",
+    "guillemotright",
+    "ellipsis",
+    "perthousand",
+    "questiondown",
+    "grave",
+    "acute",
+    "circumflex",
+    "tilde",
+    "macron",
+    "breve",
+    "dotaccent",
+    "dieresis",
+    "ring",
+    "cedilla",
+    "hungarumlaut",
+    "ogonek",
+    "caron",
+    "emdash",
+    "AE",
+    "ordfeminine",
+    "Lslash",
+    "Oslash",
+    "OE",
+    "ordmasculine",
+    "ae",
+    "dotlessi",
+    "lslash",
+    "oslash",
+    "oe",
+    "germandbls",
+    "onesuperior",
+    "logicalnot",
+    "mu",
+    "trademark",
+    "Eth",
+    "onehalf",
+    "plusminus",
+    "Thorn",
+    "onequarter",
+    "divide",
+    "brokenbar",
+    "degree",
+    "thorn",
+    "threequarters",
+    "twosuperior",
+    "registered",
+    "minus",
+    "eth",
+    "multiply",
+    "threesuperior",
+    "copyright",
+    "Aacute",
+    "Acircumflex",
+    "Adieresis",
+    "Agrave",
+    "Aring",
+    "Atilde",
+    "Ccedilla",
+    "Eacute",
+    "Ecircumflex",
+    "Edieresis",
+    "Egrave",
+    "Iacute",
+    "Icircumflex",
+    "Idieresis",
+    "Igrave",
+    "Ntilde",
+    "Oacute",
+    "Ocircumflex",
+    "Odieresis",
+    "Ograve",
+    "Otilde",
+    "Scaron",
+    "Uacute",
+    "Ucircumflex",
+    "Udieresis",
+    "Ugrave",
+    "Yacute",
+    "Ydieresis",
+    "Zcaron",
+    "aacute",
+    "acircumflex",
+    "adieresis",
+    "agrave",
+    "aring",
+    "atilde",
+    "ccedilla",
+    "eacute",
+    "ecircumflex",
+    "edieresis",
+    "egrave",
+    "iacute",
+    "icircumflex",
+    "idieresis",
+    "igrave",
+    "ntilde",
+    "oacute",
+    "ocircumflex",
+    "odieresis",
+    "ograve",
+    "otilde",
+    "scaron",
+    "uacute",
+    "ucircumflex",
+    "udieresis",
+    "ugrave",
+    "yacute",
+    "ydieresis",
+    "zcaron",
 ];
 
 /// An INDEX's items as byte ranges into the font.
@@ -42,7 +262,13 @@ fn index(d: &[u8], at: usize) -> Option<(Vec<(usize, usize)>, usize)> {
     }
     let offsets_at = at + 3;
     let data_at = offsets_at + (count + 1) * off_size - 1;
-    let off = |i: usize| -> Option<usize> { Some(d.get(offsets_at + i * off_size..offsets_at + (i + 1) * off_size)?.iter().fold(0usize, |a, b| a << 8 | *b as usize)) };
+    let off = |i: usize| -> Option<usize> {
+        Some(
+            d.get(offsets_at + i * off_size..offsets_at + (i + 1) * off_size)?
+                .iter()
+                .fold(0usize, |a, b| a << 8 | *b as usize),
+        )
+    };
     let mut items = Vec::with_capacity(count);
     for i in 0..count {
         let (a, b) = (data_at + off(i)?, data_at + off(i + 1)?);
@@ -79,7 +305,12 @@ fn dict(d: &[u8]) -> Vec<(u16, Vec<f64>)> {
                 i += 3;
             }
             29 => {
-                let v = i32::from_be_bytes([*d.get(i + 1).unwrap_or(&0), *d.get(i + 2).unwrap_or(&0), *d.get(i + 3).unwrap_or(&0), *d.get(i + 4).unwrap_or(&0)]);
+                let v = i32::from_be_bytes([
+                    *d.get(i + 1).unwrap_or(&0),
+                    *d.get(i + 2).unwrap_or(&0),
+                    *d.get(i + 3).unwrap_or(&0),
+                    *d.get(i + 4).unwrap_or(&0),
+                ]);
                 operands.push(v as f64);
                 i += 5;
             }
@@ -201,7 +432,8 @@ impl Cff {
                             let p = at + 3 + 3 * r;
                             let first = u16::from_be_bytes([*d.get(p)?, *d.get(p + 1)?]) as usize;
                             let fd = *d.get(p + 2)?;
-                            let next = d.get(p + 3..p + 5).map(|b| u16::from_be_bytes([b[0], b[1]]) as usize).unwrap_or(n);
+                            let next =
+                                d.get(p + 3..p + 5).map(|b| u16::from_be_bytes([b[0], b[1]]) as usize).unwrap_or(n);
                             if first < next.min(n) {
                                 fd_select[first..next.min(n)].fill(fd);
                             }
@@ -232,7 +464,11 @@ impl Cff {
                     while g < n {
                         let Some(b) = d.get(p..p + 2) else { break };
                         let first = u16::from_be_bytes([b[0], b[1]]);
-                        let left = if *f == 1 { *d.get(p + 2)? as usize } else { u16::from_be_bytes([*d.get(p + 2)?, *d.get(p + 3)?]) as usize };
+                        let left = if *f == 1 {
+                            *d.get(p + 2)? as usize
+                        } else {
+                            u16::from_be_bytes([*d.get(p + 2)?, *d.get(p + 3)?]) as usize
+                        };
                         p += if *f == 1 { 3 } else { 4 };
                         for k in 0..=left {
                             if g >= n {
@@ -252,7 +488,18 @@ impl Cff {
             }
         }
         // The font's own encoding (name-keyed fonts).
-        let mut cff = Cff { data: Vec::new(), charstrings, global, strings, privates, fd_select, charset, cid, encoding: [0; 256], matrix: [0.001, 0.0, 0.0, 0.001, 0.0, 0.0] };
+        let mut cff = Cff {
+            data: Vec::new(),
+            charstrings,
+            global,
+            strings,
+            privates,
+            fd_select,
+            charset,
+            cid,
+            encoding: [0; 256],
+            matrix: [0.001, 0.0, 0.0, 0.001, 0.0, 0.0],
+        };
         if let Some(m) = get(&top, 1207)
             && m.len() == 6
             && m.iter().all(|v| v.is_finite())
@@ -363,7 +610,19 @@ impl Cff {
         let fd = if self.cid { self.fd_select.get(gid as usize).copied().unwrap_or(0) as usize } else { 0 };
         let local = self.privates.get(fd).map(|p| p.subrs.as_slice()).unwrap_or(&[]);
         let &(a, b) = self.charstrings.get(gid as usize)?;
-        let mut run = Run { cff: self, local, path: Path::new(), stack: Vec::new(), x: 0.0, y: 0.0, stems: 0, open: false, width_seen: false, ops: 0, done: false };
+        let mut run = Run {
+            cff: self,
+            local,
+            path: Path::new(),
+            stack: Vec::new(),
+            x: 0.0,
+            y: 0.0,
+            stems: 0,
+            open: false,
+            width_seen: false,
+            ops: 0,
+            done: false,
+        };
         run.exec(&self.data[a..b], 0);
         if run.open {
             run.path.close();
@@ -474,7 +733,13 @@ impl Run<'_> {
                     }
                     _ => {
                         // 255: a 16.16 fixed number.
-                        let v = i32::from_be_bytes([*code.get(i).unwrap_or(&0), *code.get(i + 1).unwrap_or(&0), *code.get(i + 2).unwrap_or(&0), *code.get(i + 3).unwrap_or(&0)]) as f64 / 65536.0;
+                        let v = i32::from_be_bytes([
+                            *code.get(i).unwrap_or(&0),
+                            *code.get(i + 1).unwrap_or(&0),
+                            *code.get(i + 2).unwrap_or(&0),
+                            *code.get(i + 3).unwrap_or(&0),
+                        ]) as f64
+                            / 65536.0;
                         i += 4;
                         v
                     }
@@ -525,7 +790,11 @@ impl Run<'_> {
                     let st = std::mem::take(&mut self.stack);
                     let mut horizontal = b == 6;
                     for v in st {
-                        if horizontal { self.line_to(v, 0.0) } else { self.line_to(0.0, v) }
+                        if horizontal {
+                            self.line_to(v, 0.0)
+                        } else {
+                            self.line_to(0.0, v)
+                        }
                         horizontal = !horizontal;
                     }
                 }
@@ -564,7 +833,11 @@ impl Run<'_> {
                     let first = if st.len() % 4 == 1 { st.remove(0) } else { 0.0 };
                     for (k, c) in st.as_chunks::<4>().0.iter().enumerate() {
                         let d = if k == 0 { first } else { 0.0 };
-                        if b == 26 { self.curve([d, c[0], c[1], c[2], 0.0, c[3]]) } else { self.curve([c[0], d, c[1], c[2], c[3], 0.0]) }
+                        if b == 26 {
+                            self.curve([d, c[0], c[1], c[2], 0.0, c[3]])
+                        } else {
+                            self.curve([c[0], d, c[1], c[2], c[3], 0.0])
+                        }
                     }
                 }
                 30 | 31 => {
@@ -602,7 +875,8 @@ impl Run<'_> {
                         }
                     }
                     if self.stack.len() == 4 && depth == 0 {
-                        let (adx, ady, bchar, achar) = (self.stack[0], self.stack[1], self.stack[2] as usize, self.stack[3] as usize);
+                        let (adx, ady, bchar, achar) =
+                            (self.stack[0], self.stack[1], self.stack[2] as usize, self.stack[3] as usize);
                         if self.open {
                             self.path.close();
                             self.open = false;

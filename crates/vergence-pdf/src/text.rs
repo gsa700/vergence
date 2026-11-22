@@ -113,15 +113,35 @@ pub fn boxes(chars: &[Char], a: usize, b: usize) -> Vec<[f32; 4]> {
 /// closest along it; else the closest of all.
 pub fn nearest(chars: &[Char], x: f32, y: f32) -> Option<usize> {
     let dist = |c: &Char| {
-        let dx = if x < c.rect[0] { c.rect[0] - x } else if x > c.rect[2] { x - c.rect[2] } else { 0.0 };
-        let dy = if y < c.rect[1] { c.rect[1] - y } else if y > c.rect[3] { y - c.rect[3] } else { 0.0 };
+        let dx = if x < c.rect[0] {
+            c.rect[0] - x
+        } else if x > c.rect[2] {
+            x - c.rect[2]
+        } else {
+            0.0
+        };
+        let dy = if y < c.rect[1] {
+            c.rect[1] - y
+        } else if y > c.rect[3] {
+            y - c.rect[3]
+        } else {
+            0.0
+        };
         (dy, dx)
     };
-    let on_line = chars.iter().enumerate().filter(|(_, c)| y >= c.rect[1] && y <= c.rect[3]).min_by(|a, b| dist(a.1).1.total_cmp(&dist(b.1).1));
-    on_line.or_else(|| chars.iter().enumerate().min_by(|a, b| {
-        let (da, db) = (dist(a.1), dist(b.1));
-        (da.0 * 4.0 + da.1).total_cmp(&(db.0 * 4.0 + db.1))
-    })).map(|(i, _)| i)
+    let on_line = chars
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| y >= c.rect[1] && y <= c.rect[3])
+        .min_by(|a, b| dist(a.1).1.total_cmp(&dist(b.1).1));
+    on_line
+        .or_else(|| {
+            chars.iter().enumerate().min_by(|a, b| {
+                let (da, db) = (dist(a.1), dist(b.1));
+                (da.0 * 4.0 + da.1).total_cmp(&(db.0 * 4.0 + db.1))
+            })
+        })
+        .map(|(i, _)| i)
 }
 
 /// Whether (x, y) is on text: inside a character's box, a little grown.

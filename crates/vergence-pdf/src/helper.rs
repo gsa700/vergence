@@ -313,7 +313,8 @@ pub fn serve(input: &mut impl Read, output: &mut impl Write) -> std::io::Result<
                 }
                 let region = if u(16) == 0 { None } else { Some((u(8), u(12), u(16), u(20))) };
                 let (pw, ph) = crate::page_size(page);
-                let (w, h) = region.map_or(((pw * scale).ceil() as usize, (ph * scale).ceil() as usize), |r| (r.2, r.3));
+                let (w, h) =
+                    region.map_or(((pw * scale).ceil() as usize, (ph * scale).ceil() as usize), |r| (r.2, r.3));
                 if w.saturating_mul(h) > MAX_PIXELS {
                     return Err("too many pixels: ask for tiles".into());
                 }
@@ -334,13 +335,19 @@ pub fn serve(input: &mut impl Read, output: &mut impl Write) -> std::io::Result<
             }
             b'T' => {
                 let d = doc.as_ref().ok_or("no document")?;
-                let page = body.get(0..4).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as usize).ok_or("a bad request")?;
+                let page = body
+                    .get(0..4)
+                    .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as usize)
+                    .ok_or("a bad request")?;
                 let p = pages.get(page).ok_or("no such page")?;
                 Ok(encode_text(&crate::page_text(d, p)))
             }
             b'L' => {
                 let d = doc.as_ref().ok_or("no document")?;
-                let page = body.get(0..4).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as usize).ok_or("a bad request")?;
+                let page = body
+                    .get(0..4)
+                    .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as usize)
+                    .ok_or("a bad request")?;
                 Ok(encode_links(&crate::outline::links(d, &pages, page)))
             }
             _ => Err("an unknown request".into()),
@@ -395,7 +402,13 @@ impl std::fmt::Display for Error {
 fn helper_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
-    [dir.join("vergence-pdf"), dir.parent()?.join("libexec/vergence/vergence-pdf"), PathBuf::from("/usr/local/libexec/vergence/vergence-pdf")].into_iter().find(|p| p.is_file())
+    [
+        dir.join("vergence-pdf"),
+        dir.parent()?.join("libexec/vergence/vergence-pdf"),
+        PathBuf::from("/usr/local/libexec/vergence/vergence-pdf"),
+    ]
+    .into_iter()
+    .find(|p| p.is_file())
 }
 
 struct Running {
@@ -435,8 +448,15 @@ impl Viewer {
     /// A helper started, the document (and password) given to it again.
     fn start(&mut self) -> Result<(), Error> {
         self.stop();
-        let mut child = std::process::Command::new(&self.program).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn().map_err(Error::Io)?;
-        let (Some(to), Some(from)) = (child.stdin.take(), child.stdout.take()) else { return Err(Error::Crashed("no pipe".into())) };
+        let mut child = std::process::Command::new(&self.program)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(Error::Io)?;
+        let (Some(to), Some(from)) = (child.stdin.take(), child.stdout.take()) else {
+            return Err(Error::Crashed("no pipe".into()));
+        };
         self.running = Some(Running { child, to, from });
         let data = std::mem::take(&mut self.data);
         let answer = self.ask(b'D', &data);
@@ -480,7 +500,11 @@ impl Viewer {
             Ok(Some((_, why))) => Err(Error::Refused(String::from_utf8_lossy(&why).into_owned())),
             Ok(None) | Err(_) => {
                 self.stop();
-                Err(Error::Crashed(if timed_out { "it ran past the time".into() } else { "it stopped (a limit, or a fault in the file)".into() }))
+                Err(Error::Crashed(if timed_out {
+                    "it ran past the time".into()
+                } else {
+                    "it stopped (a limit, or a fault in the file)".into()
+                }))
             }
         }
     }
@@ -601,7 +625,6 @@ mod tests {
 
     use crate::helper::tiny_pdf;
 
-
     fn frame(op: u8, body: &[u8]) -> Vec<u8> {
         let mut v = Vec::new();
         write_frame(&mut v, op, body).unwrap();
@@ -639,7 +662,10 @@ mod tests {
         assert_eq!(a.len(), 4);
         assert_eq!(a[0].0, 0);
         assert_eq!(Info::decode(&a[0].1), Some(Info { needs_password: false, pages: vec![(100.0, 50.0)] }));
-        let (w, h) = (u32::from_be_bytes(a[1].1[0..4].try_into().unwrap()), u32::from_be_bytes(a[1].1[4..8].try_into().unwrap()));
+        let (w, h) = (
+            u32::from_be_bytes(a[1].1[0..4].try_into().unwrap()),
+            u32::from_be_bytes(a[1].1[4..8].try_into().unwrap()),
+        );
         assert_eq!((a[1].0, w, h), (0, 200, 100));
         let px = |b: &[u8], w: usize, x: usize, y: usize| b[8 + (y * w + x) * 4];
         // The square covers x 20..60, y (from the top) 40..80 at scale 2.
@@ -654,16 +680,23 @@ mod tests {
 
     #[test]
     fn metadata_crosses_the_pipe() {
-        let pairs = vec![("Title".to_string(), "Ein Handbuch ♠".to_string()), ("Version".to_string(), "1.7".to_string())];
+        let pairs =
+            vec![("Title".to_string(), "Ein Handbuch ♠".to_string()), ("Version".to_string(), "1.7".to_string())];
         assert_eq!(decode_pairs(&encode_pairs(&pairs)), Some(pairs));
         assert_eq!(decode_pairs(&[0, 0, 0, 2, 0, 1]), None, "cut short: refused, no panic");
     }
 
     #[test]
     fn outline_and_links_cross_the_pipe() {
-        let entries = vec![Entry { level: 0, title: "Intro".into(), target: Some(Target { page: 2, top: Some(10.5) }) }, Entry { level: 1, title: "No place".into(), target: None }];
+        let entries = vec![
+            Entry { level: 0, title: "Intro".into(), target: Some(Target { page: 2, top: Some(10.5) }) },
+            Entry { level: 1, title: "No place".into(), target: None },
+        ];
         assert_eq!(decode_outline(&encode_outline(&entries)), Some(entries));
-        let links = vec![Link { rect: [1.0, 2.0, 3.0, 4.0], action: Action::GoTo(Target { page: 7, top: None }) }, Link { rect: [5.0, 6.0, 7.0, 8.0], action: Action::Uri("https://example.org/".into()) }];
+        let links = vec![
+            Link { rect: [1.0, 2.0, 3.0, 4.0], action: Action::GoTo(Target { page: 7, top: None }) },
+            Link { rect: [5.0, 6.0, 7.0, 8.0], action: Action::Uri("https://example.org/".into()) },
+        ];
         assert_eq!(decode_links(&encode_links(&links)), Some(links));
         assert_eq!(decode_links(&[0, 0, 0, 5]), None);
         let chars = vec![crate::text::Char { text: "ﬁ".into(), rect: [1.0, 2.0, 3.0, 4.0] }];

@@ -65,14 +65,31 @@ pub struct AgentFound {
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentChange {
     /// The keyboard went to this window (0, 0: one that is not native).
-    Window { client: u32, window: u32 },
-    Focus { client: u32, window: u32, node: u64 },
-    Caret { client: u32, window: u32, at: Option<Rect4> },
-    Tree { client: u32, window: u32 },
+    Window {
+        client: u32,
+        window: u32,
+    },
+    Focus {
+        client: u32,
+        window: u32,
+        node: u64,
+    },
+    Caret {
+        client: u32,
+        window: u32,
+        at: Option<Rect4>,
+    },
+    Tree {
+        client: u32,
+        window: u32,
+    },
     /// This agent's timed grant for an app is running out (each minute of
     /// its last five) or has run out (0): ask the person for more before a
     /// long step (bus v28).
-    Time { app: String, minutes_left: u32 },
+    Time {
+        app: String,
+        minutes_left: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -99,14 +116,40 @@ pub enum AgentRequest {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentEvent {
-    Windows { serial: u32, windows: Vec<AgentWindow> },
-    Tree { serial: u32, client: u32, window: u32, title: String, focus: u64, caret: Option<Rect4>, nodes: Vec<Node> },
-    Found { serial: u32, found: Vec<AgentFound> },
+    Windows {
+        serial: u32,
+        windows: Vec<AgentWindow>,
+    },
+    Tree {
+        serial: u32,
+        client: u32,
+        window: u32,
+        title: String,
+        focus: u64,
+        caret: Option<Rect4>,
+        nodes: Vec<Node>,
+    },
+    Found {
+        serial: u32,
+        found: Vec<AgentFound>,
+    },
     /// Boxed: a found widget is large, and every bus message would carry its size.
-    Focused { serial: u32, found: Option<Box<AgentFound>>, caret: Option<Rect4> },
-    Acted { serial: u32, ok: bool, why: String },
+    Focused {
+        serial: u32,
+        found: Option<Box<AgentFound>>,
+        caret: Option<Rect4>,
+    },
+    Acted {
+        serial: u32,
+        ok: bool,
+        why: String,
+    },
     /// `latest`: the number to ask from next time.
-    Changes { serial: u32, latest: u64, changes: Vec<(u64, AgentChange)> },
+    Changes {
+        serial: u32,
+        latest: u64,
+        changes: Vec<(u64, AgentChange)>,
+    },
 }
 
 mod op {
@@ -281,7 +324,13 @@ impl AgentEvent {
                 let mut e = Encoder::frame(op::E_WINDOWS);
                 e.u32(*serial).count(windows.len());
                 for w in windows {
-                    e.u32(w.client).u32(w.window).str(&w.title).str(&w.app_id).str(&w.kind).bool(w.keyboard).bool(w.meaning);
+                    e.u32(w.client)
+                        .u32(w.window)
+                        .str(&w.title)
+                        .str(&w.app_id)
+                        .str(&w.kind)
+                        .bool(w.keyboard)
+                        .bool(w.meaning);
                     put_rect(&mut e, &w.at);
                     e.str(&w.screen).str(&w.allowed).u32(w.minutes_left);
                 }
@@ -353,10 +402,23 @@ impl AgentEvent {
                 let n = listed(&mut d, 8 + 12 + 2 + 32 + 4)?;
                 let mut windows = Vec::with_capacity(n);
                 for _ in 0..n {
-                    let (client, window, title, app_id, kind, keyboard, meaning) = (d.u32()?, d.u32()?, d.str()?, d.str()?, d.str()?, d.bool()?, d.bool()?);
+                    let (client, window, title, app_id, kind, keyboard, meaning) =
+                        (d.u32()?, d.u32()?, d.str()?, d.str()?, d.str()?, d.bool()?, d.bool()?);
                     let at = get_rect(&mut d)?;
                     let screen = d.str()?;
-                    windows.push(AgentWindow { client, window, title, app_id, kind, keyboard, meaning, at, screen, allowed: d.str()?, minutes_left: d.u32()? });
+                    windows.push(AgentWindow {
+                        client,
+                        window,
+                        title,
+                        app_id,
+                        kind,
+                        keyboard,
+                        meaning,
+                        at,
+                        screen,
+                        allowed: d.str()?,
+                        minutes_left: d.u32()?,
+                    });
                 }
                 AgentEvent::Windows { serial, windows }
             }
@@ -406,7 +468,19 @@ mod tests {
     use super::*;
 
     fn node() -> Node {
-        Node { id: 9, parent: 0, role: "choice".into(), name: "Font".into(), value: Some("Inter".into()), states: vec!["focused".into()], x: 100.0, y: 40.0, w: 80.0, h: 20.0, items: vec!["Inter".into(), "Mono".into()] }
+        Node {
+            id: 9,
+            parent: 0,
+            role: "choice".into(),
+            name: "Font".into(),
+            value: Some("Inter".into()),
+            states: vec!["focused".into()],
+            x: 100.0,
+            y: 40.0,
+            w: 80.0,
+            h: 20.0,
+            items: vec!["Inter".into(), "Mono".into()],
+        }
     }
 
     #[test]
@@ -417,11 +491,22 @@ mod tests {
             AgentRequest::Tree { serial: 3, client: 4, window: 1 },
             AgentRequest::Find { serial: 4, path: "Calculator > button:7".into() },
             AgentRequest::Focused { serial: 5 },
-            AgentRequest::Act { serial: 6, client: 4, window: 1, node: 1 << 50, action: Action::Choose("Mono".into()), role: "choice".into(), name: "Font".into() },
+            AgentRequest::Act {
+                serial: 6,
+                client: 4,
+                window: 1,
+                node: 1 << 50,
+                action: Action::Choose("Mono".into()),
+                role: "choice".into(),
+                name: "Font".into(),
+            },
             AgentRequest::Changes { serial: 7, since: 123 },
         ] {
             let bytes = r.encode().unwrap();
-            let (len, opcode) = (u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize, u16::from_le_bytes(bytes[4..6].try_into().unwrap()));
+            let (len, opcode) = (
+                u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize,
+                u16::from_le_bytes(bytes[4..6].try_into().unwrap()),
+            );
             assert!(is_agent_opcode(opcode));
             assert_eq!(AgentRequest::decode(opcode, &bytes[6..4 + len]).unwrap(), r);
         }
@@ -431,8 +516,31 @@ mod tests {
     fn events_round_trip() {
         let f = AgentFound { client: 4, window: 1, title: "Windows".into(), node: node(), screen: "DP-1".into() };
         for ev in [
-            AgentEvent::Windows { serial: 1, windows: vec![AgentWindow { client: 4, window: 1, title: "Windows".into(), app_id: "vergence-settings".into(), kind: "native".into(), keyboard: true, meaning: true, at: (10.0, 20.0, 800.0, 600.0), screen: "DP-1".into(), allowed: "timed".into(), minutes_left: 12 }] },
-            AgentEvent::Tree { serial: 2, client: 4, window: 1, title: "Windows".into(), focus: 9, caret: Some((1.0, 2.0, 1.0, 14.0)), nodes: vec![node()] },
+            AgentEvent::Windows {
+                serial: 1,
+                windows: vec![AgentWindow {
+                    client: 4,
+                    window: 1,
+                    title: "Windows".into(),
+                    app_id: "vergence-settings".into(),
+                    kind: "native".into(),
+                    keyboard: true,
+                    meaning: true,
+                    at: (10.0, 20.0, 800.0, 600.0),
+                    screen: "DP-1".into(),
+                    allowed: "timed".into(),
+                    minutes_left: 12,
+                }],
+            },
+            AgentEvent::Tree {
+                serial: 2,
+                client: 4,
+                window: 1,
+                title: "Windows".into(),
+                focus: 9,
+                caret: Some((1.0, 2.0, 1.0, 14.0)),
+                nodes: vec![node()],
+            },
             AgentEvent::Found { serial: 3, found: vec![f.clone(), f.clone()] },
             AgentEvent::Focused { serial: 4, found: Some(Box::new(f)), caret: None },
             AgentEvent::Focused { serial: 5, found: None, caret: None },
@@ -450,14 +558,27 @@ mod tests {
             },
         ] {
             let bytes = ev.encode().unwrap();
-            let (len, opcode) = (u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize, u16::from_le_bytes(bytes[4..6].try_into().unwrap()));
+            let (len, opcode) = (
+                u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize,
+                u16::from_le_bytes(bytes[4..6].try_into().unwrap()),
+            );
             assert_eq!(AgentEvent::decode(opcode, &bytes[6..4 + len]).unwrap(), ev);
         }
     }
 
     #[test]
     fn damage_never_panics() {
-        let ev = AgentEvent::Tree { serial: 2, client: 4, window: 1, title: "W".into(), focus: 9, caret: None, nodes: vec![node(); 3] }.encode().unwrap();
+        let ev = AgentEvent::Tree {
+            serial: 2,
+            client: 4,
+            window: 1,
+            title: "W".into(),
+            focus: 9,
+            caret: None,
+            nodes: vec![node(); 3],
+        }
+        .encode()
+        .unwrap();
         let mut seed = 7u64;
         for i in 0..2000 {
             let mut b = ev[6..].to_vec();

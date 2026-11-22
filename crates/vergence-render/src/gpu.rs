@@ -275,7 +275,17 @@ impl Atlas {
         unsafe {
             (gl.glBindTexture)(gl::GL_TEXTURE_2D, self.texture);
             (gl.glPixelStorei)(gl::GL_UNPACK_ALIGNMENT, 1);
-            (gl.glTexSubImage2D)(gl::GL_TEXTURE_2D, 0, at.0, at.1, w, h, gl::GL_RED, gl::GL_UNSIGNED_BYTE, bitmap.alpha.as_ptr() as *const c_void);
+            (gl.glTexSubImage2D)(
+                gl::GL_TEXTURE_2D,
+                0,
+                at.0,
+                at.1,
+                w,
+                h,
+                gl::GL_RED,
+                gl::GL_UNSIGNED_BYTE,
+                bitmap.alpha.as_ptr() as *const c_void,
+            );
         }
         self.x += w + 1;
         self.row = self.row.max(h);
@@ -416,7 +426,12 @@ impl Gpu {
                 let mut t = 0;
                 (gl.glGenTextures)(1, &mut t);
                 (gl.glBindTexture)(gl::GL_TEXTURE_2D, t);
-                for (name, value) in [(gl::GL_TEXTURE_MIN_FILTER, gl::GL_NEAREST), (gl::GL_TEXTURE_MAG_FILTER, gl::GL_NEAREST), (gl::GL_TEXTURE_WRAP_S, gl::GL_CLAMP_TO_EDGE), (gl::GL_TEXTURE_WRAP_T, gl::GL_CLAMP_TO_EDGE)] {
+                for (name, value) in [
+                    (gl::GL_TEXTURE_MIN_FILTER, gl::GL_NEAREST),
+                    (gl::GL_TEXTURE_MAG_FILTER, gl::GL_NEAREST),
+                    (gl::GL_TEXTURE_WRAP_S, gl::GL_CLAMP_TO_EDGE),
+                    (gl::GL_TEXTURE_WRAP_T, gl::GL_CLAMP_TO_EDGE),
+                ] {
                     (gl.glTexParameteri)(gl::GL_TEXTURE_2D, name, value as i32);
                 }
                 (gl.glTexImage2D)(gl::GL_TEXTURE_2D, 0, internal as i32, w, h, 0, format, gl::GL_UNSIGNED_BYTE, pixels);
@@ -425,7 +440,13 @@ impl Gpu {
             let atlas_texture = texture(gl::GL_R8, gl::GL_RED, size, size, std::ptr::null());
             let blank = texture(gl::GL_RGBA8, gl::GL_RGBA, 1, 1, [0u8; 4].as_ptr() as *const c_void);
             let (gamma, contrast) = crate::textlook::look();
-            let curves = texture(gl::GL_R8, gl::GL_RED, 256, 256, crate::textlook::curves(gamma, contrast).as_ptr() as *const c_void);
+            let curves = texture(
+                gl::GL_R8,
+                gl::GL_RED,
+                256,
+                256,
+                crate::textlook::curves(gamma, contrast).as_ptr() as *const c_void,
+            );
             let error = (gl.glGetError)();
             if error != 0 {
                 return Err(GpuError::Gl(error));
@@ -442,7 +463,15 @@ impl Gpu {
                 vertex_array,
                 buffer,
                 size_uniform,
-                atlas: Atlas { texture: atlas_texture, size, x: 0, y: 0, row: 0, places: HashMap::default(), held: Vec::new() },
+                atlas: Atlas {
+                    texture: atlas_texture,
+                    size,
+                    x: 0,
+                    y: 0,
+                    row: 0,
+                    places: HashMap::default(),
+                    held: Vec::new(),
+                },
                 target: None,
                 blank,
                 curves,
@@ -459,7 +488,13 @@ impl Gpu {
     /// The scene at `scale` pixels to the reference unit, over `background`,
     /// read back from the GPU: the picture [`crate::Cpu::render`] gives,
     /// within a rounding step.
-    pub fn render(&mut self, scene: &Scene, fonts: &mut Fonts, scale: f32, background: Color) -> Result<Pixmap, GpuError> {
+    pub fn render(
+        &mut self,
+        scene: &Scene,
+        fonts: &mut Fonts,
+        scale: f32,
+        background: Color,
+    ) -> Result<Pixmap, GpuError> {
         self.frame(scene, fonts, scale, background, true, None)
     }
 
@@ -479,7 +514,9 @@ impl Gpu {
     /// A buffer of GPU memory, `width` x `height` pixels, to draw a window's
     /// frames into and hand to the display server.
     pub fn buffer(&mut self, width: u32, height: u32) -> Result<GpuBuffer, GpuError> {
-        let (Some((gbm, device)), Some(image_target)) = (&self.gbm, self.image_target) else { return Err(GpuError::Unsupported("buffers a display server can show")) };
+        let (Some((gbm, device)), Some(image_target)) = (&self.gbm, self.image_target) else {
+            return Err(GpuError::Unsupported("buffers a display server can show"));
+        };
         if width == 0 || height == 0 || width > crate::MAX_SIDE || height > crate::MAX_SIDE {
             return Err(GpuError::Render(RenderError::TooLarge));
         }
@@ -498,7 +535,11 @@ impl Gpu {
                 return Err(GpuError::Unsupported("a GPU buffer as a file descriptor"));
             }
             let fd = OwnedFd::from_raw_fd(raw);
-            let (stride, offset, modifier) = ((gbm.gbm_bo_get_stride)(object), (gbm.gbm_bo_get_offset)(object, 0), (gbm.gbm_bo_get_modifier)(object));
+            let (stride, offset, modifier) = (
+                (gbm.gbm_bo_get_stride)(object),
+                (gbm.gbm_bo_get_offset)(object, 0),
+                (gbm.gbm_bo_get_modifier)(object),
+            );
             let mut attributes: Vec<isize> = vec![
                 gl::EGL_WIDTH,
                 width as isize,
@@ -514,10 +555,21 @@ impl Gpu {
                 stride as isize,
             ];
             if modifier != gl::MODIFIER_INVALID {
-                attributes.extend_from_slice(&[gl::EGL_DMA_BUF_PLANE0_MODIFIER_LO, (modifier & 0xffff_ffff) as isize, gl::EGL_DMA_BUF_PLANE0_MODIFIER_HI, (modifier >> 32) as isize]);
+                attributes.extend_from_slice(&[
+                    gl::EGL_DMA_BUF_PLANE0_MODIFIER_LO,
+                    (modifier & 0xffff_ffff) as isize,
+                    gl::EGL_DMA_BUF_PLANE0_MODIFIER_HI,
+                    (modifier >> 32) as isize,
+                ]);
             }
             attributes.push(gl::EGL_NONE as isize);
-            let image = (self.egl.eglCreateImage)(self.display, std::ptr::null_mut(), gl::EGL_LINUX_DMA_BUF, std::ptr::null_mut(), attributes.as_ptr());
+            let image = (self.egl.eglCreateImage)(
+                self.display,
+                std::ptr::null_mut(),
+                gl::EGL_LINUX_DMA_BUF,
+                std::ptr::null_mut(),
+                attributes.as_ptr(),
+            );
             if image.is_null() {
                 let code = (self.egl.eglGetError)();
                 (gbm.gbm_bo_destroy)(object);
@@ -537,10 +589,26 @@ impl Gpu {
             let complete = (gl.glCheckFramebufferStatus)(gl::GL_FRAMEBUFFER) == gl::GL_FRAMEBUFFER_COMPLETE;
             let error = (gl.glGetError)();
             (gl.glBindTexture)(gl::GL_TEXTURE_2D, self.blank);
-            let buffer = GpuBuffer { width, height, fd, stride, offset, format: gl::FORMAT_ARGB8888, modifier, object, image, texture, framebuffer };
+            let buffer = GpuBuffer {
+                width,
+                height,
+                fd,
+                stride,
+                offset,
+                format: gl::FORMAT_ARGB8888,
+                modifier,
+                object,
+                image,
+                texture,
+                framebuffer,
+            };
             if !complete || error != 0 {
                 self.release(buffer);
-                return Err(if error != 0 { GpuError::Gl(error) } else { GpuError::Unsupported("drawing into a GPU buffer") });
+                return Err(if error != 0 {
+                    GpuError::Gl(error)
+                } else {
+                    GpuError::Unsupported("drawing into a GPU buffer")
+                });
             }
             Ok(buffer)
         }
@@ -564,7 +632,14 @@ impl Gpu {
 
     /// Draws the scene into a buffer of its size at this scale, and waits
     /// until the GPU has finished: the buffer can then be shown.
-    pub fn draw_into(&mut self, buffer: &GpuBuffer, scene: &Scene, fonts: &mut Fonts, scale: f32, background: Color) -> Result<(), GpuError> {
+    pub fn draw_into(
+        &mut self,
+        buffer: &GpuBuffer,
+        scene: &Scene,
+        fonts: &mut Fonts,
+        scale: f32,
+        background: Color,
+    ) -> Result<(), GpuError> {
         if pixel_size(scene, scale)? != (buffer.width, buffer.height) {
             return Err(GpuError::Render(RenderError::Size));
         }
@@ -581,7 +656,15 @@ impl Gpu {
             }
             (self.gl.glBindFramebuffer)(gl::GL_FRAMEBUFFER, buffer.framebuffer);
             (self.gl.glPixelStorei)(gl::GL_PACK_ALIGNMENT, 1);
-            (self.gl.glReadPixels)(0, 0, buffer.width as i32, buffer.height as i32, gl::GL_RGBA, gl::GL_UNSIGNED_BYTE, pixmap.data.as_mut_ptr() as *mut c_void);
+            (self.gl.glReadPixels)(
+                0,
+                0,
+                buffer.width as i32,
+                buffer.height as i32,
+                gl::GL_RGBA,
+                gl::GL_UNSIGNED_BYTE,
+                pixmap.data.as_mut_ptr() as *mut c_void,
+            );
             let error = (self.gl.glGetError)();
             if error != 0 {
                 return Err(GpuError::Gl(error));
@@ -598,7 +681,14 @@ impl Gpu {
     /// shaders ([`crate::blur`], [`crate::round`]) are tested on this GPU
     /// against their CPU arithmetic. `uniforms` are floats by name, one to
     /// four each.
-    pub fn shader_pass(&mut self, fragment: &str, rgba: &[u8], w: u32, h: u32, uniforms: &[(&str, &[f32])]) -> Result<Pixmap, GpuError> {
+    pub fn shader_pass(
+        &mut self,
+        fragment: &str,
+        rgba: &[u8],
+        w: u32,
+        h: u32,
+        uniforms: &[(&str, &[f32])],
+    ) -> Result<Pixmap, GpuError> {
         if w == 0 || h == 0 || rgba.len() != (w * h * 4) as usize {
             return Err(GpuError::Render(RenderError::Size));
         }
@@ -653,18 +743,38 @@ impl Gpu {
             (gl.glGenTextures)(1, &mut texture);
             (gl.glActiveTexture)(gl::GL_TEXTURE0);
             (gl.glBindTexture)(gl::GL_TEXTURE_2D, texture);
-            for (name, value) in [(gl::GL_TEXTURE_MIN_FILTER, gl::GL_NEAREST), (gl::GL_TEXTURE_MAG_FILTER, gl::GL_NEAREST), (gl::GL_TEXTURE_WRAP_S, gl::GL_CLAMP_TO_EDGE), (gl::GL_TEXTURE_WRAP_T, gl::GL_CLAMP_TO_EDGE)] {
+            for (name, value) in [
+                (gl::GL_TEXTURE_MIN_FILTER, gl::GL_NEAREST),
+                (gl::GL_TEXTURE_MAG_FILTER, gl::GL_NEAREST),
+                (gl::GL_TEXTURE_WRAP_S, gl::GL_CLAMP_TO_EDGE),
+                (gl::GL_TEXTURE_WRAP_T, gl::GL_CLAMP_TO_EDGE),
+            ] {
                 (gl.glTexParameteri)(gl::GL_TEXTURE_2D, name, value as i32);
             }
             (gl.glPixelStorei)(gl::GL_UNPACK_ALIGNMENT, 1);
-            (gl.glTexImage2D)(gl::GL_TEXTURE_2D, 0, gl::GL_RGBA8 as i32, w as i32, h as i32, 0, gl::GL_RGBA, gl::GL_UNSIGNED_BYTE, rgba.as_ptr() as *const c_void);
+            (gl.glTexImage2D)(
+                gl::GL_TEXTURE_2D,
+                0,
+                gl::GL_RGBA8 as i32,
+                w as i32,
+                h as i32,
+                0,
+                gl::GL_RGBA,
+                gl::GL_UNSIGNED_BYTE,
+                rgba.as_ptr() as *const c_void,
+            );
             let quad: [f32; 8] = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0];
             let (mut vao, mut vbo) = (0u32, 0u32);
             (gl.glGenVertexArrays)(1, &mut vao);
             (gl.glBindVertexArray)(vao);
             (gl.glGenBuffers)(1, &mut vbo);
             (gl.glBindBuffer)(gl::GL_ARRAY_BUFFER, vbo);
-            (gl.glBufferData)(gl::GL_ARRAY_BUFFER, std::mem::size_of_val(&quad) as isize, quad.as_ptr() as *const c_void, gl::GL_STREAM_DRAW);
+            (gl.glBufferData)(
+                gl::GL_ARRAY_BUFFER,
+                std::mem::size_of_val(&quad) as isize,
+                quad.as_ptr() as *const c_void,
+                gl::GL_STREAM_DRAW,
+            );
             (gl.glEnableVertexAttribArray)(0);
             (gl.glVertexAttribPointer)(0, 2, gl::GL_FLOAT, 0, 8, std::ptr::null());
             (gl.glVertexAttribDivisor)(0, 0);
@@ -691,7 +801,15 @@ impl Gpu {
             (gl.glDrawArraysInstanced)(gl::GL_TRIANGLE_STRIP, 0, 4, 1);
             let mut pixmap = Pixmap::new(w, h);
             (gl.glPixelStorei)(gl::GL_PACK_ALIGNMENT, 1);
-            (gl.glReadPixels)(0, 0, w as i32, h as i32, gl::GL_RGBA, gl::GL_UNSIGNED_BYTE, pixmap.data.as_mut_ptr() as *mut c_void);
+            (gl.glReadPixels)(
+                0,
+                0,
+                w as i32,
+                h as i32,
+                gl::GL_RGBA,
+                gl::GL_UNSIGNED_BYTE,
+                pixmap.data.as_mut_ptr() as *mut c_void,
+            );
             (gl.glDeleteBuffers)(1, &vbo);
             (gl.glDeleteVertexArrays)(1, &vao);
             (gl.glDeleteTextures)(1, &texture);
@@ -718,7 +836,17 @@ impl Gpu {
                     (gl.glBindTexture)(gl::GL_TEXTURE_2D, t);
                     (gl.glTexParameteri)(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MIN_FILTER, gl::GL_NEAREST as i32);
                     (gl.glTexParameteri)(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MAG_FILTER, gl::GL_NEAREST as i32);
-                    (gl.glTexImage2D)(gl::GL_TEXTURE_2D, 0, gl::GL_RGBA8 as i32, w as i32, h as i32, 0, gl::GL_RGBA, gl::GL_UNSIGNED_BYTE, std::ptr::null());
+                    (gl.glTexImage2D)(
+                        gl::GL_TEXTURE_2D,
+                        0,
+                        gl::GL_RGBA8 as i32,
+                        w as i32,
+                        h as i32,
+                        0,
+                        gl::GL_RGBA,
+                        gl::GL_UNSIGNED_BYTE,
+                        std::ptr::null(),
+                    );
                     (gl.glGenFramebuffers)(1, &mut f);
                     (gl.glBindFramebuffer)(gl::GL_FRAMEBUFFER, f);
                     (gl.glFramebufferTexture2D)(gl::GL_FRAMEBUFFER, gl::GL_COLOR_ATTACHMENT0, gl::GL_TEXTURE_2D, t, 0);
@@ -734,7 +862,15 @@ impl Gpu {
         }
     }
 
-    fn frame(&mut self, scene: &Scene, fonts: &mut Fonts, scale: f32, background: Color, read: bool, into: Option<u32>) -> Result<Pixmap, GpuError> {
+    fn frame(
+        &mut self,
+        scene: &Scene,
+        fonts: &mut Fonts,
+        scale: f32,
+        background: Color,
+        read: bool,
+        into: Option<u32>,
+    ) -> Result<Pixmap, GpuError> {
         let (w, h) = pixel_size(scene, scale)?;
         scene.validate().map_err(RenderError::from)?;
         let prepared = prepare(scene, fonts, scale, w, h, Order::Rgba, false);
@@ -765,7 +901,12 @@ impl Gpu {
             (gl.glViewport)(0, 0, w as i32, h as i32);
             (gl.glDisable)(gl::GL_DITHER);
             let a = background.a as f32 / 255.0;
-            (gl.glClearColor)(background.r as f32 / 255.0 * a, background.g as f32 / 255.0 * a, background.b as f32 / 255.0 * a, a);
+            (gl.glClearColor)(
+                background.r as f32 / 255.0 * a,
+                background.g as f32 / 255.0 * a,
+                background.b as f32 / 255.0 * a,
+                a,
+            );
             (gl.glClear)(gl::GL_COLOR_BUFFER_BIT);
             (gl.glEnable)(gl::GL_BLEND);
             // Colors leave the fragment program with alpha multiplied in.
@@ -774,7 +915,12 @@ impl Gpu {
             (gl.glUniform2f)(self.size_uniform, w as f32, h as f32);
             (gl.glBindVertexArray)(self.vertex_array);
             (gl.glBindBuffer)(gl::GL_ARRAY_BUFFER, self.buffer);
-            (gl.glBufferData)(gl::GL_ARRAY_BUFFER, std::mem::size_of_val(data.as_slice()) as isize, data.as_ptr() as *const c_void, gl::GL_STREAM_DRAW);
+            (gl.glBufferData)(
+                gl::GL_ARRAY_BUFFER,
+                std::mem::size_of_val(data.as_slice()) as isize,
+                data.as_ptr() as *const c_void,
+                gl::GL_STREAM_DRAW,
+            );
             (gl.glActiveTexture)(gl::GL_TEXTURE0);
             (gl.glBindTexture)(gl::GL_TEXTURE_2D, self.atlas.texture);
             (gl.glActiveTexture)(gl::GL_TEXTURE0 + 2);
@@ -797,7 +943,17 @@ impl Gpu {
                             (gl.glTexParameteri)(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MIN_FILTER, gl::GL_NEAREST as i32);
                             (gl.glTexParameteri)(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MAG_FILTER, gl::GL_NEAREST as i32);
                             (gl.glPixelStorei)(gl::GL_UNPACK_ALIGNMENT, 1);
-                            (gl.glTexImage2D)(gl::GL_TEXTURE_2D, 0, gl::GL_RGBA8 as i32, im.width as i32, im.height as i32, 0, gl::GL_RGBA, gl::GL_UNSIGNED_BYTE, im.rgba.as_ptr() as *const c_void);
+                            (gl.glTexImage2D)(
+                                gl::GL_TEXTURE_2D,
+                                0,
+                                gl::GL_RGBA8 as i32,
+                                im.width as i32,
+                                im.height as i32,
+                                0,
+                                gl::GL_RGBA,
+                                gl::GL_UNSIGNED_BYTE,
+                                im.rgba.as_ptr() as *const c_void,
+                            );
                             self.pictures.insert(key, (im.clone(), texture));
                         }
                     }
@@ -812,7 +968,15 @@ impl Gpu {
             let mut pixmap = Pixmap::new(if read { w } else { 0 }, if read { h } else { 0 });
             if read {
                 (gl.glPixelStorei)(gl::GL_PACK_ALIGNMENT, 1);
-                (gl.glReadPixels)(0, 0, w as i32, h as i32, gl::GL_RGBA, gl::GL_UNSIGNED_BYTE, pixmap.data.as_mut_ptr() as *mut c_void);
+                (gl.glReadPixels)(
+                    0,
+                    0,
+                    w as i32,
+                    h as i32,
+                    gl::GL_RGBA,
+                    gl::GL_UNSIGNED_BYTE,
+                    pixmap.data.as_mut_ptr() as *mut c_void,
+                );
             } else {
                 (gl.glFinish)();
             }
@@ -833,9 +997,16 @@ impl Gpu {
     }
 
     /// The prepared shapes as instance data, and the draw calls to make of them.
-    fn instances(&mut self, prepared: &Prepared, scene: &Scene, fonts: &mut Fonts, scale: f32) -> Result<(Vec<f32>, Vec<Batch>), GpuError> {
+    fn instances(
+        &mut self,
+        prepared: &Prepared,
+        scene: &Scene,
+        fonts: &mut Fonts,
+        scale: f32,
+    ) -> Result<(Vec<f32>, Vec<Batch>), GpuError> {
         let (prims, chains) = (&prepared.prims, &prepared.chains);
-        let cells: usize = scene.commands.iter().map(|c| if let Command::Cells { cells, .. } = c { cells.len() } else { 0 }).sum();
+        let cells: usize =
+            scene.commands.iter().map(|c| if let Command::Cells { cells, .. } = c { cells.len() } else { 0 }).sum();
         let mut data: Vec<f32> = Vec::with_capacity((prims.len() + 2 * cells) * FLOATS);
         let mut batches: Vec<Batch> = Vec::new();
         let rect = |r: &RRect| [r.x0, r.y0, r.x1, r.y1];
@@ -903,12 +1074,30 @@ impl Gpu {
                     // A grid goes from its cells to instances with no shapes kept between:
                     // what the reference renderer's `prepare` makes of it, by the same
                     // arithmetic and in the same order, written straight into the list.
-                    let Command::Cells { origin, cell_w, cell_h, baseline, size, columns, cells } = &scene.commands[*at] else { continue };
+                    let Command::Cells { origin, cell_w, cell_h, baseline, size, columns, cells } =
+                        &scene.commands[*at]
+                    else {
+                        continue;
+                    };
                     let (columns, scissor) = (*columns as usize, p.bounds);
                     let fill = |data: &mut Vec<f32>, batches: &mut Vec<Batch>, r: RRect, c: Color| {
                         let bounds = intersect(r.bounds(), scissor);
                         if bounds[0] < bounds[2] && bounds[1] < bounds[3] && c.a != 0 {
-                            emit(data, batches, [whole(bounds), rect(&r), [0.0; 4], [KIND_FILL, r.radius, 0.0, 0.0], color([c.r, c.g, c.b, c.a]), [0.0; 4], clip, clip_param], None);
+                            emit(
+                                data,
+                                batches,
+                                [
+                                    whole(bounds),
+                                    rect(&r),
+                                    [0.0; 4],
+                                    [KIND_FILL, r.radius, 0.0, 0.0],
+                                    color([c.r, c.g, c.b, c.a]),
+                                    [0.0; 4],
+                                    clip,
+                                    clip_param,
+                                ],
+                                None,
+                            );
                         }
                     };
                     // Where each glyph of this grid is in the atlas, and its box: a screen
@@ -927,7 +1116,21 @@ impl Gpu {
                                 end += 1;
                             }
                             if ground.a != 0 {
-                                fill(&mut data, &mut batches, RRect::device(&Rect::new(origin.x + x as f32 * cell_w, top, (end - x) as f32 * cell_w, *cell_h), scale, 0.0), ground);
+                                fill(
+                                    &mut data,
+                                    &mut batches,
+                                    RRect::device(
+                                        &Rect::new(
+                                            origin.x + x as f32 * cell_w,
+                                            top,
+                                            (end - x) as f32 * cell_w,
+                                            *cell_h,
+                                        ),
+                                        scale,
+                                        0.0,
+                                    ),
+                                    ground,
+                                );
                             }
                             x = end;
                         }
@@ -939,7 +1142,21 @@ impl Gpu {
                                 while end < columns && lined(&row[end]) && row[end].ink == row[x].ink {
                                     end += 1;
                                 }
-                                fill(&mut data, &mut batches, RRect::device(&Rect::new(origin.x + x as f32 * cell_w, top + cell_h - 2.0, (end - x) as f32 * cell_w, 1.0), scale, 0.0), row[x].ink);
+                                fill(
+                                    &mut data,
+                                    &mut batches,
+                                    RRect::device(
+                                        &Rect::new(
+                                            origin.x + x as f32 * cell_w,
+                                            top + cell_h - 2.0,
+                                            (end - x) as f32 * cell_w,
+                                            1.0,
+                                        ),
+                                        scale,
+                                        0.0,
+                                    ),
+                                    row[x].ink,
+                                );
                             }
                             x = end;
                         }
@@ -957,14 +1174,27 @@ impl Gpu {
                                 sub = 0;
                             }
                             let key = cell.glyph as u64 | (cell.font as u64) << 32 | (sub as u64) << 48;
-                            let slot = (cell.glyph as usize).wrapping_mul(31).wrapping_add(cell.font as usize * 7 + sub as usize) & (MEMO - 1);
+                            let slot = (cell.glyph as usize)
+                                .wrapping_mul(31)
+                                .wrapping_add(cell.font as usize * 7 + sub as usize)
+                                & (MEMO - 1);
                             let known = match memo[slot] {
                                 Some((k, known)) if k == key => known,
                                 _ => {
                                     let known = match fonts.raster(face, cell.glyph, size * scale, sub) {
                                         Some(bitmap) => {
-                                            let at = self.atlas.place(&self.gl, &bitmap).ok_or(GpuError::Unsupported("atlas full"))?;
-                                            Some([at.0, at.1, bitmap.left, bitmap.top, bitmap.width as i32, bitmap.height as i32])
+                                            let at = self
+                                                .atlas
+                                                .place(&self.gl, &bitmap)
+                                                .ok_or(GpuError::Unsupported("atlas full"))?;
+                                            Some([
+                                                at.0,
+                                                at.1,
+                                                bitmap.left,
+                                                bitmap.top,
+                                                bitmap.width as i32,
+                                                bitmap.height as i32,
+                                            ])
                                         }
                                         None => None,
                                     };
@@ -977,14 +1207,33 @@ impl Gpu {
                             let bounds = intersect([px, py, px + w, py + h], scissor);
                             if bounds[0] < bounds[2] && bounds[1] < bounds[3] {
                                 let ink = cell.ink;
-                                emit(&mut data, &mut batches, [whole(bounds), [0.0; 4], [0.0; 4], [KIND_GLYPH, 0.0, 0.0, 0.0], color([ink.r, ink.g, ink.b, ink.a]), [u as f32, v as f32, px as f32, py as f32], clip, clip_param], None);
+                                emit(
+                                    &mut data,
+                                    &mut batches,
+                                    [
+                                        whole(bounds),
+                                        [0.0; 4],
+                                        [0.0; 4],
+                                        [KIND_GLYPH, 0.0, 0.0, 0.0],
+                                        color([ink.r, ink.g, ink.b, ink.a]),
+                                        [u as f32, v as f32, px as f32, py as f32],
+                                        clip,
+                                        clip_param,
+                                    ],
+                                    None,
+                                );
                             }
                         }
                     }
                     continue;
                 }
             }
-            emit(&mut data, &mut batches, [whole(p.bounds), shape, inner, param, color(p.color), uv, clip, clip_param], image);
+            emit(
+                &mut data,
+                &mut batches,
+                [whole(p.bounds), shape, inner, param, color(p.color), uv, clip, clip_param],
+                image,
+            );
         }
         Ok((data, batches))
     }
@@ -1022,7 +1271,12 @@ impl Drop for Gpu {
                 (gl.glDeleteVertexArrays)(1, &self.vertex_array);
                 (gl.glDeleteProgram)(self.program);
                 (gl.glFinish)();
-                (self.egl.eglMakeCurrent)(self.display, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
+                (self.egl.eglMakeCurrent)(
+                    self.display,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                );
             }
             (self.egl.eglDestroyContext)(self.display, self.context);
         }
@@ -1041,7 +1295,10 @@ fn open_display(egl: &Egl) -> Option<(*mut c_void, Option<(Gbm, *mut c_void)>)> 
     };
     if let Some(gbm) = Gbm::load() {
         for n in 128..136 {
-            let Ok(file) = std::fs::OpenOptions::new().read(true).write(true).open(format!("/dev/dri/renderD{n}")) else { continue };
+            let Ok(file) = std::fs::OpenOptions::new().read(true).write(true).open(format!("/dev/dri/renderD{n}"))
+            else {
+                continue;
+            };
             // The device keeps the descriptor for as long as the display lives (the process).
             let fd = file.into_raw_fd();
             // SAFETY: a descriptor we own; results are checked, and released if unused.
@@ -1061,7 +1318,8 @@ fn open_display(egl: &Egl) -> Option<(*mut c_void, Option<(Gbm, *mut c_void)>)> 
         }
     }
     // SAFETY: the platform's default display.
-    let display = unsafe { (egl.eglGetPlatformDisplay)(gl::EGL_PLATFORM_SURFACELESS, std::ptr::null_mut(), std::ptr::null()) };
+    let display =
+        unsafe { (egl.eglGetPlatformDisplay)(gl::EGL_PLATFORM_SURFACELESS, std::ptr::null_mut(), std::ptr::null()) };
     ready(display).then_some((display, None))
 }
 
@@ -1088,7 +1346,8 @@ unsafe fn link(gl: &Gles) -> Result<u32, GpuError> {
             Ok(shader)
         };
         let vertex = compile(gl::GL_VERTEX_SHADER, VERTEX)?;
-        let fragment = match compile(gl::GL_FRAGMENT_SHADER, &FRAGMENT.replace("//_TEXT_LOOK_", crate::textlook::GLSL)) {
+        let fragment = match compile(gl::GL_FRAGMENT_SHADER, &FRAGMENT.replace("//_TEXT_LOOK_", crate::textlook::GLSL))
+        {
             Ok(f) => f,
             Err(e) => {
                 (gl.glDeleteShader)(vertex);
@@ -1177,7 +1436,8 @@ mod clip_tests {
         let c = one_clip(&[area, card], [400, 200, 500, 220]).unwrap();
         assert_eq!((c.x0, c.y0, c.x1, c.y1, c.radius), (40.0, 100.0, 960.0, 400.0, 0.0));
         // Square clips only: their meeting.
-        let c = one_clip(&[rr(0.0, 0.0, 500.0, 500.0, 0.0), rr(100.0, 50.0, 800.0, 300.0, 0.0)], [0, 0, 900, 900]).unwrap();
+        let c =
+            one_clip(&[rr(0.0, 0.0, 500.0, 500.0, 0.0), rr(100.0, 50.0, 800.0, 300.0, 0.0)], [0, 0, 900, 900]).unwrap();
         assert_eq!((c.x0, c.y0, c.x1, c.y1), (100.0, 50.0, 500.0, 300.0));
         // A shape in the corner of two rounded clips that share it: not one clip.
         let a = rr(0.0, 0.0, 100.0, 100.0, 10.0);

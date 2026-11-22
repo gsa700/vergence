@@ -54,7 +54,14 @@ pub struct Backdrop {
 impl Backdrop {
     /// A backdrop frost over `dst` (physical pixels of the output), drawn
     /// with `program` (the frost's) into `texture` (dst's size).
-    pub fn new(id: Id, commit: CommitCounter, dst: Rectangle<i32, Physical>, texture: GlesTexture, program: GlesTexProgram, look: &Look) -> Backdrop {
+    pub fn new(
+        id: Id,
+        commit: CommitCounter,
+        dst: Rectangle<i32, Physical>,
+        texture: GlesTexture,
+        program: GlesTexProgram,
+        look: &Look,
+    ) -> Backdrop {
         let (w, h) = (dst.size.w.max(1) as f32, dst.size.h.max(1) as f32);
         let uniforms = vec![
             Uniform::new("texel", UniformValue::_2f(1.0 / w, 1.0 / h)),
@@ -130,10 +137,26 @@ impl RenderElement<GlesRenderer> for Backdrop {
         _cache: Option<&UserDataMap>,
     ) -> Result<(), GlesError> {
         let turn = if rows_from_top(frame) { Transform::Normal } else { Transform::Flipped180 };
-        frame.render_texture_from_to(&self.texture, src, dst, damage, opaque_regions, turn, 1.0, Some(&self.program), &self.uniforms)
+        frame.render_texture_from_to(
+            &self.texture,
+            src,
+            dst,
+            damage,
+            opaque_regions,
+            turn,
+            1.0,
+            Some(&self.program),
+            &self.uniforms,
+        )
     }
 
-    fn capture_framebuffer(&self, frame: &mut GlesFrame<'_, '_>, _src: Rectangle<f64, BufferCoords>, dst: Rectangle<i32, Physical>, _cache: &UserDataMap) -> Result<(), GlesError> {
+    fn capture_framebuffer(
+        &self,
+        frame: &mut GlesFrame<'_, '_>,
+        _src: Rectangle<f64, BufferCoords>,
+        dst: Rectangle<i32, Physical>,
+        _cache: &UserDataMap,
+    ) -> Result<(), GlesError> {
         let texture = self.texture.tex_id();
         let from_top = rows_from_top(frame);
         frame.with_context(|gl| {
@@ -177,16 +200,28 @@ pub type Slot = Option<(Id, GlesTexture, CommitCounter, Look)>;
 /// The backdrop frost over `dst` for a surface whose texture is kept in
 /// `slot` (made or remade here when the size changed). None if the texture
 /// cannot be made.
-pub fn element(renderer: &mut GlesRenderer, slot: &mut Slot, dst: Rectangle<i32, Physical>, program: GlesTexProgram, look: &Look) -> Option<Backdrop> {
+pub fn element(
+    renderer: &mut GlesRenderer,
+    slot: &mut Slot,
+    dst: Rectangle<i32, Physical>,
+    program: GlesTexProgram,
+    look: &Look,
+) -> Option<Backdrop> {
     use smithay::backend::renderer::{Offscreen, Texture};
     if dst.size.w <= 0 || dst.size.h <= 0 {
         return None;
     }
-    let fresh = slot.as_ref().is_none_or(|(_, t, ..)| (t.width() as i32, t.height() as i32) != (dst.size.w, dst.size.h));
+    let fresh =
+        slot.as_ref().is_none_or(|(_, t, ..)| (t.width() as i32, t.height() as i32) != (dst.size.w, dst.size.h));
     if fresh {
-        match Offscreen::<GlesTexture>::create_buffer(renderer, smithay::backend::allocator::Fourcc::Abgr8888, (dst.size.w, dst.size.h).into()) {
+        match Offscreen::<GlesTexture>::create_buffer(
+            renderer,
+            smithay::backend::allocator::Fourcc::Abgr8888,
+            (dst.size.w, dst.size.h).into(),
+        ) {
             Ok(t) => {
-                let (id, mut commit) = slot.take().map_or_else(|| (Id::new(), CommitCounter::default()), |(id, _, c, _)| (id, c));
+                let (id, mut commit) =
+                    slot.take().map_or_else(|| (Id::new(), CommitCounter::default()), |(id, _, c, _)| (id, c));
                 commit.increment();
                 *slot = Some((id, t, commit, *look));
             }
@@ -243,10 +278,30 @@ impl Shaded {
     /// picture serial): the texture's own number may be the same for a new
     /// picture, GL reusing a freed one.
     #[allow(clippy::too_many_arguments)]
-    pub fn new(slot: &mut ShadedSlot, dst: Rectangle<i32, Physical>, src: Rectangle<f64, BufferCoords>, texture: GlesTexture, content: u64, program: GlesTexProgram, uniforms: Vec<Uniform<'static>>) -> Shaded {
+    pub fn new(
+        slot: &mut ShadedSlot,
+        dst: Rectangle<i32, Physical>,
+        src: Rectangle<f64, BufferCoords>,
+        texture: GlesTexture,
+        content: u64,
+        program: GlesTexProgram,
+        uniforms: Vec<Uniform<'static>>,
+    ) -> Shaded {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (texture.tex_id(), content, dst.loc.x, dst.loc.y, dst.size.w, dst.size.h, src.loc.x.to_bits(), src.loc.y.to_bits(), src.size.w.to_bits(), src.size.h.to_bits()).hash(&mut h);
+        (
+            texture.tex_id(),
+            content,
+            dst.loc.x,
+            dst.loc.y,
+            dst.size.w,
+            dst.size.h,
+            src.loc.x.to_bits(),
+            src.loc.y.to_bits(),
+            src.size.w.to_bits(),
+            src.size.h.to_bits(),
+        )
+            .hash(&mut h);
         for u in &uniforms {
             u.name.hash(&mut h);
             format!("{:?}", u.value).hash(&mut h);
@@ -283,7 +338,11 @@ impl Element for Shaded {
     }
 
     fn damage_since(&self, scale: Scale<f64>, commit: Option<CommitCounter>) -> DamageSet<i32, Physical> {
-        if commit == Some(self.commit) { DamageSet::default() } else { DamageSet::from_slice(&[Rectangle::from_size(self.geometry(scale).size)]) }
+        if commit == Some(self.commit) {
+            DamageSet::default()
+        } else {
+            DamageSet::from_slice(&[Rectangle::from_size(self.geometry(scale).size)])
+        }
     }
 
     fn opaque_regions(&self, _scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
@@ -309,6 +368,16 @@ impl RenderElement<GlesRenderer> for Shaded {
         opaque_regions: &[Rectangle<i32, Physical>],
         _cache: Option<&UserDataMap>,
     ) -> Result<(), GlesError> {
-        frame.render_texture_from_to(&self.texture, src, dst, damage, opaque_regions, Transform::Normal, 1.0, Some(&self.program), &self.uniforms)
+        frame.render_texture_from_to(
+            &self.texture,
+            src,
+            dst,
+            damage,
+            opaque_regions,
+            Transform::Normal,
+            1.0,
+            Some(&self.program),
+            &self.uniforms,
+        )
     }
 }

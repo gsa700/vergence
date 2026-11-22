@@ -56,14 +56,27 @@ pub enum Line {
     /// `pin`: what names the command across runs, for adding it to the
     /// first panel or taking it off (None: not a command of the app's);
     /// `pinned`: the user added it there.
-    Item { action: Action, label: String, keys: String, enabled: bool, checked: Option<bool>, pin: Option<String>, pinned: bool },
+    Item {
+        action: Action,
+        label: String,
+        keys: String,
+        enabled: bool,
+        checked: Option<bool>,
+        pin: Option<String>,
+        pinned: bool,
+    },
     /// A submenu, by its name.
     Sub(String),
     /// A menu's name over its commands, in Keyboard shortcuts.
     Header(String),
     /// Text size: its three commands (smaller, as it was, larger) and what
     /// it is now ("110%", the Actual size command's label as the app sent it).
-    Zoom { out: u32, reset: u32, grow: u32, now: String },
+    Zoom {
+        out: u32,
+        reset: u32,
+        grow: u32,
+        now: String,
+    },
     /// A line of words, not chosen (a foreign app's note).
     Note(String),
     Separator,
@@ -129,7 +142,15 @@ pub struct Model {
 /// A given line as the menu draws it.
 fn given_line(l: &MenuLine) -> Line {
     match l {
-        MenuLine::Item { id, label, keys, enabled, checked } => Line::Item { action: Action::Command(*id), label: label.clone(), keys: keys.clone(), enabled: *enabled, checked: *checked, pin: None, pinned: false },
+        MenuLine::Item { id, label, keys, enabled, checked } => Line::Item {
+            action: Action::Command(*id),
+            label: label.clone(),
+            keys: keys.clone(),
+            enabled: *enabled,
+            checked: *checked,
+            pin: None,
+            pinned: false,
+        },
         MenuLine::Separator => Line::Separator,
         MenuLine::Sub { label, .. } => Line::Sub(label.clone()),
     }
@@ -143,7 +164,15 @@ impl Model {
     fn item(&self, c: &Command) -> Line {
         let key = c.key();
         let pinned = !c.featured && self.pins.contains(&key);
-        Line::Item { action: Action::Command(c.id), label: c.label_shown(&self.app), keys: c.keys_shown(self.terminal), enabled: c.enabled, checked: c.checked, pin: Some(key), pinned }
+        Line::Item {
+            action: Action::Command(c.id),
+            label: c.label_shown(&self.app),
+            keys: c.keys_shown(self.terminal),
+            enabled: c.enabled,
+            checked: c.checked,
+            pin: Some(key),
+            pinned,
+        }
     }
 
     /// A skeleton line: the app's command for the role if it sent one, else the desktop's.
@@ -151,12 +180,22 @@ impl Model {
         match self.role(role) {
             // The skeleton's lines are always there: nothing to add or take off.
             Some(c) => match self.item(c) {
-                Line::Item { action, label, keys, enabled, checked, .. } => Line::Item { action, label, keys, enabled, checked, pin: None, pinned: false },
+                Line::Item { action, label, keys, enabled, checked, .. } => {
+                    Line::Item { action, label, keys, enabled, checked, pin: None, pinned: false }
+                }
                 other => other,
             },
             None => {
                 let info = role.info().expect("a role of the table");
-                Line::Item { action: own, label: info.label.replace("{app}", &self.app), keys: String::new(), enabled: true, checked: None, pin: None, pinned: false }
+                Line::Item {
+                    action: own,
+                    label: info.label.replace("{app}", &self.app),
+                    keys: String::new(),
+                    enabled: true,
+                    checked: None,
+                    pin: None,
+                    pinned: false,
+                }
             }
         }
     }
@@ -164,7 +203,11 @@ impl Model {
     /// The menus the app fills, in their order: the standard ones it uses,
     /// then its own in the order it first names them.
     pub fn menus(&self) -> Vec<String> {
-        let mut out: Vec<String> = MENUS.iter().filter(|m| self.commands.iter().any(|c| c.menu_shown() == **m)).map(|m| m.to_string()).collect();
+        let mut out: Vec<String> = MENUS
+            .iter()
+            .filter(|m| self.commands.iter().any(|c| c.menu_shown() == **m))
+            .map(|m| m.to_string())
+            .collect();
         for c in &self.commands {
             let m = c.menu_shown();
             if !m.is_empty() && !out.iter().any(|o| o == m) {
@@ -199,7 +242,12 @@ impl Model {
             return None;
         }
         let reset = find(Role::ZoomReset);
-        Some(Line::Zoom { out: out.id, reset: reset.map_or(0, |c| c.id), grow: grow.id, now: reset.map(|c| c.label.clone()).filter(|l| !l.is_empty()).unwrap_or_else(|| "Text size".into()) })
+        Some(Line::Zoom {
+            out: out.id,
+            reset: reset.map_or(0, |c| c.id),
+            grow: grow.id,
+            now: reset.map(|c| c.label.clone()).filter(|l| !l.is_empty()).unwrap_or_else(|| "Text size".into()),
+        })
     }
 
     /// The top level.
@@ -214,7 +262,10 @@ impl Model {
         }
         if self.native {
             let zoom = self.zoom();
-            let zooming = |l: &Line| zoom.is_some() && matches!(l, Line::Item { action: Action::Command(id), .. } if self.commands.iter().any(|c| c.id == *id && matches!(c.role, Role::ZoomIn | Role::ZoomOut | Role::ZoomReset)));
+            let zooming = |l: &Line| {
+                zoom.is_some()
+                    && matches!(l, Line::Item { action: Action::Command(id), .. } if self.commands.iter().any(|c| c.id == *id && matches!(c.role, Role::ZoomIn | Role::ZoomOut | Role::ZoomReset)))
+            };
             lines.extend(self.everyday().into_iter().filter(|l| !zooming(l)));
             lines.extend(zoom);
         } else {
@@ -237,7 +288,11 @@ impl Model {
     /// One menu's commands: the roles in the table's order, then the app's
     /// own in the order it sent them.
     fn menu(&self, name: &str) -> Vec<Line> {
-        let mut lines: Vec<Line> = ROLES.iter().filter_map(|r| self.commands.iter().find(|c| c.role == r.role && r.menu == name)).map(|c| self.item(c)).collect();
+        let mut lines: Vec<Line> = ROLES
+            .iter()
+            .filter_map(|r| self.commands.iter().find(|c| c.role == r.role && r.menu == name))
+            .map(|c| self.item(c))
+            .collect();
         lines.extend(self.commands.iter().filter(|c| c.role == Role::Own && c.menu == name).map(|c| self.item(c)));
         lines
     }
@@ -248,13 +303,27 @@ impl Model {
             return given
                 .iter()
                 .find_map(|l| match l {
-                    MenuLine::Sub { label, lines } if label == name => Some(tidy(lines.iter().map(given_line).collect())),
+                    MenuLine::Sub { label, lines } if label == name => {
+                        Some(tidy(lines.iter().map(given_line).collect()))
+                    }
                     _ => None,
                 })
                 .unwrap_or_default();
         }
         if name == "Window" {
-            return self.window.iter().map(|(a, l)| Line::Item { action: Action::Window(*a), label: l.clone(), keys: String::new(), enabled: true, checked: None, pin: None, pinned: false }).collect();
+            return self
+                .window
+                .iter()
+                .map(|(a, l)| Line::Item {
+                    action: Action::Window(*a),
+                    label: l.clone(),
+                    keys: String::new(),
+                    enabled: true,
+                    checked: None,
+                    pin: None,
+                    pinned: false,
+                })
+                .collect();
         }
         if name != ALL {
             return Vec::new();
@@ -306,7 +375,9 @@ impl Model {
             }
         }
         all.extend(self.sub("Window").into_iter().map(|l| (l, "Window".to_string())));
-        all.extend(self.top().into_iter().filter(|l| matches!(l, Line::Item { pin: None, .. })).map(|l| (l, String::new())));
+        all.extend(
+            self.top().into_iter().filter(|l| matches!(l, Line::Item { pin: None, .. })).map(|l| (l, String::new())),
+        );
         all.retain(|(l, _)| match l {
             Line::Item { label, enabled: true, .. } => {
                 let label = label.to_lowercase();
@@ -457,7 +528,15 @@ impl State {
                     self.key(m, key)
                 }
                 // The field's own keys do nothing in a submenu.
-                Key::Home | Key::End | Key::Delete | Key::BackWord | Key::SelectAll | Key::SelectLeft | Key::SelectRight | Key::SelectHome | Key::SelectEnd => Did::Nothing,
+                Key::Home
+                | Key::End
+                | Key::Delete
+                | Key::BackWord
+                | Key::SelectAll
+                | Key::SelectLeft
+                | Key::SelectRight
+                | Key::SelectHome
+                | Key::SelectEnd => Did::Nothing,
             };
         }
         // While there is text, the field has the keys a field has: Left and
@@ -493,18 +572,30 @@ impl State {
             }
         }
         match key {
-            Key::Home | Key::End | Key::Delete | Key::BackWord | Key::SelectAll | Key::SelectLeft | Key::SelectRight | Key::SelectHome | Key::SelectEnd => Did::Nothing,
+            Key::Home
+            | Key::End
+            | Key::Delete
+            | Key::BackWord
+            | Key::SelectAll
+            | Key::SelectLeft
+            | Key::SelectRight
+            | Key::SelectHome
+            | Key::SelectEnd => Did::Nothing,
             Key::Up | Key::Down => {
                 self.top = step(&lines, self.top, key == Key::Down);
                 self.open = self.top.filter(|i| matches!(lines.get(*i), Some(Line::Sub(_))));
                 Did::Moved
             }
-            Key::Left | Key::Right | Key::Enter if matches!(self.top.and_then(|i| lines.get(i)), Some(Line::Zoom { .. })) => match (key, self.top.and_then(|i| lines.get(i))) {
-                (Key::Left, Some(Line::Zoom { out, .. })) => Did::Chosen(Action::Command(*out)),
-                (Key::Right, Some(Line::Zoom { grow, .. })) => Did::Chosen(Action::Command(*grow)),
-                (Key::Enter, Some(Line::Zoom { reset, .. })) if *reset != 0 => Did::Chosen(Action::Command(*reset)),
-                _ => Did::Nothing,
-            },
+            Key::Left | Key::Right | Key::Enter
+                if matches!(self.top.and_then(|i| lines.get(i)), Some(Line::Zoom { .. })) =>
+            {
+                match (key, self.top.and_then(|i| lines.get(i))) {
+                    (Key::Left, Some(Line::Zoom { out, .. })) => Did::Chosen(Action::Command(*out)),
+                    (Key::Right, Some(Line::Zoom { grow, .. })) => Did::Chosen(Action::Command(*grow)),
+                    (Key::Enter, Some(Line::Zoom { reset, .. })) if *reset != 0 => Did::Chosen(Action::Command(*reset)),
+                    _ => Did::Nothing,
+                }
+            }
             Key::Right | Key::Enter => match self.top.and_then(|i| lines.get(i)) {
                 Some(Line::Sub(_)) => {
                     self.open = self.top;
@@ -763,14 +854,21 @@ mod tests {
         m.given = Some(vec![
             MenuLine::item(1, "FileView", ""),
             MenuLine::Separator,
-            MenuLine::Sub { label: "Internet".into(), lines: vec![MenuLine::item(2, "Firefox", ""), MenuLine::item(3, "Mail", "")] },
+            MenuLine::Sub {
+                label: "Internet".into(),
+                lines: vec![MenuLine::item(2, "Firefox", ""), MenuLine::item(3, "Mail", "")],
+            },
             MenuLine::Sub { label: "Office".into(), lines: vec![MenuLine::item(3, "Mail", "")] },
         ]);
         m.searchable = true;
         assert_eq!(m.top()[0], Line::Search, "a search field first");
         let mut s = State::default();
         assert_eq!(s.key(&m, Key::Char('f')), Did::Moved);
-        let names: Vec<String> = s.shown(&m).iter().filter_map(|l| if let Line::Item { label, .. } = l { Some(label.clone()) } else { None }).collect();
+        let names: Vec<String> = s
+            .shown(&m)
+            .iter()
+            .filter_map(|l| if let Line::Item { label, .. } = l { Some(label.clone()) } else { None })
+            .collect();
         assert_eq!(names, vec!["FileView", "Firefox"], "from the top and from a submenu");
         s.key(&m, Key::Back);
         s.key(&m, Key::Char('m'));
@@ -785,7 +883,10 @@ mod tests {
         m.given = Some(vec![
             MenuLine::Separator,
             MenuLine::item(1, "Open", "Enter"),
-            MenuLine::Sub { label: "Open With".into(), lines: vec![MenuLine::item(10, "Edit", ""), MenuLine::item(11, "Close-Up", "")] },
+            MenuLine::Sub {
+                label: "Open With".into(),
+                lines: vec![MenuLine::item(10, "Edit", ""), MenuLine::item(11, "Close-Up", "")],
+            },
             MenuLine::Separator,
             MenuLine::Separator,
             MenuLine::item(2, "Rename…", "F2").enabled(false),
@@ -812,11 +913,37 @@ mod tests {
     #[test]
     fn the_menu_is_the_apps_own_few_then_the_skeleton() {
         let m = terminal();
-        assert_eq!(labels(&m.top()), ["New tab (Ctrl+Shift+T)", "New window (Ctrl+Shift+N)", "[- 110% +]", "---", "Settings… (Ctrl+,)", "Keyboard shortcuts >", "About Terminal", "Quit Terminal"]);
+        assert_eq!(
+            labels(&m.top()),
+            [
+                "New tab (Ctrl+Shift+T)",
+                "New window (Ctrl+Shift+N)",
+                "[- 110% +]",
+                "---",
+                "Settings… (Ctrl+,)",
+                "Keyboard shortcuts >",
+                "About Terminal",
+                "Quit Terminal"
+            ]
+        );
         assert_eq!(
             labels(&m.sub(ALL)),
             [
-                "# File", "New window (Ctrl+Shift+N)", "New tab (Ctrl+Shift+T)", "# Edit", "Copy (Ctrl+C)", "Paste (Ctrl+V)", "# View", "Zoom in (Ctrl+=)", "Zoom out (Ctrl+-)", "Actual size (Ctrl+0)", "# Tab", "Next tab (Ctrl+Page Down)", "Split side by side (Ctrl+Shift+R)", "# Shell", "Clear"
+                "# File",
+                "New window (Ctrl+Shift+N)",
+                "New tab (Ctrl+Shift+T)",
+                "# Edit",
+                "Copy (Ctrl+C)",
+                "Paste (Ctrl+V)",
+                "# View",
+                "Zoom in (Ctrl+=)",
+                "Zoom out (Ctrl+-)",
+                "Actual size (Ctrl+0)",
+                "# Tab",
+                "Next tab (Ctrl+Page Down)",
+                "Split side by side (Ctrl+Shift+R)",
+                "# Shell",
+                "Clear"
             ]
         );
         assert!(matches!(&big().top()[0], Line::Search), "many commands: a search field");
@@ -837,7 +964,16 @@ mod tests {
         let mut m = terminal();
         m.pins = vec!["Shell/Clear".into(), "role:11".into(), "gone/away".into(), "Tab/Split side by side".into()];
         let top = labels(&m.top());
-        assert_eq!(&top[..5], ["New tab (Ctrl+Shift+T)", "New window (Ctrl+Shift+N)", "Clear *", "Split side by side (Ctrl+Shift+R) *", "[- 110% +]"]);
+        assert_eq!(
+            &top[..5],
+            [
+                "New tab (Ctrl+Shift+T)",
+                "New window (Ctrl+Shift+N)",
+                "Clear *",
+                "Split side by side (Ctrl+Shift+R) *",
+                "[- 110% +]"
+            ]
+        );
         assert!(labels(&m.sub(ALL)).contains(&"Clear *".to_string()));
         match &m.top()[2] {
             Line::Item { pin, pinned: true, .. } => assert_eq!(pin.as_deref(), Some("Shell/Clear")),
@@ -857,7 +993,16 @@ mod tests {
 
     #[test]
     fn a_foreign_app_gets_the_skeleton_and_a_note() {
-        let m = Model { app: "Firefox".into(), commands: vec![], terminal: false, native: false, window: Vec::new(), pins: Vec::new(), given: None, searchable: false };
+        let m = Model {
+            app: "Firefox".into(),
+            commands: vec![],
+            terminal: false,
+            native: false,
+            window: Vec::new(),
+            pins: Vec::new(),
+            given: None,
+            searchable: false,
+        };
         assert_eq!(labels(&m.top()), ["[note]", "---", "Settings…", "About Firefox", "Quit Firefox"]);
     }
 

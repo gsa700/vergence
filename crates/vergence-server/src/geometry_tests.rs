@@ -48,7 +48,16 @@ fn on_the_grid_a_picture_is_the_pixels_it_covers() {
             for (x, y) in places() {
                 let at: Point<i32, Logical> = (snap_at(x, 0, step), snap_at(y, 0, step)).into();
                 let cover = edges_px(at, size, scale);
-                assert_eq!((pic.0, pic.1), (cover.size.w, cover.size.h), "{}x{} pt at {},{} scale {scale}: picture {pic:?}, covers {:?}", size.w, size.h, at.x, at.y, cover.size);
+                assert_eq!(
+                    (pic.0, pic.1),
+                    (cover.size.w, cover.size.h),
+                    "{}x{} pt at {},{} scale {scale}: picture {pic:?}, covers {:?}",
+                    size.w,
+                    size.h,
+                    at.x,
+                    at.y,
+                    cover.size
+                );
                 let shown = shown_px(pic, cover.size);
                 assert_eq!((shown.size.w as i32, shown.size.h as i32), pic, "nothing cropped");
             }
@@ -70,7 +79,11 @@ fn bar_and_body_meet_wherever_the_window_is() {
                     let body = edges_px((x, y).into(), size, scale);
                     let bar = edges_px((x, y - bar_h).into(), (w, bar_h).into(), scale);
                     assert_eq!(bar.loc.y + bar.size.h, body.loc.y, "bar meets body at {x},{y} scale {scale}");
-                    assert_eq!((bar.loc.x, bar.size.w), (body.loc.x, body.size.w), "same sides at {x},{y} scale {scale}");
+                    assert_eq!(
+                        (bar.loc.x, bar.size.w),
+                        (body.loc.x, body.size.w),
+                        "same sides at {x},{y} scale {scale}"
+                    );
                 }
             }
         }
@@ -102,7 +115,11 @@ fn picture_sizes_read_back_as_their_points() {
             if scale >= 1.0 {
                 assert_eq!(back, points, "{points} pt at {scale} drawn as {px} px");
             } else {
-                assert_eq!(picture_px((back, back), scale).0, px, "{points} pt at {scale} drawn as {px} px, read as {back}");
+                assert_eq!(
+                    picture_px((back, back), scale).0,
+                    px,
+                    "{points} pt at {scale} drawn as {px} px, read as {back}"
+                );
             }
         }
     }

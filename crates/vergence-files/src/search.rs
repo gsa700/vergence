@@ -26,7 +26,8 @@ impl Search {
     /// Starts walking down from `root`; `wake` is called as results come
     /// (at most five times a second) and when it is done.
     pub fn start(root: &Path, words: &str, hidden: bool, wake: impl Fn() + Send + 'static) -> Search {
-        let (found, stop, done) = (Arc::new(Mutex::new(Vec::new())), Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+        let (found, stop, done) =
+            (Arc::new(Mutex::new(Vec::new())), Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
         let (f, s, d, from, w) = (found.clone(), stop.clone(), done.clone(), root.to_path_buf(), words.to_lowercase());
         std::thread::spawn(move || {
             walk(&from, &w, hidden, &s, |batch| {
@@ -121,7 +122,11 @@ mod tests {
         let mut got = Vec::new();
         super::walk(&dir, "report", false, &AtomicBool::new(false), |b| got.extend(b.into_iter().map(|e| e.name)));
         got.sort();
-        assert_eq!(got, vec!["Report.txt", "old REPORT.pdf", "report-2.md"], "case not looked at; hidden left out; the link not walked");
+        assert_eq!(
+            got,
+            vec!["Report.txt", "old REPORT.pdf", "report-2.md"],
+            "case not looked at; hidden left out; the link not walked"
+        );
         let mut with_hidden = 0;
         super::walk(&dir, "report", true, &AtomicBool::new(false), |b| with_hidden += b.len());
         assert_eq!(with_hidden, 4);

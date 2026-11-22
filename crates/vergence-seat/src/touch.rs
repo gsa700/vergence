@@ -63,7 +63,11 @@ impl Seat {
         let under = if self.locked { Some(Target::Server(Part::Lock)) } else { under };
         let mut out = Vec::new();
         self.keyboard.super_alone = false;
-        let ours = self.menu.is_some() || matches!(under, Some(Target::Server(Part::Note | Part::Card | Part::Picker | Part::Drawer | Part::Session)));
+        let ours = self.menu.is_some()
+            || matches!(
+                under,
+                Some(Target::Server(Part::Note | Part::Card | Part::Picker | Part::Drawer | Part::Session))
+            );
         if self.touch.on_windows.iter().any(|(s, _)| *s == slot) || self.touch.pointing == Some(slot) {
             // A slot already down (the panel lost an up): ignore the repeat.
             return out;
@@ -84,7 +88,9 @@ impl Seat {
         out.extend(self.motion(under));
         out.extend(self.button(BTN_LEFT, true, under, Mods::default(), now_ms));
         self.touch.presses += 1;
-        self.touch.resting = (!ours && matches!(under, Some(Target::Server(Part::Dock | Part::Desktop | Part::Title(_))))).then_some((x, y));
+        self.touch.resting = (!ours
+            && matches!(under, Some(Target::Server(Part::Dock | Part::Desktop | Part::Title(_)))))
+        .then_some((x, y));
         out.push(Out::LongPressTimer(self.touch.presses));
         out
     }
@@ -217,7 +223,15 @@ mod tests {
         let mut seat = Seat::new();
         let dock = Target::Server(Part::Dock);
         let out = seat.touch_down(3, 1900.0, 500.0, Some(dock), 0);
-        assert_eq!(out, vec![Out::PointerTo { x: 1900.0, y: 500.0 }, Out::Enter(dock), Out::Press(dock, BTN_LEFT), Out::LongPressTimer(1)]);
+        assert_eq!(
+            out,
+            vec![
+                Out::PointerTo { x: 1900.0, y: 500.0 },
+                Out::Enter(dock),
+                Out::Press(dock, BTN_LEFT),
+                Out::LongPressTimer(1)
+            ]
+        );
         // A second finger there does nothing.
         assert!(seat.touch_down(4, 1900.0, 520.0, Some(dock), 1).is_empty());
         let out = seat.touch_up(3, Some(dock), 2);

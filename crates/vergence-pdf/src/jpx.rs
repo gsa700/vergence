@@ -70,7 +70,8 @@ pub fn decode(data: &[u8]) -> Res<Picture> {
     // A palette: each output channel a component as it is or one of the
     // palette's columns looked up by a component.
     if let Some(pal) = &info.palette {
-        let map: Vec<(usize, u8, usize)> = if info.cmap.is_empty() { (0..pal.columns.len()).map(|c| (0, 1, c)).collect() } else { info.cmap.clone() };
+        let map: Vec<(usize, u8, usize)> =
+            if info.cmap.is_empty() { (0..pal.columns.len()).map(|c| (0, 1, c)).collect() } else { info.cmap.clone() };
         let mut out = Vec::new();
         for (cmp, kind, col) in map {
             let src = pic.channels.get(cmp).ok_or("palette of a missing component")?;
@@ -113,7 +114,11 @@ fn boxes(mut d: &[u8]) -> Vec<([u8; 4], &[u8])> {
         let kind = [d[4], d[5], d[6], d[7]];
         let (head, len) = match len {
             0 => (8, d.len()),
-            1 if d.len() >= 16 => (16, usize::try_from(u64::from_be_bytes([d[8], d[9], d[10], d[11], d[12], d[13], d[14], d[15]])).unwrap_or(usize::MAX)),
+            1 if d.len() >= 16 => (
+                16,
+                usize::try_from(u64::from_be_bytes([d[8], d[9], d[10], d[11], d[12], d[13], d[14], d[15]]))
+                    .unwrap_or(usize::MAX),
+            ),
             1 => break,
             n => (8, n),
         };
@@ -150,13 +155,19 @@ fn jp2(data: &[u8]) -> Res<Jp2<'_>> {
                         b"pclr" if b.len() >= 3 => {
                             let entries = u16::from_be_bytes([b[0], b[1]]) as usize;
                             let cols = b[2] as usize;
-                            let depths: Vec<u8> = b.get(3..3 + cols).ok_or("pclr")?.iter().map(|x| (x & 0x7F) + 1).collect();
+                            let depths: Vec<u8> =
+                                b.get(3..3 + cols).ok_or("pclr")?.iter().map(|x| (x & 0x7F) + 1).collect();
                             let mut at = 3 + cols;
-                            let mut columns: Vec<(u8, Vec<u16>)> = depths.iter().map(|d| (*d, Vec::with_capacity(entries))).collect();
+                            let mut columns: Vec<(u8, Vec<u16>)> =
+                                depths.iter().map(|d| (*d, Vec::with_capacity(entries))).collect();
                             for _ in 0..entries {
                                 for (c, d) in depths.iter().enumerate() {
                                     let n = (*d as usize).div_ceil(8);
-                                    let v = b.get(at..at + n).ok_or("pclr entries")?.iter().fold(0u32, |a, x| (a << 8) | *x as u32);
+                                    let v = b
+                                        .get(at..at + n)
+                                        .ok_or("pclr entries")?
+                                        .iter()
+                                        .fold(0u32, |a, x| (a << 8) | *x as u32);
                                     at += n;
                                     columns[c].1.push(v.min(u16::MAX as u32) as u16);
                                 }
@@ -166,12 +177,17 @@ fn jp2(data: &[u8]) -> Res<Jp2<'_>> {
                             }
                         }
                         b"cmap" => {
-                            info.cmap = b.chunks(4).filter(|c| c.len() == 4).map(|c| (u16::from_be_bytes([c[0], c[1]]) as usize, c[2], c[3] as usize)).collect();
+                            info.cmap = b
+                                .chunks(4)
+                                .filter(|c| c.len() == 4)
+                                .map(|c| (u16::from_be_bytes([c[0], c[1]]) as usize, c[2], c[3] as usize))
+                                .collect();
                         }
                         b"cdef" if b.len() >= 2 => {
                             let n = u16::from_be_bytes([b[0], b[1]]) as usize;
                             for e in b[2..].chunks(6).take(n).filter(|e| e.len() == 6) {
-                                let (ch, typ) = (u16::from_be_bytes([e[0], e[1]]) as usize, u16::from_be_bytes([e[2], e[3]]));
+                                let (ch, typ) =
+                                    (u16::from_be_bytes([e[0], e[1]]) as usize, u16::from_be_bytes([e[2], e[3]]));
                                 if typ == 1 || typ == 2 {
                                     info.opacity = Some(ch);
                                 }
@@ -304,7 +320,8 @@ fn quant(r: &mut Reader, end: usize) -> Res<Quant> {
 /// Reads a COD, COC, QCD or QCC segment (or notes PPM/PPT) into `h`.
 fn marker(h: &mut Header, m: u16, seg: &[u8], ncomp: usize) -> Res<()> {
     let mut r = Reader { d: seg, p: 0 };
-    let comp = |r: &mut Reader| -> Res<usize> { if ncomp < 257 { r.u8().map(usize::from) } else { r.u16().map(usize::from) } };
+    let comp =
+        |r: &mut Reader| -> Res<usize> { if ncomp < 257 { r.u8().map(usize::from) } else { r.u16().map(usize::from) } };
     match m {
         0xFF52 => {
             let s = r.u8()?;
@@ -412,7 +429,8 @@ fn codestream(d: &[u8], ycc: Option<()>) -> Res<Picture> {
         }
         let part_end = if psot == 0 { d.len() } else { (start + psot).min(d.len()) };
         let Some(tile) = tiles.get_mut(isot) else { return Err("tile index") };
-        let mut h = tile.0.clone().unwrap_or_else(|| Header { coc: vec![None; n], qcc: vec![None; n], ..Default::default() });
+        let mut h =
+            tile.0.clone().unwrap_or_else(|| Header { coc: vec![None; n], qcc: vec![None; n], ..Default::default() });
         loop {
             let m = r.u16()?;
             if m == 0xFF93 {
@@ -445,7 +463,12 @@ fn codestream(d: &[u8], ycc: Option<()>) -> Res<Picture> {
             return Err("packed packet headers");
         }
         let (tx, ty) = (i % ntx, i / ntx);
-        let rect = [(tx0 + tx * tw).max(x0), (ty0 + ty * th).max(y0), (tx0 + (tx + 1) * tw).min(x1), (ty0 + (ty + 1) * th).min(y1)];
+        let rect = [
+            (tx0 + tx * tw).max(x0),
+            (ty0 + ty * th).max(y0),
+            (tx0 + (tx + 1) * tw).min(x1),
+            (ty0 + (ty + 1) * th).min(y1),
+        ];
         tile(&siz, &main, h, rect, data, &mut planes, &mut budget)?;
     }
     // At full size: each sample from its component's grid.
@@ -478,7 +501,11 @@ fn sycc(ch: &mut [Channel]) {
     let max = ((1u32 << ch[0].depth) - 1) as f32;
     let half = (1u32 << (ch[0].depth - 1)) as f32;
     for i in 0..ch[0].data.len() {
-        let (y, cb, cr) = (ch[0].data[i] as f32, ch[1].data.get(i).copied().unwrap_or(0) as f32 - half, ch[2].data.get(i).copied().unwrap_or(0) as f32 - half);
+        let (y, cb, cr) = (
+            ch[0].data[i] as f32,
+            ch[1].data.get(i).copied().unwrap_or(0) as f32 - half,
+            ch[2].data.get(i).copied().unwrap_or(0) as f32 - half,
+        );
         let rgb = [y + 1.402 * cr, y - 0.344_136 * cb - 0.714_136 * cr, y + 1.772 * cb];
         for (k, v) in rgb.iter().enumerate() {
             if let Some(s) = ch[k].data.get_mut(i) {
@@ -568,12 +595,18 @@ struct TileComp {
 }
 
 fn tile_comp(c: &CompSiz, rect: [usize; 4], style: Style, q: Quant, budget: &mut Budget) -> Res<TileComp> {
-    let (x0, y0, x1, y1) = (ceil_div(rect[0], c.dx), ceil_div(rect[1], c.dy), ceil_div(rect[2], c.dx), ceil_div(rect[3], c.dy));
+    let (x0, y0, x1, y1) =
+        (ceil_div(rect[0], c.dx), ceil_div(rect[1], c.dy), ceil_div(rect[2], c.dx), ceil_div(rect[3], c.dy));
     let nl = style.levels;
     let mut res = Vec::new();
     for r in 0..=nl {
         let s = nl - r;
-        let (rx0, ry0, rx1, ry1) = (ceil_shift(x0 as i64, s) as usize, ceil_shift(y0 as i64, s) as usize, ceil_shift(x1 as i64, s) as usize, ceil_shift(y1 as i64, s) as usize);
+        let (rx0, ry0, rx1, ry1) = (
+            ceil_shift(x0 as i64, s) as usize,
+            ceil_shift(y0 as i64, s) as usize,
+            ceil_shift(x1 as i64, s) as usize,
+            ceil_shift(y1 as i64, s) as usize,
+        );
         let (ppx, ppy) = style.precincts.get(r).copied().unwrap_or((15, 15));
         if r > 0 && (ppx == 0 || ppy == 0) {
             return Err("precinct size");
@@ -607,7 +640,14 @@ fn tile_comp(c: &CompSiz, rect: [usize; 4], style: Style, q: Quant, budget: &mut
             for gy in 0..gh {
                 for gx in 0..gw {
                     let (cx, cy) = ((gx0 + gx) << cbw, (gy0 + gy) << cbh);
-                    blocks.push(Block { x0: cx.max(bx0), y0: cy.max(by0), x1: (cx + (1 << cbw)).min(bx1), y1: (cy + (1 << cbh)).min(by1), lblock: 3, ..Default::default() });
+                    blocks.push(Block {
+                        x0: cx.max(bx0),
+                        y0: cy.max(by0),
+                        x1: (cx + (1 << cbw)).min(bx1),
+                        y1: (cy + (1 << cbh)).min(by1),
+                        lblock: 3,
+                        ..Default::default()
+                    });
                 }
             }
             let mut precs = Vec::with_capacity(pw * ph);
@@ -616,9 +656,24 @@ fn tile_comp(c: &CompSiz, rect: [usize; 4], style: Style, q: Quant, budget: &mut
                     let (sx0, sx1) = (((kx0 + px) << pbx).max(bx0), ((kx0 + px + 1) << pbx).min(bx1));
                     let (sy0, sy1) = (((ky0 + py) << pby).max(by0), ((ky0 + py + 1) << pby).min(by1));
                     let (b0x, b0y) = ((sx0 >> cbw).saturating_sub(gx0), (sy0 >> cbh).saturating_sub(gy0));
-                    let bw = if sx1 > sx0 { (ceil_shift(sx1 as i64, cbw as usize) as usize - gx0).saturating_sub(b0x) } else { 0 };
-                    let bh = if sy1 > sy0 { (ceil_shift(sy1 as i64, cbh as usize) as usize - gy0).saturating_sub(b0y) } else { 0 };
-                    precs.push(Prec { bx0: b0x, by0: b0y, bw, bh, incl: TagTree::new(bw, bh), zbp: TagTree::new(bw, bh) });
+                    let bw = if sx1 > sx0 {
+                        (ceil_shift(sx1 as i64, cbw as usize) as usize - gx0).saturating_sub(b0x)
+                    } else {
+                        0
+                    };
+                    let bh = if sy1 > sy0 {
+                        (ceil_shift(sy1 as i64, cbh as usize) as usize - gy0).saturating_sub(b0y)
+                    } else {
+                        0
+                    };
+                    precs.push(Prec {
+                        bx0: b0x,
+                        by0: b0y,
+                        bw,
+                        bh,
+                        incl: TagTree::new(bw, bh),
+                        zbp: TagTree::new(bw, bh),
+                    });
                 }
             }
             // Its quantization step (E.1).
@@ -636,15 +691,33 @@ fn tile_comp(c: &CompSiz, rect: [usize; 4], style: Style, q: Quant, budget: &mut
     Ok(TileComp { depth: c.depth, x0, y0, x1, y1, style, guard: q.guard, res })
 }
 
-fn tile(siz: &Siz, main: &Header, h: &Header, rect: [usize; 4], data: &[u8], planes: &mut [Vec<u16>], budget: &mut Budget) -> Res<()> {
+fn tile(
+    siz: &Siz,
+    main: &Header,
+    h: &Header,
+    rect: [usize; 4],
+    data: &[u8],
+    planes: &mut [Vec<u16>],
+    budget: &mut Budget,
+) -> Res<()> {
     if rect[2] <= rect[0] || rect[3] <= rect[1] {
         return Ok(());
     }
     let global = h.global.or(main.global).ok_or("no COD")?;
     let mut tcs = Vec::new();
     for (i, c) in siz.comps.iter().enumerate() {
-        let style = h.coc[i].clone().or_else(|| h.cod.clone()).or_else(|| main.coc[i].clone()).or_else(|| main.cod.clone()).ok_or("no coding style")?;
-        let q = h.qcc[i].clone().or_else(|| h.qcd.clone()).or_else(|| main.qcc[i].clone()).or_else(|| main.qcd.clone()).ok_or("no quantization")?;
+        let style = h.coc[i]
+            .clone()
+            .or_else(|| h.cod.clone())
+            .or_else(|| main.coc[i].clone())
+            .or_else(|| main.cod.clone())
+            .ok_or("no coding style")?;
+        let q = h.qcc[i]
+            .clone()
+            .or_else(|| h.qcd.clone())
+            .or_else(|| main.qcc[i].clone())
+            .or_else(|| main.qcd.clone())
+            .ok_or("no quantization")?;
         tcs.push(tile_comp(c, rect, style, q, budget)?);
     }
     // The packets, in the progression order (B.12).
@@ -656,8 +729,13 @@ fn tile(siz: &Siz, main: &Header, h: &Header, rect: [usize; 4], data: &[u8], pla
             for p in 0..res.pw * res.ph {
                 let (i, j) = (p % res.pw, p / res.pw);
                 // The precinct's place on the reference grid (B.12.1.3).
-                let place = |k: usize, sh: u8, d: usize, min: usize| -> u64 { (((k as u128) << (sh as u32 + s as u32).min(100)) * d as u128).max(min as u128).min(u64::MAX as u128) as u64 };
-                let (xr, yr) = (place(res.kx0 + i, res.ppx, cs.dx, rect[0]), place(res.ky0 + j, res.ppy, cs.dy, rect[1]));
+                let place = |k: usize, sh: u8, d: usize, min: usize| -> u64 {
+                    (((k as u128) << (sh as u32 + s as u32).min(100)) * d as u128)
+                        .max(min as u128)
+                        .min(u64::MAX as u128) as u64
+                };
+                let (xr, yr) =
+                    (place(res.kx0 + i, res.ppx, cs.dx, rect[0]), place(res.ky0 + j, res.ppy, cs.dy, rect[1]));
                 for l in 0..global.layers {
                     let (l, r64, c64, p64) = (l as u64, r as u64, c as u64, p as u64);
                     let key = match global.order {
@@ -969,7 +1047,13 @@ fn sig_context(h: u32, v: u32, d: u32, kind: usize) -> usize {
         return match d {
             0 => [0, 1, 2][hv.min(2) as usize],
             1 => [3, 4, 5][hv.min(2) as usize],
-            2 => if hv >= 1 { 7 } else { 6 },
+            2 => {
+                if hv >= 1 {
+                    7
+                } else {
+                    6
+                }
+            }
             _ => 8,
         };
     }
@@ -1025,7 +1109,15 @@ fn tier1(b: &Block, kind: usize, mb: i32, cb: u8, reversible: bool) -> Vec<f32> 
     let sign_cx = |sig: &[u8], neg: &[u8], x: usize, y: usize| -> (usize, u8) {
         let i = at(x, y);
         let below = !(vsc && y % 4 == 3);
-        let c = |j: usize| -> i32 { if sig[j] == 0 { 0 } else if neg[j] != 0 { -1 } else { 1 } };
+        let c = |j: usize| -> i32 {
+            if sig[j] == 0 {
+                0
+            } else if neg[j] != 0 {
+                -1
+            } else {
+                1
+            }
+        };
         let hc = (c(i - 1) + c(i + 1)).clamp(-1, 1);
         let vc = (c(i - sw) + if below { c(i + sw) } else { 0 }).clamp(-1, 1);
         match (hc, vc) {
@@ -1043,9 +1135,14 @@ fn tier1(b: &Block, kind: usize, mb: i32, cb: u8, reversible: bool) -> Vec<f32> 
     let mut cx = fresh_contexts();
     let mut k = 0u32;
     'segs: for seg in &b.segs {
-        let mut coder = if seg.raw { Coder::Raw(RawBits { d: &seg.data, p: 0, byte: 0, left: 0 }) } else { Coder::Mq(Mq::new(&seg.data)) };
+        let mut coder = if seg.raw {
+            Coder::Raw(RawBits { d: &seg.data, p: 0, byte: 0, left: 0 })
+        } else {
+            Coder::Mq(Mq::new(&seg.data))
+        };
         for _ in 0..seg.passes {
-            let (kind_of_pass, plane) = if k == 0 { (2, numbps - 1) } else { ((k - 1) % 3, numbps - 1 - (k as i32 + 2) / 3) };
+            let (kind_of_pass, plane) =
+                if k == 0 { (2, numbps - 1) } else { ((k - 1) % 3, numbps - 1 - (k as i32 + 2) / 3) };
             if plane < 0 {
                 break 'segs;
             }
@@ -1081,7 +1178,8 @@ fn tier1(b: &Block, kind: usize, mb: i32, cb: u8, reversible: bool) -> Vec<f32> 
                             if bit_of(&mut coder, &mut cx, RUN) == 0 {
                                 continue;
                             }
-                            let r = ((bit_of(&mut coder, &mut cx, UNIFORM) << 1) | bit_of(&mut coder, &mut cx, UNIFORM)) as usize;
+                            let r = ((bit_of(&mut coder, &mut cx, UNIFORM) << 1) | bit_of(&mut coder, &mut cx, UNIFORM))
+                                as usize;
                             y = y0 + r;
                             let i = at(x, y);
                             neg[i] = sign_of(&mut coder, &mut cx, &sig, &neg, x, y);
@@ -1339,9 +1437,14 @@ mod tests {
             fields.push(String::from_utf8(d[s..i].to_vec()).unwrap());
         }
         let body = &d[i + 1..];
-        let (w, h, max): (usize, usize, usize) = (fields[1].parse().unwrap(), fields[2].parse().unwrap(), fields[3].parse().unwrap());
+        let (w, h, max): (usize, usize, usize) =
+            (fields[1].parse().unwrap(), fields[2].parse().unwrap(), fields[3].parse().unwrap());
         let ch = if fields[0] == "P6" { 3 } else { 1 };
-        let samples: Vec<u16> = if max > 255 { body.chunks(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect() } else { body.iter().map(|b| *b as u16).collect() };
+        let samples: Vec<u16> = if max > 255 {
+            body.chunks(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect()
+        } else {
+            body.iter().map(|b| *b as u16).collect()
+        };
         assert_eq!(samples.len(), w * h * ch);
         (w, h, ch, samples)
     }
@@ -1442,4 +1545,3 @@ mod tests {
         }
     }
 }
-

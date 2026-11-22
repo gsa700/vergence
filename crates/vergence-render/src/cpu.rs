@@ -71,7 +71,13 @@ impl RRect {
 
     /// The same shape drawn in by `by` on every side (None if nothing is left).
     fn inset(&self, by: f32) -> Option<RRect> {
-        let r = RRect { x0: self.x0 + by, y0: self.y0 + by, x1: self.x1 - by, y1: self.y1 - by, radius: (self.radius - by).max(0.0) };
+        let r = RRect {
+            x0: self.x0 + by,
+            y0: self.y0 + by,
+            x1: self.x1 - by,
+            y1: self.y1 - by,
+            radius: (self.radius - by).max(0.0),
+        };
         (r.x1 > r.x0 && r.y1 > r.y0).then_some(r)
     }
 
@@ -108,12 +114,27 @@ pub(crate) enum Shape {
     /// The outer shape less the inner one (None: the outline is the whole shape).
     Stroke(RRect, Option<RRect>),
     /// A line from a to b, `half` its width.
-    Line { ax: f32, ay: f32, bx: f32, by: f32, half: f32 },
+    Line {
+        ax: f32,
+        ay: f32,
+        bx: f32,
+        by: f32,
+        half: f32,
+    },
     /// A glyph's coverage with its top-left pixel at x, y, and what each
     /// coverage value paints for its ink (textlook.rs; the GPU works it out
     /// in its shader instead).
-    Glyph { x: i32, y: i32, bitmap: Arc<Bitmap>, curve: Arc<[u8; 256]> },
-    Image { to: RRect, image: usize, opacity: f32 },
+    Glyph {
+        x: i32,
+        y: i32,
+        bitmap: Arc<Bitmap>,
+        curve: Arc<[u8; 256]>,
+    },
+    Image {
+        to: RRect,
+        image: usize,
+        opacity: f32,
+    },
     /// A grid of cells left as it is in the scene (the command at this
     /// place in its list), for a renderer that makes its own shapes of it:
     /// the GPU's. Its `bounds` are the clip's, not the grid's.
@@ -202,7 +223,15 @@ pub(crate) struct Prepared<'a> {
 
 /// `banded`: note each shape against the bands of rows it touches, which
 /// only this renderer needs (the GPU's draws the shapes in their order).
-pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u32, h: u32, order: Order, banded: bool) -> Prepared<'a> {
+pub(crate) fn prepare<'a>(
+    scene: &'a Scene,
+    fonts: &mut Fonts,
+    scale: f32,
+    w: u32,
+    h: u32,
+    order: Order,
+    banded: bool,
+) -> Prepared<'a> {
     let faces: Vec<Option<FaceId>> = scene.fonts.iter().map(|f| fonts.face(&f.family, f.weight, f.italic)).collect();
     let whole = [0, 0, w as i32, h as i32];
     let mut prims: Vec<Prim> = Vec::with_capacity(scene.commands.len());
@@ -234,8 +263,14 @@ pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u3
                 add(Shape::Stroke(r, r.inset(width * scale)), straight(color, order), r.bounds());
             }
             Command::Line { from, to, width, color } => {
-                let (ax, ay, bx, by, half) = (from.x * scale, from.y * scale, to.x * scale, to.y * scale, width * scale / 2.0);
-                let bounds = [(ax.min(bx) - half).floor() as i32 - 1, (ay.min(by) - half).floor() as i32 - 1, (ax.max(bx) + half).ceil() as i32 + 1, (ay.max(by) + half).ceil() as i32 + 1];
+                let (ax, ay, bx, by, half) =
+                    (from.x * scale, from.y * scale, to.x * scale, to.y * scale, width * scale / 2.0);
+                let bounds = [
+                    (ax.min(bx) - half).floor() as i32 - 1,
+                    (ay.min(by) - half).floor() as i32 - 1,
+                    (ax.max(bx) + half).ceil() as i32 + 1,
+                    (ay.max(by) + half).ceil() as i32 + 1,
+                ];
                 add(Shape::Line { ax, ay, bx, by, half }, straight(color, order), bounds);
             }
             Command::Glyphs { font, size, color, origin, glyphs } => {
@@ -261,7 +296,11 @@ pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u3
             }
             Command::Image { image, rect, opacity } => {
                 let to = RRect::device(rect, scale, 0.0);
-                add(Shape::Image { to, image: *image as usize, opacity: *opacity }, [255, 255, 255, to255(*opacity) as u8], to.bounds());
+                add(
+                    Shape::Image { to, image: *image as usize, opacity: *opacity },
+                    [255, 255, 255, to255(*opacity) as u8],
+                    to.bounds(),
+                );
             }
             Command::PushClip { rect, radius } => {
                 let r = RRect::device(rect, scale, *radius);
@@ -274,7 +313,11 @@ pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u3
                     chains.push(list);
                     chains.len() as u32 - 1
                 };
-                let bounds = if aligned { [r.x0.round() as i32, r.y0.round() as i32, r.x1.round() as i32, r.y1.round() as i32] } else { r.bounds() };
+                let bounds = if aligned {
+                    [r.x0.round() as i32, r.y0.round() as i32, r.x1.round() as i32, r.y1.round() as i32]
+                } else {
+                    r.bounds()
+                };
                 clips.push((intersect(scissor, bounds), chain));
             }
             Command::PopClip => {
@@ -304,7 +347,11 @@ pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u3
                             end += 1;
                         }
                         if ground.a != 0 {
-                            let shape = RRect::device(&Rect::new(origin.x + x as f32 * cell_w, top, (end - x) as f32 * cell_w, *cell_h), scale, 0.0);
+                            let shape = RRect::device(
+                                &Rect::new(origin.x + x as f32 * cell_w, top, (end - x) as f32 * cell_w, *cell_h),
+                                scale,
+                                0.0,
+                            );
                             add(Shape::Fill(shape), straight(&ground, order), shape.bounds());
                         }
                         x = end;
@@ -317,7 +364,16 @@ pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u3
                             while end < columns && lined(&row[end]) && row[end].ink == row[x].ink {
                                 end += 1;
                             }
-                            let shape = RRect::device(&Rect::new(origin.x + x as f32 * cell_w, top + cell_h - 2.0, (end - x) as f32 * cell_w, 1.0), scale, 0.0);
+                            let shape = RRect::device(
+                                &Rect::new(
+                                    origin.x + x as f32 * cell_w,
+                                    top + cell_h - 2.0,
+                                    (end - x) as f32 * cell_w,
+                                    1.0,
+                                ),
+                                scale,
+                                0.0,
+                            );
                             add(Shape::Fill(shape), straight(&row[x].ink, order), shape.bounds());
                         }
                         x = end;
@@ -339,7 +395,11 @@ pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u3
                         let Some(bitmap) = fonts.raster(face, cell.glyph, size * scale, sub) else { continue };
                         let (px, py) = (whole_x as i32 + bitmap.left, line + bitmap.top);
                         let bounds = [px, py, px + bitmap.width as i32, py + bitmap.height as i32];
-                        add(Shape::Glyph { x: px, y: py, bitmap, curve: curve(&cell.ink) }, straight(&cell.ink, order), bounds);
+                        add(
+                            Shape::Glyph { x: px, y: py, bitmap, curve: curve(&cell.ink) },
+                            straight(&cell.ink, order),
+                            bounds,
+                        );
                     }
                 }
             }
@@ -388,7 +448,8 @@ impl Prepared<'_> {
                 let rows = edge(r.y0, r.y1, y);
                 // The columns that are covered in full across this row, and the edges beside them.
                 let inset = if r.corner_row(y) { r.radius } else { 0.0 };
-                let (full0, full1) = (((r.x0 + inset).ceil() as i32).clamp(x0, x1), ((r.x1 - inset).floor() as i32).clamp(x0, x1));
+                let (full0, full1) =
+                    (((r.x0 + inset).ceil() as i32).clamp(x0, x1), ((r.x1 - inset).floor() as i32).clamp(x0, x1));
                 if full0 >= full1 {
                     return each(row, x0, x1, &|x| r.cover(x, y));
                 }
@@ -459,7 +520,9 @@ impl Prepared<'_> {
                     let (a, b, c, d) = (texel(u0, v0), texel(u1, v0), texel(u0, v1), texel(u1, v1));
                     // Mixed with alpha multiplied in, so a clear texel's color does not bleed.
                     let mut mixed = [0.0f32; 4];
-                    for (t, wgt) in [(a, (1.0 - uf) * (1.0 - vf)), (b, uf * (1.0 - vf)), (c, (1.0 - uf) * vf), (d, uf * vf)] {
+                    for (t, wgt) in
+                        [(a, (1.0 - uf) * (1.0 - vf)), (b, uf * (1.0 - vf)), (c, (1.0 - uf) * vf), (d, uf * vf)]
+                    {
                         let alpha = t[3] / 255.0 * wgt;
                         mixed[0] += t[0] * alpha;
                         mixed[1] += t[1] * alpha;
@@ -469,7 +532,12 @@ impl Prepared<'_> {
                     if mixed[3] <= 0.0 {
                         continue;
                     }
-                    let color = [(mixed[0] / mixed[3] + 0.5) as u8, (mixed[1] / mixed[3] + 0.5) as u8, (mixed[2] / mixed[3] + 0.5) as u8, 255];
+                    let color = [
+                        (mixed[0] / mixed[3] + 0.5) as u8,
+                        (mixed[1] / mixed[3] + 0.5) as u8,
+                        (mixed[2] / mixed[3] + 0.5) as u8,
+                        255,
+                    ];
                     blend(&mut row[x as usize * 4..], color, to255(mixed[3] * cover));
                 }
             }
@@ -523,7 +591,13 @@ impl Cpu {
     }
 
     /// The scene at `scale` pixels to the reference unit, over `background`.
-    pub fn render(&self, scene: &Scene, fonts: &mut Fonts, scale: f32, background: Color) -> Result<Pixmap, RenderError> {
+    pub fn render(
+        &self,
+        scene: &Scene,
+        fonts: &mut Fonts,
+        scale: f32,
+        background: Color,
+    ) -> Result<Pixmap, RenderError> {
         let (w, h) = pixel_size(scene, scale)?;
         let mut pixmap = Pixmap::new(w, h);
         self.render_rows(scene, fonts, scale, background, &mut pixmap, 0..h)?;
@@ -533,14 +607,30 @@ impl Cpu {
     /// Redraws the pixel rows `rows` of `into`, a picture of this scene's
     /// size at this scale, leaving the others as they are. What it draws is
     /// exactly what [`Cpu::render`] would put in those rows.
-    pub fn render_rows(&self, scene: &Scene, fonts: &mut Fonts, scale: f32, background: Color, into: &mut Pixmap, rows: Range<u32>) -> Result<(), RenderError> {
+    pub fn render_rows(
+        &self,
+        scene: &Scene,
+        fonts: &mut Fonts,
+        scale: f32,
+        background: Color,
+        into: &mut Pixmap,
+        rows: Range<u32>,
+    ) -> Result<(), RenderError> {
         let target = Target { width: into.width, height: into.height, data: &mut into.data, order: Order::Rgba };
         self.render_target(scene, fonts, scale, background, target, rows)
     }
 
     /// As [`Cpu::render_rows`], into any memory of the right size, in either
     /// byte order: a window's buffer is drawn in place, with no copy.
-    pub fn render_target(&self, scene: &Scene, fonts: &mut Fonts, scale: f32, background: Color, into: Target<'_>, rows: Range<u32>) -> Result<(), RenderError> {
+    pub fn render_target(
+        &self,
+        scene: &Scene,
+        fonts: &mut Fonts,
+        scale: f32,
+        background: Color,
+        into: Target<'_>,
+        rows: Range<u32>,
+    ) -> Result<(), RenderError> {
         let (w, h) = pixel_size(scene, scale)?;
         if (into.width, into.height) != (w, h) || into.data.len() != w as usize * h as usize * 4 {
             return Err(RenderError::Size);
@@ -554,8 +644,18 @@ impl Cpu {
         let stride = w as usize * 4;
         let a = background.a as u32;
         let ground = straight(&background, into.order);
-        let background = [mul255(ground[0] as u32, a) as u8, mul255(ground[1] as u32, a) as u8, mul255(ground[2] as u32, a) as u8, background.a];
-        let work: Vec<(usize, &mut [u8])> = into.data.chunks_mut(BAND * stride).enumerate().filter(|(band, _)| band * BAND < rows.end && (band + 1) * BAND > rows.start).collect();
+        let background = [
+            mul255(ground[0] as u32, a) as u8,
+            mul255(ground[1] as u32, a) as u8,
+            mul255(ground[2] as u32, a) as u8,
+            background.a,
+        ];
+        let work: Vec<(usize, &mut [u8])> = into
+            .data
+            .chunks_mut(BAND * stride)
+            .enumerate()
+            .filter(|(band, _)| band * BAND < rows.end && (band + 1) * BAND > rows.start)
+            .collect();
         let threads = self.threads.min(work.len());
         let queue = Mutex::new(work);
         let run = || {

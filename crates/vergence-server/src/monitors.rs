@@ -35,7 +35,10 @@ struct Entry {
 const MAX: usize = 64;
 
 fn path() -> Option<PathBuf> {
-    let state = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    let state = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
     Some(state.join("vergence/monitors.toml"))
 }
 
@@ -45,7 +48,10 @@ fn read() -> Record {
 
 /// Written beside and moved into place, readable by its owner only.
 fn write(record: &Record) -> std::io::Result<()> {
-    use std::{io::Write, os::unix::fs::{DirBuilderExt, OpenOptionsExt}};
+    use std::{
+        io::Write,
+        os::unix::fs::{DirBuilderExt, OpenOptionsExt},
+    };
     let Some(path) = path() else { return Ok(()) };
     if let Some(dir) = path.parent() {
         std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;

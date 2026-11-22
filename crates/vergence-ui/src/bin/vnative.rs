@@ -81,20 +81,36 @@ impl GpuDraw {
         let travel = (w - BAR as f32).max(1.0);
         scene.fill(Rect::new((n as f32 * 2.0) % travel, h / 3.0, BAR as f32, h / 3.0), Color::rgb(60, 160, 90));
         if let Some((x, y)) = pointer {
-            scene.fill(Rect::new(x as f32 - DOT as f32 / 2.0, y as f32 - DOT as f32 / 2.0, DOT as f32, DOT as f32), Color::rgb(20, 20, 20));
+            scene.fill(
+                Rect::new(x as f32 - DOT as f32 / 2.0, y as f32 - DOT as f32 / 2.0, DOT as f32, DOT as f32),
+                Color::rgb(20, 20, 20),
+            );
         }
         if self.send_scene {
             let bytes = scene.encode_keyed(&[], &|_| false).map_err(|e| format!("scene: {e}"))?;
             let mut shm = ShmFile::new(bytes.len())?;
             shm.bytes()[..bytes.len()].copy_from_slice(&bytes);
             let fd = Fd(std::sync::Arc::new(unsafe_dup(shm.fd())?));
-            c.send(&ClientMsg::Window(WinRequest::Scene { window: WINDOW, fd, len: bytes.len() as u32, forget: Vec::new() }))?;
+            c.send(&ClientMsg::Window(WinRequest::Scene {
+                window: WINDOW,
+                fd,
+                len: bytes.len() as u32,
+                forget: Vec::new(),
+            }))?;
             return Ok(());
         }
         let b = &self.buffers[self.next];
-        self.gpu.draw_into(b, &scene, &mut self.fonts, self.scale as f32, Color::rgb(0, 0, 0)).map_err(|e| format!("GPU draw: {e:?}"))?;
+        self.gpu
+            .draw_into(b, &scene, &mut self.fonts, self.scale as f32, Color::rgb(0, 0, 0))
+            .map_err(|e| format!("GPU draw: {e:?}"))?;
         let plane = Plane { fd: Fd(std::sync::Arc::new(b.fd.try_clone()?)), offset: b.offset, stride: b.stride };
-        let buffer = Buffer::Dmabuf { planes: vec![plane], width: b.width, height: b.height, format: b.format, modifier: b.modifier };
+        let buffer = Buffer::Dmabuf {
+            planes: vec![plane],
+            width: b.width,
+            height: b.height,
+            format: b.format,
+            modifier: b.modifier,
+        };
         c.send(&ClientMsg::Window(WinRequest::Attach { window: WINDOW, buffer, damage: Vec::new() }))?;
         self.next = (self.next + 1) % self.buffers.len();
         Ok(())
@@ -155,7 +171,12 @@ impl Picture {
     fn dot(&mut self, x: f64, y: f64) -> Damage {
         let side = (DOT * self.scale).round() as i32;
         let (px, py) = ((x * self.scale) as i32 - side / 2, (y * self.scale) as i32 - side / 2);
-        let r = Damage { x: px.max(0), y: py.max(0), w: (px + side).min(self.w) - px.max(0), h: (py + side).min(self.h) - py.max(0) };
+        let r = Damage {
+            x: px.max(0),
+            y: py.max(0),
+            w: (px + side).min(self.w) - px.max(0),
+            h: (py + side).min(self.h) - py.max(0),
+        };
         for yy in r.y..r.y + r.h {
             for xx in r.x..r.x + r.w {
                 self.put(xx, yy, (20, 20, 20));
@@ -207,7 +228,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut gpu = if args.iter().any(|a| a == "--gpu") {
         let g = Gpu::new().map_err(|e| format!("no GPU renderer: {e:?}"))?;
         println!("drawing on the GPU: {}", g.description());
-        Some(GpuDraw { gpu: g, fonts: Fonts::system(), send_scene: args.iter().any(|a| a == "--scene"), buffers: Vec::new(), next: 0, size: (width, height), scale: 1.0 })
+        Some(GpuDraw {
+            gpu: g,
+            fonts: Fonts::system(),
+            send_scene: args.iter().any(|a| a == "--scene"),
+            buffers: Vec::new(),
+            next: 0,
+            size: (width, height),
+            scale: 1.0,
+        })
     } else {
         None
     };
@@ -264,7 +293,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match ev {
             WinEvent::Configure { serial, width, height, scale, maximized, activated, .. } => {
                 last_dot = None;
-                println!("configure {serial}: {width}x{height} at scale {scale:.4}{}{}", if maximized { ", maximized" } else { "" }, if activated { ", active" } else { "" });
+                println!(
+                    "configure {serial}: {width}x{height} at scale {scale:.4}{}{}",
+                    if maximized { ", maximized" } else { "" },
+                    if activated { ", active" } else { "" }
+                );
                 if let Some(g) = gpu.as_mut() {
                     g.configure(width, height, scale)?;
                     c.send(&ClientMsg::Window(WinRequest::AckConfigure { window: WINDOW, serial }))?;
@@ -333,7 +366,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             WinEvent::PointerButton { button, pressed, .. } => {
                 println!("button {button:#x} {}", if pressed { "pressed" } else { "released" });
             }
-            WinEvent::PointerAxis { source, dx, dy, v120x, v120y, .. } => println!("scroll {dx:.1},{dy:.1} (v120 {v120x},{v120y}, source {source})"),
+            WinEvent::PointerAxis { source, dx, dy, v120x, v120y, .. } => {
+                println!("scroll {dx:.1},{dy:.1} (v120 {v120x},{v120y}, source {source})")
+            }
             WinEvent::Touch { id, phase, x, y, .. } => {
                 let what = ["down", "moved", "up", "canceled"].get(phase as usize).copied().unwrap_or("?");
                 if phase != 1 {
@@ -353,10 +388,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     break;
                 }
                 if key == KEY_C && pressed {
-                    c.send(&ClientMsg::Window(WinRequest::Copy { input_serial: serial, kinds: vec![TEXT.into(), "text/plain".into()] }))?;
+                    c.send(&ClientMsg::Window(WinRequest::Copy {
+                        input_serial: serial,
+                        kinds: vec![TEXT.into(), "text/plain".into()],
+                    }))?;
                 }
-                if key == KEY_P && pressed && let Some(id) = &monitor {
-                    c.send(&ClientMsg::Window(WinRequest::Place { window: WINDOW, place: Place::Monitor { id: id.clone(), x: 40.0, y: 40.0 } }))?;
+                if key == KEY_P
+                    && pressed
+                    && let Some(id) = &monitor
+                {
+                    c.send(&ClientMsg::Window(WinRequest::Place {
+                        window: WINDOW,
+                        place: Place::Monitor { id: id.clone(), x: 40.0, y: 40.0 },
+                    }))?;
                     println!("asked for 40,40 of {id}");
                 }
                 if key == KEY_V && pressed {
@@ -368,13 +412,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             WinEvent::ClipboardSend { kind, fd } => {
                 // Someone pastes what we copied: written, then the pipe closed.
                 use std::io::Write;
-                let mut f = std::fs::File::from(std::sync::Arc::try_unwrap(fd.0).unwrap_or_else(|a| a.try_clone().expect("dup")));
+                let mut f = std::fs::File::from(
+                    std::sync::Arc::try_unwrap(fd.0).unwrap_or_else(|a| a.try_clone().expect("dup")),
+                );
                 let _ = f.write_all(COPIED.as_bytes());
                 println!("clipboard asked for {kind}: sent {} bytes", COPIED.len());
             }
             WinEvent::ClipboardData { fd, .. } => {
                 use std::io::Read;
-                let mut f = std::fs::File::from(std::sync::Arc::try_unwrap(fd.0).unwrap_or_else(|a| a.try_clone().expect("dup")));
+                let mut f = std::fs::File::from(
+                    std::sync::Arc::try_unwrap(fd.0).unwrap_or_else(|a| a.try_clone().expect("dup")),
+                );
                 let mut text = String::new();
                 let _ = f.read_to_string(&mut text);
                 println!("pasted: {text:?}");

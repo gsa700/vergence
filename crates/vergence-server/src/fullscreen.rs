@@ -22,7 +22,10 @@ impl Server {
     pub fn enter_fullscreen(&mut self, w: &Win, output: Option<Output>) {
         let Some(geo) = self.space.element_geometry(w) else { return };
         let screen = output.and_then(|o| self.space.output_geometry(&o)).or_else(|| {
-            self.space.outputs().filter_map(|o| self.space.output_geometry(o)).max_by_key(|g| g.intersection(geo).map_or(0, |i| i.size.w as i64 * i.size.h as i64))
+            self.space
+                .outputs()
+                .filter_map(|o| self.space.output_geometry(o))
+                .max_by_key(|g| g.intersection(geo).map_or(0, |i| i.size.w as i64 * i.size.h as i64))
         });
         let Some(screen) = screen else { return };
         self.fullscreen.retain(|w, _| w.alive());
@@ -65,6 +68,10 @@ impl Server {
     /// there is neither drawn nor pressed.
     pub fn fullscreen_covers(&self, screen: Rectangle<i32, Logical>) -> bool {
         let Some(f) = self.keyboard_window() else { return false };
-        self.fullscreen.contains_key(&f) && self.space.element_geometry(&f).is_some_and(|g| g.intersection(screen).is_some_and(|i| i.size.w * 2 >= screen.size.w))
+        self.fullscreen.contains_key(&f)
+            && self
+                .space
+                .element_geometry(&f)
+                .is_some_and(|g| g.intersection(screen).is_some_and(|i| i.size.w * 2 >= screen.size.w))
     }
 }

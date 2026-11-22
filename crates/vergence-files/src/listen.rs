@@ -87,10 +87,14 @@ fn work(path: PathBuf, slices: u32, state: Arc<Mutex<State>>, nudge: Arc<Condvar
     // AlbumWall looks the same way), decoded by the picture helper.
     if state.lock().unwrap_or_else(|e| e.into_inner()).cover.is_none()
         && let Some(side) = path.parent().and_then(sidecar)
-        && let Ok(p) = vergence_decode::decode_file(&side, Some((vergence_hymie::helper::COVER_PX, vergence_hymie::helper::COVER_PX)))
+        && let Ok(p) = vergence_decode::decode_file(
+            &side,
+            Some((vergence_hymie::helper::COVER_PX, vergence_hymie::helper::COVER_PX)),
+        )
         && let Some(f) = p.frames.into_iter().next()
     {
-        state.lock().unwrap_or_else(|e| e.into_inner()).cover = Some(Arc::new(Image { width: p.width, height: p.height, rgba: f.rgba }));
+        state.lock().unwrap_or_else(|e| e.into_inner()).cover =
+            Some(Arc::new(Image { width: p.width, height: p.height, rgba: f.rgba }));
         wake();
     }
     let info = sound.info.clone();
@@ -223,7 +227,14 @@ struct Resample {
 
 impl Resample {
     fn new(from_rate: u32, from_ch: usize, to_rate: u32, to_ch: usize) -> Resample {
-        Resample { from_rate, from_ch: from_ch.max(1), to_rate, to_ch: to_ch.max(1), phase: 0.0, last: vec![0.0; from_ch.max(1)] }
+        Resample {
+            from_rate,
+            from_ch: from_ch.max(1),
+            to_rate,
+            to_ch: to_ch.max(1),
+            phase: 0.0,
+            last: vec![0.0; from_ch.max(1)],
+        }
     }
 
     fn channel(&self, frame: &[f32], c: usize) -> f32 {
@@ -250,7 +261,13 @@ impl Resample {
         }
         let step = self.from_rate as f64 / self.to_rate as f64;
         // Input frame -1 is the last of the piece before.
-        let frame_at = |i: isize, last: &[f32]| -> Vec<f32> { if i < 0 { last.to_vec() } else { input[i as usize * self.from_ch..(i as usize + 1) * self.from_ch].to_vec() } };
+        let frame_at = |i: isize, last: &[f32]| -> Vec<f32> {
+            if i < 0 {
+                last.to_vec()
+            } else {
+                input[i as usize * self.from_ch..(i as usize + 1) * self.from_ch].to_vec()
+            }
+        };
         let mut p = self.phase;
         while p < n as f64 - 1.0 {
             let i = p.floor() as isize;
@@ -293,6 +310,9 @@ mod tests {
 /// ArtNames): the first of these names present, whatever its case.
 fn sidecar(dir: &std::path::Path) -> Option<PathBuf> {
     const NAMES: [&str; 6] = ["cover.jpg", "cover.jpeg", "cover.png", "folder.jpg", "folder.jpeg", "front.jpg"];
-    let present: Vec<PathBuf> = std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).filter(|p| p.is_file()).collect();
-    NAMES.iter().find_map(|n| present.iter().find(|p| p.file_name().is_some_and(|f| f.to_string_lossy().eq_ignore_ascii_case(n))).cloned())
+    let present: Vec<PathBuf> =
+        std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).filter(|p| p.is_file()).collect();
+    NAMES.iter().find_map(|n| {
+        present.iter().find(|p| p.file_name().is_some_and(|f| f.to_string_lossy().eq_ignore_ascii_case(n))).cloned()
+    })
 }

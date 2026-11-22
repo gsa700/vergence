@@ -108,12 +108,21 @@ mod tests {
     use super::*;
 
     fn kept(closed: Option<(u64, &str)>) -> Kept {
-        Kept { page: Some("Theme and fonts".into()), app: None, scroll: 412.5, closed: closed.map(|(a, s)| (a, s.to_string())) }
+        Kept {
+            page: Some("Theme and fonts".into()),
+            app: None,
+            scroll: 412.5,
+            closed: closed.map(|(a, s)| (a, s.to_string())),
+        }
     }
 
     #[test]
     fn written_and_read_back() {
-        for k in [kept(None), kept(Some((1_763_750_000, "3f9c0a1b2d4e5f60"))), Kept { app: Some("org.mozilla.firefox".into()), ..Kept::default() }] {
+        for k in [
+            kept(None),
+            kept(Some((1_763_750_000, "3f9c0a1b2d4e5f60"))),
+            Kept { app: Some("org.mozilla.firefox".into()), ..Kept::default() },
+        ] {
             assert_eq!(parse(&text(&k)), k);
         }
         assert_eq!(parse("page \nscroll -4\nscroll NaN\nclosed x y\n"), Kept::default());
@@ -129,7 +138,10 @@ mod tests {
     fn closed_by_the_user_comes_back_for_a_while_in_the_same_session() {
         let k = kept(Some((5000, "s1")));
         assert!(wanted(k.clone(), 5000 + 600, "s1", true, 30).is_some());
-        assert!(wanted(k.clone(), 5000 + 600, "s1", false, 30).is_some(), "the close's own time, whatever restore says");
+        assert!(
+            wanted(k.clone(), 5000 + 600, "s1", false, 30).is_some(),
+            "the close's own time, whatever restore says"
+        );
         assert!(wanted(k.clone(), 5000 + 3600, "s1", true, 30).is_none(), "too long ago");
         assert!(wanted(k.clone(), 5000 + 600, "s2", true, 30).is_none(), "a new session: the front page");
         assert!(wanted(k, 5000 + 600, "s1", true, 0).is_none(), "keeping off");

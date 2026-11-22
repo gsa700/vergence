@@ -66,9 +66,23 @@ fn scene(rng: &mut Rng) -> Scene {
             8 => {
                 let columns = 1 + rng.below(12);
                 let cells = (0..columns * rng.below(6))
-                    .map(|_| Cell { ground: color(rng), ink: color(rng), glyph: rng.below(3000) as u32, font: rng.below(fonts) as u16, flags: [0, CELL_GLYPH, CELL_GLYPH, CELL_UNDERLINE | CELL_GLYPH, CELL_UNDERLINE][rng.below(5)] })
+                    .map(|_| Cell {
+                        ground: color(rng),
+                        ink: color(rng),
+                        glyph: rng.below(3000) as u32,
+                        font: rng.below(fonts) as u16,
+                        flags: [0, CELL_GLYPH, CELL_GLYPH, CELL_UNDERLINE | CELL_GLYPH, CELL_UNDERLINE][rng.below(5)],
+                    })
                     .collect();
-                s.cells(Point::new(rng.unit() * 600.0, rng.unit() * 400.0), 4.0 + rng.unit() * 12.0, 8.0 + rng.unit() * 20.0, rng.unit() * 20.0, 6.0 + rng.unit() * 30.0, columns as u32, cells);
+                s.cells(
+                    Point::new(rng.unit() * 600.0, rng.unit() * 400.0),
+                    4.0 + rng.unit() * 12.0,
+                    8.0 + rng.unit() * 20.0,
+                    rng.unit() * 20.0,
+                    6.0 + rng.unit() * 30.0,
+                    columns as u32,
+                    cells,
+                );
             }
             2 => {
                 let (r, c) = (rect(rng), color(rng));
@@ -76,12 +90,25 @@ fn scene(rng: &mut Rng) -> Scene {
             }
             3 => {
                 let c = color(rng);
-                s.line(Point::new(rng.unit() * 500.0, rng.unit() * 500.0), Point::new(rng.unit() * 500.0, rng.unit() * 500.0), rng.unit() * 4.0, c);
+                s.line(
+                    Point::new(rng.unit() * 500.0, rng.unit() * 500.0),
+                    Point::new(rng.unit() * 500.0, rng.unit() * 500.0),
+                    rng.unit() * 4.0,
+                    c,
+                );
             }
             4 | 5 => {
-                let glyphs = (0..rng.below(40)).map(|i| Glyph { id: rng.below(3000) as u32, x: i as f32 * 8.1, y: 0.0 }).collect();
+                let glyphs = (0..rng.below(40))
+                    .map(|i| Glyph { id: rng.below(3000) as u32, x: i as f32 * 8.1, y: 0.0 })
+                    .collect();
                 let c = color(rng);
-                s.glyphs(rng.below(fonts) as u32, 6.0 + rng.unit() * 30.0, c, Point::new(rng.unit() * 600.0, rng.unit() * 400.0), glyphs);
+                s.glyphs(
+                    rng.below(fonts) as u32,
+                    6.0 + rng.unit() * 30.0,
+                    c,
+                    Point::new(rng.unit() * 600.0, rng.unit() * 400.0),
+                    glyphs,
+                );
             }
             6 if images > 0 => {
                 let r = rect(rng);
@@ -151,7 +178,8 @@ fn damaged_scenes_never_panic() {
             3 => {
                 if b.len() >= 4 {
                     let at = rng.below(b.len() - 3);
-                    let v: u32 = [0, 1, u32::MAX, 0x7fc0_0000, 0x7f80_0000, 0xff80_0000, 1 << 20, 1 << 31][rng.below(8)];
+                    let v: u32 =
+                        [0, 1, u32::MAX, 0x7fc0_0000, 0x7f80_0000, 0xff80_0000, 1 << 20, 1 << 31][rng.below(8)];
                     b[at..at + 4].copy_from_slice(&v.to_le_bytes());
                 }
             }

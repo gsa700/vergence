@@ -270,7 +270,24 @@ struct Cx {
 impl Cx {
     fn new(id_len: u32) -> Cx {
         let i = || vec![0u8; 512];
-        Cx { dh: i(), dw: i(), ex: i(), ai: i(), dt: i(), fs: i(), ds: i(), it: i(), ri: i(), rdw: i(), rdh: i(), rdx: i(), rdy: i(), id: vec![0; 1 << (id_len.min(24) + 1)], gb: vec![0; 1 << 16], gr: vec![0; 1 << 14] }
+        Cx {
+            dh: i(),
+            dw: i(),
+            ex: i(),
+            ai: i(),
+            dt: i(),
+            fs: i(),
+            ds: i(),
+            it: i(),
+            ri: i(),
+            rdw: i(),
+            rdh: i(),
+            rdx: i(),
+            rdy: i(),
+            id: vec![0; 1 << (id_len.min(24) + 1)],
+            gb: vec![0; 1 << 16],
+            gr: vec![0; 1 << 14],
+        }
     }
 }
 
@@ -286,7 +303,15 @@ const TEMPLATES: [&[(i8, i8)]; 4] = [
 const SLTP: [usize; 4] = [0x9B25, 0x0795, 0x00E5, 0x0195];
 
 /// A generic region by arithmetic coding (6.2.5).
-fn generic(m: &mut Mq, cx: &mut [u8], w: usize, h: usize, template: u8, tpgdon: bool, at: &[(i8, i8)]) -> Option<Bitmap> {
+fn generic(
+    m: &mut Mq,
+    cx: &mut [u8],
+    w: usize,
+    h: usize,
+    template: u8,
+    tpgdon: bool,
+    at: &[(i8, i8)],
+) -> Option<Bitmap> {
     let t = (template & 3) as usize;
     let mut pixels: Vec<(i8, i8)> = TEMPLATES[t].to_vec();
     pixels.extend(at.iter().take(if t == 0 { 4 } else { 1 }));
@@ -320,7 +345,15 @@ fn generic(m: &mut Mq, cx: &mut [u8], w: usize, h: usize, template: u8, tpgdon: 
 /// A generic region by MMR (6.2.6): T.6 with 1 black.
 fn generic_mmr(data: &[u8], w: usize, h: usize) -> Option<Bitmap> {
     Bitmap::new(w, h, 0)?;
-    let p = crate::ccitt::Params { k: -1, columns: w, rows: h, end_of_line: false, byte_align: false, end_of_block: true, black_is_1: true };
+    let p = crate::ccitt::Params {
+        k: -1,
+        columns: w,
+        rows: h,
+        end_of_line: false,
+        byte_align: false,
+        end_of_block: true,
+        black_is_1: true,
+    };
     let packed = crate::ccitt::decode(data, &p);
     let stride = w.div_ceil(8);
     let mut b = Bitmap::new(w, h, 0)?;
@@ -333,12 +366,26 @@ fn generic_mmr(data: &[u8], w: usize, h: usize) -> Option<Bitmap> {
 }
 
 const REFINE_CODING: [&[(i8, i8)]; 2] = [&[(0, -1), (1, -1), (-1, 0)], &[(-1, -1), (0, -1), (1, -1), (-1, 0)]];
-const REFINE_REFERENCE: [&[(i8, i8)]; 2] = [&[(0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)], &[(0, -1), (-1, 0), (0, 0), (1, 0), (0, 1), (1, 1)]];
+const REFINE_REFERENCE: [&[(i8, i8)]; 2] = [
+    &[(0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)],
+    &[(0, -1), (-1, 0), (0, 0), (1, 0), (0, 1), (1, 1)],
+];
 const REFINE_SLTP: [usize; 2] = [0x0020, 0x0008];
 
 /// A refinement region (6.3): `reference` moved by (dx, dy).
 #[allow(clippy::too_many_arguments)]
-fn refine(m: &mut Mq, cx: &mut [u8], w: usize, h: usize, template: u8, reference: &Bitmap, dx: isize, dy: isize, tpgron: bool, at: &[(i8, i8)]) -> Option<Bitmap> {
+fn refine(
+    m: &mut Mq,
+    cx: &mut [u8],
+    w: usize,
+    h: usize,
+    template: u8,
+    reference: &Bitmap,
+    dx: isize,
+    dy: isize,
+    tpgron: bool,
+    at: &[(i8, i8)],
+) -> Option<Bitmap> {
     let t = (template & 1) as usize;
     let mut coding: Vec<(i8, i8)> = REFINE_CODING[t].to_vec();
     let mut refs: Vec<(i8, i8)> = REFINE_REFERENCE[t].to_vec();
@@ -418,7 +465,18 @@ fn text(m: &mut Mq, c: &mut Cx, p: &Text, syms: &[Bitmap]) -> Option<Bitmap> {
                 let rdy = m.int(&mut c.rdy)?;
                 let w = (sym.w as i64 + rdw).clamp(0, 1 << 16) as usize;
                 let h = (sym.h as i64 + rdh).clamp(0, 1 << 16) as usize;
-                let r = refine(m, &mut c.gr, w, h, p.r_template, &sym, ((rdw >> 1) + rdx) as isize, ((rdh >> 1) + rdy) as isize, false, &p.r_at)?;
+                let r = refine(
+                    m,
+                    &mut c.gr,
+                    w,
+                    h,
+                    p.r_template,
+                    &sym,
+                    ((rdw >> 1) + rdx) as isize,
+                    ((rdh >> 1) + rdy) as isize,
+                    false,
+                    &p.r_at,
+                )?;
                 sym = std::borrow::Cow::Owned(r);
             }
             let (sw, sh) = (sym.w as i64, sym.h as i64);
@@ -522,7 +580,21 @@ fn symbol_dict(d: &[u8], inputs: &[Bitmap]) -> Option<Vec<Bitmap>> {
                     let reference = syms.get(id)?.clone();
                     refine(&mut m, &mut c.gr, w, h, r_template, &reference, rdx as isize, rdy as isize, false, &r_at)?
                 } else {
-                    let p = Text { w, h, refine: true, strips: 1, corner: 1, transposed: false, op: 0, default: 0, ds_offset: 0, r_template, r_at, instances: count.clamp(0, MAX_INSTANCES as i64) as usize, id_len: id_bits };
+                    let p = Text {
+                        w,
+                        h,
+                        refine: true,
+                        strips: 1,
+                        corner: 1,
+                        transposed: false,
+                        op: 0,
+                        default: 0,
+                        ds_offset: 0,
+                        r_template,
+                        r_at,
+                        instances: count.clamp(0, MAX_INSTANCES as i64) as usize,
+                        id_len: id_bits,
+                    };
                     let known = syms.clone();
                     text(&mut m, &mut c, &p, &known)?
                 }
@@ -654,7 +726,13 @@ fn segment<'a>(d: &'a [u8], i: &mut usize) -> Option<Segment<'a>> {
     if count > 1 << 16 {
         return None;
     }
-    let size = if number <= 256 { 1 } else if number <= 65536 { 2 } else { 4 };
+    let size = if number <= 256 {
+        1
+    } else if number <= 65536 {
+        2
+    } else {
+        4
+    };
     let mut refers = Vec::with_capacity(count);
     for _ in 0..count {
         let b = d.get(p..p + size)?;
@@ -748,8 +826,14 @@ mod tests {
     /// context.
     #[test]
     fn mq_decoder_test_sequence() {
-        let coded = [0x84, 0xC7, 0x3B, 0xFC, 0xE1, 0xA1, 0x43, 0x04, 0x02, 0x20, 0x00, 0x00, 0x41, 0x0D, 0xBB, 0x86, 0xF4, 0x31, 0x7F, 0xFF, 0x88, 0xFF, 0x37, 0x47, 0x1A, 0xDB, 0x6A, 0xDF, 0xFF, 0xAC];
-        let want = [0x00, 0x02, 0x00, 0x51, 0x00, 0x00, 0x00, 0xC0, 0x03, 0x52, 0x87, 0x2A, 0xAA, 0xAA, 0xAA, 0xAA, 0x82, 0xC0, 0x20, 0x00, 0xFC, 0xD7, 0x9E, 0xF6, 0xBF, 0x7F, 0xED, 0x90, 0x4F, 0x46, 0xA3, 0xBF];
+        let coded = [
+            0x84, 0xC7, 0x3B, 0xFC, 0xE1, 0xA1, 0x43, 0x04, 0x02, 0x20, 0x00, 0x00, 0x41, 0x0D, 0xBB, 0x86, 0xF4, 0x31,
+            0x7F, 0xFF, 0x88, 0xFF, 0x37, 0x47, 0x1A, 0xDB, 0x6A, 0xDF, 0xFF, 0xAC,
+        ];
+        let want = [
+            0x00, 0x02, 0x00, 0x51, 0x00, 0x00, 0x00, 0xC0, 0x03, 0x52, 0x87, 0x2A, 0xAA, 0xAA, 0xAA, 0xAA, 0x82, 0xC0,
+            0x20, 0x00, 0xFC, 0xD7, 0x9E, 0xF6, 0xBF, 0x7F, 0xED, 0x90, 0x4F, 0x46, 0xA3, 0xBF,
+        ];
         let mut m = Mq::new(&coded);
         let mut cx = [0u8; 1];
         let got: Vec<u8> = (0..want.len()).map(|_| (0..8).fold(0u8, |v, _| v << 1 | m.bit(&mut cx, 0))).collect();
@@ -761,7 +845,9 @@ mod tests {
         let mut page = Bitmap::new(4, 1, 0).unwrap();
         page.px = vec![0, 1, 0, 1];
         let src = Bitmap { w: 4, h: 1, px: vec![0, 0, 1, 1] };
-        for (op, want) in [(0, [0, 1, 1, 1]), (1, [0, 0, 0, 1]), (2, [0, 1, 1, 0]), (3, [1, 0, 0, 1]), (4, [0, 0, 1, 1])] {
+        for (op, want) in
+            [(0, [0, 1, 1, 1]), (1, [0, 0, 0, 1]), (2, [0, 1, 1, 0]), (3, [1, 0, 0, 1]), (4, [0, 0, 1, 1])]
+        {
             let mut p = page.clone();
             p.compose(&src, 0, 0, op);
             assert_eq!(p.px, want, "op {op}");

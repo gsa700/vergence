@@ -178,7 +178,10 @@ pub fn of_bytes(head: &[u8]) -> Option<&'static str> {
     }
     // RIFF holds several formats; its kind is at byte 8.
     if at(0, b"RIFF") {
-        return [(b"WEBP", "image/webp"), (b"WAVE", "audio/x-wav"), (b"AVI ", "video/x-msvideo")].into_iter().find(|(k, _)| at(8, *k)).map(|(_, m)| m);
+        return [(b"WEBP", "image/webp"), (b"WAVE", "audio/x-wav"), (b"AVI ", "video/x-msvideo")]
+            .into_iter()
+            .find(|(k, _)| at(8, *k))
+            .map(|(_, m)| m);
     }
     // ISO base media (MPEG-4, QuickTime, HEIF, AVIF): "ftyp" at 4, the brand at 8.
     if at(4, b"ftyp") {
@@ -207,7 +210,8 @@ pub fn of_bytes(head: &[u8]) -> Option<&'static str> {
     let lower = start.chars().take(512).collect::<String>().to_ascii_lowercase();
     if let Some(line) = start.strip_prefix("#!") {
         let line = line.lines().next().unwrap_or_default();
-        let program = line.split_whitespace().flat_map(|w| w.rsplit('/').next()).find(|w| *w != "env").unwrap_or_default();
+        let program =
+            line.split_whitespace().flat_map(|w| w.rsplit('/').next()).find(|w| *w != "env").unwrap_or_default();
         return Some(match program {
             p if p.starts_with("python") => "text/x-python",
             p if p.starts_with("perl") => "application/x-perl",
@@ -275,8 +279,12 @@ pub fn of_file(path: &Path) -> &'static str {
 /// (whose file's own type counts).
 pub fn of_link(link: &str) -> Option<String> {
     let (scheme, rest) = link.split_once(':')?;
-    let ok = !scheme.is_empty() && scheme.len() <= 32 && scheme.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) && scheme.chars().all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c));
-    (ok && !scheme.eq_ignore_ascii_case("file") && !rest.is_empty()).then(|| format!("{SCHEME}{}", scheme.to_ascii_lowercase()))
+    let ok = !scheme.is_empty()
+        && scheme.len() <= 32
+        && scheme.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+        && scheme.chars().all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c));
+    (ok && !scheme.eq_ignore_ascii_case("file") && !rest.is_empty())
+        .then(|| format!("{SCHEME}{}", scheme.to_ascii_lowercase()))
 }
 
 /// The path a `file://` link names (its %XX escapes decoded), None for any
@@ -385,7 +393,8 @@ impl MimeApps {
                 continue;
             }
             let (Some(g), Some((key, value))) = (group, line.split_once('=')) else { continue };
-            let apps: Vec<String> = value.split(';').map(str::trim).filter(|a| !a.is_empty()).map(str::to_string).collect();
+            let apps: Vec<String> =
+                value.split(';').map(str::trim).filter(|a| !a.is_empty()).map(str::to_string).collect();
             let list = match g {
                 0 => &mut out.defaults,
                 1 => &mut out.added,
@@ -401,7 +410,11 @@ impl MimeApps {
     /// The file's text: the three groups, each type on its own line.
     pub fn to_text(&self) -> String {
         let mut out = String::new();
-        for (title, list) in [("Default Applications", &self.defaults), ("Added Associations", &self.added), ("Removed Associations", &self.removed)] {
+        for (title, list) in [
+            ("Default Applications", &self.defaults),
+            ("Added Associations", &self.added),
+            ("Removed Associations", &self.removed),
+        ] {
             if list.is_empty() {
                 continue;
             }
@@ -469,7 +482,10 @@ pub fn list_paths() -> Vec<PathBuf> {
 /// the user's config directory (the shared mimeapps.list is never written).
 pub fn own_list_path() -> PathBuf {
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".config")).join(format!("{DESKTOP}-mimeapps.list"))
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".config"))
+        .join(format!("{DESKTOP}-mimeapps.list"))
 }
 
 /// Every list file read, in [`list_paths`]'s order.
@@ -512,7 +528,8 @@ pub fn apps_for(mime: &str, apps: &[App], lists: &[MimeApps]) -> Vec<String> {
     // An application removed for a type, in any list, is not offered for it,
     // nor through the types it is a kind of.
     let kinds = ancestors(mime);
-    let all_removed: Vec<String> = kinds.iter().flat_map(|m| lists.iter().flat_map(move |l| MimeApps::of(&l.removed, m)).cloned()).collect();
+    let all_removed: Vec<String> =
+        kinds.iter().flat_map(|m| lists.iter().flat_map(move |l| MimeApps::of(&l.removed, m)).cloned()).collect();
     for m in &kinds {
         for l in lists.iter().filter(|l| l.vergence) {
             for id in MimeApps::of(&l.defaults, m) {
@@ -726,7 +743,13 @@ mod tests {
     fn a_list_file_round_trips_and_bad_lines_are_skipped() {
         let text = "# comment\n[Default Applications]\nimage/png=closeup.desktop;gimp.desktop;\ntext/plain=vergence-edit.desktop\nnot a line\n\n[Added Associations]\nimage/jpg=closeup.desktop;\n[Removed Associations]\ntext/plain=libreoffice.desktop;\n[Other]\nx/y=z.desktop\n";
         let l = MimeApps::parse(text);
-        assert_eq!(l.defaults, vec![("image/png".into(), vec!["closeup.desktop".into(), "gimp.desktop".into()]), ("text/plain".into(), vec!["vergence-edit.desktop".into()])]);
+        assert_eq!(
+            l.defaults,
+            vec![
+                ("image/png".into(), vec!["closeup.desktop".into(), "gimp.desktop".into()]),
+                ("text/plain".into(), vec!["vergence-edit.desktop".into()])
+            ]
+        );
         assert_eq!(l.added, vec![("image/jpeg".into(), vec!["closeup.desktop".into()])], "aliases resolved");
         assert_eq!(l.removed.len(), 1);
         assert_eq!(MimeApps::parse(&l.to_text()), l);
@@ -739,7 +762,14 @@ mod tests {
     #[test]
     fn the_apps_for_a_type_best_first() {
         let t = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        let (edit, closeup, gimp, office, hex, gone) = (t(&["text/plain"]), t(&["image/png", "image/jpeg"]), t(&["image/*"]), t(&["text/plain", "application/msword"]), t(&["application/octet-stream"]), t(&[]));
+        let (edit, closeup, gimp, office, hex, gone) = (
+            t(&["text/plain"]),
+            t(&["image/png", "image/jpeg"]),
+            t(&["image/*"]),
+            t(&["text/plain", "application/msword"]),
+            t(&["application/octet-stream"]),
+            t(&[]),
+        );
         let apps = [
             App { id: "vergence-edit.desktop", types: &edit },
             App { id: "closeup.desktop", types: &closeup },
@@ -749,19 +779,49 @@ mod tests {
             App { id: "other.desktop", types: &gone },
         ];
         let ours = MimeApps { vergence: true, ..MimeApps::parse("[Default Applications]\nimage/png=gimp.desktop;\n") };
-        let shared = MimeApps::parse("[Default Applications]\nimage/png=closeup.desktop;\ntext/plain=uninstalled.desktop;office.desktop;\n[Removed Associations]\napplication/x-shellscript=office.desktop;\n");
+        let shared = MimeApps::parse(
+            "[Default Applications]\nimage/png=closeup.desktop;\ntext/plain=uninstalled.desktop;office.desktop;\n[Removed Associations]\napplication/x-shellscript=office.desktop;\n",
+        );
         let lists = [ours, shared];
-        assert_eq!(apps_for("image/png", &apps, &lists), vec!["gimp.desktop", "closeup.desktop", "hex.desktop"], "ours first; image/* matches; binary last");
-        assert_eq!(apps_for("text/plain", &apps, &lists), vec!["vergence-edit.desktop", "office.desktop", "hex.desktop"], "Vergence's own app before another desktop's choice; an uninstalled default is passed over");
+        assert_eq!(
+            apps_for("image/png", &apps, &lists),
+            vec!["gimp.desktop", "closeup.desktop", "hex.desktop"],
+            "ours first; image/* matches; binary last"
+        );
+        assert_eq!(
+            apps_for("text/plain", &apps, &lists),
+            vec!["vergence-edit.desktop", "office.desktop", "hex.desktop"],
+            "Vergence's own app before another desktop's choice; an uninstalled default is passed over"
+        );
         let gnome = MimeApps::parse("[Default Applications]\ntext/markdown=gnome-edit.desktop;\n");
         let md = t(&["text/markdown"]);
-        let with_gnome = [App { id: "vergence-edit.desktop", types: &edit }, App { id: "gnome-edit.desktop", types: &md }];
-        assert_eq!(default_for("text/markdown", &with_gnome, std::slice::from_ref(&gnome)).as_deref(), Some("vergence-edit.desktop"), "Markdown is a kind of text: ours, not GNOME's choice");
-        let chosen = MimeApps { vergence: true, ..MimeApps::parse("[Default Applications]\ntext/markdown=gnome-edit.desktop;\n") };
-        assert_eq!(default_for("text/markdown", &with_gnome, &[chosen, gnome]).as_deref(), Some("gnome-edit.desktop"), "a choice made in Vergence beats our own apps");
-        assert_eq!(apps_for("application/x-shellscript", &apps, &lists), vec!["vergence-edit.desktop", "hex.desktop"], "a script opens with text apps, less the removed");
+        let with_gnome =
+            [App { id: "vergence-edit.desktop", types: &edit }, App { id: "gnome-edit.desktop", types: &md }];
+        assert_eq!(
+            default_for("text/markdown", &with_gnome, std::slice::from_ref(&gnome)).as_deref(),
+            Some("vergence-edit.desktop"),
+            "Markdown is a kind of text: ours, not GNOME's choice"
+        );
+        let chosen = MimeApps {
+            vergence: true,
+            ..MimeApps::parse("[Default Applications]\ntext/markdown=gnome-edit.desktop;\n")
+        };
+        assert_eq!(
+            default_for("text/markdown", &with_gnome, &[chosen, gnome]).as_deref(),
+            Some("gnome-edit.desktop"),
+            "a choice made in Vergence beats our own apps"
+        );
+        assert_eq!(
+            apps_for("application/x-shellscript", &apps, &lists),
+            vec!["vergence-edit.desktop", "hex.desktop"],
+            "a script opens with text apps, less the removed"
+        );
         assert_eq!(apps_for("image/jpg", &apps, &[]), vec!["closeup.desktop", "gimp.desktop", "hex.desktop"]);
-        assert_eq!(apps_for("application/x-unknown", &apps, &[]), vec!["hex.desktop"], "only apps that list binary files by name");
+        assert_eq!(
+            apps_for("application/x-unknown", &apps, &[]),
+            vec!["hex.desktop"],
+            "only apps that list binary files by name"
+        );
     }
 
     #[test]

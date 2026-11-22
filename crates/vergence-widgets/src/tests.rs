@@ -39,7 +39,11 @@ fn laid(root: Element<Msg>, w: f32, h: f32) -> Ui<Msg> {
 
 /// The bounds of the widgets with a meaning, by name.
 fn bounds(ui: &Ui<Msg>, name: &str) -> Rect {
-    ui.meaning().into_iter().find(|m| m.name == name).unwrap_or_else(|| panic!("no {name:?} in\n{}", ui.meaning_text())).bounds
+    ui.meaning()
+        .into_iter()
+        .find(|m| m.name == name)
+        .unwrap_or_else(|| panic!("no {name:?} in\n{}", ui.meaning_text()))
+        .bounds
 }
 
 fn press(ui: &mut Ui<Msg>, x: f32, y: f32, pressed: bool) -> Vec<Msg> {
@@ -48,7 +52,8 @@ fn press(ui: &mut Ui<Msg>, x: f32, y: f32, pressed: bool) -> Vec<Msg> {
 
 fn key(ui: &mut Ui<Msg>, sym: u32, shift: bool) -> Vec<Msg> {
     let modifiers = Modifiers { shift, ..Modifiers::default() };
-    let r = ui.input(&Input::Key { sym, text: None, pressed: true, repeat: false, composing: false, modifiers }).messages;
+    let r =
+        ui.input(&Input::Key { sym, text: None, pressed: true, repeat: false, composing: false, modifiers }).messages;
     ui.input(&Input::Key { sym, text: None, pressed: false, repeat: false, composing: false, modifiers });
     r
 }
@@ -58,7 +63,14 @@ fn a_row_shares_its_width() {
     // 100 wide: a fixed 20, a label of 4 characters at 10 (20 wide), and two
     // fills weighted 1 and 2 sharing what is left (100 - 20 - 20 - 3 gaps of 4 = 48).
     let ui = laid(
-        row(vec![space().width(Length::Fixed(20.0)), label("abcd"), label("one").width(Length::Fill(1)), label("two").width(Length::Fill(2))]).spacing(4.0).width(Length::FILL),
+        row(vec![
+            space().width(Length::Fixed(20.0)),
+            label("abcd"),
+            label("one").width(Length::Fill(1)),
+            label("two").width(Length::Fill(2)),
+        ])
+        .spacing(4.0)
+        .width(Length::FILL),
         100.0,
         50.0,
     );
@@ -70,7 +82,10 @@ fn a_row_shares_its_width() {
 #[test]
 fn a_column_centers_and_fills() {
     let ui = laid(
-        column(vec![label("top"), space().height(Length::FILL), label("bottom")]).align(Align::Center).width(Length::FILL).height(Length::FILL),
+        column(vec![label("top"), space().height(Length::FILL), label("bottom")])
+            .align(Align::Center)
+            .width(Length::FILL)
+            .height(Length::FILL),
         100.0,
         100.0,
     );
@@ -122,7 +137,13 @@ fn a_long_wrapped_text_is_measured_about_once() {
     // breaking used to re-measure the line so far for every word, again for every
     // time a container measured it: 2026-11-11, the License page took 6 s.
     let text = vec!["word"; 2000].join(" ");
-    let page: Element<Msg> = column(vec![panel(column(vec![panel(label(text.clone()).wrap().width(Length::FILL)).width(Length::FILL)]).width(Length::FILL)).width(Length::FILL)]).width(Length::FILL);
+    let page: Element<Msg> = column(vec![
+        panel(
+            column(vec![panel(label(text.clone()).wrap().width(Length::FILL)).width(Length::FILL)]).width(Length::FILL),
+        )
+        .width(Length::FILL),
+    ])
+    .width(Length::FILL);
     let mut counting = Counting(0);
     let mut ui = Ui::new();
     ui.layout(page, 300.0, 300.0, &mut counting, 10.0);
@@ -140,7 +161,9 @@ fn meaning_links_each_widget_to_its_nearest_meaningful_ancestor() {
     // A scroll area holding a column (no meaning of its own) of a label and a
     // button whose text is its name: both point at the scroll area; the
     // scroll area at the window (0). Ids are the widgets' own, stable.
-    let page = || scroll(column(vec![label("Hello"), button(label("Save")).on_press(Msg::A)]).width(Length::FILL)).name("Page");
+    let page = || {
+        scroll(column(vec![label("Hello"), button(label("Save")).on_press(Msg::A)]).width(Length::FILL)).name("Page")
+    };
     let ui = laid(page(), 300.0, 200.0);
     let m = ui.meaning();
     let roles: Vec<&str> = m.iter().map(|m| m.role).collect();
@@ -153,7 +176,8 @@ fn meaning_links_each_widget_to_its_nearest_meaningful_ancestor() {
 }
 
 fn two_buttons() -> Element<Msg> {
-    row(vec![button(label("A")).on_press(Msg::A), button(label("B")).on_press(Msg::B), button(label("off"))]).spacing(10.0)
+    row(vec![button(label("A")).on_press(Msg::A), button(label("B")).on_press(Msg::B), button(label("off"))])
+        .spacing(10.0)
 }
 
 #[test]
@@ -178,10 +202,25 @@ fn a_click_is_judged_where_it_happened() {
 #[test]
 fn a_rows_own_button_shows_and_takes_clicks_only_on_hover() {
     // Two rows, each a button with its own small button at the end, shown on hover.
-    let rows = || column(vec![
-        button(row(vec![label("one").width(Length::FILL), button(label("x")).on_press(Msg::B).name("x1").shown_on_hover()])).on_press(Msg::A).name("row1").width(Length::FILL),
-        button(row(vec![label("two").width(Length::FILL), button(label("x")).on_press(Msg::C).name("x2").shown_on_hover()])).on_press(Msg::A).name("row2").width(Length::FILL),
-    ]).spacing(4.0);
+    let rows = || {
+        column(vec![
+            button(row(vec![
+                label("one").width(Length::FILL),
+                button(label("x")).on_press(Msg::B).name("x1").shown_on_hover(),
+            ]))
+            .on_press(Msg::A)
+            .name("row1")
+            .width(Length::FILL),
+            button(row(vec![
+                label("two").width(Length::FILL),
+                button(label("x")).on_press(Msg::C).name("x2").shown_on_hover(),
+            ]))
+            .on_press(Msg::A)
+            .name("row2")
+            .width(Length::FILL),
+        ])
+        .spacing(4.0)
+    };
     let mut ui = laid(rows(), 300.0, 100.0);
     let (x1, x2) = (bounds(&ui, "x1"), bounds(&ui, "x2"));
     // It keeps its room, so nothing moves when it shows.
@@ -236,7 +275,13 @@ fn a_field_that_asks_for_the_keyboard_gets_it_when_it_appears() {
 #[test]
 fn a_name_offered_in_a_field_that_asks_for_the_keyboard_is_replaced_by_typing() {
     let mut ui = laid(column(vec![two_buttons()]), 300.0, 100.0);
-    ui.layout(column(vec![two_buttons(), field("New folder", Msg::Text).autofocus().name("Name")]), 300.0, 100.0, &mut Fixed, 13.0);
+    ui.layout(
+        column(vec![two_buttons(), field("New folder", Msg::Text).autofocus().name("Name")]),
+        300.0,
+        100.0,
+        &mut Fixed,
+        13.0,
+    );
     assert_eq!(type_text(&mut ui, "x"), vec![Msg::Text("x".into())]);
 }
 
@@ -258,7 +303,14 @@ fn tab_walks_the_controls_and_enter_presses() {
 
 #[test]
 fn every_widget_has_its_own_id() {
-    let ui = laid(column(vec![row(vec![button(label("A")).on_press(Msg::A), button(label("B")).on_press(Msg::B)]), panel(label("x"))]), 300.0, 100.0);
+    let ui = laid(
+        column(vec![
+            row(vec![button(label("A")).on_press(Msg::A), button(label("B")).on_press(Msg::B)]),
+            panel(label("x")),
+        ]),
+        300.0,
+        100.0,
+    );
     let mut ids: Vec<Id> = ui.ids();
     let n = ids.len();
     ids.sort();
@@ -268,7 +320,9 @@ fn every_widget_has_its_own_id() {
 
 #[test]
 fn what_is_remembered_follows_the_key() {
-    let list = |order: &[(u64, &str, Msg)]| column(order.iter().map(|(k, n, m)| button(label(*n)).on_press(m.clone()).key(*k)).collect());
+    let list = |order: &[(u64, &str, Msg)]| {
+        column(order.iter().map(|(k, n, m)| button(label(*n)).on_press(m.clone()).key(*k)).collect())
+    };
     let mut ui = laid(list(&[(1, "one", Msg::A), (2, "two", Msg::B)]), 300.0, 100.0);
     key(&mut ui, sym::TAB, false);
     key(&mut ui, sym::TAB, false);
@@ -285,12 +339,26 @@ fn the_meaning_of_a_page() {
     let page = column(vec![
         label("Appearance").size(20.0),
         rule(),
-        row(vec![label("Accent"), button(label("\u{2715}")).name("No accent").on_press(Msg::A), button(label("Apply"))]),
+        row(vec![
+            label("Accent"),
+            button(label("\u{2715}")).name("No accent").on_press(Msg::A),
+            button(label("Apply")),
+        ]),
     ]);
     let ui = laid(page, 300.0, 200.0);
     let text = ui.meaning_text();
     let lines: Vec<&str> = text.lines().map(|l| l.split(" at ").next().unwrap_or("")).collect();
-    assert_eq!(lines, vec!["label \"Appearance\"", "separator \"\"", "label \"Accent\"", "button \"No accent\"", "button \"Apply\" [off]"], "{text}");
+    assert_eq!(
+        lines,
+        vec![
+            "label \"Appearance\"",
+            "separator \"\"",
+            "label \"Accent\"",
+            "button \"No accent\"",
+            "button \"Apply\" [off]"
+        ],
+        "{text}"
+    );
 }
 
 #[test]
@@ -299,7 +367,16 @@ fn drawn_through_the_cpu_renderer() {
     use vergence_text::db::FontDb;
     let theme = Theme::default();
     let mut fonts = Fonts::new(FontDb::default());
-    let mut ui = laid(column(vec![button(space().width(Length::Fixed(40.0)).height(Length::Fixed(20.0))).padding(0.0).on_press(Msg::A).look(ButtonLook::Chosen)]), 100.0, 100.0);
+    let mut ui = laid(
+        column(vec![
+            button(space().width(Length::Fixed(40.0)).height(Length::Fixed(20.0)))
+                .padding(0.0)
+                .on_press(Msg::A)
+                .look(ButtonLook::Chosen),
+        ]),
+        100.0,
+        100.0,
+    );
     let shot = |ui: &mut Ui<Msg>, fonts: &mut Fonts| {
         let mut scene = Scene::new(100.0, 100.0);
         ui.draw(&mut scene, fonts, &theme);
@@ -319,7 +396,17 @@ fn drawn_through_the_cpu_renderer() {
 fn type_text(ui: &mut Ui<Msg>, text: &str) -> Vec<Msg> {
     let mut out = Vec::new();
     for c in text.chars() {
-        out.extend(ui.input(&Input::Key { sym: c as u32, text: Some(c.to_string()), pressed: true, repeat: false, composing: false, modifiers: Modifiers::default() }).messages);
+        out.extend(
+            ui.input(&Input::Key {
+                sym: c as u32,
+                text: Some(c.to_string()),
+                pressed: true,
+                repeat: false,
+                composing: false,
+                modifiers: Modifiers::default(),
+            })
+            .messages,
+        );
     }
     out
 }
@@ -341,7 +428,9 @@ fn click(ui: &mut Ui<Msg>, x: f32, y: f32) -> Vec<Msg> {
 
 #[test]
 fn a_switch_flips() {
-    let page = |on: bool| column(vec![switch(on, Msg::Toggle).name("Repeat"), switch(on, Msg::Toggle).name("Fixed").disabled()]);
+    let page = |on: bool| {
+        column(vec![switch(on, Msg::Toggle).name("Repeat"), switch(on, Msg::Toggle).name("Fixed").disabled()])
+    };
     let mut ui = laid(page(false), 300.0, 100.0);
     let (x, y) = center(bounds(&ui, "Repeat"));
     assert_eq!(click(&mut ui, x, y), vec![Msg::Toggle(true)]);
@@ -356,7 +445,17 @@ fn a_switch_flips() {
 
 #[test]
 fn a_slider_is_dragged_and_keyed() {
-    let mut ui = laid(column(vec![slider(0.0, 100.0, 50.0, Msg::Value).step(10.0).on_release(Msg::Done).width(Length::Fixed(116.0)).name("Delay")]), 300.0, 100.0);
+    let mut ui = laid(
+        column(vec![
+            slider(0.0, 100.0, 50.0, Msg::Value)
+                .step(10.0)
+                .on_release(Msg::Done)
+                .width(Length::Fixed(116.0))
+                .name("Delay"),
+        ]),
+        300.0,
+        100.0,
+    );
     let r = bounds(&ui, "Delay");
     // The thumb travels 100 points, from 8 in (its radius).
     let y = r.y + r.h / 2.0;
@@ -376,7 +475,10 @@ fn a_slider_is_dragged_and_keyed() {
 }
 
 fn form(text: &str) -> Element<Msg> {
-    column(vec![field(text, Msg::Text).on_submit(Msg::Submit).name("Accent"), field("hunter2", Msg::Text).secret().name("Password")])
+    column(vec![
+        field(text, Msg::Text).on_submit(Msg::Submit).name("Accent"),
+        field("hunter2", Msg::Text).secret().name("Password"),
+    ])
 }
 
 #[test]
@@ -391,7 +493,14 @@ fn typing_into_a_field() {
     assert_eq!(type_text(&mut ui, "x"), vec![Msg::Text("#xa".into())]);
     assert_eq!(key(&mut ui, sym::RETURN, false), vec![Msg::Submit]);
     // Shift+Home chooses back to the start; typing replaces it.
-    ui.input(&Input::Key { sym: sym::HOME, text: None, pressed: true, repeat: false, composing: false, modifiers: Modifiers { shift: true, ..Modifiers::default() } });
+    ui.input(&Input::Key {
+        sym: sym::HOME,
+        text: None,
+        pressed: true,
+        repeat: false,
+        composing: false,
+        modifiers: Modifiers { shift: true, ..Modifiers::default() },
+    });
     assert_eq!(chord(&mut ui, 'c', true).copy.as_deref(), Some("#x"));
     assert_eq!(type_text(&mut ui, "ff"), vec![Msg::Text("fa".into()), Msg::Text("ffa".into())]);
     // The program sets the text: its value wins.
@@ -400,7 +509,11 @@ fn typing_into_a_field() {
     assert!(chord(&mut ui, 'v', true).paste);
     assert!(chord(&mut ui, 'a', true).messages.is_empty());
     assert_eq!(ui.input(&Input::Paste("red\nignored\u{7}".into())).messages, vec![Msg::Text("red".into())], "one line");
-    assert_eq!(ui.input(&Input::Paste("a\u{7}b".into())).messages, vec![Msg::Text("redab".into())], "no control characters");
+    assert_eq!(
+        ui.input(&Input::Paste("a\u{7}b".into())).messages,
+        vec![Msg::Text("redab".into())],
+        "no control characters"
+    );
     // A secret is never copied nor told.
     key(&mut ui, sym::TAB, false);
     assert_eq!(ui.field_text().map(|t| (t.1, t.2)), Some((0, 7)), "all chosen on arrival");
@@ -423,7 +536,14 @@ fn a_field_undoes_and_redoes() {
     assert!(chord(&mut ui, 'z', true).messages.is_empty(), "nothing more to undo");
     assert_eq!(chord(&mut ui, 'y', true).messages, vec![Msg::Text("hello".into())]);
     let shift_z = Modifiers { ctrl: true, shift: true, ..Modifiers::default() };
-    let r = ui.input(&Input::Key { sym: 'Z' as u32, text: None, pressed: true, repeat: false, composing: false, modifiers: shift_z });
+    let r = ui.input(&Input::Key {
+        sym: 'Z' as u32,
+        text: None,
+        pressed: true,
+        repeat: false,
+        composing: false,
+        modifiers: shift_z,
+    });
     assert_eq!(r.messages, vec![Msg::Text("hel".into())]);
     assert_eq!(ui.field_text().map(|t| (t.1, t.2)), Some((3, 3)), "the caret comes back with the text");
     // A paste is a step of its own.
@@ -435,7 +555,9 @@ fn a_field_undoes_and_redoes() {
 fn a_field_offers_spelling_and_the_clipboard_on_a_right_click() {
     let mut ui = laid(form("teh"), 300.0, 100.0);
     let r = bounds(&ui, "Accent");
-    let right = |ui: &mut Ui<Msg>, x: f32, y: f32| ui.input(&Input::Button { button: MouseButton::Right, pressed: true, x, y, modifiers: Modifiers::default() });
+    let right = |ui: &mut Ui<Msg>, x: f32, y: f32| {
+        ui.input(&Input::Button { button: MouseButton::Right, pressed: true, x, y, modifiers: Modifiers::default() })
+    };
     assert!(right(&mut ui, r.x + r.w - 4.0, r.y + r.h / 2.0).used);
     let m = ui.field_menu_labels().expect("a menu");
     assert_eq!(m[0], "the");
@@ -464,7 +586,10 @@ fn a_field_holds_so_much_and_no_more() {
 }
 
 fn picker(sel: Option<usize>) -> Element<Msg> {
-    column(vec![choice((0..30).map(|i| format!("item {i}")).collect(), sel, Msg::Pick).name("Fit"), button(label("A")).on_press(Msg::A)])
+    column(vec![
+        choice((0..30).map(|i| format!("item {i}")).collect(), sel, Msg::Pick).name("Fit"),
+        button(label("A")).on_press(Msg::A),
+    ])
 }
 
 fn is_open(ui: &Ui<Msg>) -> bool {
@@ -502,7 +627,18 @@ fn a_choice_opens_and_chooses() {
 }
 
 fn long_page() -> Element<Msg> {
-    scroll(column((0..40).map(|i| button(label(format!("b{i}"))).on_press(if i == 39 { Msg::C } else { Msg::A }).height(Length::Fixed(20.0))).collect::<Vec<_>>()).width(Length::FILL))
+    scroll(
+        column(
+            (0..40)
+                .map(|i| {
+                    button(label(format!("b{i}")))
+                        .on_press(if i == 39 { Msg::C } else { Msg::A })
+                        .height(Length::Fixed(20.0))
+                })
+                .collect::<Vec<_>>(),
+        )
+        .width(Length::FILL),
+    )
 }
 
 #[test]
@@ -585,13 +721,20 @@ fn a_finger_scrolls_and_flicks() {
 
 #[test]
 fn a_drawing_hears_in_its_own_coordinates() {
-    let page = column(vec![space().height(Length::Fixed(30.0)), drawing(|_, _, _, _| {}).on_touch(|t| Some(Msg::Touched(t))).name("Screens")]).width(Length::FILL);
+    let page = column(vec![
+        space().height(Length::Fixed(30.0)),
+        drawing(|_, _, _, _| {}).on_touch(|t| Some(Msg::Touched(t))).name("Screens"),
+    ])
+    .width(Length::FILL);
     let mut ui = laid(page, 300.0, 200.0);
     let r = bounds(&ui, "Screens");
     assert_eq!((r.y, r.h), (30.0, 100.0));
     assert_eq!(press(&mut ui, 10.0, 40.0, true), vec![Msg::Touched(Touch::Press { x: 10.0, y: 10.0 })]);
     // Held: it hears the pointer even outside.
-    assert_eq!(ui.input(&Input::PointerMoved { x: 50.0, y: 0.0 }).messages, vec![Msg::Touched(Touch::Move { x: 50.0, y: -30.0, pressed: true })]);
+    assert_eq!(
+        ui.input(&Input::PointerMoved { x: 50.0, y: 0.0 }).messages,
+        vec![Msg::Touched(Touch::Move { x: 50.0, y: -30.0, pressed: true })]
+    );
     assert_eq!(press(&mut ui, 50.0, 0.0, false), vec![Msg::Touched(Touch::Release { x: 50.0, y: -30.0 })]);
     ui.input(&Input::PointerMoved { x: 20.0, y: 50.0 });
     assert_eq!(ui.input(&Input::PointerLeft).messages, vec![Msg::Touched(Touch::Leave)]);
@@ -605,7 +748,8 @@ fn a_picture_is_drawn_to_fit() {
     use vergence_text::db::FontDb;
     // Two pixels, red then blue; contained in 40 x 40 it is 40 x 20, in the middle.
     let image = Arc::new(Image { width: 2, height: 1, rgba: vec![255, 0, 0, 255, 0, 0, 255, 255] });
-    let mut ui = laid(column(vec![picture::<Msg>(image).width(Length::Fixed(40.0)).height(Length::Fixed(40.0))]), 40.0, 40.0);
+    let mut ui =
+        laid(column(vec![picture::<Msg>(image).width(Length::Fixed(40.0)).height(Length::Fixed(40.0))]), 40.0, 40.0);
     let mut scene = Scene::new(40.0, 40.0);
     let mut fonts = Fonts::new(FontDb::default());
     ui.draw(&mut scene, &mut fonts, &Theme::default());
@@ -619,14 +763,19 @@ fn fuzz_page() -> Element<Msg> {
     scroll(
         column(vec![
             label("Title").size(20.0),
-            row(vec![button(label("A")).on_press(Msg::A), switch(true, Msg::Toggle), slider(0.0, 1.0, 0.5, Msg::Value).on_release(Msg::Done)]),
+            row(vec![
+                button(label("A")).on_press(Msg::A),
+                switch(true, Msg::Toggle),
+                slider(0.0, 1.0, 0.5, Msg::Value).on_release(Msg::Done),
+            ]),
             field("text", Msg::Text).on_submit(Msg::Submit),
             choice(vec!["one".into(), "two".into()], Some(0), Msg::Pick),
             drawing(|s, _, r, t| {
                 s.fill(r, t.card);
             })
             .on_touch(|t| Some(Msg::Touched(t))),
-            scroll(column((0..20).map(|i| label(format!("line {i}"))).collect()).width(Length::FILL)).height(Length::Fixed(60.0)),
+            scroll(column((0..20).map(|i| label(format!("line {i}"))).collect()).width(Length::FILL))
+                .height(Length::Fixed(60.0)),
             button(label("C")).on_press(Msg::C),
         ])
         .spacing(6.0)
@@ -666,7 +815,26 @@ fn fuzz_input_on_every_widget() {
     };
     let mut fonts = Fonts::new(FontDb::default());
     let mut ui = laid(fuzz_page(), 400.0, 300.0);
-    let keys = [sym::TAB, sym::RETURN, ' ' as u32, sym::LEFT, sym::RIGHT, sym::UP, sym::DOWN, sym::HOME, sym::END, sym::PAGE_UP, sym::PAGE_DOWN, sym::BACKSPACE, sym::DELETE, sym::ESCAPE, 'a' as u32, 'c' as u32, 'v' as u32, 'x' as u32];
+    let keys = [
+        sym::TAB,
+        sym::RETURN,
+        ' ' as u32,
+        sym::LEFT,
+        sym::RIGHT,
+        sym::UP,
+        sym::DOWN,
+        sym::HOME,
+        sym::END,
+        sym::PAGE_UP,
+        sym::PAGE_DOWN,
+        sym::BACKSPACE,
+        sym::DELETE,
+        sym::ESCAPE,
+        'a' as u32,
+        'c' as u32,
+        'v' as u32,
+        'x' as u32,
+    ];
     let pastes = ["", "pasted", "two\nlines", "\u{1b}[31m", "e\u{301}\u{e9}"];
     for round in 0..rounds {
         let x = (next() % 500) as f32 - 50.0;
@@ -676,10 +844,22 @@ fn fuzz_input_on_every_widget() {
             0 => Input::PointerMoved { x, y },
             1 | 2 => Input::Button { button: MouseButton::Left, pressed: next() % 2 == 0, x, y, modifiers: m },
             3 => Input::Scroll { x, y, dx: 0.0, dy: (next() % 200) as f32 - 100.0 },
-            4 => Input::Touch { id: (next() % 3) as i32, phase: [Phase::Down, Phase::Moved, Phase::Up, Phase::Cancelled][(next() % 4) as usize], x, y },
+            4 => Input::Touch {
+                id: (next() % 3) as i32,
+                phase: [Phase::Down, Phase::Moved, Phase::Up, Phase::Cancelled][(next() % 4) as usize],
+                x,
+                y,
+            },
             5 | 6 => {
                 let k = keys[(next() % keys.len() as u64) as usize];
-                Input::Key { sym: k, text: char::from_u32(k).filter(|c| !c.is_control() && k < 0x100).map(|c| c.to_string()), pressed: next() % 3 != 0, repeat: next() % 5 == 0, composing: false, modifiers: m }
+                Input::Key {
+                    sym: k,
+                    text: char::from_u32(k).filter(|c| !c.is_control() && k < 0x100).map(|c| c.to_string()),
+                    pressed: next() % 3 != 0,
+                    repeat: next() % 5 == 0,
+                    composing: false,
+                    modifiers: m,
+                }
             }
             7 => Input::Paste(pastes[(next() % pastes.len() as u64) as usize].into()),
             8 => Input::PointerLeft,
@@ -707,7 +887,11 @@ fn fuzz_input_on_every_widget() {
 fn a_wrapping_row_makes_lines() {
     // Tiles 40 wide with gaps of 10 in 100: two to a line, three lines.
     let tiles = (0..5).map(|i| label(format!("t{i}")).width(Length::Fixed(40.0)).height(Length::Fixed(20.0))).collect();
-    let ui = laid(column(vec![row(tiles).spacing(10.0).wrap().width(Length::FILL), label("after")]).width(Length::FILL), 100.0, 300.0);
+    let ui = laid(
+        column(vec![row(tiles).spacing(10.0).wrap().width(Length::FILL), label("after")]).width(Length::FILL),
+        100.0,
+        300.0,
+    );
     assert_eq!(bounds(&ui, "t0"), Rect::new(0.0, 0.0, 40.0, 20.0));
     assert_eq!(bounds(&ui, "t1"), Rect::new(50.0, 0.0, 40.0, 20.0));
     assert_eq!(bounds(&ui, "t2"), Rect::new(0.0, 30.0, 40.0, 20.0));
@@ -724,9 +908,22 @@ fn a_text_area_is_drawn() {
     // Monospace at 13, as the geometry below expects (the desktop's is 16 by default).
     let theme = Theme { mono_size: 13.0, ..Theme::default() };
     let mut fonts = Fonts::system();
-    let text: String = (1..=40).map(|i| if i == 3 { "\tA long line that has to wrap at the edge of the area, more than once, because it goes on and on.\n".to_string() } else { format!("line {i}\n") }).collect();
+    let text: String = (1..=40)
+        .map(|i| {
+            if i == 3 {
+                "\tA long line that has to wrap at the edge of the area, more than once, because it goes on and on.\n"
+                    .to_string()
+            } else {
+                format!("line {i}\n")
+            }
+        })
+        .collect();
     let doc = crate::TextDoc::new(&text);
-    let mut ui = laid(column(vec![crate::text_area(&doc).on_change(Msg::A)]).width(Length::FILL).height(Length::FILL), 360.0, 240.0);
+    let mut ui = laid(
+        column(vec![crate::text_area(&doc).on_change(Msg::A)]).width(Length::FILL).height(Length::FILL),
+        360.0,
+        240.0,
+    );
     // Drawn once to measure, then a triple click chooses the second line.
     let mut scene = Scene::new(360.0, 240.0);
     ui.draw(&mut scene, &mut fonts, &theme);
@@ -758,7 +955,11 @@ fn icon_like() -> Element<Msg> {
 
 /// The meaning node id of the widget named `name`.
 fn id_of(ui: &Ui<Msg>, name: &str) -> u64 {
-    ui.meaning().into_iter().find(|m| m.name == name).unwrap_or_else(|| panic!("no {name:?} in\n{}", ui.meaning_text())).id
+    ui.meaning()
+        .into_iter()
+        .find(|m| m.name == name)
+        .unwrap_or_else(|| panic!("no {name:?} in\n{}", ui.meaning_text()))
+        .id
 }
 
 fn act(ui: &mut Ui<Msg>, name: &str, action: vergence_ui::Action) -> Result<Vec<Msg>, String> {
@@ -790,21 +991,41 @@ fn actions_by_meaning_do_what_input_does() {
     assert_eq!(act(&mut ui, "Repeat", Action::Press), Ok(vec![Msg::Toggle(true)]));
     assert_eq!(act(&mut ui, "Repeat", Action::Set("on".into())), Ok(vec![Msg::Toggle(true)]));
     assert_eq!(act(&mut ui, "Repeat", Action::Set("off".into())), Ok(vec![]), "already off");
-    assert_eq!(act(&mut ui, "Delay", Action::Set("250".into())), Ok(vec![Msg::Value(100.0), Msg::Done]), "kept within its range");
+    assert_eq!(
+        act(&mut ui, "Delay", Action::Set("250".into())),
+        Ok(vec![Msg::Value(100.0), Msg::Done]),
+        "kept within its range"
+    );
     assert!(act(&mut ui, "Delay", Action::Set("loud".into())).is_err());
     // A field's whole text replaced, as typing over it would.
     assert_eq!(act(&mut ui, "Name", Action::Set("Dave".into())), Ok(vec![Msg::Text("Dave".into())]));
     assert_eq!(act(&mut ui, "Password", Action::Set("x".into())), Err("a secret field is not set by actions".into()));
-    assert_eq!(act(&mut ui, "Font", Action::Choose("jetbrains mono".into())), Ok(vec![Msg::Pick(1)]), "by name, any case");
+    assert_eq!(
+        act(&mut ui, "Font", Action::Choose("jetbrains mono".into())),
+        Ok(vec![Msg::Pick(1)]),
+        "by name, any case"
+    );
     assert_eq!(act(&mut ui, "Font", Action::Set("Inter".into())), Ok(vec![Msg::Pick(0)]), "set means choose");
-    assert_eq!(act(&mut ui, "Font", Action::Choose("Comic Sans".into())), Err("no item named \"Comic Sans\" (its items: Inter, JetBrains Mono)".into()), "says what there is");
+    assert_eq!(
+        act(&mut ui, "Font", Action::Choose("Comic Sans".into())),
+        Err("no item named \"Comic Sans\" (its items: Inter, JetBrains Mono)".into()),
+        "says what there is"
+    );
     assert_eq!(act(&mut ui, "Hello", Action::Press), Err("it cannot be pressed".into()));
     // A field pressed: Enter in it; one with nothing to do with Enter says so.
     assert_eq!(act(&mut ui, "Page", Action::Press), Ok(vec![Msg::Done]));
     assert_eq!(act(&mut ui, "Name", Action::Press), Err("it does nothing with Enter".into()));
     // A drawing tells what it shows; an icon in a button is the button's.
-    assert!(ui.meaning().iter().any(|m| m.role == "drawing" && m.name == "Pages" && m.value.as_deref() == Some("Page 3 of 10")));
-    assert!(!ui.meaning().iter().any(|m| m.role == "drawing" && m.name.is_empty()), "no nameless icons:\n{}", ui.meaning_text());
+    assert!(
+        ui.meaning()
+            .iter()
+            .any(|m| m.role == "drawing" && m.name == "Pages" && m.value.as_deref() == Some("Page 3 of 10"))
+    );
+    assert!(
+        !ui.meaning().iter().any(|m| m.role == "drawing" && m.name.is_empty()),
+        "no nameless icons:\n{}",
+        ui.meaning_text()
+    );
     assert_eq!(ui.act(9_999_999, &Action::Press).err(), Some("no such node".into()));
     // No action moves the focus but Focus.
     assert_eq!(ui.focused(), None);
@@ -817,7 +1038,8 @@ fn actions_by_meaning_do_what_input_does() {
 #[test]
 fn reveal_scrolls_a_widget_into_view() {
     use vergence_ui::Action;
-    let rows: Vec<Element<Msg>> = (0..40).map(|i| button(label(format!("Row {i}"))).on_press(Msg::A).name(format!("Row {i}"))).collect();
+    let rows: Vec<Element<Msg>> =
+        (0..40).map(|i| button(label(format!("Row {i}"))).on_press(Msg::A).name(format!("Row {i}"))).collect();
     let mut ui = laid(scroll(column(rows)).name("List"), 200.0, 100.0);
     let before = bounds(&ui, "Row 30");
     assert!(before.y > 100.0, "out of sight first: {before:?}");
@@ -825,7 +1047,13 @@ fn reveal_scrolls_a_widget_into_view() {
     let after = bounds(&ui, "Row 30");
     assert!(after.y >= 0.0 && after.y + after.h <= 100.0, "in sight after: {after:?}");
     // A press reveals what it presses too.
-    let mut ui = laid(scroll(column((0..40).map(|i| button(label(format!("Row {i}"))).on_press(Msg::B).name(format!("Row {i}"))).collect())), 200.0, 100.0);
+    let mut ui = laid(
+        scroll(column(
+            (0..40).map(|i| button(label(format!("Row {i}"))).on_press(Msg::B).name(format!("Row {i}"))).collect(),
+        )),
+        200.0,
+        100.0,
+    );
     assert_eq!(act(&mut ui, "Row 39", Action::Press), Ok(vec![Msg::B]));
     let at = bounds(&ui, "Row 39");
     assert!(at.y + at.h <= 100.0, "{at:?}");
@@ -841,7 +1069,10 @@ fn a_text_area_set_by_action_is_one_step_to_undo() {
     assert!(doc.borrow_mut().undo());
     assert_eq!(doc.borrow().text(), "first line\nsecond", "one undo brings it back");
     // A read-only one refuses.
-    let ro = crate::textarea::TextDoc::with_options("x", crate::textarea::AreaOptions { editable: false, ..Default::default() });
+    let ro = crate::textarea::TextDoc::with_options(
+        "x",
+        crate::textarea::AreaOptions { editable: false, ..Default::default() },
+    );
     let mut ui = laid(column(vec![crate::textarea::text_area::<Msg>(&ro).name("Log")]), 300.0, 200.0);
     assert_eq!(act(&mut ui, "Log", Action::Set("y".into())), Err("it is off".into()));
 }

@@ -139,10 +139,7 @@ impl X {
             let connected = info.connection == randr::Connection::CONNECTED;
             let edid = if connected && atom != 0 {
                 let any: u32 = AtomEnum::ANY.into();
-                let p = self
-                    .conn
-                    .randr_get_output_property(o, atom, any, 0, 256, false, false)?
-                    .reply()?;
+                let p = self.conn.randr_get_output_property(o, atom, any, 0, 256, false, false)?.reply()?;
                 if p.format == 8 && !p.data.is_empty() { Some(p.data) } else { None }
             } else {
                 None
@@ -268,8 +265,8 @@ pub fn run(o: &Options) -> Result<bool, Box<dyn std::error::Error>> {
     if left {
         println!("WARNING: {} still shows connected after the run", o.output);
     }
-    let vergd_bad = results.iter().any(|(oc, _)| {
-        matches!(oc, Outcome::VergdWrongKey | Outcome::VergdFailed | Outcome::HarnessError)
-    });
+    let vergd_bad = results
+        .iter()
+        .any(|(oc, _)| matches!(oc, Outcome::VergdWrongKey | Outcome::VergdFailed | Outcome::HarnessError));
     Ok(!vergd_bad && !left)
 }

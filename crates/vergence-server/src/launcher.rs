@@ -49,7 +49,11 @@ impl Server {
         };
         let name = |i: usize| -> String {
             let n = &apps[i].name;
-            if n.trim().is_empty() { apps[i].id.trim_end_matches(".desktop").to_string() } else { n.chars().filter(|c| !c.is_control()).take(60).collect() }
+            if n.trim().is_empty() {
+                apps[i].id.trim_end_matches(".desktop").to_string()
+            } else {
+                n.chars().filter(|c| !c.is_control()).take(60).collect()
+            }
         };
         let mut lines = Vec::new();
         for i in vergence_shell::launcher::own(apps) {
@@ -67,9 +71,17 @@ impl Server {
                 lines.push(MenuLine::Sub { label: vergence_shell::launcher::TABS[t].into(), lines: sub });
             }
         }
-        let other: Vec<usize> = all.iter().copied().filter(|i| vergence_shell::launcher::tab_of(&apps[*i]).is_none()).take(MAX_MENU_LINES).collect();
+        let other: Vec<usize> = all
+            .iter()
+            .copied()
+            .filter(|i| vergence_shell::launcher::tab_of(&apps[*i]).is_none())
+            .take(MAX_MENU_LINES)
+            .collect();
         if !other.is_empty() {
-            let sub = other.into_iter().map(|i| item(&mut own, name(i), Entry::Shelf(Act::Start(apps[i].id.clone()), name(i)))).collect();
+            let sub = other
+                .into_iter()
+                .map(|i| item(&mut own, name(i), Entry::Shelf(Act::Start(apps[i].id.clone()), name(i))))
+                .collect();
             lines.push(MenuLine::Sub { label: "Other".into(), lines: sub });
         }
         lines.push(MenuLine::Separator);
@@ -112,10 +124,18 @@ impl Server {
                     Place::Edge(e) => e,
                     // A free dock: away from the nearer edge.
                     Place::Free { upright: true, .. } => {
-                        if b.loc.x < mid.0 { Edge::Left } else { Edge::Right }
+                        if b.loc.x < mid.0 {
+                            Edge::Left
+                        } else {
+                            Edge::Right
+                        }
                     }
                     Place::Free { .. } => {
-                        if b.loc.y < mid.1 { Edge::Top } else { Edge::Bottom }
+                        if b.loc.y < mid.1 {
+                            Edge::Top
+                        } else {
+                            Edge::Bottom
+                        }
                     }
                 };
                 let top_at = |y: i32| y.min(area.loc.y + area.size.h - h).max(area.loc.y);

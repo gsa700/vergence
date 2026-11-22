@@ -2,9 +2,7 @@
 use crate::win::Win;
 use smithay::{
     desktop::{PopupKind, PopupManager, Space, Window, find_popup_root_surface, get_popup_toplevel_coords},
-    input::{
-        Seat,
-    },
+    input::Seat,
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::{
@@ -16,18 +14,14 @@ use smithay::{
     wayland::{
         compositor::with_states,
         shell::xdg::{
-            PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
-            XdgToplevelSurfaceData,
+            PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState, XdgToplevelSurfaceData,
         },
     },
 };
 
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
 
-use crate::{
-    Server,
-    dispatch::ResizeEdge,
-};
+use crate::{Server, dispatch::ResizeEdge};
 
 impl XdgShellHandler for Server {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -70,7 +64,11 @@ impl XdgShellHandler for Server {
     }
 
     // Full screen (fullscreen.rs): on the screen it names, else the one it is on.
-    fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<smithay::reexports::wayland_server::protocol::wl_output::WlOutput>) {
+    fn fullscreen_request(
+        &mut self,
+        surface: ToplevelSurface,
+        output: Option<smithay::reexports::wayland_server::protocol::wl_output::WlOutput>,
+    ) {
         let found = self.space.elements().find(|w| w.toplevel() == Some(&surface)).cloned();
         let output = output.and_then(|o| smithay::output::Output::from_resource(&o));
         if let Some(w) = found {
@@ -122,7 +120,8 @@ impl XdgShellHandler for Server {
     fn move_request(&mut self, surface: ToplevelSurface, seat: wl_seat::WlSeat, serial: Serial) {
         let seat = Seat::from_resource(&seat).unwrap();
         let wl_surface = surface.wl_surface();
-        let window = self.space.elements().find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == wl_surface)).cloned();
+        let window =
+            self.space.elements().find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == wl_surface)).cloned();
         // The seat grants it only while a button is held on the window (dispatch.rs);
         // the serial must be that press's, as Smithay's pointer saw it.
         if pressed_with(&seat, wl_surface, serial)
@@ -135,10 +134,17 @@ impl XdgShellHandler for Server {
         }
     }
 
-    fn resize_request(&mut self, surface: ToplevelSurface, seat: wl_seat::WlSeat, serial: Serial, edges: xdg_toplevel::ResizeEdge) {
+    fn resize_request(
+        &mut self,
+        surface: ToplevelSurface,
+        seat: wl_seat::WlSeat,
+        serial: Serial,
+        edges: xdg_toplevel::ResizeEdge,
+    ) {
         let seat = Seat::from_resource(&seat).unwrap();
         let wl_surface = surface.wl_surface();
-        let window = self.space.elements().find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == wl_surface)).cloned();
+        let window =
+            self.space.elements().find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == wl_surface)).cloned();
         if pressed_with(&seat, wl_surface, serial)
             && let Some(w) = window
         {
@@ -163,19 +169,9 @@ fn pressed_with(seat: &Seat<Server>, surface: &WlSurface, serial: Serial) -> boo
 /// Should be called on `WlSurface::commit`
 pub fn handle_commit(popups: &mut PopupManager, space: &Space<Win>, surface: &WlSurface) {
     // Handle toplevel commits.
-    if let Some(window) = space
-        .elements()
-        .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
-        .cloned()
-    {
+    if let Some(window) = space.elements().find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface)).cloned() {
         let initial_configure_sent = with_states(surface, |states| {
-            states
-                .data_map
-                .get::<XdgToplevelSurfaceData>()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .initial_configure_sent
+            states.data_map.get::<XdgToplevelSurfaceData>().unwrap().lock().unwrap().initial_configure_sent
         });
 
         if !initial_configure_sent {
@@ -204,11 +200,7 @@ impl Server {
         let Ok(root) = find_popup_root_surface(&PopupKind::Xdg(popup.clone())) else {
             return;
         };
-        let Some(window) = self
-            .space
-            .elements()
-            .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == &root))
-        else {
+        let Some(window) = self.space.elements().find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == &root)) else {
             return;
         };
 
@@ -248,7 +240,11 @@ impl Server {
 // GTK's and Qt's modal hint (window styles milestone 1). Smithay keeps the hint
 // on the toplevel's data, where style.rs reads it; a change is drawn at once.
 impl smithay::wayland::shell::xdg::dialog::XdgDialogHandler for Server {
-    fn dialog_hint_changed(&mut self, toplevel: ToplevelSurface, hint: smithay::wayland::shell::xdg::dialog::ToplevelDialogHint) {
+    fn dialog_hint_changed(
+        &mut self,
+        toplevel: ToplevelSurface,
+        hint: smithay::wayland::shell::xdg::dialog::ToplevelDialogHint,
+    ) {
         let _ = toplevel;
         tracing::info!("wayland: a window's dialog hint is now {hint:?}");
         self.redraw_all();

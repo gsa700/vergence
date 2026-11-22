@@ -18,7 +18,17 @@ const GRACE: Duration = Duration::from_secs(8);
 impl Server {
     /// The windows an exit waits for: everyone's, the desktop's icons aside.
     fn exit_waits_for(&self) -> Vec<Win> {
-        self.space.elements().chain(self.shelf.minimized.iter().map(|(w, _)| w)).filter(|w| smithay::utils::IsAlive::alive(*w) && !self.is_desktop(w) && self.has_title(w) && !self.belongs_to_parent(w)).cloned().collect()
+        self.space
+            .elements()
+            .chain(self.shelf.minimized.iter().map(|(w, _)| w))
+            .filter(|w| {
+                smithay::utils::IsAlive::alive(*w)
+                    && !self.is_desktop(w)
+                    && self.has_title(w)
+                    && !self.belongs_to_parent(w)
+            })
+            .cloned()
+            .collect()
     }
 
     /// Every app asked to close; the session ends when none is left.
@@ -36,7 +46,12 @@ impl Server {
             // Our own windows are told the close is the session's (bus v33):
             // what they keep stays for the next session.
             if let Some(n) = w.native() {
-                self.bus_send(n.client, vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::SessionEnding { window: n.id }));
+                self.bus_send(
+                    n.client,
+                    vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::SessionEnding {
+                        window: n.id,
+                    }),
+                );
             }
             self.close_window(w);
         }
@@ -50,7 +65,11 @@ impl Server {
                 return smithay::reexports::calloop::timer::TimeoutAction::Drop;
             }
             if started.elapsed() >= GRACE {
-                let names: Vec<String> = left.iter().map(|w| format!("“{}”", state.window_title(w).trim_end_matches(" •"))).take(3).collect();
+                let names: Vec<String> = left
+                    .iter()
+                    .map(|w| format!("“{}”", state.window_title(w).trim_end_matches(" •")))
+                    .take(3)
+                    .collect();
                 tracing::info!("exit: stopped; still open: {names:?}");
                 state.resume.exiting = false;
                 crate::desktop::STOPPING.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -60,7 +79,10 @@ impl Server {
                     app: String::new(),
                     replaces: 0,
                     summary: "Vergence is still running".into(),
-                    body: format!("{} did not close (it may be asking about work not saved). Answer it, then exit again.", names.join(", ")),
+                    body: format!(
+                        "{} did not close (it may be asking about work not saved). Answer it, then exit again.",
+                        names.join(", ")
+                    ),
                     urgency: 1,
                     timeout_ms: 0,
                     actions: Vec::new(),

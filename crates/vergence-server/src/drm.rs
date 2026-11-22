@@ -32,10 +32,7 @@ use smithay::{
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
             ImportDma, ImportMemWl,
-            element::{
-                memory::MemoryRenderBufferRenderElement,
-                surface::WaylandSurfaceRenderElement,
-            },
+            element::{memory::MemoryRenderBufferRenderElement, surface::WaylandSurfaceRenderElement},
             gles::GlesRenderer,
         },
         session::{Event as SessionEvent, Session, libseat::LibSeatSession},
@@ -43,7 +40,10 @@ use smithay::{
     },
     output::{Mode as WlMode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
-        calloop::{EventLoop, timer::{TimeoutAction, Timer}},
+        calloop::{
+            EventLoop,
+            timer::{TimeoutAction, Timer},
+        },
         drm::control::{Device as ControlDevice, ModeTypeFlags, connector, crtc, property},
         input::Libinput,
         rustix::fs::OFlags,
@@ -52,7 +52,6 @@ use smithay::{
     wayland::fractional_scale::with_fractional_scale,
 };
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
-
 
 use crate::Server;
 
@@ -73,7 +72,14 @@ smithay::backend::renderer::element::render_elements! {
 
 /// A screen's elements, front first: the pointer (unless a finger pointed
 /// last, touch.rs) and the scene.
-fn screen_elements(state: &mut Server, renderer: &mut GlesRenderer, output: &Output, geo: Rectangle<i32, Logical>, scale: f64, pointer_at: Point<f64, Logical>) -> Vec<crate::zoom::Inner> {
+fn screen_elements(
+    state: &mut Server,
+    renderer: &mut GlesRenderer,
+    output: &Output,
+    geo: Rectangle<i32, Logical>,
+    scale: f64,
+    pointer_at: Point<f64, Logical>,
+) -> Vec<crate::zoom::Inner> {
     let mut elements = Vec::new();
     if geo.to_f64().contains(pointer_at) && !state.touch.fingers_last {
         let at = (pointer_at - geo.loc.to_f64()).to_physical(smithay::utils::Scale::from(scale));
@@ -213,7 +219,11 @@ struct Relay {
     buf: RelayBuf,
     /// The buffer as a texture on the showing GPU, with the damage of each
     /// draw recorded on it (imported at the first copy).
-    shown: Option<smithay::backend::renderer::element::texture::TextureRenderBuffer<smithay::backend::renderer::gles::GlesTexture>>,
+    shown: Option<
+        smithay::backend::renderer::element::texture::TextureRenderBuffer<
+            smithay::backend::renderer::gles::GlesTexture,
+        >,
+    >,
     /// Calls to the damage tracker so far, drawn or not (its history has one
     /// entry for each; the buffer's age is counted in them).
     frame: usize,
@@ -270,9 +280,7 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
     let seat = session.seat();
     tracing::info!("seat {seat}");
 
-    let path = primary_gpu(&seat)?
-        .or_else(|| all_gpus(&seat).ok()?.into_iter().next())
-        .ok_or("no GPU")?;
+    let path = primary_gpu(&seat)?.or_else(|| all_gpus(&seat).ok()?.into_iter().next()).ok_or("no GPU")?;
     let node = DrmNode::from_path(&path)?;
     tracing::info!("GPU {} ({:?}, render node {:?})", path.display(), node.ty(), node.node_with_type(NodeType::Render));
 
@@ -298,7 +306,8 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
     // back to software and AlbumWall managed ~4 frames a second at 3.28 (2026-11-07).
     // The feedback names the render node: Mesa opens the device by its number.
     let render_node = node.node_with_type(NodeType::Render).and_then(|r| r.ok()).unwrap_or(node);
-    match smithay::wayland::dmabuf::DmabufFeedbackBuilder::new(render_node.dev_id(), renderer.dmabuf_formats()).build() {
+    match smithay::wayland::dmabuf::DmabufFeedbackBuilder::new(render_node.dev_id(), renderer.dmabuf_formats()).build()
+    {
         Ok(feedback) => {
             let mut dmabuf_state = smithay::wayland::dmabuf::DmabufState::new();
             let global = dmabuf_state.create_global_with_default_feedback::<Server>(&state.display_handle, &feedback);
@@ -318,12 +327,14 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
         render_formats.clone(),
     );
 
-    let mut devices = vec![Device { manager, scanner: DrmScanner::new(), renderer: None, path: path.display().to_string() }];
+    let mut devices =
+        vec![Device { manager, scanner: DrmScanner::new(), renderer: None, path: path.display().to_string() }];
     // The other GPUs with connectors: the primary draws their screens into
     // linear buffers in its own memory, and each copies the frame into its
     // own scan-out buffer with its own renderer (step 3). Their VBlank sources below.
     let mut notifiers = Vec::new();
-    let others: Vec<String> = state.gpus.iter().filter(|g| !g.primary && !g.connectors.is_empty()).map(|g| g.path.clone()).collect();
+    let others: Vec<String> =
+        state.gpus.iter().filter(|g| !g.primary && !g.connectors.is_empty()).map(|g| g.path.clone()).collect();
     for other in others {
         let opened = (|| -> Result<(Device, smithay::backend::drm::DrmDeviceNotifier), Box<dyn std::error::Error>> {
             let p = Path::new(&other);
@@ -342,7 +353,9 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
             // (40 to 77 ms a 4K frame), 2026-11-14.
             let name = gl_renderer(&mut copier);
             if is_software(&name) {
-                tracing::warn!("gpu: {other}: its GL is {name}, software on the CPU: screens on it will be slow. Its own GL driver is missing (nouveau: Mesa's Vulkan driver NVK and the Vulkan loader, for Zink)");
+                tracing::warn!(
+                    "gpu: {other}: its GL is {name}, software on the CPU: screens on it will be slow. Its own GL driver is missing (nouveau: Mesa's Vulkan driver NVK and the Vulkan loader, for Zink)"
+                );
             } else {
                 tracing::info!("gpu: {other} copies with {name}");
             }
@@ -359,7 +372,10 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
         })();
         match opened {
             Ok((dev, notifier)) => {
-                tracing::info!("gpu: {other} shows screens: drawn by {}, copied there by its own renderer", path.display());
+                tracing::info!(
+                    "gpu: {other} shows screens: drawn by {}, copied there by its own renderer",
+                    path.display()
+                );
                 notifiers.push((devices.len(), notifier));
                 devices.push(dev);
             }
@@ -377,24 +393,30 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
             }
         }
     })?;
-    state.backend = Some(Backend { renderer, gbm: Some(primary_gbm), devices, surfaces: HashMap::new(), paused: false, waiting: Vec::new(), probed });
+    state.backend = Some(Backend {
+        renderer,
+        gbm: Some(primary_gbm),
+        devices,
+        surfaces: HashMap::new(),
+        paused: false,
+        waiting: Vec::new(),
+        probed,
+    });
     state.session = Some(session.clone());
 
     // Input from every device on the seat.
     let mut libinput = Libinput::new_with_udev::<LibinputSessionInterface<LibSeatSession>>(session.clone().into());
     libinput.udev_assign_seat(&seat).map_err(|_| "libinput: cannot assign seat")?;
     let libinput_for_session = libinput.clone();
-    event_loop
-        .handle()
-        .insert_source(LibinputInputBackend::new(libinput), |event, _, state| {
-            // Mice and touchpads are kept, to be given their settings (pointer.rs).
-            match &event {
-                smithay::backend::input::InputEvent::DeviceAdded { device } => state.pointer_device_added(device.clone()),
-                smithay::backend::input::InputEvent::DeviceRemoved { device } => state.pointer_device_removed(device),
-                _ => {}
-            }
-            state.process_input_event(event)
-        })?;
+    event_loop.handle().insert_source(LibinputInputBackend::new(libinput), |event, _, state| {
+        // Mice and touchpads are kept, to be given their settings (pointer.rs).
+        match &event {
+            smithay::backend::input::InputEvent::DeviceAdded { device } => state.pointer_device_added(device.clone()),
+            smithay::backend::input::InputEvent::DeviceRemoved { device } => state.pointer_device_removed(device),
+            _ => {}
+        }
+        state.process_input_event(event)
+    })?;
 
     // VBlank: the frame is on screen; draw the next one. One source per GPU.
     for (gpu, notifier) in std::iter::once((0usize, drm_notifier)).chain(notifiers) {
@@ -528,33 +550,50 @@ fn scan_gpu(state: &mut Server, gpu: usize, startup: bool) -> bool {
                 // While the screens are off, a monitor in standby may come and go every
                 // few seconds (Techbench's ASUS: every 10 s, all night): debug only.
                 if state.energy.screens_off {
-                    tracing::debug!("hotplug: {}-{} connected", connector.interface().as_str(), connector.interface_id());
+                    tracing::debug!(
+                        "hotplug: {}-{} connected",
+                        connector.interface().as_str(),
+                        connector.interface_id()
+                    );
                 } else {
-                    tracing::info!("hotplug: {}-{} connected; setting up in 1 s", connector.interface().as_str(), connector.interface_id());
+                    tracing::info!(
+                        "hotplug: {}-{} connected; setting up in 1 s",
+                        connector.interface().as_str(),
+                        connector.interface_id()
+                    );
                 }
-                let _ = state.loop_handle.insert_source(Timer::from_duration(Duration::from_secs(1)), move |_, _, st| {
-                    if st.energy.screens_off {
-                        if let Some(b) = st.backend.as_mut() {
-                            if !b.waiting.contains(&(gpu, handle, crtc)) {
-                                tracing::info!("hotplug: screens are off; setting it up when they come on");
-                                b.waiting.push((gpu, handle, crtc));
+                let _ =
+                    state.loop_handle.insert_source(Timer::from_duration(Duration::from_secs(1)), move |_, _, st| {
+                        if st.energy.screens_off {
+                            if let Some(b) = st.backend.as_mut() {
+                                if !b.waiting.contains(&(gpu, handle, crtc)) {
+                                    tracing::info!("hotplug: screens are off; setting it up when they come on");
+                                    b.waiting.push((gpu, handle, crtc));
+                                }
                             }
+                            return TimeoutAction::Drop;
                         }
-                        return TimeoutAction::Drop;
-                    }
-                    let anchors = st.window_anchors();
-                    if connect_if_there(st, gpu, handle, crtc) {
-                        setup_changed(st, anchors);
-                        render(st, (gpu, crtc));
-                    }
-                    TimeoutAction::Drop
-                });
+                        let anchors = st.window_anchors();
+                        if connect_if_there(st, gpu, handle, crtc) {
+                            setup_changed(st, anchors);
+                            render(st, (gpu, crtc));
+                        }
+                        TimeoutAction::Drop
+                    });
             }
             DrmScanEvent::Disconnected { connector, crtc: Some(crtc) } => {
                 if state.energy.screens_off {
-                    tracing::debug!("hotplug: {}-{} disconnected", connector.interface().as_str(), connector.interface_id());
+                    tracing::debug!(
+                        "hotplug: {}-{} disconnected",
+                        connector.interface().as_str(),
+                        connector.interface_id()
+                    );
                 } else {
-                    tracing::info!("hotplug: {}-{} disconnected", connector.interface().as_str(), connector.interface_id());
+                    tracing::info!(
+                        "hotplug: {}-{} disconnected",
+                        connector.interface().as_str(),
+                        connector.interface_id()
+                    );
                 }
                 disconnect(state, (gpu, crtc));
                 changed = true;
@@ -579,7 +618,11 @@ fn scan_gpu(state: &mut Server, gpu: usize, startup: bool) -> bool {
                 if want.is_none() || want == running {
                     continue;
                 }
-                tracing::info!("hotplug: {}-{} modes changed ({running:?} -> {want:?})", connector.interface().as_str(), connector.interface_id());
+                tracing::info!(
+                    "hotplug: {}-{} modes changed ({running:?} -> {want:?})",
+                    connector.interface().as_str(),
+                    connector.interface_id()
+                );
                 disconnect(state, (gpu, crtc));
                 changed = true;
                 if state.energy.screens_off {
@@ -650,7 +693,8 @@ mod spec_tests {
 /// The monitor at `crtc` is gone: its output leaves the desktop and the clients.
 /// Set up a monitor the scanner reported, if it is still connected.
 fn connect_if_there(state: &mut Server, gpu: usize, handle: connector::Handle, crtc: crtc::Handle) -> bool {
-    let info = state.backend.as_ref().and_then(|b| b.devices.get(gpu)?.manager.device().get_connector(handle, true).ok());
+    let info =
+        state.backend.as_ref().and_then(|b| b.devices.get(gpu)?.manager.device().get_connector(handle, true).ok());
     match info.filter(|i| i.state() == connector::State::Connected) {
         Some(info) => {
             connect(state, gpu, info, crtc);
@@ -670,9 +714,13 @@ fn disconnect(state: &mut Server, key: Key) {
 }
 
 /// After monitors came or went: lay them out, find the setup, put windows back.
-fn setup_changed(state: &mut Server, anchors: Vec<(crate::win::Win, String, smithay::utils::Point<i32, smithay::utils::Logical>)>) {
+fn setup_changed(
+    state: &mut Server,
+    anchors: Vec<(crate::win::Win, String, smithay::utils::Point<i32, smithay::utils::Logical>)>,
+) {
     // The setup first: the arrangement is kept per setup.
-    let edids: Vec<Vec<u8>> = state.backend.as_ref().map(|b| b.surfaces.values().map(|s| s.edid.clone()).collect()).unwrap_or_default();
+    let edids: Vec<Vec<u8>> =
+        state.backend.as_ref().map(|b| b.surfaces.values().map(|s| s.edid.clone()).collect()).unwrap_or_default();
     state.set_setup(&edids);
     // A setup with a screen in memory is a test's: never saved (memory.rs).
     if state.backend.as_ref().is_some_and(|b| b.surfaces.keys().any(|k| k.0 == MEMORY)) {
@@ -705,8 +753,20 @@ pub fn displays_changed(state: &mut Server) {
                 .iter()
                 .filter(|(_, s)| {
                     let running = s.modes.get(s.mode as usize).map(|m| (m.width, m.height, m.refresh_mhz));
-                    let preferred = s.modes.iter().find(|m| m.preferred).or(s.modes.first()).map(|m| (m.width, m.height, m.refresh_mhz));
-                    let want = cfg.mode_for(&s.id).filter(|w| s.modes.iter().any(|m| m.width == w.0 && m.height == w.1 && (m.refresh_mhz as i64 - w.2 as i64).abs() <= 50)).or(preferred);
+                    let preferred = s
+                        .modes
+                        .iter()
+                        .find(|m| m.preferred)
+                        .or(s.modes.first())
+                        .map(|m| (m.width, m.height, m.refresh_mhz));
+                    let want = cfg
+                        .mode_for(&s.id)
+                        .filter(|w| {
+                            s.modes.iter().any(|m| {
+                                m.width == w.0 && m.height == w.1 && (m.refresh_mhz as i64 - w.2 as i64).abs() <= 50
+                            })
+                        })
+                        .or(preferred);
                     match (want, running) {
                         (Some(w), Some(r)) => !(w.0 == r.0 && w.1 == r.1 && (w.2 as i64 - r.2 as i64).abs() <= 50),
                         _ => false,
@@ -757,7 +817,8 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
     let edid = edid_of(b.devices[gpu].manager.device(), conn.handle());
     // The same monitor on another of its inputs keeps its identity (monitors.rs).
     let others: Vec<Vec<u8>> = b.surfaces.values().map(|s| s.edid.clone()).collect();
-    let identity = edid.as_deref().map(|e| crate::monitors::identity(e, &others)).unwrap_or_else(|| name.clone().into_bytes());
+    let identity =
+        edid.as_deref().map(|e| crate::monitors::identity(e, &others)).unwrap_or_else(|| name.clone().into_bytes());
     let id = vergence_profile::monitor_id(&identity);
     let preferred = conn.modes().iter().position(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED)).unwrap_or(0);
     let wanted = crate::displays::load().mode_for(&id);
@@ -769,7 +830,10 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
         })
     });
     if let (Some((ww, wh, wr)), None) = (wanted, chosen) {
-        tracing::warn!("{name}: {ww}x{wh} at {:.2} Hz is not one of its modes; its preferred mode instead", wr as f64 / 1000.0);
+        tracing::warn!(
+            "{name}: {ww}x{wh} at {:.2} Hz is not one of its modes; its preferred mode instead",
+            wr as f64 / 1000.0
+        );
     }
     let mode_id = chosen.unwrap_or(preferred);
     let Some(&drm_mode) = conn.modes().get(mode_id) else { return };
@@ -782,13 +846,17 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
         }
     }
     let running = mode_info(&drm_mode);
-    let mode_index = modes.iter().position(|x| (x.width, x.height, x.refresh_mhz) == (running.width, running.height, running.refresh_mhz)).map_or(u32::MAX, |i| i as u32);
+    let mode_index = modes
+        .iter()
+        .position(|x| (x.width, x.height, x.refresh_mhz) == (running.width, running.height, running.refresh_mhz))
+        .map_or(u32::MAX, |i| i as u32);
     let wl_mode = WlMode::from(drm_mode);
     let (w, h) = drm_mode.size();
 
     // The panel's size from its EDID (the connector's mm are only the base block's).
     let parsed = edid.as_deref().and_then(|e| vergence_edid::Edid::parse(e).ok());
-    let mm = parsed.as_ref().and_then(|e| e.physical_size_mm()).map(|(a, c)| (a as u32, c as u32)).or_else(|| conn.size());
+    let mm =
+        parsed.as_ref().and_then(|e| e.physical_size_mm()).map(|(a, c)| (a as u32, c as u32)).or_else(|| conn.size());
     // Calculated from the EDID, the screen's viewing distance and the size
     // preference, or set by hand (displays.rs). In 120ths, as wp-fractional-scale-v1
     // tells it to apps: the output at exactly the scale the apps draw at, so their
@@ -797,7 +865,13 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
     let scales = crate::displays::load().scale_for(&id, &name, (w as u32, h as u32), mm);
     let (scale, how) = (scales.shown, scales.how.clone());
     let label = parsed.as_ref().and_then(|e| e.name.clone()).unwrap_or_else(|| name.clone());
-    tracing::info!("{name}: {label:?} {w}x{h} at {} Hz {:?} mm -> scale {:.4} ({}/120), {how}", drm_mode.vrefresh(), mm, scale, (scale * 120.0).round());
+    tracing::info!(
+        "{name}: {label:?} {w}x{h} at {} Hz {:?} mm -> scale {:.4} ({}/120), {how}",
+        drm_mode.vrefresh(),
+        mm,
+        scale,
+        (scale * 120.0).round()
+    );
     state.scale_notes.insert(name.clone(), scales);
     let Some(b) = state.backend.as_mut() else { return };
 
@@ -819,11 +893,28 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
     let planes = b.devices[gpu].manager.device().planes(&crtc).ok();
     let mut relay = None;
     let initialized = if gpu == 0 {
-        b.devices[0].manager.lock().initialize_output::<_, OutputElements>(crtc, drm_mode, &[conn.handle()], &output, planes, &mut b.renderer, &DrmOutputRenderElements::default())
+        b.devices[0].manager.lock().initialize_output::<_, OutputElements>(
+            crtc,
+            drm_mode,
+            &[conn.handle()],
+            &output,
+            planes,
+            &mut b.renderer,
+            &DrmOutputRenderElements::default(),
+        )
     } else {
         // The showing GPU's frame goes through a hidden output at scale 1, so the
         // copy is pixel for pixel; the real output keeps the screen's own scale.
-        let plain = Output::new(format!("{name} (copy)"), PhysicalProperties { size: (0, 0).into(), subpixel: Subpixel::Unknown, make: "Vergence".into(), model: String::new(), serial_number: String::new() });
+        let plain = Output::new(
+            format!("{name} (copy)"),
+            PhysicalProperties {
+                size: (0, 0).into(),
+                subpixel: Subpixel::Unknown,
+                make: "Vergence".into(),
+                model: String::new(),
+                serial_number: String::new(),
+            },
+        );
         plain.change_current_state(Some(wl_mode), Some(Transform::Normal), Some(Scale::Integer(1)), None);
         let Some(gbm) = b.gbm.as_ref() else { return };
         let buf = match relay_buffer(gbm, w as u32, h as u32) {
@@ -834,7 +925,15 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
         let damage = smithay::backend::renderer::damage::OutputDamageTracker::new(size, scale, Transform::Normal);
         let dev = &mut b.devices[gpu];
         let Some(copier) = dev.renderer.as_mut() else { return };
-        let r = dev.manager.lock().initialize_output::<_, RelayElements>(crtc, drm_mode, &[conn.handle()], &plain, planes, copier, &DrmOutputRenderElements::default());
+        let r = dev.manager.lock().initialize_output::<_, RelayElements>(
+            crtc,
+            drm_mode,
+            &[conn.handle()],
+            &plain,
+            planes,
+            copier,
+            &DrmOutputRenderElements::default(),
+        );
         relay = Some(Relay { buf, shown: None, frame: 0, pending: false, last_damage_px: 0, damage, _plain: plain });
         r
     };
@@ -845,7 +944,25 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
     if gpu > 0 {
         tracing::info!("{name}: shown by {}, drawn by {} and copied there", b.devices[gpu].path, b.devices[0].path);
     }
-    b.surfaces.insert((gpu, crtc), Surface { output, present: Present::Drm { out: drm_output, handle: conn.handle() }, connector: name, last: std::time::Instant::now(), scale, id, px: (w as u32, h as u32), mm, edid: identity, global, relay, modes, mode: mode_index, since: CONNECTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) });
+    b.surfaces.insert(
+        (gpu, crtc),
+        Surface {
+            output,
+            present: Present::Drm { out: drm_output, handle: conn.handle() },
+            connector: name,
+            last: std::time::Instant::now(),
+            scale,
+            id,
+            px: (w as u32, h as u32),
+            mm,
+            edid: identity,
+            global,
+            relay,
+            modes,
+            mode: mode_index,
+            since: CONNECTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        },
+    );
 }
 
 /// The GL renderer's name ("Mesa Intel(R) UHD Graphics (CML GT2)", "llvmpipe ...").
@@ -853,7 +970,11 @@ fn gl_renderer(r: &mut GlesRenderer) -> String {
     use smithay::backend::renderer::gles::ffi;
     r.with_context(|gl| unsafe {
         let p = gl.GetString(ffi::RENDERER);
-        if p.is_null() { String::from("an unknown renderer") } else { std::ffi::CStr::from_ptr(p as *const std::ffi::c_char).to_string_lossy().into_owned() }
+        if p.is_null() {
+            String::from("an unknown renderer")
+        } else {
+            std::ffi::CStr::from_ptr(p as *const std::ffi::c_char).to_string_lossy().into_owned()
+        }
     })
     .unwrap_or_else(|_| "an unknown renderer".into())
 }
@@ -872,7 +993,12 @@ fn mode_info(m: &smithay::reexports::drm::control::Mode) -> vergence_protocol::b
     let (_, _, vtotal) = m.vsync();
     let total = htotal as u64 * vtotal as u64;
     let refresh_mhz = if total > 0 { (m.clock() as u64 * 1_000_000 / total) as u32 } else { m.vrefresh() * 1000 };
-    vergence_protocol::bus::ModeInfo { width: w as u32, height: h as u32, refresh_mhz, preferred: m.mode_type().contains(ModeTypeFlags::PREFERRED) }
+    vergence_protocol::bus::ModeInfo {
+        width: w as u32,
+        height: h as u32,
+        refresh_mhz,
+        preferred: m.mode_type().contains(ModeTypeFlags::PREFERRED),
+    }
 }
 
 /// A linear XRGB8888 buffer in the primary GPU's memory, the size of a screen
@@ -1005,7 +1131,11 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
             })
             .collect(),
         Some(lens) => {
-            let back = if lens { screen_elements(state, &mut b.renderer, &output, geo, scale, pointer_at) } else { Vec::new() };
+            let back = if lens {
+                screen_elements(state, &mut b.renderer, &output, geo, scale, pointer_at)
+            } else {
+                Vec::new()
+            };
             let ground = state.background_color(&s.connector);
             state.zoom_frame(front, back, geo, scale, ground).into_iter().map(OutputElements::Zoomed).collect()
         }
@@ -1017,8 +1147,11 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
     if let Some(i) = state.shot_pending.iter().position(|n| *n == s.connector) {
         state.shot_pending.remove(i);
         let size = output.current_mode().map(|m| m.size).unwrap_or_default();
-        let shown = s.relay.as_mut().filter(|r| r.buf.drawn > 0).map(|r| read_back(&mut b.renderer, &mut r.buf.dmabuf, size));
-        match shown.unwrap_or_else(|| capture(&mut b.renderer, &elements, size, s.scale, state.background_color(&s.connector))) {
+        let shown =
+            s.relay.as_mut().filter(|r| r.buf.drawn > 0).map(|r| read_back(&mut b.renderer, &mut r.buf.dmabuf, size));
+        match shown
+            .unwrap_or_else(|| capture(&mut b.renderer, &elements, size, s.scale, state.background_color(&s.connector)))
+        {
             Ok(rgba) => crate::control::save_png(s.connector.clone(), size.w as u32, size.h as u32, rgba),
             Err(e) => tracing::warn!("shot {}: {e}", s.connector),
         }
@@ -1058,7 +1191,10 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
         memory_frame(&mut b.renderer, s, &elements, clear)
     } else if crtc.0 == 0 {
         match s.drm() {
-            Some(out) => out.render_frame(&mut b.renderer, &elements, clear, FrameFlags::DEFAULT).map(|r| if r.is_empty { Relayed::Nothing } else { Relayed::Shown }).map_err(|e| format!("{e:?}")),
+            Some(out) => out
+                .render_frame(&mut b.renderer, &elements, clear, FrameFlags::DEFAULT)
+                .map(|r| if r.is_empty { Relayed::Nothing } else { Relayed::Shown })
+                .map_err(|e| format!("{e:?}")),
             None => Err("not a monitor".to_string()),
         }
     } else {
@@ -1100,27 +1236,32 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
             }
             if let Err(e) = queued {
                 tracing::warn!("queue frame: {e:?}");
-                let _ = state.loop_handle.insert_source(Timer::from_duration(Duration::from_millis(100)), move |_, _, st| {
-                    render(st, crtc);
-                    TimeoutAction::Drop
-                });
+                let _ = state.loop_handle.insert_source(
+                    Timer::from_duration(Duration::from_millis(100)),
+                    move |_, _, st| {
+                        render(st, crtc);
+                        TimeoutAction::Drop
+                    },
+                );
             }
         }
         Ok(Relayed::Nothing) => {
             // Nothing changed: look again in a frame's time (no VBlank comes without a frame).
-            let _ = state.loop_handle.insert_source(Timer::from_duration(Duration::from_millis(16)), move |_, _, st| {
-                render(st, crtc);
-                TimeoutAction::Drop
-            });
+            let _ =
+                state.loop_handle.insert_source(Timer::from_duration(Duration::from_millis(16)), move |_, _, st| {
+                    render(st, crtc);
+                    TimeoutAction::Drop
+                });
         }
         Err(e) => {
             // Try again shortly: without a frame no VBlank comes, and drawing
             // would stop for good.
             tracing::warn!("render {}: {e}", s.connector);
-            let _ = state.loop_handle.insert_source(Timer::from_duration(Duration::from_millis(100)), move |_, _, st| {
-                render(st, crtc);
-                TimeoutAction::Drop
-            });
+            let _ =
+                state.loop_handle.insert_source(Timer::from_duration(Duration::from_millis(100)), move |_, _, st| {
+                    render(st, crtc);
+                    TimeoutAction::Drop
+                });
         }
     }
 
@@ -1165,8 +1306,20 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
 /// A screen on another GPU, one turn: a frame drawn and not yet copied is
 /// copied once its fence has signaled, only its damage; otherwise the
 /// primary draws any change and records its damage for the copy.
-fn relay_frame(primary: &mut GlesRenderer, copier: Option<&mut GlesRenderer>, s: &mut Surface, elements: &[OutputElements], clear: [f32; 4]) -> Result<Relayed, String> {
-    use smithay::backend::renderer::{Bind, ImportDma, element::{Kind, texture::{TextureRenderBuffer, TextureRenderElement}}};
+fn relay_frame(
+    primary: &mut GlesRenderer,
+    copier: Option<&mut GlesRenderer>,
+    s: &mut Surface,
+    elements: &[OutputElements],
+    clear: [f32; 4],
+) -> Result<Relayed, String> {
+    use smithay::backend::renderer::{
+        Bind, ImportDma,
+        element::{
+            Kind,
+            texture::{TextureRenderBuffer, TextureRenderElement},
+        },
+    };
     use smithay::utils::{Buffer, Rectangle};
     let copier = copier.ok_or("no renderer on the showing GPU")?;
     let relay = s.relay.as_mut().ok_or("no relay buffer")?;
@@ -1180,8 +1333,18 @@ fn relay_frame(primary: &mut GlesRenderer, copier: Option<&mut GlesRenderer>, s:
         let age = if relay.buf.drawn == 0 { 0 } else { 1 };
         let drawn = {
             let mut fb = primary.bind(&mut relay.buf.dmabuf).map_err(|e| format!("bind: {e}"))?;
-            let r = relay.damage.render_output(primary, &mut fb, age, elements, clear).map_err(|e| format!("draw: {e:?}"))?;
-            r.damage.map(|d| (d.iter().map(|r| Rectangle::<i32, Buffer>::new((r.loc.x, r.loc.y).into(), (r.size.w, r.size.h).into())).collect::<Vec<_>>(), r.sync.clone()))
+            let r = relay
+                .damage
+                .render_output(primary, &mut fb, age, elements, clear)
+                .map_err(|e| format!("draw: {e:?}"))?;
+            r.damage.map(|d| {
+                (
+                    d.iter()
+                        .map(|r| Rectangle::<i32, Buffer>::new((r.loc.x, r.loc.y).into(), (r.size.w, r.size.h).into()))
+                        .collect::<Vec<_>>(),
+                    r.sync.clone(),
+                )
+            })
         };
         relay.frame += 1;
         let Some((rects, sync)) = drawn else { return Ok(Relayed::Nothing) };
@@ -1201,7 +1364,8 @@ fn relay_frame(primary: &mut GlesRenderer, copier: Option<&mut GlesRenderer>, s:
     relay.pending = false;
     relay.buf.sync = None;
     if relay.shown.is_none() {
-        let tex = copier.import_dmabuf(&relay.buf.dmabuf, None).map_err(|e| format!("import on the showing GPU: {e}"))?;
+        let tex =
+            copier.import_dmabuf(&relay.buf.dmabuf, None).map_err(|e| format!("import on the showing GPU: {e}"))?;
         relay.shown = Some(TextureRenderBuffer::from_texture(copier, tex, 1, Transform::Normal, None));
     }
     let shown = relay.shown.as_ref().ok_or("no texture")?;
@@ -1212,7 +1376,8 @@ fn relay_frame(primary: &mut GlesRenderer, copier: Option<&mut GlesRenderer>, s:
         Present::Drm { out, .. } => out,
         Present::Memory(_) => return Err("copy: not a monitor".into()),
     };
-    let empty = out.render_frame(copier, &els, clear, FrameFlags::DEFAULT).map_err(|e| format!("copy: {e:?}"))?.is_empty;
+    let empty =
+        out.render_frame(copier, &els, clear, FrameFlags::DEFAULT).map_err(|e| format!("copy: {e:?}"))?.is_empty;
     let damage_px = relay.last_damage_px;
     let tr = std::time::Instant::now();
     // The copy must be finished before the screen flips to it and before the
@@ -1234,11 +1399,17 @@ fn relay_frame(primary: &mut GlesRenderer, copier: Option<&mut GlesRenderer>, s:
 }
 
 /// A relay buffer's pixels as the screen got them (R, G, B, A bytes, top row first).
-fn read_back(renderer: &mut GlesRenderer, dmabuf: &mut smithay::backend::allocator::dmabuf::Dmabuf, size: smithay::utils::Size<i32, smithay::utils::Physical>) -> Result<Vec<u8>, String> {
+fn read_back(
+    renderer: &mut GlesRenderer,
+    dmabuf: &mut smithay::backend::allocator::dmabuf::Dmabuf,
+    size: smithay::utils::Size<i32, smithay::utils::Physical>,
+) -> Result<Vec<u8>, String> {
     use smithay::backend::renderer::{Bind, ExportMem};
     let buf = smithay::utils::Size::<i32, smithay::utils::Buffer>::from((size.w, size.h));
     let fb = renderer.bind(dmabuf).map_err(|e| e.to_string())?;
-    let mapping = renderer.copy_framebuffer(&fb, smithay::utils::Rectangle::from_size(buf), Fourcc::Abgr8888).map_err(|e| e.to_string())?;
+    let mapping = renderer
+        .copy_framebuffer(&fb, smithay::utils::Rectangle::from_size(buf), Fourcc::Abgr8888)
+        .map_err(|e| e.to_string())?;
     drop(fb);
     let bytes = renderer.map_texture(&mapping).map_err(|e| e.to_string())?;
     Ok(bytes.to_vec())
@@ -1253,17 +1424,26 @@ fn read_back(renderer: &mut GlesRenderer, dmabuf: &mut smithay::backend::allocat
 /// `vctl screen add`). Input comes only from vctl. Run it with its own HOME
 /// and runtime directory (tools/vergence-session --headless): it is a whole
 /// session, with its own settings, window memory and session restore.
-pub fn run_headless(event_loop: &mut EventLoop<Server>, state: &mut Server, screens: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_headless(
+    event_loop: &mut EventLoop<Server>,
+    state: &mut Server,
+    screens: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
     use smithay::backend::egl::EGLDevice;
     // The GPU: VERGENCE_HEADLESS_GPU (a render node's path) if given, else the
     // lowest-numbered render node (renderD128, the main GPU as a rule: Hubble's
     // Intel before its NVIDIA, which zink drew on at first), else Mesa's
     // software device (canary, no GPU).
-    let mut all: Vec<(Option<smithay::backend::drm::DrmNode>, EGLDevice)> = EGLDevice::enumerate()?.map(|d| (d.try_get_render_node().ok().flatten(), d)).collect();
+    let mut all: Vec<(Option<smithay::backend::drm::DrmNode>, EGLDevice)> =
+        EGLDevice::enumerate()?.map(|d| (d.try_get_render_node().ok().flatten(), d)).collect();
     all.sort_by_key(|(n, d)| (d.is_software(), n.map_or(u64::MAX, |n| n.minor() as u64)));
-    let wanted = std::env::var("VERGENCE_HEADLESS_GPU").ok().and_then(|p| smithay::backend::drm::DrmNode::from_path(p).ok());
+    let wanted =
+        std::env::var("VERGENCE_HEADLESS_GPU").ok().and_then(|p| smithay::backend::drm::DrmNode::from_path(p).ok());
     let pick = match wanted {
-        Some(w) => all.iter().find(|(n, _)| n.is_some_and(|n| n.dev_id() == w.dev_id())).ok_or("VERGENCE_HEADLESS_GPU: no such render node")?,
+        Some(w) => all
+            .iter()
+            .find(|(n, _)| n.is_some_and(|n| n.dev_id() == w.dev_id()))
+            .ok_or("VERGENCE_HEADLESS_GPU: no such render node")?,
         None => all.first().ok_or("no EGL device, not even a software one")?,
     };
     let device = pick.1.clone();
@@ -1272,24 +1452,37 @@ pub fn run_headless(event_loop: &mut EventLoop<Server>, state: &mut Server, scre
     let context = EGLContext::new(&display)?;
     let mut renderer = unsafe { GlesRenderer::new(context)? };
     let name = gl_renderer(&mut renderer);
-    tracing::info!("headless: drawing with {name} ({})", node.map_or("no render node: software".to_string(), |n| format!("{n:?}")));
+    tracing::info!(
+        "headless: drawing with {name} ({})",
+        node.map_or("no render node: software".to_string(), |n| format!("{n:?}"))
+    );
     state.shm_formats_from(&renderer);
     if let Some(node) = node {
         match smithay::wayland::dmabuf::DmabufFeedbackBuilder::new(node.dev_id(), renderer.dmabuf_formats()).build() {
             Ok(feedback) => {
                 let mut dmabuf_state = smithay::wayland::dmabuf::DmabufState::new();
-                let global = dmabuf_state.create_global_with_default_feedback::<Server>(&state.display_handle, &feedback);
+                let global =
+                    dmabuf_state.create_global_with_default_feedback::<Server>(&state.display_handle, &feedback);
                 state.dmabuf = Some((dmabuf_state, global));
             }
             Err(e) => tracing::warn!("linux-dmabuf: {e:?}"),
         }
     }
     let (probed, _probed_rx) = smithay::reexports::calloop::channel::channel::<usize>();
-    state.backend = Some(Backend { renderer, gbm: None, devices: Vec::new(), surfaces: HashMap::new(), paused: false, waiting: Vec::new(), probed });
+    state.backend = Some(Backend {
+        renderer,
+        gbm: None,
+        devices: Vec::new(),
+        surfaces: HashMap::new(),
+        paused: false,
+        waiting: Vec::new(),
+        probed,
+    });
     state.session = None;
     watchdog(event_loop)?;
     for spec in screens {
-        let parsed = parse_screen_spec(spec).ok_or_else(|| format!("--screen {spec}: WxH MMxMM[@HZ], as 2560x1440 597x336@60"))?;
+        let parsed = parse_screen_spec(spec)
+            .ok_or_else(|| format!("--screen {spec}: WxH MMxMM[@HZ], as 2560x1440 597x336@60"))?;
         let (px, mm, hz) = parsed;
         let edid = fake_screen_edid(px, mm, &format!("HL{}x{}", px.0, px.1));
         add_memory_screen(state, edid, px, hz)?;
@@ -1328,8 +1521,15 @@ pub fn parse_screen_spec(spec: &str) -> Option<ScreenSpec> {
 /// A fake monitor's EDID for a screen in memory: the same mode, size and
 /// name give the same monitor (window memory per setup).
 pub fn fake_screen_edid(px: (u32, u32), mm: (u32, u32), name: &str) -> Vec<u8> {
-    let serial = (px.0.wrapping_mul(31).wrapping_add(px.1)).wrapping_mul(2654435761).wrapping_add(mm.0 * 7 + mm.1) % 100_000_000;
-    vergence_edid::fake::build(&vergence_edid::fake::Spec { name, product: 0x9a00, serial, timing: vergence_edid::fake::FHD_60, size_mm: (mm.0.min(4095) as u16, mm.1.min(4095) as u16) })
+    let serial =
+        (px.0.wrapping_mul(31).wrapping_add(px.1)).wrapping_mul(2654435761).wrapping_add(mm.0 * 7 + mm.1) % 100_000_000;
+    vergence_edid::fake::build(&vergence_edid::fake::Spec {
+        name,
+        product: 0x9a00,
+        serial,
+        timing: vergence_edid::fake::FHD_60,
+        size_mm: (mm.0.min(4095) as u16, mm.1.min(4095) as u16),
+    })
 }
 
 #[cfg(test)]
@@ -1382,7 +1582,12 @@ fn watchdog(event_loop: &mut EventLoop<Server>) -> Result<(), Box<dyn std::error
 }
 
 /// A screen in memory, one frame: drawn into its texture (what changed).
-fn memory_frame(renderer: &mut GlesRenderer, s: &mut Surface, elements: &[OutputElements], clear: [f32; 4]) -> Result<Relayed, String> {
+fn memory_frame(
+    renderer: &mut GlesRenderer,
+    s: &mut Surface,
+    elements: &[OutputElements],
+    clear: [f32; 4],
+) -> Result<Relayed, String> {
     use smithay::backend::renderer::Bind;
     let Present::Memory(m) = &mut s.present else { return Err("not in memory".into()) };
     let mut fb = renderer.bind(&mut m.tex).map_err(|e| e.to_string())?;
@@ -1395,7 +1600,12 @@ fn memory_frame(renderer: &mut GlesRenderer, s: &mut Surface, elements: &[Output
 /// identity (a fake's, vergence_edid::fake), `px` its mode, `refresh_mhz` its
 /// rate. Laid out, scaled and remembered like a monitor, except that its
 /// setups are never saved (memory.rs). Its name, MEM-<n>.
-pub fn add_memory_screen(state: &mut Server, edid: Vec<u8>, px: (u32, u32), refresh_mhz: u32) -> Result<String, String> {
+pub fn add_memory_screen(
+    state: &mut Server,
+    edid: Vec<u8>,
+    px: (u32, u32),
+    refresh_mhz: u32,
+) -> Result<String, String> {
     use smithay::backend::renderer::Offscreen;
     if !(1..=8192).contains(&px.0) || !(1..=8192).contains(&px.1) || !(1_000..=500_000).contains(&refresh_mhz) {
         return Err("a screen from 1x1 to 8192x8192 pixels, 1 to 500 Hz".into());
@@ -1417,26 +1627,56 @@ pub fn add_memory_screen(state: &mut Server, edid: Vec<u8>, px: (u32, u32), refr
     }
     let scales = cfg.scale_for(&id, &name, px, mm);
     let scale = scales.shown;
-    tracing::info!("{name}: in memory, {label:?} {}x{} at {:.2} Hz {mm:?} mm -> scale {scale:.4}, {}", px.0, px.1, refresh_mhz as f64 / 1000.0, scales.how);
+    tracing::info!(
+        "{name}: in memory, {label:?} {}x{} at {:.2} Hz {mm:?} mm -> scale {scale:.4}, {}",
+        px.0,
+        px.1,
+        refresh_mhz as f64 / 1000.0,
+        scales.how
+    );
     state.scale_notes.insert(name.clone(), scales);
     let Some(b) = state.backend.as_mut() else { return Err("no backend".into()) };
     let wl_mode = WlMode { size: (px.0 as i32, px.1 as i32).into(), refresh: refresh_mhz as i32 };
     let output = Output::new(
         name.clone(),
-        PhysicalProperties { size: mm.map(|(a, c)| (a as i32, c as i32)).unwrap_or((0, 0)).into(), subpixel: Subpixel::Unknown, make: "Vergence".into(), model: label, serial_number: String::new() },
+        PhysicalProperties {
+            size: mm.map(|(a, c)| (a as i32, c as i32)).unwrap_or((0, 0)).into(),
+            subpixel: Subpixel::Unknown,
+            make: "Vergence".into(),
+            model: label,
+            serial_number: String::new(),
+        },
     );
     let global = output.create_global::<Server>(&dh);
     output.user_data().insert_if_missing(|| crate::memory::MonitorId(id.clone()));
     output.set_preferred(wl_mode);
     output.change_current_state(Some(wl_mode), Some(Transform::Normal), Some(Scale::Fractional(scale)), None);
-    let tex = b.renderer.create_buffer(Fourcc::Abgr8888, (px.0 as i32, px.1 as i32).into()).map_err(|e| format!("{name}: no texture to draw it in: {e}"))?;
+    let tex = b
+        .renderer
+        .create_buffer(Fourcc::Abgr8888, (px.0 as i32, px.1 as i32).into())
+        .map_err(|e| format!("{name}: no texture to draw it in: {e}"))?;
     // From the output, so a scale changed later (vctl scale, the settings app) is followed.
     let damage = smithay::backend::renderer::damage::OutputDamageTracker::from_output(&output);
     let interval = Duration::from_micros(1_000_000_000 / refresh_mhz as u64);
     let modes = vec![vergence_protocol::bus::ModeInfo { width: px.0, height: px.1, refresh_mhz, preferred: true }];
     b.surfaces.insert(
         (MEMORY, crtc),
-        Surface { output, present: Present::Memory(MemoryScreen { tex, damage, interval }), connector: name.clone(), last: std::time::Instant::now(), scale, id, px, mm, edid: identity, global, relay: None, modes, mode: 0, since: CONNECTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) },
+        Surface {
+            output,
+            present: Present::Memory(MemoryScreen { tex, damage, interval }),
+            connector: name.clone(),
+            last: std::time::Instant::now(),
+            scale,
+            id,
+            px,
+            mm,
+            edid: identity,
+            global,
+            relay: None,
+            modes,
+            mode: 0,
+            since: CONNECTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        },
     );
     let anchors = state.window_anchors();
     setup_changed(state, anchors);
@@ -1447,7 +1687,11 @@ pub fn add_memory_screen(state: &mut Server, edid: Vec<u8>, px: (u32, u32), refr
 
 /// Take a screen in memory away, as a monitor unplugged.
 pub fn remove_memory_screen(state: &mut Server, name: &str) -> Result<(), String> {
-    let key = state.backend.as_ref().and_then(|b| b.surfaces.iter().find(|(k, s)| k.0 == MEMORY && s.connector == name).map(|(k, _)| *k)).ok_or_else(|| format!("no screen {name} in memory"))?;
+    let key = state
+        .backend
+        .as_ref()
+        .and_then(|b| b.surfaces.iter().find(|(k, s)| k.0 == MEMORY && s.connector == name).map(|(k, _)| *k))
+        .ok_or_else(|| format!("no screen {name} in memory"))?;
     let anchors = state.window_anchors();
     disconnect(state, key);
     state.scale_notes.remove(name);
@@ -1458,17 +1702,27 @@ pub fn remove_memory_screen(state: &mut Server, name: &str) -> Result<(), String
 
 /// The screens in memory, by name.
 pub fn memory_screens(state: &Server) -> Vec<String> {
-    let mut v: Vec<String> = state.backend.as_ref().map(|b| b.surfaces.iter().filter(|(k, _)| k.0 == MEMORY).map(|(_, s)| s.connector.clone()).collect()).unwrap_or_default();
+    let mut v: Vec<String> = state
+        .backend
+        .as_ref()
+        .map(|b| b.surfaces.iter().filter(|(k, _)| k.0 == MEMORY).map(|(_, s)| s.connector.clone()).collect())
+        .unwrap_or_default();
     v.sort();
     v
 }
 
 /// A texture's pixels, RGBA.
-fn read_texture(renderer: &mut GlesRenderer, tex: &mut smithay::backend::renderer::gles::GlesTexture, size: smithay::utils::Size<i32, smithay::utils::Physical>) -> Result<Vec<u8>, String> {
+fn read_texture(
+    renderer: &mut GlesRenderer,
+    tex: &mut smithay::backend::renderer::gles::GlesTexture,
+    size: smithay::utils::Size<i32, smithay::utils::Physical>,
+) -> Result<Vec<u8>, String> {
     use smithay::backend::renderer::{Bind, ExportMem};
     let buf = smithay::utils::Size::<i32, smithay::utils::Buffer>::from((size.w, size.h));
     let fb = renderer.bind(tex).map_err(|e| e.to_string())?;
-    let mapping = renderer.copy_framebuffer(&fb, smithay::utils::Rectangle::from_size(buf), Fourcc::Abgr8888).map_err(|e| e.to_string())?;
+    let mapping = renderer
+        .copy_framebuffer(&fb, smithay::utils::Rectangle::from_size(buf), Fourcc::Abgr8888)
+        .map_err(|e| e.to_string())?;
     let bytes = renderer.map_texture(&mapping).map_err(|e| e.to_string())?;
     Ok(bytes.to_vec())
 }
@@ -1503,11 +1757,17 @@ fn to_output(e: crate::zoom::Inner) -> OutputElements {
 
 /// A screen as it shows (unmagnified), the pointer at `pointer_at` (far
 /// away to leave it out): its size in pixels, its scale, its pixels.
-fn screen_pixels(state: &mut Server, renderer: &mut GlesRenderer, output: &Output, pointer_at: Point<f64, Logical>) -> Result<(usize, usize, f64, Vec<u8>), String> {
+fn screen_pixels(
+    state: &mut Server,
+    renderer: &mut GlesRenderer,
+    output: &Output,
+    pointer_at: Point<f64, Logical>,
+) -> Result<(usize, usize, f64, Vec<u8>), String> {
     let geo = state.space.output_geometry(output).ok_or("a screen without a place")?;
     let scale = output.current_scale().fractional_scale();
     let size = output.current_mode().map(|m| m.size).ok_or("a screen without a mode")?;
-    let elements: Vec<OutputElements> = screen_elements(state, renderer, output, geo, scale, pointer_at).into_iter().map(to_output).collect();
+    let elements: Vec<OutputElements> =
+        screen_elements(state, renderer, output, geo, scale, pointer_at).into_iter().map(to_output).collect();
     let clear = state.background_color(&output.name());
     let rgba = capture(renderer, &elements, size, scale, clear)?;
     Ok((size.w as usize, size.h as usize, scale, rgba))
@@ -1656,7 +1916,13 @@ fn run_captures(state: &mut Server, renderer: &mut GlesRenderer, pointer_at: Poi
 /// A window alone (its bar, border, corners and content) on a clear
 /// ground, at the densest scale of the screens it is on; a soft shadow
 /// around it if asked.
-fn window_pixels(state: &mut Server, renderer: &mut GlesRenderer, outputs: &[Output], w: &crate::win::Win, shadow: bool) -> Result<Pixels, String> {
+fn window_pixels(
+    state: &mut Server,
+    renderer: &mut GlesRenderer,
+    outputs: &[Output],
+    w: &crate::win::Win,
+    shadow: bool,
+) -> Result<Pixels, String> {
     use crate::{decor::SceneElement, overview::WinParts};
     use smithay::backend::renderer::element::{
         Element,
@@ -1665,7 +1931,9 @@ fn window_pixels(state: &mut Server, renderer: &mut GlesRenderer, outputs: &[Out
     let wgeo = state.space.element_geometry(w).ok_or("the window is not on a screen")?;
     let on: Vec<(&Output, i32)> = outputs
         .iter()
-        .filter_map(|o| state.space.output_geometry(o).and_then(|g| g.intersection(wgeo)).map(|i| (o, i.size.w * i.size.h)))
+        .filter_map(|o| {
+            state.space.output_geometry(o).and_then(|g| g.intersection(wgeo)).map(|i| (o, i.size.w * i.size.h))
+        })
         .collect();
     let main = on.iter().max_by_key(|(_, a)| *a).map(|(o, _)| (*o).clone()).ok_or("the window is on no screen")?;
     let d = on.iter().map(|(o, _)| o.current_scale().fractional_scale()).fold(1.0f64, f64::max);
@@ -1673,7 +1941,12 @@ fn window_pixels(state: &mut Server, renderer: &mut GlesRenderer, outputs: &[Out
     let els = state.scene(renderer, &main, d);
     state.capture_only = None;
     let k = smithay::utils::Scale::from(d);
-    let bx = els.iter().map(|e| e.geometry(k)).reduce(|a, b| a.merge(b)).filter(|b| b.size.w > 0 && b.size.h > 0).ok_or("the window has nothing drawn")?;
+    let bx = els
+        .iter()
+        .map(|e| e.geometry(k))
+        .reduce(|a, b| a.merge(b))
+        .filter(|b| b.size.w > 0 && b.size.h > 0)
+        .ok_or("the window has nothing drawn")?;
     let placed: Vec<OutputElements> = els
         .into_iter()
         .filter_map(|e| {
@@ -1686,7 +1959,11 @@ fn window_pixels(state: &mut Server, renderer: &mut GlesRenderer, outputs: &[Out
                 SceneElement::Backdrop(x) => WinParts::Backdrop(x),
                 _ => return None,
             };
-            Some(OutputElements::Scene(SceneElement::Placed(RelocateRenderElement::from_element(RescaleRenderElement::from_element(part, bx.loc, 1.0), Point::from((0, 0))  - bx.loc, Relocate::Relative))))
+            Some(OutputElements::Scene(SceneElement::Placed(RelocateRenderElement::from_element(
+                RescaleRenderElement::from_element(part, bx.loc, 1.0),
+                Point::from((0, 0)) - bx.loc,
+                Relocate::Relative,
+            ))))
         })
         .collect();
     let rgba = capture(renderer, &placed, bx.size, d, [0.0, 0.0, 0.0, 0.0])?;
@@ -1764,7 +2041,10 @@ pub fn screens_on(state: &mut Server) {
 impl Backend {
     /// A screen's modes and the index of the one running (u32::MAX: unknown).
     pub fn modes_of(&self, connector: &str) -> (Vec<vergence_protocol::bus::ModeInfo>, u32) {
-        self.surfaces.values().find(|s| s.connector == connector).map_or((Vec::new(), u32::MAX), |s| (s.modes.clone(), s.mode))
+        self.surfaces
+            .values()
+            .find(|s| s.connector == connector)
+            .map_or((Vec::new(), u32::MAX), |s| (s.modes.clone(), s.mode))
     }
 
     /// The device path of the GPU that shows (or, `drawn`, draws) a screen.

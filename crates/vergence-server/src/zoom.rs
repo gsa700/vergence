@@ -75,7 +75,15 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Config {
-        Config { on: false, level: 2.0, lens: false, follow_pointer: true, follow_focus: true, follow_caret: true, lens_size: (480.0, 270.0) }
+        Config {
+            on: false,
+            level: 2.0,
+            lens: false,
+            follow_pointer: true,
+            follow_focus: true,
+            follow_caret: true,
+            lens_size: (480.0, 270.0),
+        }
     }
 }
 
@@ -84,7 +92,12 @@ pub fn config_from(text: &str) -> Config {
     let table = text.parse::<toml::Table>().ok();
     let Some(t) = table.as_ref().and_then(|t| t.get("magnifier")).and_then(|m| m.as_table()) else { return d };
     let b = |k: &str, v: bool| t.get(k).and_then(|x| x.as_bool()).unwrap_or(v);
-    let f = |k: &str, v: f64| t.get(k).and_then(|x| x.as_float().or_else(|| x.as_integer().map(|i| i as f64))).filter(|x| x.is_finite()).unwrap_or(v);
+    let f = |k: &str, v: f64| {
+        t.get(k)
+            .and_then(|x| x.as_float().or_else(|| x.as_integer().map(|i| i as f64)))
+            .filter(|x| x.is_finite())
+            .unwrap_or(v)
+    };
     Config {
         on: b("on", d.on),
         level: f("level", d.level).clamp(LEAST, MOST),
@@ -92,13 +105,19 @@ pub fn config_from(text: &str) -> Config {
         follow_pointer: b("follow-pointer", d.follow_pointer),
         follow_focus: b("follow-focus", d.follow_focus),
         follow_caret: b("follow-caret", d.follow_caret),
-        lens_size: (f("lens-width", d.lens_size.0).clamp(120.0, 2000.0), f("lens-height", d.lens_size.1).clamp(80.0, 1500.0)),
+        lens_size: (
+            f("lens-width", d.lens_size.0).clamp(120.0, 2000.0),
+            f("lens-height", d.lens_size.1).clamp(80.0, 1500.0),
+        ),
     }
 }
 
 fn focus_ring_wanted() -> bool {
     let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
-    text.parse::<toml::Table>().ok().and_then(|t| t.get("appearance").and_then(|a| a.get("focus-ring")).and_then(|v| v.as_bool())).unwrap_or(false)
+    text.parse::<toml::Table>()
+        .ok()
+        .and_then(|t| t.get("appearance").and_then(|a| a.get("focus-ring")).and_then(|v| v.as_bool()))
+        .unwrap_or(false)
 }
 
 fn load_config() -> Config {
@@ -269,7 +288,8 @@ impl Server {
         let target = if z.on { z.level } else { 1.0 };
         z.shown += (target - z.shown) * k;
         z.at += (z.point - z.at).upscale(k);
-        let near = (target - z.shown).abs() < 0.002 && (z.point.x - z.at.x).abs() < 0.3 && (z.point.y - z.at.y).abs() < 0.3;
+        let near =
+            (target - z.shown).abs() < 0.002 && (z.point.x - z.at.x).abs() < 0.3 && (z.point.y - z.at.y).abs() < 0.3;
         if near {
             z.shown = target;
             z.at = z.point;
@@ -308,12 +328,22 @@ impl Server {
     /// front first) scaled about the point of interest; for the lens, cropped
     /// to it, framed, in front of `back` (the same elements made again,
     /// unscaled). `geo` is the screen on the desktop.
-    pub fn zoom_frame(&self, front: Vec<Inner>, back: Vec<Inner>, geo: Rectangle<i32, Logical>, scale: f64, ground: [f32; 4]) -> Vec<Zoomed> {
+    pub fn zoom_frame(
+        &self,
+        front: Vec<Inner>,
+        back: Vec<Inner>,
+        geo: Rectangle<i32, Logical>,
+        scale: f64,
+        ground: [f32; 4],
+    ) -> Vec<Zoomed> {
         let z = &self.zoom;
         let level = z.shown;
         let origin: Point<i32, Physical> = (z.at - geo.loc.to_f64()).to_physical(scale).to_i32_round();
-        let screen: Rectangle<i32, Physical> = Rectangle::new((0, 0).into(), geo.size.to_f64().to_physical(scale).to_i32_round());
-        let scaled = |e: Inner, level: f64, crop: Rectangle<i32, Physical>| CropRenderElement::from_element(RescaleRenderElement::from_element(e, origin, level), scale, crop);
+        let screen: Rectangle<i32, Physical> =
+            Rectangle::new((0, 0).into(), geo.size.to_f64().to_physical(scale).to_i32_round());
+        let scaled = |e: Inner, level: f64, crop: Rectangle<i32, Physical>| {
+            CropRenderElement::from_element(RescaleRenderElement::from_element(e, origin, level), scale, crop)
+        };
         if !z.lens {
             return front.into_iter().filter_map(|e| scaled(e, level, screen)).collect();
         }
@@ -330,7 +360,15 @@ impl Server {
             Rectangle::new((x - f, y).into(), Size::from((f, lh))),
             Rectangle::new((x + lw, y).into(), Size::from((f, lh))),
         ];
-        let solid = |id: &Id, r: Rectangle<i32, Physical>, c: [f32; 4]| Inner::Scene(crate::decor::SceneElement::Solid(SolidColorRenderElement::new(id.clone(), r, z.commit, c, Kind::Unspecified)));
+        let solid = |id: &Id, r: Rectangle<i32, Physical>, c: [f32; 4]| {
+            Inner::Scene(crate::decor::SceneElement::Solid(SolidColorRenderElement::new(
+                id.clone(),
+                r,
+                z.commit,
+                c,
+                Kind::Unspecified,
+            )))
+        };
         let mut out: Vec<Zoomed> = Vec::new();
         // A rescale of 1 is the element itself.
         for (id, r) in z.frame_ids.iter().zip(frame) {
@@ -347,7 +385,12 @@ impl Server {
     /// the window; nothing for a control that fills most of it (a page, a
     /// text area: the window itself says that). Placed by the scene just in
     /// front of that window's picture, so windows in front cover it.
-    pub fn focus_ring_elements(&self, w: &crate::win::Win, out: Rectangle<i32, Logical>, scale: f64) -> Vec<crate::decor::SceneElement> {
+    pub fn focus_ring_elements(
+        &self,
+        w: &crate::win::Win,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Vec<crate::decor::SceneElement> {
         if !self.zoom.focus_ring || self.input.keyboard_native.as_ref() != Some(w) {
             return Vec::new();
         }
@@ -373,12 +416,35 @@ impl Server {
         let a = self.accent();
         let color = [a.r as f32 / 255.0, a.g as f32 / 255.0, a.b as f32 / 255.0, 1.0];
         let px = |x: f64, y: f64, w: f64, h: f64| {
-            let p0: Point<i32, Physical> = Point::<f64, Logical>::from((x - out.loc.x as f64, y - out.loc.y as f64)).to_physical(scale).to_i32_round();
-            let p1: Point<i32, Physical> = Point::<f64, Logical>::from((x + w - out.loc.x as f64, y + h - out.loc.y as f64)).to_physical(scale).to_i32_round();
+            let p0: Point<i32, Physical> = Point::<f64, Logical>::from((x - out.loc.x as f64, y - out.loc.y as f64))
+                .to_physical(scale)
+                .to_i32_round();
+            let p1: Point<i32, Physical> =
+                Point::<f64, Logical>::from((x + w - out.loc.x as f64, y + h - out.loc.y as f64))
+                    .to_physical(scale)
+                    .to_i32_round();
             Rectangle::<i32, Physical>::new(p0, Size::from(((p1.x - p0.x).max(1), (p1.y - p0.y).max(1))))
         };
-        let sides = [px(x0, y0, x1 - x0, t), px(x0, y1 - t, x1 - x0, t), px(x0, y0 + t, t, y1 - y0 - 2.0 * t), px(x1 - t, y0 + t, t, y1 - y0 - 2.0 * t)];
-        self.zoom.ring_ids.iter().zip(sides).map(|(id, r)| crate::decor::SceneElement::Solid(SolidColorRenderElement::new(id.clone(), r, self.zoom.commit, color, Kind::Unspecified))).collect()
+        let sides = [
+            px(x0, y0, x1 - x0, t),
+            px(x0, y1 - t, x1 - x0, t),
+            px(x0, y0 + t, t, y1 - y0 - 2.0 * t),
+            px(x1 - t, y0 + t, t, y1 - y0 - 2.0 * t),
+        ];
+        self.zoom
+            .ring_ids
+            .iter()
+            .zip(sides)
+            .map(|(id, r)| {
+                crate::decor::SceneElement::Solid(SolidColorRenderElement::new(
+                    id.clone(),
+                    r,
+                    self.zoom.commit,
+                    color,
+                    Kind::Unspecified,
+                ))
+            })
+            .collect()
     }
 
     /// For `vctl zoom`.
@@ -405,7 +471,9 @@ mod tests {
     #[test]
     fn its_settings() {
         assert_eq!(config_from(""), Config::default());
-        let c = config_from("[magnifier]\non = true\nlevel = 3\nstyle = \"lens\"\nfollow-caret = false\nlens-width = 9999\n");
+        let c = config_from(
+            "[magnifier]\non = true\nlevel = 3\nstyle = \"lens\"\nfollow-caret = false\nlens-width = 9999\n",
+        );
         assert!(c.on && c.lens && !c.follow_caret && c.follow_focus);
         assert_eq!(c.level, 3.0, "an integer level is read too");
         assert_eq!(c.lens_size.0, 2000.0, "kept within bounds");

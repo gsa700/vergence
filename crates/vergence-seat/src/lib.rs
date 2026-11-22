@@ -134,7 +134,19 @@ impl Target {
     pub fn window(&self) -> Option<WinId> {
         match *self {
             Target::Surface(w, _) | Target::Native(w) => Some(w),
-            Target::Server(Part::Title(w) | Part::Edge(w, _) | Part::Close(w) | Part::Maximize(w) | Part::Minimize(w) | Part::Tab(w, _) | Part::CloseTab(w, _) | Part::Plus(w) | Part::Blocked(w) | Part::Tool(w, _) | Part::AppMenu(w)) => Some(w),
+            Target::Server(
+                Part::Title(w)
+                | Part::Edge(w, _)
+                | Part::Close(w)
+                | Part::Maximize(w)
+                | Part::Minimize(w)
+                | Part::Tab(w, _)
+                | Part::CloseTab(w, _)
+                | Part::Plus(w)
+                | Part::Blocked(w)
+                | Part::Tool(w, _)
+                | Part::AppMenu(w),
+            ) => Some(w),
             Target::Server(_) => None,
         }
     }
@@ -210,7 +222,10 @@ pub enum Out {
     ToEdge,
     // ---- touch ----
     /// Put the pointer where the pointing finger is (its picture stays hidden).
-    PointerTo { x: f64, y: f64 },
+    PointerTo {
+        x: f64,
+        y: f64,
+    },
     /// A finger came down on, moved on, or left a window's content.
     TouchDown(Target, Slot),
     TouchMotion(Target, Slot),
@@ -224,7 +239,11 @@ pub enum Out {
     /// A long press on the bare desktop: the desktop menu.
     DesktopMenu,
     /// A window moved by the finger that asked (its toolkit's bar): put it where the finger says.
-    FingerMove { window: WinId, dx: f64, dy: f64 },
+    FingerMove {
+        window: WinId,
+        dx: f64,
+        dy: f64,
+    },
     /// That finger lifted: remember where the window is.
     FingerMoveEnd(WinId),
     /// No finger rests on the dock any more (no name beside an icon).
@@ -232,7 +251,10 @@ pub enum Out {
     /// A window's menu (windows milestone 1, step 4: the layouts): a right
     /// click on its title bar or maximize button (`on_button`), or a long
     /// press on its title bar.
-    WindowMenu { window: WinId, on_button: bool },
+    WindowMenu {
+        window: WinId,
+        on_button: bool,
+    },
     /// A window's app button was pressed: open (or close) its app menu.
     AppMenu(WinId),
     // ---- switching ----

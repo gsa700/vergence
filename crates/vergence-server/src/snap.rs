@@ -102,14 +102,28 @@ impl SnapConfig {
 
 impl Default for SnapConfig {
     fn default() -> SnapConfig {
-        SnapConfig { mode: SnapMode::Always, top_half: false, between: false, preview: true, layouts_hover: true, gaps: true, window_keys: true, app_switch: true, alt_tab_screen: false, desktop_aside: true }
+        SnapConfig {
+            mode: SnapMode::Always,
+            top_half: false,
+            between: false,
+            preview: true,
+            layouts_hover: true,
+            gaps: true,
+            window_keys: true,
+            app_switch: true,
+            alt_tab_screen: false,
+            desktop_aside: true,
+        }
     }
 }
 
 /// The `[windows]` table of desktop.toml's text.
 pub fn config_from(text: &str) -> SnapConfig {
     let d = SnapConfig::default();
-    let Some(t) = text.parse::<toml::Table>().ok().and_then(|t| t.get("windows").and_then(|w| w.as_table()).cloned()) else { return d };
+    let Some(t) = text.parse::<toml::Table>().ok().and_then(|t| t.get("windows").and_then(|w| w.as_table()).cloned())
+    else {
+        return d;
+    };
     let flag = |k: &str, or: bool| t.get(k).and_then(|v| v.as_bool()).unwrap_or(or);
     let word = |k: &str| t.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
     let mode = match t.get("snap") {
@@ -120,12 +134,25 @@ pub fn config_from(text: &str) -> SnapConfig {
         Some(toml::Value::String(s)) if s == "ctrl" => SnapMode::Ctrl,
         _ => d.mode,
     };
-    SnapConfig { mode, top_half: word("top-edge") == "half", between: word("between-screens") == "press", preview: flag("preview", d.preview), layouts_hover: flag("layouts-hover", d.layouts_hover), gaps: flag("gaps", d.gaps), window_keys: flag("window-keys", d.window_keys), app_switch: flag("app-switch", d.app_switch), alt_tab_screen: word("alt-tab") == "screen", desktop_aside: flag("desktop-aside", d.desktop_aside) }
+    SnapConfig {
+        mode,
+        top_half: word("top-edge") == "half",
+        between: word("between-screens") == "press",
+        preview: flag("preview", d.preview),
+        layouts_hover: flag("layouts-hover", d.layouts_hover),
+        gaps: flag("gaps", d.gaps),
+        window_keys: flag("window-keys", d.window_keys),
+        app_switch: flag("app-switch", d.app_switch),
+        alt_tab_screen: word("alt-tab") == "screen",
+        desktop_aside: flag("desktop-aside", d.desktop_aside),
+    }
 }
 
 fn load_config() -> SnapConfig {
     let Some(home) = std::env::var_os("HOME") else { return SnapConfig::default() };
-    config_from(&std::fs::read_to_string(std::path::Path::new(&home).join(".config/vergence/desktop.toml")).unwrap_or_default())
+    config_from(
+        &std::fs::read_to_string(std::path::Path::new(&home).join(".config/vergence/desktop.toml")).unwrap_or_default(),
+    )
 }
 
 /// A snapped window: its part of the screen, and where it was before.
@@ -172,7 +199,15 @@ pub struct Snap {
 
 impl Default for Snap {
     fn default() -> Snap {
-        Snap { config: load_config(), aim: None, ctrl_seen: false, hover: None, snapped: Default::default(), recalled: Default::default(), picture: None }
+        Snap {
+            config: load_config(),
+            aim: None,
+            ctrl_seen: false,
+            hover: None,
+            snapped: Default::default(),
+            recalled: Default::default(),
+            picture: None,
+        }
     }
 }
 
@@ -212,10 +247,14 @@ impl Server {
         match (self.snap.aim, aim) {
             // Still the same part of the same screen: it keeps its time.
             (Some(a), Some((zone, screen, ..))) if a.zone == zone && a.screen == screen => {}
-            (_, Some((zone, screen, rect, shared))) => self.snap.aim = Some(Aim { zone, rect, screen, since: Instant::now(), shared }),
+            (_, Some((zone, screen, rect, shared))) => {
+                self.snap.aim = Some(Aim { zone, rect, screen, since: Instant::now(), shared })
+            }
             (_, None) => self.snap.aim = None,
         }
-        if was.is_some_and(|(.., shown)| shown) && self.snap.aim.map(|a| (a.zone, a.screen)) != was.map(|(z, s, _)| (z, s)) {
+        if was.is_some_and(|(.., shown)| shown)
+            && self.snap.aim.map(|a| (a.zone, a.screen)) != was.map(|(z, s, _)| (z, s))
+        {
             self.redraw_all();
         }
     }
@@ -229,8 +268,13 @@ impl Server {
         }
     }
 
-    fn snap_aim(&self, pos: Point<f64, Logical>, c: SnapConfig) -> Option<(Zone, Rectangle<i32, Logical>, Rectangle<i32, Logical>, bool)> {
-        let screens: Vec<Rectangle<i32, Logical>> = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).collect();
+    fn snap_aim(
+        &self,
+        pos: Point<f64, Logical>,
+        c: SnapConfig,
+    ) -> Option<(Zone, Rectangle<i32, Logical>, Rectangle<i32, Logical>, bool)> {
+        let screens: Vec<Rectangle<i32, Logical>> =
+            self.space.outputs().filter_map(|o| self.space.output_geometry(o)).collect();
         let screen = *screens.iter().find(|g| g.to_f64().contains(pos))?;
         let all: Vec<vergence_shell::Rect> = screens.iter().map(|g| shell_rect(*g)).collect();
         let (zone, shared) = zone_at(pos.x, pos.y, shell_rect(screen), &all)?;
@@ -273,7 +317,13 @@ impl Server {
     }
 
     /// The same, with where it goes back to given (else where it is now).
-    fn snap_apply_from(&mut self, w: &Win, zone: Zone, screen: Rectangle<i32, Logical>, from: Option<Rectangle<i32, Logical>>) {
+    fn snap_apply_from(
+        &mut self,
+        w: &Win,
+        zone: Zone,
+        screen: Rectangle<i32, Logical>,
+        from: Option<Rectangle<i32, Logical>>,
+    ) {
         self.snap.snapped.retain(|w, _| w.alive());
         let area = self.work_area(screen);
         let (r, max) = zone_rect_gapped(zone, shell_rect(area), self.snap.config.top_half, self.snap.config.gap());
@@ -293,7 +343,14 @@ impl Server {
         }
         // Its place before: kept from a first snap through later ones, and from
         // before it was maximized if it was.
-        let before = self.snap.snapped.get(w).map(|s| s.before).or_else(|| self.restore.remove(w)).or(from).or_else(|| self.space.element_geometry(w));
+        let before = self
+            .snap
+            .snapped
+            .get(w)
+            .map(|s| s.before)
+            .or_else(|| self.restore.remove(w))
+            .or(from)
+            .or_else(|| self.space.element_geometry(w));
         let Some(before) = before else { return };
         let r = rectangle(r);
         let top = if self.has_title(w) { self.bar_h_in(screen) } else { 0 };
@@ -357,7 +414,12 @@ impl Server {
         let Some(zone) = self.snap.recalled.remove(w) else { return };
         let Some(geo) = self.space.element_geometry(w) else { return };
         let mid = (geo.loc.x + geo.size.w / 2, geo.loc.y + geo.size.h / 2);
-        let screen = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).find(|g| g.contains(mid)).or_else(|| self.output_at_pointer());
+        let screen = self
+            .space
+            .outputs()
+            .filter_map(|o| self.space.output_geometry(o))
+            .find(|g| g.contains(mid))
+            .or_else(|| self.output_at_pointer());
         if let Some(screen) = screen {
             self.snap_apply(w, zone, screen);
         }
@@ -365,7 +427,13 @@ impl Server {
 
     /// The preview: where the dragged window will go, a rounded tint in the
     /// accent with a line round it, over the windows.
-    pub fn snap_preview_element(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64, light: bool) -> Option<SceneElement> {
+    pub fn snap_preview_element(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+        light: bool,
+    ) -> Option<SceneElement> {
         if !self.is_moving() {
             self.snap.aim = None;
             return None;
@@ -374,7 +442,10 @@ impl Server {
         // Where the window will go; without gaps a little inside, so its line
         // shows against the screen's edge.
         let inset = if self.snap.config.gaps { 0 } else { 6 };
-        let r = Rectangle::<i32, Logical>::new((aim.rect.loc.x + inset, aim.rect.loc.y + inset).into(), (aim.rect.size.w - 2 * inset, aim.rect.size.h - 2 * inset).into());
+        let r = Rectangle::<i32, Logical>::new(
+            (aim.rect.loc.x + inset, aim.rect.loc.y + inset).into(),
+            (aim.rect.size.w - 2 * inset, aim.rect.size.h - 2 * inset).into(),
+        );
         if !r.overlaps(out) || r.size.w <= 0 || r.size.h <= 0 {
             return None;
         }
@@ -388,7 +459,11 @@ impl Server {
             let rect = vergence_scene::Rect::new(0.0, 0.0, w, h);
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
             if armed {
-                scene.fill_rounded(rect, vergence_look::RADIUS, vergence_scene::Color::rgba(a.r, a.g, a.b, if light { 48 } else { 64 }));
+                scene.fill_rounded(
+                    rect,
+                    vergence_look::RADIUS,
+                    vergence_scene::Color::rgba(a.r, a.g, a.b, if light { 48 } else { 64 }),
+                );
                 scene.stroke(rect, vergence_look::RADIUS, 2.0, vergence_scene::Color::rgba(a.r, a.g, a.b, 220));
             } else {
                 scene.fill_rounded(rect, vergence_look::RADIUS, vergence_scene::Color::rgba(a.r, a.g, a.b, 18));
@@ -400,16 +475,41 @@ impl Server {
                     let m = fonts.metrics(face, size);
                     let (cw, ch) = (tw + 28.0, m.ascent + m.descent + 16.0);
                     if cw < w && ch < h {
-                        let card = vergence_scene::Rect::new(((w - cw) / 2.0).round(), ((h - ch) / 2.0).round(), cw, ch);
+                        let card =
+                            vergence_scene::Rect::new(((w - cw) / 2.0).round(), ((h - ch) / 2.0).round(), cw, ch);
                         let s = vergence_look::shelf_look(light);
-                        scene.fill_rounded(card, vergence_look::RADIUS, vergence_scene::Color::rgba(s.menu.0, s.menu.1, s.menu.2, 235));
-                        vergence_render::text(&mut scene, fonts, face, size, vergence_scene::Color::rgb(s.menu_ink.0, s.menu_ink.1, s.menu_ink.2), vergence_scene::Point::new(card.x + 14.0, (card.y + 8.0 + m.ascent).round()), text);
+                        scene.fill_rounded(
+                            card,
+                            vergence_look::RADIUS,
+                            vergence_scene::Color::rgba(s.menu.0, s.menu.1, s.menu.2, 235),
+                        );
+                        vergence_render::text(
+                            &mut scene,
+                            fonts,
+                            face,
+                            size,
+                            vergence_scene::Color::rgb(s.menu_ink.0, s.menu_ink.1, s.menu_ink.2),
+                            vergence_scene::Point::new(card.x + 14.0, (card.y + 8.0 + m.ascent).round()),
+                            text,
+                        );
                     }
                 }
             }
-            match vergence_render::Cpu::new().render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0)) {
+            match vergence_render::Cpu::new().render(
+                &scene,
+                fonts,
+                scale as f32,
+                vergence_scene::Color::rgba(0, 0, 0, 0),
+            ) {
                 Ok(p) => {
-                    let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+                    let buffer = MemoryRenderBuffer::from_slice(
+                        &p.data,
+                        Fourcc::Abgr8888,
+                        (p.width as i32, p.height as i32),
+                        1,
+                        Transform::Normal,
+                        None,
+                    );
                     self.snap.picture = Some((key, buffer, (p.width as i32, p.height as i32)));
                 }
                 Err(e) => {
@@ -421,7 +521,17 @@ impl Server {
         let (_, buffer, px) = self.snap.picture.as_ref()?;
         let whole = Rectangle::<f64, Logical>::from_size((px.0 as f64, px.1 as f64).into());
         let loc = (r.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
-        MemoryRenderBufferRenderElement::from_buffer(renderer, loc.to_f64(), buffer, None, Some(whole), Some(r.size), Kind::Unspecified).ok().map(SceneElement::Memory)
+        MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            loc.to_f64(),
+            buffer,
+            None,
+            Some(whole),
+            Some(r.size),
+            Kind::Unspecified,
+        )
+        .ok()
+        .map(SceneElement::Memory)
     }
 
     /// Super with an arrow, for the window with the keyboard (vergence-shell
@@ -431,11 +541,16 @@ impl Server {
         if self.is_minimized(&w) {
             return;
         }
-        let screens: Vec<Rectangle<i32, Logical>> = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).collect();
+        let screens: Vec<Rectangle<i32, Logical>> =
+            self.space.outputs().filter_map(|o| self.space.output_geometry(o)).collect();
         // The screen most of it is on (its place before, if maximized or snapped,
         // would put a window back on a screen it has left by keys).
         let Some(geo) = self.space.element_geometry(&w) else { return };
-        let at = screens.iter().enumerate().max_by_key(|(_, g)| g.intersection(geo).map_or(0, |i| i.size.w as i64 * i.size.h as i64)).map(|(i, _)| i);
+        let at = screens
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, g)| g.intersection(geo).map_or(0, |i| i.size.w as i64 * i.size.h as i64))
+            .map(|(i, _)| i);
         let Some(at) = at else { return };
         let standing = match (self.restore.contains_key(&w), self.snap.snapped.get(&w)) {
             (true, _) => Standing::Maximized,
@@ -477,8 +592,12 @@ impl Server {
         match act {
             LayoutAct::Snap(zone) => {
                 let Some(geo) = self.space.element_geometry(w) else { return };
-                let screens: Vec<Rectangle<i32, Logical>> = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).collect();
-                let screen = screens.iter().max_by_key(|g| g.intersection(geo).map_or(0, |i| i.size.w as i64 * i.size.h as i64)).copied();
+                let screens: Vec<Rectangle<i32, Logical>> =
+                    self.space.outputs().filter_map(|o| self.space.output_geometry(o)).collect();
+                let screen = screens
+                    .iter()
+                    .max_by_key(|g| g.intersection(geo).map_or(0, |i| i.size.w as i64 * i.size.h as i64))
+                    .copied();
                 if let Some(screen) = screen {
                     self.snap_apply(w, zone, screen);
                 }
@@ -519,7 +638,10 @@ impl Server {
             self.snap.hover = None;
             return;
         }
-        let quiet = self.snap.config.layouts_hover && !self.menu_is_open() && !self.input.seat.buttons_held() && !self.is_moving();
+        let quiet = self.snap.config.layouts_hover
+            && !self.menu_is_open()
+            && !self.input.seat.buttons_held()
+            && !self.is_moving();
         match on_button.filter(|_| quiet) {
             Some(w) => match &self.snap.hover {
                 Some((hw, since)) if *hw == w => {
@@ -540,7 +662,14 @@ impl Server {
     pub fn snap_report(&self) -> String {
         let mut out = vec![format!("{:?}", self.snap.config)];
         out.push(match self.snap.aim {
-            Some(a) => format!("aimed: {} {:?} shared {} shown {} ready {}", a.zone.as_str(), a.rect, a.shared, a.shown(), a.ready()),
+            Some(a) => format!(
+                "aimed: {} {:?} shared {} shown {} ready {}",
+                a.zone.as_str(),
+                a.rect,
+                a.shared,
+                a.shown(),
+                a.ready()
+            ),
             None => "aimed: nothing".into(),
         });
         for (w, s) in &self.snap.snapped {
@@ -562,8 +691,24 @@ mod tests {
         assert_eq!(SnapConfig::default().mode, SnapMode::Always, "on unless the settings say otherwise");
         assert_eq!(config_from("[windows]\npreview = false\n").mode, SnapMode::Always);
         assert_eq!(config_from("[windows]\nsnap = \"ctrl\"\n").mode, SnapMode::Ctrl);
-        let c = config_from("[windows]\nsnap = true\ntop-edge = \"half\"\nbetween-screens = \"press\"\npreview = false\nlayouts-hover = false\n");
-        assert_eq!(c, SnapConfig { mode: SnapMode::Always, top_half: true, between: true, preview: false, layouts_hover: false, gaps: true, window_keys: true, app_switch: true, alt_tab_screen: false, desktop_aside: true });
+        let c = config_from(
+            "[windows]\nsnap = true\ntop-edge = \"half\"\nbetween-screens = \"press\"\npreview = false\nlayouts-hover = false\n",
+        );
+        assert_eq!(
+            c,
+            SnapConfig {
+                mode: SnapMode::Always,
+                top_half: true,
+                between: true,
+                preview: false,
+                layouts_hover: false,
+                gaps: true,
+                window_keys: true,
+                app_switch: true,
+                alt_tab_screen: false,
+                desktop_aside: true
+            }
+        );
         let c = config_from("[windows]\nwindow-keys = false\napp-switch = false\nalt-tab = \"screen\"\n");
         assert!(!c.window_keys && !c.app_switch && c.alt_tab_screen);
         assert!(!config_from("[windows]\ngaps = false\n").gaps);

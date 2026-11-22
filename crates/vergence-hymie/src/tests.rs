@@ -67,7 +67,12 @@ fn wav(rate: u32, channels: u16, samples: &[i16]) -> Vec<u8> {
     let mut id3 = b"ID3\x03\x00\x00".to_vec();
     let frame = [&b"TIT2"[..], &[0, 0, 0, 6, 0, 0], &b"\x00Hello"[..]].concat();
     let size = frame.len() as u32;
-    id3.extend_from_slice(&[(size >> 21) as u8 & 0x7f, (size >> 14) as u8 & 0x7f, (size >> 7) as u8 & 0x7f, size as u8 & 0x7f]);
+    id3.extend_from_slice(&[
+        (size >> 21) as u8 & 0x7f,
+        (size >> 14) as u8 & 0x7f,
+        (size >> 7) as u8 & 0x7f,
+        size as u8 & 0x7f,
+    ]);
     id3.extend_from_slice(&frame);
     let data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
     let mut w = b"RIFF\0\0\0\0WAVE".to_vec();
@@ -174,7 +179,11 @@ const TONE22: &[u8] = include_bytes!("../fixtures/tone22.mp3");
 const BURST48: &[u8] = include_bytes!("../fixtures/burst48.mp3");
 
 /// The fixtures: bytes, rate, channels, the samples given to lame.
-const MP3S: [(&str, &[u8], u32, u16, u64); 3] = [("tone44", TONE44, 44_100, 2, 66_150), ("tone22", TONE22, 22_050, 1, 22_050), ("burst48", BURST48, 48_000, 2, 48_000)];
+const MP3S: [(&str, &[u8], u32, u16, u64); 3] = [
+    ("tone44", TONE44, 44_100, 2, 66_150),
+    ("tone22", TONE22, 22_050, 1, 22_050),
+    ("burst48", BURST48, 48_000, 2, 48_000),
+];
 
 #[test]
 fn mp3_is_gapless_by_its_lame_tag() {
@@ -203,7 +212,9 @@ fn crossings(s: &[f32], ch: usize, c: usize) -> usize {
 fn mp3_decodes_the_tones_in_place() {
     // (fixture, channel, frequency, seconds); every tone is a sine at 0.5
     // starting at sample 0 (fixtures/README.md).
-    for (data, ch, c, hz, rate) in [(TONE44, 2, 0, 440.0, 44_100.0), (TONE44, 2, 1, 660.0, 44_100.0), (TONE22, 1, 0, 1000.0, 22_050.0)] {
+    for (data, ch, c, hz, rate) in
+        [(TONE44, 2, 0, 440.0, 44_100.0), (TONE44, 2, 1, 660.0, 44_100.0), (TONE22, 1, 0, 1000.0, 22_050.0)]
+    {
         let mut t = open(data.to_vec()).unwrap();
         let s = all(t.as_mut(), 4096);
         let n = s.len() / ch;
@@ -215,7 +226,16 @@ fn mp3_decodes_the_tones_in_place() {
         // Gapless puts every sample where it was: the decoded sound is
         // closest to the sine as it was given, not to it a sample early or
         // late (lame's own noise on these tones is about 0.018 RMS).
-        let rms = |shift: f64| ((0..n).map(|i| (s[i * ch + c] as f64 - 0.5 * (std::f64::consts::TAU * hz * (i as f64 + shift) / rate).sin()).powi(2)).sum::<f64>() / n as f64).sqrt();
+        let rms = |shift: f64| {
+            ((0..n)
+                .map(|i| {
+                    (s[i * ch + c] as f64 - 0.5 * (std::f64::consts::TAU * hz * (i as f64 + shift) / rate).sin())
+                        .powi(2)
+                })
+                .sum::<f64>()
+                / n as f64)
+                .sqrt()
+        };
         let (early, here, late) = (rms(-1.0), rms(0.0), rms(1.0));
         assert!(here < 0.025 && here < early && here < late, "{hz} Hz: RMS from the sine {early} / {here} / {late}");
     }
@@ -254,7 +274,12 @@ fn id3_txxx(values: &[(&str, &str)]) -> Vec<u8> {
     }
     let size = frames.len();
     let mut tag = b"ID3\x03\x00\x00".to_vec();
-    tag.extend_from_slice(&[(size >> 21) as u8 & 0x7f, (size >> 14) as u8 & 0x7f, (size >> 7) as u8 & 0x7f, size as u8 & 0x7f]);
+    tag.extend_from_slice(&[
+        (size >> 21) as u8 & 0x7f,
+        (size >> 14) as u8 & 0x7f,
+        (size >> 7) as u8 & 0x7f,
+        size as u8 & 0x7f,
+    ]);
     tag.extend_from_slice(&frames);
     tag
 }
@@ -414,7 +439,9 @@ fn noise16_source() -> Vec<f32> {
 fn alac_is_lossless_and_as_long_as_what_was_encoded() {
     // Encoded by FFmpeg from tone16.flac and tone24.flac, whose own decode
     // matches the MD5 they keep: the same samples, to the bit, at both depths.
-    for (name, m4a, flac, rate, ch, bits, frames) in [("alac16", ALAC16, TONE16, 44_100, 2, 16, 66_150u64), ("alac24", ALAC24, TONE24, 48_000, 1, 24, 48_000)] {
+    for (name, m4a, flac, rate, ch, bits, frames) in
+        [("alac16", ALAC16, TONE16, 44_100, 2, 16, 66_150u64), ("alac24", ALAC24, TONE24, 48_000, 1, 24, 48_000)]
+    {
         assert_eq!(format_of(m4a), Some(Format::Mp4), "{name}");
         let mut t = open(m4a.to_vec()).unwrap();
         assert_eq!((t.rate(), t.channels(), t.bits(), t.frames()), (rate, ch, bits, frames), "{name}");
@@ -586,8 +613,18 @@ fn damaged_mp4s_are_not_a_panic() {
 /// ilst, every box around it grown to hold it (its moov is after the frames,
 /// so no chunk offset moves).
 fn with_freeform(name: &str, value: &str) -> Vec<u8> {
-    let full = |kind: &[u8; 4], body: &[u8]| mp4_box(kind, &[&[0u8, 0, 0, if kind == b"data" { 1 } else { 0 }][..], body].concat());
-    let atom = mp4_box(b"----", &[full(b"mean", b"com.apple.iTunes"), full(b"name", name.as_bytes()), full(b"data", &[&[0u8; 4][..], value.as_bytes()].concat())].concat());
+    let full = |kind: &[u8; 4], body: &[u8]| {
+        mp4_box(kind, &[&[0u8, 0, 0, if kind == b"data" { 1 } else { 0 }][..], body].concat())
+    };
+    let atom = mp4_box(
+        b"----",
+        &[
+            full(b"mean", b"com.apple.iTunes"),
+            full(b"name", name.as_bytes()),
+            full(b"data", &[&[0u8; 4][..], value.as_bytes()].concat()),
+        ]
+        .concat(),
+    );
     let mut d = ALAC16.to_vec();
     let size = |d: &[u8], at: usize| u32::from_be_bytes(d[at..at + 4].try_into().unwrap()) as usize;
     let find = |d: &[u8], kind: &[u8], from: usize| from + d[from..].windows(4).position(|w| w == kind).unwrap() - 4;

@@ -12,7 +12,10 @@
 
 use smithay::{
     utils::{Logical, Size},
-    wayland::{compositor, shell::xdg::{SurfaceCachedState, XdgToplevelSurfaceData, dialog::ToplevelDialogHint}},
+    wayland::{
+        compositor,
+        shell::xdg::{SurfaceCachedState, XdgToplevelSurfaceData, dialog::ToplevelDialogHint},
+    },
     xwayland::xwm::WmWindowType,
 };
 
@@ -85,7 +88,10 @@ impl Server {
         if let Some(n) = w.native() {
             let (parent, style) = n.style();
             // A portal dialog's parent is another program's window (portal.rs).
-            let parent = (parent != 0).then(|| self.natives.get(&(n.client, parent)).cloned()).flatten().or_else(|| self.portal.adopted.get(w).cloned());
+            let parent = (parent != 0)
+                .then(|| self.natives.get(&(n.client, parent)).cloned())
+                .flatten()
+                .or_else(|| self.portal.adopted.get(w).cloned());
             let Some(s) = style else { return WinStyle { parent, ..Default::default() } };
             use vergence_protocol::window::WinKind;
             let kind = match s.kind {
@@ -95,12 +101,17 @@ impl Server {
                 WinKind::Sidebar => Kind::Sidebar,
                 WinKind::Desktop => Kind::Desktop,
             };
-            let (min, max) = limits((s.min.0.round() as i32, s.min.1.round() as i32), (s.max.0.round() as i32, s.max.1.round() as i32));
+            let (min, max) = limits(
+                (s.min.0.round() as i32, s.min.1.round() as i32),
+                (s.max.0.round() as i32, s.max.1.round() as i32),
+            );
             return WinStyle { kind, modal: s.modal, min, max, parent };
         }
         if let Some(x) = w.x11_surface() {
             let parent_id = x.is_transient_for();
-            let parent = parent_id.and_then(|id| self.space.elements().find(|e| e.x11_surface().is_some_and(|p| p.window_id() == id)).cloned());
+            let parent = parent_id.and_then(|id| {
+                self.space.elements().find(|e| e.x11_surface().is_some_and(|p| p.window_id() == id)).cloned()
+            });
             let kind = x11_kind(x.window_type(), parent.is_some());
             let size = |s: Option<Size<i32, Logical>>| s.map_or((0, 0), |s| (s.w, s.h));
             let (min, max) = limits(size(x.min_size()), size(x.max_size()));
@@ -108,15 +119,27 @@ impl Server {
         }
         if let Some(t) = w.toplevel() {
             let surface = t.wl_surface();
-            let parent = t.parent().and_then(|p| self.space.elements().find(|e| e.toplevel().is_some_and(|pt| *pt.wl_surface() == p)).cloned());
+            let parent = t.parent().and_then(|p| {
+                self.space.elements().find(|e| e.toplevel().is_some_and(|pt| *pt.wl_surface() == p)).cloned()
+            });
             let (cached, hint) = compositor::with_states(surface, |s| {
                 let cached = *s.cached_state.get::<SurfaceCachedState>().current();
-                let hint = s.data_map.get::<XdgToplevelSurfaceData>().map(|d| d.lock().unwrap().dialog_hint).unwrap_or_default();
+                let hint = s
+                    .data_map
+                    .get::<XdgToplevelSurfaceData>()
+                    .map(|d| d.lock().unwrap().dialog_hint)
+                    .unwrap_or_default();
                 (cached, hint)
             });
             let (min, max) = limits((cached.min_size.w, cached.min_size.h), (cached.max_size.w, cached.max_size.h));
             let kind = if parent.is_some() { Kind::Dialog } else { Kind::Normal };
-            return WinStyle { kind, modal: kind == Kind::Dialog && hint == ToplevelDialogHint::Modal, min, max, parent };
+            return WinStyle {
+                kind,
+                modal: kind == Kind::Dialog && hint == ToplevelDialogHint::Modal,
+                min,
+                max,
+                parent,
+            };
         }
         WinStyle::default()
     }
@@ -159,7 +182,14 @@ impl Server {
         let s = self.window_style(w);
         let size = |s: Option<Size<i32, Logical>>| s.map_or("-".to_string(), |s| format!("{}x{}", s.w, s.h));
         let parent = s.parent.as_ref().map(|p| format!(" parent {:?}", self.window_title(p))).unwrap_or_default();
-        format!("kind={:?}{} min={} max={}{}", s.kind, if s.modal { " modal" } else { "" }, size(s.min), size(s.max), parent)
+        format!(
+            "kind={:?}{} min={} max={}{}",
+            s.kind,
+            if s.modal { " modal" } else { "" },
+            size(s.min),
+            size(s.max),
+            parent
+        )
     }
 }
 

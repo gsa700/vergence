@@ -65,8 +65,7 @@ pub struct DetailedTiming {
 impl DetailedTiming {
     /// Vertical refresh in Hz, or None if the totals are zero.
     pub fn refresh_hz(&self) -> Option<f64> {
-        let total = (self.h_active as u64 + self.h_blank as u64)
-            * (self.v_active as u64 + self.v_blank as u64);
+        let total = (self.h_active as u64 + self.h_blank as u64) * (self.v_active as u64 + self.v_blank as u64);
         if total == 0 {
             return None;
         }
@@ -121,11 +120,7 @@ impl Edid {
         let manufacturer: String = [letter(10), letter(5), letter(0)].iter().collect();
 
         let year = 1990 + b[17] as u16;
-        let made = if b[16] == 0xff {
-            MadeIn::ModelYear(year)
-        } else {
-            MadeIn::Week { week: b[16], year }
-        };
+        let made = if b[16] == 0xff { MadeIn::ModelYear(year) } else { MadeIn::Week { week: b[16], year } };
 
         let mut edid = Edid {
             manufacturer,
@@ -166,11 +161,7 @@ impl Edid {
             }
         }
         let (w, h) = self.size_cm;
-        if w > 0 && h > 0 {
-            Some((w as u16 * 10, h as u16 * 10))
-        } else {
-            None
-        }
+        if w > 0 && h > 0 { Some((w as u16 * 10, h as u16 * 10)) } else { None }
     }
 }
 
@@ -192,10 +183,7 @@ fn parse_timing(d: &[u8]) -> DetailedTiming {
 fn descriptor_text(d: &[u8]) -> Option<String> {
     let raw = &d[5..18];
     let end = raw.iter().position(|&c| c == 0x0a).unwrap_or(raw.len());
-    let s: String = raw[..end]
-        .iter()
-        .map(|&c| if (0x20..0x7f).contains(&c) { c as char } else { '?' })
-        .collect();
+    let s: String = raw[..end].iter().map(|&c| if (0x20..0x7f).contains(&c) { c as char } else { '?' }).collect();
     let s = s.trim().to_string();
     if s.is_empty() { None } else { Some(s) }
 }

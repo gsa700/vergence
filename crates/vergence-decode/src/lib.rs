@@ -87,7 +87,13 @@ impl std::fmt::Display for Error {
 fn helper() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
-    [dir.join("vergence-decode"), dir.parent()?.join("libexec/vergence/vergence-decode"), PathBuf::from("/usr/local/libexec/vergence/vergence-decode")].into_iter().find(|p| p.is_file())
+    [
+        dir.join("vergence-decode"),
+        dir.parent()?.join("libexec/vergence/vergence-decode"),
+        PathBuf::from("/usr/local/libexec/vergence/vergence-decode"),
+    ]
+    .into_iter()
+    .find(|p| p.is_file())
 }
 
 /// Decodes a picture file in the helper. `at_least`: shrink it (never
@@ -100,7 +106,12 @@ pub fn decode_file(path: &Path, at_least: Option<(u32, u32)>) -> Result<Picture,
     if let Some((w, h)) = at_least {
         cmd.arg(format!("--at-least={w}x{h}"));
     }
-    let mut child = cmd.stdin(file).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().map_err(Error::Io)?;
+    let mut child = cmd
+        .stdin(file)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(Error::Io)?;
     let pid = child.id();
     // A watchman: kills the helper if it runs past the time.
     let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
@@ -225,7 +236,10 @@ pub fn jpeg_samples(data: &[u8]) -> Result<(u32, u32, u8, Vec<u8>), String> {
     if w.saturating_mul(h).saturating_mul(channels as usize) > 256 << 20 {
         return Err("too large".into());
     }
-    let mut decoder = zune_jpeg::JpegDecoder::new_with_options(zune_core::bytestream::ZCursor::new(data), options().jpeg_set_out_colorspace(out));
+    let mut decoder = zune_jpeg::JpegDecoder::new_with_options(
+        zune_core::bytestream::ZCursor::new(data),
+        options().jpeg_set_out_colorspace(out),
+    );
     let mut samples = decoder.decode().map_err(|e| format!("{e:?}"))?;
     if samples.len() != w * h * channels as usize {
         return Err("short picture".into());
@@ -274,7 +288,8 @@ pub fn decode_bytes(data: &[u8], at_least: Option<(u32, u32)>) -> Result<Picture
     };
     match mime {
         "image/png" | "image/jpeg" => {
-            let reader = image::ImageReader::new(std::io::Cursor::new(data)).with_guessed_format().map_err(|e| e.to_string())?;
+            let reader =
+                image::ImageReader::new(std::io::Cursor::new(data)).with_guessed_format().map_err(|e| e.to_string())?;
             let mut decoder = reader.into_decoder().map_err(|e| e.to_string())?;
             let orientation = decoder.orientation().unwrap_or(image::metadata::Orientation::NoTransforms);
             let mut img = image::DynamicImage::from_decoder(decoder).map_err(|e| e.to_string())?;
@@ -315,7 +330,11 @@ pub fn decode_bytes(data: &[u8], at_least: Option<(u32, u32)>) -> Result<Picture
             let s = at_least.map_or(1.0, |(mw, mh)| (mw as f32 / sw).max(mh as f32 / sh)).clamp(0.01, 64.0);
             let (w, h) = (((sw * s).ceil() as u32).clamp(1, 16384), ((sh * s).ceil() as u32).clamp(1, 16384));
             let mut canvas = resvg::tiny_skia::Pixmap::new(w, h).ok_or("SVG: no canvas")?;
-            resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(w as f32 / sw, h as f32 / sh), &mut canvas.as_mut());
+            resvg::render(
+                &tree,
+                resvg::tiny_skia::Transform::from_scale(w as f32 / sw, h as f32 / sh),
+                &mut canvas.as_mut(),
+            );
             // tiny-skia is premultiplied; answers are straight.
             let mut px = canvas.take();
             for p in px.chunks_exact_mut(4) {
@@ -444,14 +463,20 @@ mod seccomp {
     /// futex, sched_getaffinity, clock_gettime, exit_group, newfstatat,
     /// getrandom, statx.
     #[cfg(target_arch = "x86_64")]
-    pub const ALLOWED: &[u32] = &[0, 1, 3, 5, 8, 9, 10, 11, 12, 14, 15, 19, 20, 24, 25, 28, 60, 202, 204, 228, 231, 262, 318, 332];
+    pub const ALLOWED: &[u32] =
+        &[0, 1, 3, 5, 8, 9, 10, 11, 12, 14, 15, 19, 20, 24, 25, 28, 60, 202, 204, 228, 231, 262, 318, 332];
 
     /// The filter program: the wrong architecture or a call not listed is
     /// killed.
     #[cfg(target_arch = "x86_64")]
     fn program() -> Vec<SockFilter> {
         let f = |code, jt, jf, k| SockFilter { code, jt, jf, k };
-        let mut p = vec![f(LD_W_ABS, 0, 0, OFF_ARCH), f(JEQ_K, 1, 0, ARCH), f(RET_K, 0, 0, RET_KILL_PROCESS), f(LD_W_ABS, 0, 0, OFF_NR)];
+        let mut p = vec![
+            f(LD_W_ABS, 0, 0, OFF_ARCH),
+            f(JEQ_K, 1, 0, ARCH),
+            f(RET_K, 0, 0, RET_KILL_PROCESS),
+            f(LD_W_ABS, 0, 0, OFF_NR),
+        ];
         for &nr in ALLOWED {
             p.push(f(JEQ_K, 0, 1, nr));
             p.push(f(RET_K, 0, 0, RET_ALLOW));
@@ -548,7 +573,9 @@ mod tests {
     fn png(w: u32, h: u32) -> Vec<u8> {
         let img = image::RgbaImage::from_fn(w, h, |x, y| image::Rgba([x as u8, y as u8, 7, 255]));
         let mut out = Vec::new();
-        image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png).unwrap();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+            .unwrap();
         out
     }
 
@@ -582,7 +609,14 @@ mod tests {
 
     #[test]
     fn an_answer_round_trips_and_garbage_is_refused() {
-        let p = Picture { width: 2, height: 1, frames: vec![Frame { delay_ms: 0, rgba: vec![1, 2, 3, 4, 5, 6, 7, 8] }, Frame { delay_ms: 40, rgba: vec![9; 8] }] };
+        let p = Picture {
+            width: 2,
+            height: 1,
+            frames: vec![
+                Frame { delay_ms: 0, rgba: vec![1, 2, 3, 4, 5, 6, 7, 8] },
+                Frame { delay_ms: 40, rgba: vec![9; 8] },
+            ],
+        };
         assert_eq!(parse(&encode(&p)), Some(p.clone()));
         let mut cut = encode(&p);
         cut.pop();
@@ -595,12 +629,22 @@ mod tests {
     /// (it is a bin of this crate: cargo builds it with the tests).
     #[test]
     fn the_helper_decodes_a_file_apart() {
-        let Some(helper) = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.parent()?.join("vergence-decode"))).filter(|p| p.is_file()) else { return };
+        let Some(helper) = std::env::current_exe()
+            .ok()
+            .and_then(|e| Some(e.parent()?.parent()?.join("vergence-decode")))
+            .filter(|p| p.is_file())
+        else {
+            return;
+        };
         let dir = std::env::temp_dir().join(format!("vergence-decode-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("p.png");
         std::fs::write(&file, png(30, 10)).unwrap();
-        let out = std::process::Command::new(&helper).arg("--at-least=6x2").stdin(std::fs::File::open(&file).unwrap()).output().unwrap();
+        let out = std::process::Command::new(&helper)
+            .arg("--at-least=6x2")
+            .stdin(std::fs::File::open(&file).unwrap())
+            .output()
+            .unwrap();
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         let p = parse(&out.stdout).unwrap();
         assert_eq!((p.width, p.height), (6, 2));
@@ -611,7 +655,10 @@ mod tests {
     }
 
     fn helper() -> Option<PathBuf> {
-        std::env::current_exe().ok().and_then(|e| Some(e.parent()?.parent()?.join("vergence-decode"))).filter(|p| p.is_file())
+        std::env::current_exe()
+            .ok()
+            .and_then(|e| Some(e.parent()?.parent()?.join("vergence-decode")))
+            .filter(|p| p.is_file())
     }
 
     /// A 2 x 2 BMP, 32 bits, bottom-up.
@@ -636,7 +683,11 @@ mod tests {
     fn encoded(format: image::ImageFormat) -> Vec<u8> {
         let img = image::RgbaImage::from_fn(16, 8, |x, y| image::Rgba([x as u8 * 9, y as u8 * 20, 7, 255]));
         let mut out = Vec::new();
-        let pic = if format == image::ImageFormat::Jpeg { image::DynamicImage::ImageRgb8(image::DynamicImage::ImageRgba8(img).to_rgb8()) } else { image::DynamicImage::ImageRgba8(img) };
+        let pic = if format == image::ImageFormat::Jpeg {
+            image::DynamicImage::ImageRgb8(image::DynamicImage::ImageRgba8(img).to_rgb8())
+        } else {
+            image::DynamicImage::ImageRgba8(img)
+        };
         pic.write_to(&mut std::io::Cursor::new(&mut out), format).unwrap();
         out
     }
@@ -648,7 +699,8 @@ mod tests {
             let mut enc = GifEncoder::new(&mut out);
             for i in 0..3u8 {
                 let img = image::RgbaImage::from_pixel(4, 4, image::Rgba([i * 80, 0, 0, 255]));
-                enc.encode_frame(image::Frame::from_parts(img, 0, 0, image::Delay::from_numer_denom_ms(100, 1))).unwrap();
+                enc.encode_frame(image::Frame::from_parts(img, 0, 0, image::Delay::from_numer_denom_ms(100, 1)))
+                    .unwrap();
             }
         }
         out

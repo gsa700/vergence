@@ -56,14 +56,20 @@ pub enum Service {
 }
 
 pub enum ToVdm {
-    Hello { version: u8, service: Service },
+    Hello {
+        version: u8,
+        service: Service,
+    },
     Answer(Secret),
     Cancel,
     Presented,
     CannotLock(String),
     /// The login screen: who logs in, and which session (an index into the
     /// list vdm and the greeter both read, the system's own files).
-    Login { user: String, session: u8 },
+    Login {
+        user: String,
+        session: u8,
+    },
     /// A named action and its arguments (elevation): 1 to 8 words of
     /// letters, digits, '.', '_' and '-', 256 bytes at most in all.
     Act(Vec<String>),
@@ -86,14 +92,24 @@ pub fn is_monitor_id(s: &str) -> bool {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FromVdm {
-    Prompt { echo: bool, text: String },
+    Prompt {
+        echo: bool,
+        text: String,
+    },
     Info(String),
     Error(String),
-    Done { ok: bool, wait: u16 },
+    Done {
+        ok: bool,
+        wait: u16,
+    },
     LockNow,
     /// Show the elevation prompt: what is asked, in vdm's words, and who
     /// asks (the program's name, from the kernel's pid).
-    Ask { id: u128, what: String, who: String },
+    Ask {
+        id: u128,
+        what: String,
+        who: String,
+    },
     /// Prompt `id` is over: close it.
     Withdrawn(u128),
     /// The power button was pressed where the server cannot see it as a key
@@ -184,11 +200,14 @@ pub fn send_to_vdm(w: &mut impl Write, m: &ToVdm) -> io::Result<()> {
     match m {
         ToVdm::Hello { version, service } => {
             header(w, kind::HELLO, 2)?;
-            w.write_all(&[*version, match service {
-                Service::Unlock => 1,
-                Service::Login => 2,
-                Service::Elevate => 3,
-            }])?;
+            w.write_all(&[
+                *version,
+                match service {
+                    Service::Unlock => 1,
+                    Service::Login => 2,
+                    Service::Elevate => 3,
+                },
+            ])?;
         }
         ToVdm::Answer(s) => {
             header(w, kind::ANSWER, s.len())?;
@@ -256,7 +275,9 @@ pub fn read_to_vdm(r: &mut impl Read) -> Result<ToVdm, ProtoError> {
         kind::LOGIN if (2..=65).contains(&len) => {
             let b = read_body(r, len)?;
             let user = std::str::from_utf8(&b[1..]).map_err(|_| ProtoError::Bad("user"))?;
-            if !user.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-')) || user.starts_with('-') {
+            if !user.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
+                || user.starts_with('-')
+            {
                 return Err(ProtoError::Bad("user"));
             }
             Ok(ToVdm::Login { user: user.to_string(), session: b[0] })
@@ -265,7 +286,11 @@ pub fn read_to_vdm(r: &mut impl Read) -> Result<ToVdm, ProtoError> {
             let b = read_body(r, len)?;
             let t = std::str::from_utf8(&b).map_err(|_| ProtoError::Bad("act"))?;
             let words: Vec<String> = t.split('\t').map(str::to_string).collect();
-            let ok = |w: &String| !w.is_empty() && !w.starts_with('-') && w.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'));
+            let ok = |w: &String| {
+                !w.is_empty()
+                    && !w.starts_with('-')
+                    && w.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
+            };
             if words.len() > 8 || !words.iter().all(ok) {
                 return Err(ProtoError::Bad("act"));
             }
@@ -340,7 +365,9 @@ pub fn read_from_vdm(r: &mut impl Read) -> Result<FromVdm, ProtoError> {
         (kind::PROMPT, [echo @ (0 | 1), rest @ ..]) => Ok(FromVdm::Prompt { echo: *echo == 1, text: text(rest)? }),
         (kind::INFO, rest) => Ok(FromVdm::Info(text(rest)?)),
         (kind::ERROR, rest) => Ok(FromVdm::Error(text(rest)?)),
-        (kind::DONE, [ok @ (0 | 1), hi, lo]) => Ok(FromVdm::Done { ok: *ok == 1, wait: u16::from_be_bytes([*hi, *lo]) }),
+        (kind::DONE, [ok @ (0 | 1), hi, lo]) => {
+            Ok(FromVdm::Done { ok: *ok == 1, wait: u16::from_be_bytes([*hi, *lo]) })
+        }
         (kind::LOCK_NOW, []) => Ok(FromVdm::LockNow),
         (kind::POWER_KEY, []) => Ok(FromVdm::PowerKey),
         (kind::ASK, b) if b.len() >= 18 => {
@@ -352,7 +379,9 @@ pub fn read_from_vdm(r: &mut impl Read) -> Result<FromVdm, ProtoError> {
             }
             Ok(FromVdm::Ask { id, what: text(&rest[..n])?, who: text(&rest[n..])? })
         }
-        (kind::WITHDRAWN, b) if b.len() == 16 => Ok(FromVdm::Withdrawn(u128::from_be_bytes(b.try_into().map_err(|_| ProtoError::Bad("withdrawn"))?))),
+        (kind::WITHDRAWN, b) if b.len() == 16 => {
+            Ok(FromVdm::Withdrawn(u128::from_be_bytes(b.try_into().map_err(|_| ProtoError::Bad("withdrawn"))?)))
+        }
         _ => Err(ProtoError::Bad("kind")),
     }
 }
@@ -372,7 +401,11 @@ mod tests {
             FromVdm::Done { ok: true, wait: 0 },
             FromVdm::Done { ok: false, wait: 64 },
             FromVdm::LockNow,
-            FromVdm::Ask { id: 0x0123_4567_89ab_cdef_0011_2233_4455_6677, what: "Turn on automatic login for derickson".into(), who: "System Settings".into() },
+            FromVdm::Ask {
+                id: 0x0123_4567_89ab_cdef_0011_2233_4455_6677,
+                what: "Turn on automatic login for derickson".into(),
+                who: "System Settings".into(),
+            },
             FromVdm::Withdrawn(u128::MAX - 7),
             FromVdm::PowerKey,
         ] {
@@ -421,7 +454,9 @@ mod tests {
             assert!(read_to_vdm(&mut &b[..]).is_err(), "{bad}");
         }
         // An action's words: nothing a shell or a path could take.
-        for bad in [vec!["a b".to_string()], vec!["-rf".into()], vec!["x/y".into()], vec![String::new()], vec!["w".into(); 9]] {
+        for bad in
+            [vec!["a b".to_string()], vec!["-rf".into()], vec!["x/y".into()], vec![String::new()], vec!["w".into(); 9]]
+        {
             let mut b = Vec::new();
             send_to_vdm(&mut b, &ToVdm::Act(bad.clone())).unwrap();
             assert!(read_to_vdm(&mut Cursor::new(b)).is_err(), "{bad:?}");
@@ -443,7 +478,9 @@ mod tests {
     #[test]
     fn bad_frames_are_refused() {
         // Length 0, longer than allowed, an unknown kind, a short Done, an answer too long.
-        for bytes in [vec![0, 0, 1], vec![0x10, 0, 1], vec![0, 1, 99], vec![0, 2, kind::DONE, 1], vec![0x07, 0xff, kind::ANSWER]] {
+        for bytes in
+            [vec![0, 0, 1], vec![0x10, 0, 1], vec![0, 1, 99], vec![0, 2, kind::DONE, 1], vec![0x07, 0xff, kind::ANSWER]]
+        {
             assert!(read_from_vdm(&mut Cursor::new(bytes.clone())).is_err());
             assert!(read_to_vdm(&mut Cursor::new(bytes)).is_err());
         }

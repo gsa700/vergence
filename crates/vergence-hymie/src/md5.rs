@@ -1,7 +1,11 @@
 //! MD5 (RFC 1321), copied from vergence-thumbs: only for checking a FLAC
 //! decode against the MD5 its STREAMINFO keeps, never for security.
 
-const S: [u32; 64] = [7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21];
+const S: [u32; 64] = [
+    7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+    4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15,
+    21,
+];
 
 /// The digest of `data`, as 32 lower-case hex digits.
 pub fn hex(data: &[u8]) -> String {
@@ -48,6 +52,9 @@ mod tests {
         assert_eq!(super::hex(b"abc"), "900150983cd24fb0d6963f7d28e17f72");
         assert_eq!(super::hex(b"message digest"), "f96b697d7cb7938d525a2f31aaf161d0");
         assert_eq!(super::hex(b"abcdefghijklmnopqrstuvwxyz"), "c3fcd3d76192e4007dfb496cca67e13b");
-        assert_eq!(super::hex(b"12345678901234567890123456789012345678901234567890123456789012345678901234567890"), "57edf4a22be3c955ac49da2e2107b67a");
+        assert_eq!(
+            super::hex(b"12345678901234567890123456789012345678901234567890123456789012345678901234567890"),
+            "57edf4a22be3c955ac49da2e2107b67a"
+        );
     }
 }

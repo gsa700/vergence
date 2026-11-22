@@ -7,7 +7,8 @@ use crate::{Rect, desktop::Entry};
 /// The launcher's category tabs after "All" (shelf milestone 2, Dave's
 /// choice 2026-11-13: a short fixed list, each shown only when it has an
 /// application), from the freedesktop main categories entries declare.
-pub const TABS: [&str; 9] = ["Internet", "Office", "Graphics", "Sound & Video", "Development", "Games", "Education", "Utilities", "System"];
+pub const TABS: [&str; 9] =
+    ["Internet", "Office", "Graphics", "Sound & Video", "Development", "Games", "Education", "Utilities", "System"];
 
 /// The tab an entry belongs in: the first of its categories that is one of
 /// the main ones, folded into TABS; None for an entry that declares none
@@ -30,7 +31,17 @@ pub fn tab_of(e: &Entry) -> Option<usize> {
 /// The order of Vergence's own applications in the launcher's top row
 /// (Dave, 2026-11-15: "a section at the top that holds the native apps");
 /// any other `vergence-*` application comes after these, by name.
-const OWN_ORDER: [&str; 9] = ["vergence-files", "vergence-edit", "vergence-term", "vergence-settings", "vergence-closeup", "vergence-reader", "vergence-calc", "vergence-hw", "vergence-quit"];
+const OWN_ORDER: [&str; 9] = [
+    "vergence-files",
+    "vergence-edit",
+    "vergence-term",
+    "vergence-settings",
+    "vergence-closeup",
+    "vergence-reader",
+    "vergence-calc",
+    "vergence-hw",
+    "vergence-quit",
+];
 
 /// Vergence's own applications to show in the top row, as places in
 /// `entries`: those whose desktop entry is ours (`vergence-*`), not hidden.
@@ -70,19 +81,20 @@ pub fn search_in(entries: &[Entry], typed: &str, tab: Option<usize>) -> Vec<usiz
             continue;
         }
         let name = e.name.to_lowercase();
-        let rank = if typed.is_empty() || name.split(|c: char| !c.is_alphanumeric()).any(|word| word.starts_with(&typed)) {
-            0
-        } else if name.contains(&typed) {
-            1
-        } else if e.generic_name.to_lowercase().contains(&typed) {
-            2
-        } else if e.keywords.iter().any(|k| k.to_lowercase().contains(&typed)) {
-            3
-        } else if e.comment.to_lowercase().contains(&typed) {
-            4
-        } else {
-            continue;
-        };
+        let rank =
+            if typed.is_empty() || name.split(|c: char| !c.is_alphanumeric()).any(|word| word.starts_with(&typed)) {
+                0
+            } else if name.contains(&typed) {
+                1
+            } else if e.generic_name.to_lowercase().contains(&typed) {
+                2
+            } else if e.keywords.iter().any(|k| k.to_lowercase().contains(&typed)) {
+                3
+            } else if e.comment.to_lowercase().contains(&typed) {
+                4
+            } else {
+                continue;
+            };
         found.push((rank, name, index));
     }
     found.sort();
@@ -128,7 +140,12 @@ impl Grid {
     /// Where cell `index` is; it may be above or below the area.
     pub fn cell(&self, index: usize) -> Rect {
         let (row, column) = ((index / self.columns) as i32, (index % self.columns) as i32);
-        Rect::new(self.area.x + column * self.cell_w, self.area.y + row * self.cell_h - self.scroll, self.cell_w, self.cell_h)
+        Rect::new(
+            self.area.x + column * self.cell_w,
+            self.area.y + row * self.cell_h - self.scroll,
+            self.cell_w,
+            self.cell_h,
+        )
     }
 
     /// The cell at a point of the area, if one of `count` is there.
@@ -177,7 +194,13 @@ pub fn step(selected: usize, count: usize, columns: usize, step: Step) -> usize 
     match step {
         Step::Left => selected.saturating_sub(1),
         Step::Right => (selected + 1).min(count - 1),
-        Step::Up => if selected >= columns { selected - columns } else { selected },
+        Step::Up => {
+            if selected >= columns {
+                selected - columns
+            } else {
+                selected
+            }
+        }
         // Down from the last full row onto a short last row goes to its end.
         Step::Down => {
             if selected + columns < count {
@@ -238,7 +261,10 @@ mod tests {
     fn categories_fold_into_the_short_list_of_tabs() {
         let a = apps();
         let names: Vec<Option<&str>> = a.iter().map(|e| tab_of(e).map(|t| TABS[t])).collect();
-        assert_eq!(names, [Some("Internet"), Some("System"), Some("Sound & Video"), Some("System"), Some("System"), None]);
+        assert_eq!(
+            names,
+            [Some("Internet"), Some("System"), Some("Sound & Video"), Some("System"), Some("System"), None]
+        );
     }
 
     #[test]
@@ -274,7 +300,13 @@ mod tests {
     }
 
     fn entry(name: &str, keywords: &[&str]) -> Entry {
-        Entry { id: name.to_lowercase().replace(' ', "-"), name: name.into(), exec: vec!["x".into()], keywords: keywords.iter().map(|k| k.to_string()).collect(), ..Entry::default() }
+        Entry {
+            id: name.to_lowercase().replace(' ', "-"),
+            name: name.into(),
+            exec: vec!["x".into()],
+            keywords: keywords.iter().map(|k| k.to_string()).collect(),
+            ..Entry::default()
+        }
     }
 
     fn names<'a>(entries: &'a [Entry], typed: &str) -> Vec<&'a str> {
@@ -285,7 +317,15 @@ mod tests {
     fn typing_finds_by_word_start_then_anywhere_then_keywords() {
         let mut hidden = entry("Fire Hidden", &[]);
         hidden.no_display = true;
-        let entries = vec![entry("Thunderbird", &["mail"]), entry("Firefox", &["web", "browser"]), entry("Campfire", &[]), entry("Web Fire Tool", &[]), entry("Files", &["firewire"]), hidden, entry("albumwall", &[])];
+        let entries = vec![
+            entry("Thunderbird", &["mail"]),
+            entry("Firefox", &["web", "browser"]),
+            entry("Campfire", &[]),
+            entry("Web Fire Tool", &[]),
+            entry("Files", &["firewire"]),
+            hidden,
+            entry("albumwall", &[]),
+        ];
         // Nothing typed: all that are shown, by name, whatever their case.
         assert_eq!(names(&entries, ""), ["albumwall", "Campfire", "Files", "Firefox", "Thunderbird", "Web Fire Tool"]);
         // A word's start first, then anywhere in the name, then a keyword.

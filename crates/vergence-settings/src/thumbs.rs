@@ -20,7 +20,9 @@ pub fn grid_image(t: &Thumb, scale: f32) -> vergence_scene::Image {
     let (w, h) = (((GRID_W * scale).round() as u32).max(1), ((GRID_H * scale).round() as u32).max(1));
     match image::RgbaImage::from_raw(t.w, t.h, t.rgba.clone()) {
         Some(img) => {
-            let out = image::DynamicImage::ImageRgba8(img).resize_to_fill(w, h, image::imageops::FilterType::Triangle).to_rgba8();
+            let out = image::DynamicImage::ImageRgba8(img)
+                .resize_to_fill(w, h, image::imageops::FilterType::Triangle)
+                .to_rgba8();
             vergence_scene::Image { width: w, height: h, rgba: out.into_raw() }
         }
         None => vergence_scene::Image { width: t.w, height: t.h, rgba: t.rgba.clone() },
@@ -65,7 +67,16 @@ pub fn get(path: &Path) -> Option<Thumb> {
         let _ = c.parent().map(std::fs::create_dir_all);
         let tmp = c.with_extension("png.new");
         // The format by name: the ".new" name says nothing.
-        if image::save_buffer_with_format(&tmp, &t.rgba, t.w, t.h, image::ExtendedColorType::Rgba8, image::ImageFormat::Png).is_ok() {
+        if image::save_buffer_with_format(
+            &tmp,
+            &t.rgba,
+            t.w,
+            t.h,
+            image::ExtendedColorType::Rgba8,
+            image::ImageFormat::Png,
+        )
+        .is_ok()
+        {
             let _ = std::fs::rename(&tmp, &c);
         }
     }
@@ -85,6 +96,7 @@ fn draw(path: &Path) -> Option<Thumb> {
     };
     let frame = p.frames.into_iter().next()?;
     let img = image::RgbaImage::from_raw(p.width, p.height, frame.rgba)?;
-    let filled = image::DynamicImage::ImageRgba8(img).resize_to_fill(W, H, image::imageops::FilterType::Triangle).to_rgba8();
+    let filled =
+        image::DynamicImage::ImageRgba8(img).resize_to_fill(W, H, image::imageops::FilterType::Triangle).to_rgba8();
     Some(Thumb { w: W, h: H, rgba: filled.into_raw() })
 }

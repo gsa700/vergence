@@ -42,7 +42,10 @@
 
 use std::{
     io::{BufRead, BufReader, Read, Write},
-    os::unix::{fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt}, net::UnixListener},
+    os::unix::{
+        fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
+        net::UnixListener,
+    },
     path::PathBuf,
 };
 
@@ -66,7 +69,10 @@ const IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 /// socket on for a daily session with the control-socket file (Dave, after
 /// Fable's review). Headless tests have no such file.
 fn agent_commands() -> bool {
-    let file = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config"))).map(|c| c.join("vergence/control-socket"));
+    let file = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .map(|c| c.join("vergence/control-socket"));
     enabled() && !file.is_some_and(|f| f.exists())
 }
 
@@ -122,7 +128,10 @@ pub fn listen(state: &mut Server) {
     });
     match res {
         Ok(_) => {
-            tracing::info!("control socket {} (VERGENCE_CONTROL=1: any program running as this user can drive the session)", path.display());
+            tracing::info!(
+                "control socket {} (VERGENCE_CONTROL=1: any program running as this user can drive the session)",
+                path.display()
+            );
             state.control_owned = true;
         }
         Err(e) => tracing::warn!("control: {e}"),
@@ -729,13 +738,23 @@ impl Server {
             // The window's process (Wayland: the client's credentials; native: its bus connection's).
             let pid = match w.native() {
                 Some(n) => self.bus_pid(n.client),
-                None => w.toplevel().and_then(|t| smithay::reexports::wayland_server::Resource::client(t.wl_surface())).and_then(|c| c.get_credentials(&self.display_handle).ok()).map(|c| c.pid as u32),
+                None => w
+                    .toplevel()
+                    .and_then(|t| smithay::reexports::wayland_server::Resource::client(t.wl_surface()))
+                    .and_then(|c| c.get_credentials(&self.display_handle).ok())
+                    .map(|c| c.pid as u32),
             };
             let pid = pid.map(|p| format!(" pid {p}")).unwrap_or_default();
             // A native window's scale and text factor, as told (the display suite).
             let told = w.native().map_or(String::new(), |n| format!(" scale={:.4} text={:.3}", n.scale(), n.text()));
-            let scene = w.native().map(|n| format!(" cursor={:?}", n.cursor())).unwrap_or_default() + &w.native().and_then(|n| n.scene_report()).map_or(String::new(), |s| format!(" [{s}]"));
-            out.push(format!("{i} {kind} {title:?} {class:?} {geo:?} on {on:?} title-bar={} bar-h={}{told}{pid} {}{scene}", self.has_title(w), if self.has_title(w) { self.bar_h(w) } else { 0 }, self.describe_style(w)));
+            let scene = w.native().map(|n| format!(" cursor={:?}", n.cursor())).unwrap_or_default()
+                + &w.native().and_then(|n| n.scene_report()).map_or(String::new(), |s| format!(" [{s}]"));
+            out.push(format!(
+                "{i} {kind} {title:?} {class:?} {geo:?} on {on:?} title-bar={} bar-h={}{told}{pid} {}{scene}",
+                self.has_title(w),
+                if self.has_title(w) { self.bar_h(w) } else { 0 },
+                self.describe_style(w)
+            ));
         }
         out.join("\n")
     }

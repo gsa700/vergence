@@ -18,7 +18,9 @@ fn classic(objects: &[&str]) -> Vec<u8> {
     for o in &offsets {
         out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
     }
-    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes());
+    out.extend_from_slice(
+        format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes(),
+    );
     out
 }
 
@@ -117,7 +119,11 @@ fn an_incremental_update_wins() {
 #[test]
 fn an_xref_stream_and_an_object_stream() {
     // Objects 1-3 in object stream 4; the cross-references in stream 5.
-    let inner = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 200] >>"];
+    let inner = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 200] >>",
+    ];
     let mut body = String::new();
     let mut header = String::new();
     for (i, o) in inner.iter().enumerate() {
@@ -128,7 +134,14 @@ fn an_xref_stream_and_an_object_stream() {
     let objstm = format!("{header}{body}");
     let mut f = b"%PDF-1.5\n".to_vec();
     let off4 = f.len();
-    f.extend_from_slice(format!("4 0 obj\n<< /Type /ObjStm /N 3 /First {} /Length {} >>\nstream\n{objstm}\nendstream\nendobj\n", header.len(), objstm.len()).as_bytes());
+    f.extend_from_slice(
+        format!(
+            "4 0 obj\n<< /Type /ObjStm /N 3 /First {} /Length {} >>\nstream\n{objstm}\nendstream\nendobj\n",
+            header.len(),
+            objstm.len()
+        )
+        .as_bytes(),
+    );
     let off5 = f.len();
     // W [1 2 1]: type, offset or stream number, generation or index.
     let mut rows: Vec<u8> = vec![0, 0, 0, 255];
@@ -137,7 +150,10 @@ fn an_xref_stream_and_an_object_stream() {
     }
     rows.extend_from_slice(&[1, (off4 >> 8) as u8, off4 as u8, 0]);
     rows.extend_from_slice(&[1, (off5 >> 8) as u8, off5 as u8, 0]);
-    f.extend_from_slice(format!("5 0 obj\n<< /Type /XRef /Size 6 /W [1 2 1] /Root 1 0 R /Length {} >>\nstream\n", rows.len()).as_bytes());
+    f.extend_from_slice(
+        format!("5 0 obj\n<< /Type /XRef /Size 6 /W [1 2 1] /Root 1 0 R /Length {} >>\nstream\n", rows.len())
+            .as_bytes(),
+    );
     f.extend_from_slice(&rows);
     f.extend_from_slice(format!("\nendstream\nendobj\nstartxref\n{off5}\n%%EOF\n").as_bytes());
     let doc = Document::open(f.clone()).expect("opens");
@@ -156,7 +172,10 @@ fn an_xref_stream_and_an_object_stream() {
 #[test]
 fn flate_streams_are_decoded() {
     // Python's zlib.compress(b"BT (compressed) Tj ET", 9).
-    let z: [u8; 29] = [0x78, 0xda, 0x73, 0x0a, 0x51, 0xd0, 0x48, 0xce, 0xcf, 0x2d, 0x28, 0x4a, 0x2d, 0x2e, 0x4e, 0x4d, 0xd1, 0x54, 0x08, 0xc9, 0x52, 0x70, 0x0d, 0x01, 0x00, 0x4c, 0x50, 0x06, 0xd4];
+    let z: [u8; 29] = [
+        0x78, 0xda, 0x73, 0x0a, 0x51, 0xd0, 0x48, 0xce, 0xcf, 0x2d, 0x28, 0x4a, 0x2d, 0x2e, 0x4e, 0x4d, 0xd1, 0x54,
+        0x08, 0xc9, 0x52, 0x70, 0x0d, 0x01, 0x00, 0x4c, 0x50, 0x06, 0xd4,
+    ];
     let mut f = b"%PDF-1.4\n".to_vec();
     let o1 = f.len();
     f.extend_from_slice(b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
@@ -232,7 +251,8 @@ fn random_damage_never_panics() {
             }
             _ => {
                 let k = next() as usize % f.len();
-                let junk: Vec<u8> = (0..next() % 32).map(|_| b"<<>>[]()/0 R obj endobj stream"[next() as usize % 30]).collect();
+                let junk: Vec<u8> =
+                    (0..next() % 32).map(|_| b"<<>>[]()/0 R obj endobj stream"[next() as usize % 30]).collect();
                 f.splice(k..k, junk);
             }
         }

@@ -12,10 +12,10 @@
 
 use std::io;
 
-#[cfg(target_os = "freebsd")]
-pub mod oss;
 #[cfg(target_os = "linux")]
 pub mod alsa;
+#[cfg(target_os = "freebsd")]
+pub mod oss;
 #[cfg(target_os = "linux")]
 pub mod pulse;
 
@@ -159,7 +159,9 @@ impl Stream for Paced {
 /// the runtime directory.
 #[cfg(target_os = "linux")]
 pub fn pipewire_running() -> bool {
-    std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).is_some_and(|d| d.join("pipewire-0").exists() || d.join("pulse/native").exists())
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .is_some_and(|d| d.join("pipewire-0").exists() || d.join("pulse/native").exists())
 }
 
 /// An output's name from a codec pin's configuration, as FreeBSD's driver
@@ -205,7 +207,9 @@ pub fn alsa_card_line(line: &str) -> Option<(u32, String)> {
 
 /// The default card and device from an ~/.asoundrc (0, 0 if it names none).
 pub fn asoundrc_default(text: &str) -> (u32, u32) {
-    let get = |key: &str| text.lines().find_map(|l| l.trim().strip_prefix(key).and_then(|v| v.trim().parse().ok())).unwrap_or(0);
+    let get = |key: &str| {
+        text.lines().find_map(|l| l.trim().strip_prefix(key).and_then(|v| v.trim().parse().ok())).unwrap_or(0)
+    };
     (get("defaults.pcm.card"), get("defaults.pcm.device"))
 }
 
@@ -224,7 +228,10 @@ pub fn percent_range(min: i64, max: i64, percent: u8) -> i64 {
 
 /// The pins a device drives, from its location ("nid=33,26").
 pub fn location_pins(location: &str) -> Vec<u32> {
-    location.strip_prefix("nid=").map(|l| l.split(',').filter_map(|n| n.trim().parse().ok()).collect()).unwrap_or_default()
+    location
+        .strip_prefix("nid=")
+        .map(|l| l.split(',').filter_map(|n| n.trim().parse().ok()).collect())
+        .unwrap_or_default()
 }
 
 /// OSS's level: left in the low byte, right in the next, each 0 to 100.
@@ -247,13 +254,32 @@ mod tests {
     #[test]
     fn pins_are_named_as_people_know_them() {
         // kepler's (FreeBSD's snd_hda, Realtek ALC294).
-        assert_eq!(pin_name("0x02211020 as=2 seq=0 device=Headphones conn=Jack ctype=1/8 loc=Front color=Black misc=0").as_deref(), Some("Front headphones"));
-        assert_eq!(pin_name("0x90170110 as=1 seq=0 device=Speaker conn=Fixed ctype=Analog loc=Internal color=Unknown misc=1").as_deref(), Some("Internal speaker"));
-        assert_eq!(pin_name("0x01014010 as=1 seq=0 device=Line-out conn=Jack ctype=1/8 loc=Rear color=Green misc=0").as_deref(), Some("Rear line out"));
-        assert_eq!(pin_name("0x18560010 as=1 seq=0 device=Digital-out conn=Jack ctype=Digital loc=0x18 color=Unknown misc=0").as_deref(), Some("Digital out"));
+        assert_eq!(
+            pin_name("0x02211020 as=2 seq=0 device=Headphones conn=Jack ctype=1/8 loc=Front color=Black misc=0")
+                .as_deref(),
+            Some("Front headphones")
+        );
+        assert_eq!(
+            pin_name("0x90170110 as=1 seq=0 device=Speaker conn=Fixed ctype=Analog loc=Internal color=Unknown misc=1")
+                .as_deref(),
+            Some("Internal speaker")
+        );
+        assert_eq!(
+            pin_name("0x01014010 as=1 seq=0 device=Line-out conn=Jack ctype=1/8 loc=Rear color=Green misc=0")
+                .as_deref(),
+            Some("Rear line out")
+        );
+        assert_eq!(
+            pin_name("0x18560010 as=1 seq=0 device=Digital-out conn=Jack ctype=Digital loc=0x18 color=Unknown misc=0")
+                .as_deref(),
+            Some("Digital out")
+        );
         // Inputs and unconnected pins are no outputs.
         assert_eq!(pin_name("0x02a11030 as=3 seq=0 device=Mic conn=Jack ctype=1/8 loc=Front color=Black misc=0"), None);
-        assert_eq!(pin_name("0x411111f0 as=15 seq=0 device=Speaker conn=None ctype=1/8 loc=Rear color=Black misc=1"), None);
+        assert_eq!(
+            pin_name("0x411111f0 as=15 seq=0 device=Speaker conn=None ctype=1/8 loc=Rear color=Black misc=1"),
+            None
+        );
     }
 
     #[test]
@@ -277,9 +303,15 @@ mod tests {
 
     #[test]
     fn alsa_s_words_are_read() {
-        assert_eq!(alsa_card_line(" 0 [PCH            ]: HDA-Intel - HDA Intel PCH"), Some((0, "HDA Intel PCH".into())));
+        assert_eq!(
+            alsa_card_line(" 0 [PCH            ]: HDA-Intel - HDA Intel PCH"),
+            Some((0, "HDA Intel PCH".into()))
+        );
         assert_eq!(alsa_card_line("                      HDA Intel PCH at 0xb1230000 irq 142"), None);
-        assert_eq!(asoundrc_default("# ours\ndefaults.pcm.card 1\ndefaults.pcm.device 3\ndefaults.ctl.card 1\n"), (1, 3));
+        assert_eq!(
+            asoundrc_default("# ours\ndefaults.pcm.card 1\ndefaults.pcm.device 3\ndefaults.ctl.card 1\n"),
+            (1, 3)
+        );
         assert_eq!(asoundrc_default(""), (0, 0));
         // Hubble's Master: 0 to 87.
         assert_eq!((range_percent(0, 87, 87), range_percent(0, 87, 0), range_percent(0, 87, 44)), (100, 0, 51));

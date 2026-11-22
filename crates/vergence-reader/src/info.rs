@@ -29,11 +29,20 @@ fn bytes(n: u64) -> String {
 /// when it is a common one.
 pub fn page_size(w: f32, h: f32) -> String {
     let (mm_w, mm_h) = (w * 25.4 / 72.0, h * 25.4 / 72.0);
-    let named = [("A4", 210.0, 297.0), ("A5", 148.0, 210.0), ("A3", 297.0, 420.0), ("Letter", 215.9, 279.4), ("Legal", 215.9, 355.6), ("Tabloid", 279.4, 431.8)]
-        .iter()
-        .find(|(_, a, b)| ((mm_w - a).abs() < 2.0 && (mm_h - b).abs() < 2.0) || ((mm_w - b).abs() < 2.0 && (mm_h - a).abs() < 2.0))
-        .map(|(n, ..)| format!("{n}, "))
-        .unwrap_or_default();
+    let named = [
+        ("A4", 210.0, 297.0),
+        ("A5", 148.0, 210.0),
+        ("A3", 297.0, 420.0),
+        ("Letter", 215.9, 279.4),
+        ("Legal", 215.9, 355.6),
+        ("Tabloid", 279.4, 431.8),
+    ]
+    .iter()
+    .find(|(_, a, b)| {
+        ((mm_w - a).abs() < 2.0 && (mm_h - b).abs() < 2.0) || ((mm_w - b).abs() < 2.0 && (mm_h - a).abs() < 2.0)
+    })
+    .map(|(n, ..)| format!("{n}, "))
+    .unwrap_or_default();
     format!("{named}{:.0} × {:.0} mm ({:.2} × {:.2} in)", mm_w, mm_h, w / 72.0, h / 72.0)
 }
 
@@ -52,7 +61,10 @@ fn label_of(key: &str) -> &str {
 impl Info {
     pub fn new(path: &Path, pages: &[(f32, f32)], meta: &[(String, String)], theme: Theme) -> Info {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        let mut rows = vec![("File".to_string(), name.clone()), ("Folder".to_string(), path.parent().map(Path::to_path_buf).unwrap_or_default().display().to_string())];
+        let mut rows = vec![
+            ("File".to_string(), name.clone()),
+            ("Folder".to_string(), path.parent().map(Path::to_path_buf).unwrap_or_default().display().to_string()),
+        ];
         if let Ok(m) = std::fs::metadata(path) {
             rows.push(("Size".into(), bytes(m.len())));
         }
@@ -85,15 +97,32 @@ impl Program for Info {
         let lines: Vec<Element<()>> = self
             .rows
             .iter()
-            .map(|(k, v)| row(vec![label(k.clone()).size(12.0).dim().align(Align::End).width(Length::Fixed(96.0)), label(v.clone()).size(12.0).wrap().width(Length::FILL)]).spacing(12.0).width(Length::FILL))
+            .map(|(k, v)| {
+                row(vec![
+                    label(k.clone()).size(12.0).dim().align(Align::End).width(Length::Fixed(96.0)),
+                    label(v.clone()).size(12.0).wrap().width(Length::FILL),
+                ])
+                .spacing(12.0)
+                .width(Length::FILL)
+            })
             .collect();
-        panel(scroll(column(lines).spacing(7.0).width(Length::FILL))).padding(Padding { top: t.top + 14.0, bottom: 16.0, left: 18.0, right: 18.0 }).width(Length::FILL).height(Length::FILL)
+        panel(scroll(column(lines).spacing(7.0).width(Length::FILL)))
+            .padding(Padding { top: t.top + 14.0, bottom: 16.0, left: 18.0, right: 18.0 })
+            .width(Length::FILL)
+            .height(Length::FILL)
     }
 
     fn update(&mut self, _: (), _window: &mut Window) {}
 
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: false, min: (440.0, 380.0), max: (0.0, 0.0), alone: false, frosted: false }
+        vergence_ui::Style {
+            kind: vergence_ui::WinKind::Dialog,
+            modal: false,
+            min: (440.0, 380.0),
+            max: (0.0, 0.0),
+            alone: false,
+            frosted: false,
+        }
     }
 }
 
@@ -104,7 +133,11 @@ mod tests {
     #[test]
     fn paper_sizes_by_name() {
         assert!(page_size(595.0, 842.0).starts_with("A4, 210 × 297 mm"), "{}", page_size(595.0, 842.0));
-        assert!(page_size(612.0, 792.0).starts_with("Letter, 216 × 279 mm (8.50 × 11.00 in)"), "{}", page_size(612.0, 792.0));
+        assert!(
+            page_size(612.0, 792.0).starts_with("Letter, 216 × 279 mm (8.50 × 11.00 in)"),
+            "{}",
+            page_size(612.0, 792.0)
+        );
         assert!(page_size(792.0, 612.0).starts_with("Letter"), "turned the other way, still Letter");
         assert!(page_size(300.0, 300.0).starts_with("106 × 106 mm"));
         assert_eq!(bytes(1536), "2 KB");

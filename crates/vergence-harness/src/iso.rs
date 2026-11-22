@@ -54,7 +54,12 @@ fn field(s: &str, n: usize) -> Vec<u8> {
 
 pub fn image(label: &str) -> Vec<u8> {
     let mut img = vec![0u8; SECTORS * SECTOR];
-    let label: String = label.chars().map(|c| c.to_ascii_uppercase()).filter(|c| c.is_ascii_alphanumeric() || *c == '_').take(32).collect();
+    let label: String = label
+        .chars()
+        .map(|c| c.to_ascii_uppercase())
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .take(32)
+        .collect();
     // The path table: the root alone (name 0, parent 1), eight bytes and a pad.
     let table = |extent: u32, le: bool| -> Vec<u8> {
         let mut t = vec![1u8, 0];

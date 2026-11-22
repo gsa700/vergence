@@ -96,21 +96,54 @@ pub fn parse_proc_stat(text: &str) -> Vec<Ticks> {
 
 /// Linux /proc/cpuinfo: the first "model name".
 pub fn parse_cpu_model(text: &str) -> String {
-    text.lines().find_map(|l| l.strip_prefix("model name").and_then(|r| r.split_once(':')).map(|(_, v)| v.trim().to_string())).unwrap_or_default()
+    text.lines()
+        .find_map(|l| l.strip_prefix("model name").and_then(|r| r.split_once(':')).map(|(_, v)| v.trim().to_string()))
+        .unwrap_or_default()
 }
 
 /// Linux /proc/meminfo.
 pub fn parse_meminfo(text: &str) -> Memory {
     let kb = |key: &str| {
-        text.lines().find_map(|l| l.strip_prefix(key).and_then(|r| r.strip_prefix(':')).and_then(|r| r.split_whitespace().next()).and_then(|n| n.parse::<u64>().ok())).unwrap_or(0) * 1024
+        text.lines()
+            .find_map(|l| {
+                l.strip_prefix(key)
+                    .and_then(|r| r.strip_prefix(':'))
+                    .and_then(|r| r.split_whitespace().next())
+                    .and_then(|n| n.parse::<u64>().ok())
+            })
+            .unwrap_or(0)
+            * 1024
     };
-    Memory { total: kb("MemTotal"), available: kb("MemAvailable"), cached: kb("Cached"), swap_total: kb("SwapTotal"), swap_free: kb("SwapFree") }
+    Memory {
+        total: kb("MemTotal"),
+        available: kb("MemAvailable"),
+        cached: kb("Cached"),
+        swap_total: kb("SwapTotal"),
+        swap_free: kb("SwapFree"),
+    }
 }
 
 /// File systems that are a place on a disk (not the kernel's own).
 fn real_fs(source: &str, mount: &str) -> bool {
-    const SKIP: [&str; 12] = ["tmpfs", "devtmpfs", "devfs", "fdescfs", "procfs", "linprocfs", "linsysfs", "overlay", "efivarfs", "run", "none", "udev"];
-    !SKIP.contains(&source) && !mount.starts_with("/proc") && !mount.starts_with("/sys") && !mount.starts_with("/dev") && !mount.starts_with("/run")
+    const SKIP: [&str; 12] = [
+        "tmpfs",
+        "devtmpfs",
+        "devfs",
+        "fdescfs",
+        "procfs",
+        "linprocfs",
+        "linsysfs",
+        "overlay",
+        "efivarfs",
+        "run",
+        "none",
+        "udev",
+    ];
+    !SKIP.contains(&source)
+        && !mount.starts_with("/proc")
+        && !mount.starts_with("/sys")
+        && !mount.starts_with("/dev")
+        && !mount.starts_with("/run")
 }
 
 /// `df -kP`: Filesystem, 1024-blocks, Used, Available, Capacity, Mounted on.
@@ -144,9 +177,17 @@ pub fn parse_diskstats(text: &str) -> Vec<DiskIo> {
         .filter_map(|l| {
             let f: Vec<&str> = l.split_whitespace().collect();
             let name = *f.get(2)?;
-            let skip = name.starts_with("loop") || name.starts_with("ram") || name.starts_with("zram") || name.starts_with("dm-") || name.starts_with("sr");
+            let skip = name.starts_with("loop")
+                || name.starts_with("ram")
+                || name.starts_with("zram")
+                || name.starts_with("dm-")
+                || name.starts_with("sr");
             // A partition: sda1, nvme0n1p1, mmcblk0p1.
-            let partition = (name.starts_with("sd") || name.starts_with("vd") || name.starts_with("hd")) && name.ends_with(|c: char| c.is_ascii_digit()) || name.contains('p') && (name.starts_with("nvme") || name.starts_with("mmcblk")) && name.rsplit('p').next().is_some_and(|t| t.chars().all(|c| c.is_ascii_digit()));
+            let partition = (name.starts_with("sd") || name.starts_with("vd") || name.starts_with("hd"))
+                && name.ends_with(|c: char| c.is_ascii_digit())
+                || name.contains('p')
+                    && (name.starts_with("nvme") || name.starts_with("mmcblk"))
+                    && name.rsplit('p').next().is_some_and(|t| t.chars().all(|c| c.is_ascii_digit()));
             if skip || partition {
                 return None;
             }
@@ -187,7 +228,14 @@ pub fn file_systems() -> Vec<FileSystem> {
 
 /// The machine's name and its system ("Linux 6.18.63", "FreeBSD 15.1-RELEASE-p6").
 pub fn system() -> (String, String) {
-    let out = |args: &[&str]| std::process::Command::new("uname").args(args).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+    let out = |args: &[&str]| {
+        std::process::Command::new("uname")
+            .args(args)
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default()
+    };
     (out(&["-n"]), out(&["-sr"]))
 }
 
@@ -197,7 +245,11 @@ mod os {
 
     pub fn cpu() -> Cpu {
         let ticks = parse_proc_stat(&read("/proc/stat"));
-        let freqs: Vec<u32> = (0..ticks.len()).filter_map(|i| read(format!("/sys/devices/system/cpu/cpu{i}/cpufreq/scaling_cur_freq")).trim().parse::<u32>().ok()).collect();
+        let freqs: Vec<u32> = (0..ticks.len())
+            .filter_map(|i| {
+                read(format!("/sys/devices/system/cpu/cpu{i}/cpufreq/scaling_cur_freq")).trim().parse::<u32>().ok()
+            })
+            .collect();
         let mhz = (!freqs.is_empty()).then(|| freqs.iter().sum::<u32>() / freqs.len() as u32 / 1000);
         Cpu { model: parse_cpu_model(&read("/proc/cpuinfo")), ticks, mhz }
     }
@@ -235,7 +287,13 @@ mod os {
     use std::ffi::CString;
 
     unsafe extern "C" {
-        fn sysctlbyname(name: *const std::ffi::c_char, oldp: *mut std::ffi::c_void, oldlenp: *mut usize, newp: *const std::ffi::c_void, newlen: usize) -> std::ffi::c_int;
+        fn sysctlbyname(
+            name: *const std::ffi::c_char,
+            oldp: *mut std::ffi::c_void,
+            oldlenp: *mut usize,
+            newp: *const std::ffi::c_void,
+            newlen: usize,
+        ) -> std::ffi::c_int;
     }
 
     /// A sysctl's bytes.
@@ -283,9 +341,17 @@ mod os {
     pub fn memory() -> Memory {
         let page = sysctl_int("hw.pagesize").unwrap_or(4096) as u64;
         let pages = |n: &str| sysctl_int(n).unwrap_or(0) as u64 * page;
-        let free = pages("vm.stats.vm.v_free_count") + pages("vm.stats.vm.v_inactive_count") + pages("vm.stats.vm.v_laundry_count");
+        let free = pages("vm.stats.vm.v_free_count")
+            + pages("vm.stats.vm.v_inactive_count")
+            + pages("vm.stats.vm.v_laundry_count");
         let total = sysctl_int("hw.physmem").unwrap_or(0) as u64;
-        Memory { total, available: free.min(total), cached: pages("vm.stats.vm.v_inactive_count"), swap_total: 0, swap_free: 0 }
+        Memory {
+            total,
+            available: free.min(total),
+            cached: pages("vm.stats.vm.v_inactive_count"),
+            swap_total: 0,
+            swap_free: 0,
+        }
     }
 
     pub fn disk_io() -> Vec<DiskIo> {
@@ -335,7 +401,11 @@ pub fn euid_of(pid: u32) -> Option<u32> {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let out = std::process::Command::new("ps").args(["-o", "uid=", "-p", &pid.to_string()]).stderr(std::process::Stdio::null()).output().ok()?;
+        let out = std::process::Command::new("ps")
+            .args(["-o", "uid=", "-p", &pid.to_string()])
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()?;
         String::from_utf8_lossy(&out.stdout).trim().parse().ok()
     }
 }
@@ -357,16 +427,23 @@ mod tests {
 
     #[test]
     fn processors_and_their_load() {
-        let a = parse_proc_stat("cpu  10 0 10 80 0 0 0 0 0 0\ncpu0 5 0 5 40 0 0 0 0 0 0\ncpu1 5 0 5 40 0 0 0 0\nintr 1 2 3\n");
+        let a = parse_proc_stat(
+            "cpu  10 0 10 80 0 0 0 0 0 0\ncpu0 5 0 5 40 0 0 0 0 0 0\ncpu1 5 0 5 40 0 0 0 0\nintr 1 2 3\n",
+        );
         assert_eq!(a, vec![Ticks { busy: 10, total: 50 }, Ticks { busy: 10, total: 50 }]);
         let b = parse_proc_stat("cpu0 15 0 5 40 0 0 0 0 0 0\ncpu1 5 0 5 50 0 0 0 0\n");
         assert_eq!(load(&a, &b), vec![1.0, 0.0]);
-        assert_eq!(parse_cpu_model("processor\t: 0\nmodel name\t: Intel(R) Core(TM) i5-10300H CPU @ 2.50GHz\n"), "Intel(R) Core(TM) i5-10300H CPU @ 2.50GHz");
+        assert_eq!(
+            parse_cpu_model("processor\t: 0\nmodel name\t: Intel(R) Core(TM) i5-10300H CPU @ 2.50GHz\n"),
+            "Intel(R) Core(TM) i5-10300H CPU @ 2.50GHz"
+        );
     }
 
     #[test]
     fn memory_from_meminfo() {
-        let m = parse_meminfo("MemTotal:       16000000 kB\nMemFree:  1000 kB\nMemAvailable:   12000000 kB\nCached:  3000000 kB\nSwapTotal: 2000000 kB\nSwapFree: 1500000 kB\n");
+        let m = parse_meminfo(
+            "MemTotal:       16000000 kB\nMemFree:  1000 kB\nMemAvailable:   12000000 kB\nCached:  3000000 kB\nSwapTotal: 2000000 kB\nSwapFree: 1500000 kB\n",
+        );
         assert_eq!(m.total, 16_000_000 * 1024);
         assert_eq!(m.used(), 4_000_000 * 1024);
         assert_eq!(m.swap_free, 1_500_000 * 1024);

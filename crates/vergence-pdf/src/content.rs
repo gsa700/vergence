@@ -96,7 +96,10 @@ fn inline_image(lx: &mut Lexer) -> Option<(Dict, Vec<u8>)> {
                 if i + 2 > data.len() {
                     break data.len();
                 }
-                if &data[i..i + 2] == b"EI" && (i == start || is_white(data[i - 1])) && data.get(i + 2).is_none_or(|b| is_white(*b)) {
+                if &data[i..i + 2] == b"EI"
+                    && (i == start || is_white(data[i - 1]))
+                    && data.get(i + 2).is_none_or(|b| is_white(*b))
+                {
                     break if i > start { i - 1 } else { i };
                 }
                 i += 1;

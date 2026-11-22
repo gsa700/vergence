@@ -52,7 +52,8 @@ impl Demo {
 
     fn shape_at(&self, x: f32, y: f32) -> Option<usize> {
         let i = ((x - 24.0) / 96.0).floor();
-        ((150.0..198.0).contains(&y) && i >= 0.0 && (i as usize) < self.shapes() && x - 24.0 - i * 96.0 <= 80.0).then_some(i as usize)
+        ((150.0..198.0).contains(&y) && i >= 0.0 && (i as usize) < self.shapes() && x - 24.0 - i * 96.0 <= 80.0)
+            .then_some(i as usize)
     }
 
     fn in_corner(&self, x: f32, y: f32) -> bool {
@@ -96,14 +97,38 @@ impl App for Demo {
             text(&mut s, fonts, face, 26.0, INK, Point::new(24.0, 48.0), "A window of our own");
         }
         if let Some(face) = sans {
-            text(&mut s, fonts, face, 14.0, SOFT, Point::new(24.0, 74.0), "Scene, text, renderer and Wayland code written by the project.");
+            text(
+                &mut s,
+                fonts,
+                face,
+                14.0,
+                SOFT,
+                Point::new(24.0, 74.0),
+                "Scene, text, renderer and Wayland code written by the project.",
+            );
         }
         if let Some(face) = mono {
             let pixels = ((w * f.scale).ceil(), (h * f.scale).ceil());
-            let line = format!("{w} x {h} units  scale {:.4}  {} x {} pixels  frame {}", f.scale, pixels.0, pixels.1, f.number);
+            let line = format!(
+                "{w} x {h} units  scale {:.4}  {} x {} pixels  frame {}",
+                f.scale, pixels.0, pixels.1, f.number
+            );
             text(&mut s, fonts, face, 13.33, AMBER, Point::new(24.0, 104.0), &line);
-            if let Some(avg) = (!self.draw_ms.is_empty()).then(|| self.draw_ms.iter().rev().take(30).sum::<f64>() / self.draw_ms.len().min(30) as f64) {
-                text(&mut s, fonts, face, 13.33, SOFT, Point::new(24.0, 124.0), &format!("drawn in {avg:.1} ms a frame, on the {}", if f.drawn_by.is_empty() { "?" } else { f.drawn_by }));
+            if let Some(avg) = (!self.draw_ms.is_empty())
+                .then(|| self.draw_ms.iter().rev().take(30).sum::<f64>() / self.draw_ms.len().min(30) as f64)
+            {
+                text(
+                    &mut s,
+                    fonts,
+                    face,
+                    13.33,
+                    SOFT,
+                    Point::new(24.0, 124.0),
+                    &format!(
+                        "drawn in {avg:.1} ms a frame, on the {}",
+                        if f.drawn_by.is_empty() { "?" } else { f.drawn_by }
+                    ),
+                );
             }
         }
         // A row of shapes that fills the width, so resizing shows.
@@ -112,7 +137,13 @@ impl App for Demo {
             let x = 24.0 + i as f32 * 96.0;
             let c = if i % 2 == 0 { TEAL } else { AMBER };
             let under = self.pointer.and_then(|(px, py)| self.shape_at(px, py)) == Some(i);
-            let c = if self.picked == Some(i) { INK } else if under { Color::rgb(c.r.saturating_add(40), c.g.saturating_add(40), c.b.saturating_add(40)) } else { c };
+            let c = if self.picked == Some(i) {
+                INK
+            } else if under {
+                Color::rgb(c.r.saturating_add(40), c.g.saturating_add(40), c.b.saturating_add(40))
+            } else {
+                c
+            };
             s.fill_rounded(Rect::new(x, 150.0, 80.0, 48.0), (i * 6) as f32, c);
             s.stroke(Rect::new(x, 212.0, 80.0, 48.0), (i * 6) as f32, 1.5, c);
         }
@@ -127,14 +158,38 @@ impl App for Demo {
             s.line(Point::new(cx - 6.0, cy), Point::new(cx + 6.0, cy), 1.5, INK);
             s.line(Point::new(cx, cy - 6.0), Point::new(cx, cy + 6.0), 1.5, INK);
         }
-        s.fill_rounded(Rect::new(24.0, h - 86.0, w - 48.0, 26.0), 5.0, Color::rgba(255, 255, 255, if self.focused { 28 } else { 12 }));
+        s.fill_rounded(
+            Rect::new(24.0, h - 86.0, w - 48.0, 26.0),
+            5.0,
+            Color::rgba(255, 255, 255, if self.focused { 28 } else { 12 }),
+        );
         if let Some(face) = mono {
-            let shown = if self.typed.is_empty() && !self.focused { "click here and type".to_string() } else { format!("{}{}", self.typed, if self.focused { "\u{2581}" } else { "" }) };
+            let shown = if self.typed.is_empty() && !self.focused {
+                "click here and type".to_string()
+            } else {
+                format!("{}{}", self.typed, if self.focused { "\u{2581}" } else { "" })
+            };
             s.push_clip(Rect::new(24.0, h - 86.0, w - 48.0, 26.0), 0.0);
-            text(&mut s, fonts, face, 13.33, if self.typed.is_empty() && !self.focused { SOFT } else { INK }, Point::new(32.0, h - 68.0), &shown);
+            text(
+                &mut s,
+                fonts,
+                face,
+                13.33,
+                if self.typed.is_empty() && !self.focused { SOFT } else { INK },
+                Point::new(32.0, h - 68.0),
+                &shown,
+            );
             s.pop_clip();
             let at = self.pointer.map_or("pointer outside".to_string(), |(x, y)| format!("pointer {x:.1}, {y:.1}"));
-            text(&mut s, fonts, face, 11.0, SOFT, Point::new(24.0, h - 40.0), &format!("{at}   inputs {}", self.inputs));
+            text(
+                &mut s,
+                fonts,
+                face,
+                11.0,
+                SOFT,
+                Point::new(24.0, h - 40.0),
+                &format!("{at}   inputs {}", self.inputs),
+            );
         }
         // The corner that resizes.
         for i in 0..3 {
@@ -194,7 +249,9 @@ impl App for Demo {
             }
             Input::Scroll { dy, .. } => self.grid = (self.grid + dy.signum() * 2.0).clamp(6.0, 60.0),
             Input::Key { sym: s, text, pressed: true, composing: false, modifiers, .. } => {
-                let ctrl = |c: char| modifiers.ctrl && text.is_none() && (*s == c as u32 || *s == c.to_ascii_uppercase() as u32);
+                let ctrl = |c: char| {
+                    modifiers.ctrl && text.is_none() && (*s == c as u32 || *s == c.to_ascii_uppercase() as u32)
+                };
                 if ctrl('q') {
                     window.close();
                 } else if ctrl('c') {
@@ -221,7 +278,15 @@ impl App for Demo {
             Some(n) if f.number + 1 >= n => {
                 let (w, h, scale) = self.last.unwrap_or_default();
                 let mean = self.draw_ms.iter().sum::<f64>() / self.draw_ms.len() as f64;
-                println!("{} frames in {:.2} s: {:.1} a second; {w} x {h} units at scale {scale:.4}; drawing {mean:.1} ms a frame (first {:.1}); {} frames on the GPU, {} on the CPU", f.number + 1, f.time, (f.number + 1) as f64 / f.time.max(0.001), self.draw_ms[0], self.drawn_by[0], self.drawn_by[1]);
+                println!(
+                    "{} frames in {:.2} s: {:.1} a second; {w} x {h} units at scale {scale:.4}; drawing {mean:.1} ms a frame (first {:.1}); {} frames on the GPU, {} on the CPU",
+                    f.number + 1,
+                    f.time,
+                    (f.number + 1) as f64 / f.time.max(0.001),
+                    self.draw_ms[0],
+                    self.drawn_by[0],
+                    self.drawn_by[1]
+                );
                 false
             }
             _ => true,
@@ -232,7 +297,8 @@ impl App for Demo {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let flag = |name: &str| args.iter().any(|a| a == name);
-    let value = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).and_then(|v| v.parse().ok());
+    let value =
+        |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).and_then(|v| v.parse().ok());
     let mut demo = Demo {
         animate: flag("--animate"),
         own_frame: flag("--own-frame"),

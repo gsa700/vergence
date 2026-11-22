@@ -83,11 +83,21 @@ impl Reader {
         let Input::Touch { id, phase, x, y } = *input else { return None };
         match (phase, self.first.as_mut()) {
             (Phase::Down, None) => {
-                self.first = Some(First { id, down: (x, y), last: (x, y), dragging: false, at: now, moved: now, speed: (0.0, 0.0), long: false });
+                self.first = Some(First {
+                    id,
+                    down: (x, y),
+                    last: (x, y),
+                    dragging: false,
+                    at: now,
+                    moved: now,
+                    speed: (0.0, 0.0),
+                    long: false,
+                });
                 None
             }
             (Phase::Moved, Some(first)) if first.id == id => {
-                if first.long || !first.dragging && (x - first.down.0).abs() <= SLOP && (y - first.down.1).abs() <= SLOP {
+                if first.long || !first.dragging && (x - first.down.0).abs() <= SLOP && (y - first.down.1).abs() <= SLOP
+                {
                     return None;
                 }
                 let (dx, dy) = (x - first.last.0, y - first.last.1);
@@ -103,7 +113,11 @@ impl Reader {
                 let first = *first;
                 self.first = None;
                 // A finger that stopped before it lifted throws nothing.
-                let (vx, vy) = if now.saturating_duration_since(first.moved) < Duration::from_millis(80) { first.speed } else { (0.0, 0.0) };
+                let (vx, vy) = if now.saturating_duration_since(first.moved) < Duration::from_millis(80) {
+                    first.speed
+                } else {
+                    (0.0, 0.0)
+                };
                 match (first.long, first.dragging) {
                     (true, _) => None,
                     (_, true) => Some(Gesture::DragEnd { vx, vy }),
@@ -123,7 +137,10 @@ impl Reader {
     /// A long press, if the first finger has been held still since it came
     /// down for [`LONG_PRESS`] by `now`. Told once.
     pub fn long_press(&mut self, now: Instant) -> Option<Gesture> {
-        let first = self.first.as_mut().filter(|f| !f.dragging && !f.long && now.saturating_duration_since(f.at) >= LONG_PRESS)?;
+        let first = self
+            .first
+            .as_mut()
+            .filter(|f| !f.dragging && !f.long && now.saturating_duration_since(f.at) >= LONG_PRESS)?;
         first.long = true;
         Some(Gesture::LongPress { x: first.down.0, y: first.down.1 })
     }
@@ -155,12 +172,24 @@ mod tests {
         r.read(&touch(0, Phase::Down, 100.0, 100.0));
         assert_eq!(r.read(&touch(0, Phase::Moved, 100.0, 108.0)), None);
         // Past the slop: the whole way from where it came down, then step by step.
-        assert_eq!(r.read(&touch(0, Phase::Moved, 100.0, 120.0)), Some(Gesture::Drag { x: 100.0, y: 120.0, dx: 0.0, dy: 20.0, from: (100.0, 100.0) }));
-        assert_eq!(r.read(&touch(0, Phase::Moved, 97.0, 150.0)), Some(Gesture::Drag { x: 97.0, y: 150.0, dx: -3.0, dy: 30.0, from: (100.0, 100.0) }));
+        assert_eq!(
+            r.read(&touch(0, Phase::Moved, 100.0, 120.0)),
+            Some(Gesture::Drag { x: 100.0, y: 120.0, dx: 0.0, dy: 20.0, from: (100.0, 100.0) })
+        );
+        assert_eq!(
+            r.read(&touch(0, Phase::Moved, 97.0, 150.0)),
+            Some(Gesture::Drag { x: 97.0, y: 150.0, dx: -3.0, dy: 30.0, from: (100.0, 100.0) })
+        );
         // Back near the start it is still a drag, not a tap.
-        assert_eq!(r.read(&touch(0, Phase::Moved, 100.0, 101.0)), Some(Gesture::Drag { x: 100.0, y: 101.0, dx: 3.0, dy: -49.0, from: (100.0, 100.0) }));
+        assert_eq!(
+            r.read(&touch(0, Phase::Moved, 100.0, 101.0)),
+            Some(Gesture::Drag { x: 100.0, y: 101.0, dx: 3.0, dy: -49.0, from: (100.0, 100.0) })
+        );
         // Lifted a while after it stopped: no speed to throw with.
-        assert_eq!(r.read_at(&touch(0, Phase::Up, 100.0, 101.0), Instant::now() + Duration::from_secs(1)), Some(Gesture::DragEnd { vx: 0.0, vy: 0.0 }));
+        assert_eq!(
+            r.read_at(&touch(0, Phase::Up, 100.0, 101.0), Instant::now() + Duration::from_secs(1)),
+            Some(Gesture::DragEnd { vx: 0.0, vy: 0.0 })
+        );
     }
 
     #[test]
@@ -210,7 +239,9 @@ mod tests {
             r.read_at(&touch(0, Phase::Moved, 0.0, 300.0 - 20.0 * k as f32), ms(10 * k));
         }
         // 20 units every 10 ms, upwards: about -2000 a second.
-        let Some(Gesture::DragEnd { vx, vy }) = r.read_at(&touch(0, Phase::Up, 0.0, 200.0), ms(60)) else { panic!("no end") };
+        let Some(Gesture::DragEnd { vx, vy }) = r.read_at(&touch(0, Phase::Up, 0.0, 200.0), ms(60)) else {
+            panic!("no end")
+        };
         assert!(vx == 0.0 && (vy + 2000.0).abs() < 100.0, "{vy}");
         // Stopped, then lifted: no speed.
         r.read_at(&touch(0, Phase::Down, 0.0, 300.0), t0);

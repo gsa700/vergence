@@ -193,7 +193,14 @@ pub(crate) struct Keyboard {
 
 impl Default for Keyboard {
     fn default() -> Keyboard {
-        Keyboard { focus: None, super_alone: false, used: Vec::new(), switching: None, window_keys: true, app_switch: true }
+        Keyboard {
+            focus: None,
+            super_alone: false,
+            used: Vec::new(),
+            switching: None,
+            window_keys: true,
+            app_switch: true,
+        }
     }
 }
 
@@ -226,7 +233,12 @@ impl Seat {
                 _ => KeyOut::Locked,
             };
         }
-        if mods.logo && mods.alt && !mods.ctrl && matches!(key, Key::Equal | Key::Minus | Key::Eight | Key::L) && self.keyboard.switching.is_none() {
+        if mods.logo
+            && mods.alt
+            && !mods.ctrl
+            && matches!(key, Key::Equal | Key::Minus | Key::Eight | Key::L)
+            && self.keyboard.switching.is_none()
+        {
             self.keyboard.super_alone = false;
             if !pressed {
                 return KeyOut::Swallow;
@@ -239,7 +251,12 @@ impl Seat {
             });
         }
         // Screenshots, Super+Shift+3/4/5 (Ctrl: to the clipboard), as the Mac's.
-        if mods.logo && mods.shift && !mods.alt && matches!(key, Key::Three | Key::Four | Key::Five) && self.keyboard.switching.is_none() {
+        if mods.logo
+            && mods.shift
+            && !mods.alt
+            && matches!(key, Key::Three | Key::Four | Key::Five)
+            && self.keyboard.switching.is_none()
+        {
             self.keyboard.super_alone = false;
             if !pressed {
                 return KeyOut::Swallow;
@@ -254,7 +271,12 @@ impl Seat {
         if self.menu == Some(Menu::Capture) {
             return if pressed && !is_super { KeyOut::CaptureKey } else { KeyOut::Swallow };
         }
-        if pressed && mods.logo && !mods.alt && !mods.shift && ((key == Key::L && !mods.ctrl) || (key == Key::Q && mods.ctrl)) {
+        if pressed
+            && mods.logo
+            && !mods.alt
+            && !mods.shift
+            && ((key == Key::L && !mods.ctrl) || (key == Key::Q && mods.ctrl))
+        {
             self.keyboard.super_alone = false;
             return KeyOut::Lock;
         }
@@ -423,7 +445,11 @@ mod tests {
         assert_eq!(seat.key(Key::Minus, true, sa), KeyOut::Zoom(ZoomKey::Out));
         assert_eq!(seat.key(Key::L, true, sa), KeyOut::Zoom(ZoomKey::Lens), "Super+Alt+L is the lens, not the lock");
         assert_eq!(seat.key(Key::L, true, Mods { logo: true, ..none() }), KeyOut::Lock, "Super+L still locks");
-        assert_eq!(seat.key(Key::Equal, true, Mods { alt: true, ..none() }), KeyOut::Forward(Some(W1)), "Alt+= is the window's");
+        assert_eq!(
+            seat.key(Key::Equal, true, Mods { alt: true, ..none() }),
+            KeyOut::Forward(Some(W1)),
+            "Alt+= is the window's"
+        );
         seat.menu_opened(Menu::Popup);
         assert_eq!(seat.key(Key::Equal, true, sa), KeyOut::Zoom(ZoomKey::In), "with the apps popup open too");
         seat.lock();
@@ -481,7 +507,10 @@ mod tests {
         let ss = Mods { logo: true, shift: true, ..Mods::default() };
         assert_eq!(seat.key(Key::Three, true, ss), KeyOut::Capture { key: CaptureKey::Screen, clip: false });
         assert_eq!(seat.key(Key::Three, false, ss), KeyOut::Swallow);
-        assert_eq!(seat.key(Key::Four, true, Mods { ctrl: true, ..ss }), KeyOut::Capture { key: CaptureKey::Area, clip: true });
+        assert_eq!(
+            seat.key(Key::Four, true, Mods { ctrl: true, ..ss }),
+            KeyOut::Capture { key: CaptureKey::Area, clip: true }
+        );
         assert_eq!(seat.key(Key::Five, true, ss), KeyOut::Capture { key: CaptureKey::Bar, clip: false });
         // Without Shift, 3 is the program's.
         assert!(matches!(seat.key(Key::Three, true, Mods { logo: true, ..Mods::default() }), KeyOut::Forward(_)));
@@ -551,7 +580,11 @@ mod tests {
         seat.focus(Some(W1));
         let m = Mods { ctrl: true, alt: true, ..none() };
         assert_eq!(seat.key(Key::Delete, true, m), KeyOut::SessionDialog);
-        assert_eq!(seat.key(Key::Delete, true, Mods { ctrl: true, ..none() }), KeyOut::Forward(Some(W1)), "Ctrl+Delete is the program's");
+        assert_eq!(
+            seat.key(Key::Delete, true, Mods { ctrl: true, ..none() }),
+            KeyOut::Forward(Some(W1)),
+            "Ctrl+Delete is the program's"
+        );
         seat.menu_opened(Menu::Popup);
         assert_eq!(seat.key(Key::Power, true, none()), KeyOut::SessionDialog, "over the launcher too");
         assert_eq!(seat.menu(), None);
@@ -635,7 +668,10 @@ mod tests {
         assert!(seat.switching());
         assert_eq!(seat.key(Key::Tab, false, alt()), KeyOut::Swallow);
         assert_eq!(seat.key(Key::Tab, true, alt()), KeyOut::Switch(Switch::Step { back: false }));
-        assert_eq!(seat.key(Key::Tab, true, Mods { shift: true, ..alt() }), KeyOut::Switch(Switch::Step { back: true }));
+        assert_eq!(
+            seat.key(Key::Tab, true, Mods { shift: true, ..alt() }),
+            KeyOut::Switch(Switch::Step { back: true })
+        );
         assert_eq!(seat.key(Key::Left, true, alt()), KeyOut::Switch(Switch::Step { back: true }));
         assert_eq!(seat.key(Key::Down, true, alt()), KeyOut::Switch(Switch::Step { back: false }));
         // Any other key is the switcher's, not the window's.
@@ -648,7 +684,10 @@ mod tests {
     #[test]
     fn shift_makes_the_first_step_backwards() {
         let mut seat = Seat::new();
-        assert_eq!(seat.key(Key::Tab, true, Mods { shift: true, ..alt() }), KeyOut::Switch(Switch::Begin { app: false, back: true }));
+        assert_eq!(
+            seat.key(Key::Tab, true, Mods { shift: true, ..alt() }),
+            KeyOut::Switch(Switch::Begin { app: false, back: true })
+        );
     }
 
     #[test]

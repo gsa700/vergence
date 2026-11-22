@@ -81,7 +81,12 @@ pub fn setup(desktop: &str, section: &str) -> Setup {
         .iter()
         .filter_map(|n| [Section::Favorites, Section::Locations, Section::Recent].into_iter().find(|s| s.name() == n))
         .collect();
-    Setup { favorites: key("favorites").map(|v| parse_list(&v).into_iter().map(PathBuf::from).filter(|p| p.is_absolute()).collect()), folded, recent: key("recent").as_deref() != Some("false") }
+    Setup {
+        favorites: key("favorites")
+            .map(|v| parse_list(&v).into_iter().map(PathBuf::from).filter(|p| p.is_absolute()).collect()),
+        folded,
+        recent: key("recent").as_deref() != Some("false"),
+    }
 }
 
 /// The favorites as they stand: the user's own, or Home and the user's folders.
@@ -126,11 +131,24 @@ pub fn lines(s: &Setup, locations: &[Place], recent: &[PathBuf]) -> Vec<Line> {
         })
         .collect();
     section(Section::Favorites, favs, &mut out);
-    let locs = locations.iter().map(|p| Item { name: p.name.clone(), path: p.path.clone(), file: false, place: Some(p.clone()) }).collect();
+    let locs = locations
+        .iter()
+        .map(|p| Item { name: p.name.clone(), path: p.path.clone(), file: false, place: Some(p.clone()) })
+        .collect();
     section(Section::Locations, locs, &mut out);
     if s.recent {
-        let mut items: Vec<Item> = recent.iter().filter(|p| p.exists()).take(RECENT_SHOWN).map(|p| Item { name: name_of(p), path: Some(p.clone()), file: !p.is_dir(), place: None }).collect();
-        items.push(Item { name: "All recent".into(), path: None, file: false, place: Some(Place { name: "Recent".into(), path: None, network: false }) });
+        let mut items: Vec<Item> = recent
+            .iter()
+            .filter(|p| p.exists())
+            .take(RECENT_SHOWN)
+            .map(|p| Item { name: name_of(p), path: Some(p.clone()), file: !p.is_dir(), place: None })
+            .collect();
+        items.push(Item {
+            name: "All recent".into(),
+            path: None,
+            file: false,
+            place: Some(Place { name: "Recent".into(), path: None, network: false }),
+        });
         section(Section::Recent, items, &mut out);
     }
     out
@@ -154,7 +172,8 @@ pub fn line_at(lines: &[Line], y: f32) -> Option<usize> {
 /// the favorite there, after the last if below them (on the Favorites
 /// heading: first); None outside the Favorites section.
 pub fn drop_index(lines: &[Line], at: Option<usize>) -> Option<usize> {
-    let favs_end = lines.iter().position(|l| matches!(l, Line::Head(s) if *s != Section::Favorites)).unwrap_or(lines.len());
+    let favs_end =
+        lines.iter().position(|l| matches!(l, Line::Head(s) if *s != Section::Favorites)).unwrap_or(lines.len());
     match at {
         Some(0) => Some(0),
         Some(i) if i < favs_end => Some(i - 1),
@@ -185,7 +204,8 @@ pub fn put(favs: &[PathBuf], paths: &[PathBuf], at: usize) -> Vec<PathBuf> {
 
 /// A TOML list of strings, as desktop.toml holds it.
 pub fn list_value(items: &[String]) -> String {
-    let quoted: Vec<String> = items.iter().map(|s| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))).collect();
+    let quoted: Vec<String> =
+        items.iter().map(|s| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))).collect();
     format!("[{}]", quoted.join(", "))
 }
 
@@ -233,7 +253,11 @@ mod tests {
         let f: Vec<PathBuf> = ["/a", "/b", "/c", "/d"].iter().map(PathBuf::from).collect();
         let p = |s: &str| PathBuf::from(s);
         assert_eq!(put(&f, &[p("/d")], 1), vec![p("/a"), p("/d"), p("/b"), p("/c")]);
-        assert_eq!(put(&f, &[p("/a")], 3), vec![p("/b"), p("/c"), p("/a"), p("/d")], "down past two: before the one that was fourth");
+        assert_eq!(
+            put(&f, &[p("/a")], 3),
+            vec![p("/b"), p("/c"), p("/a"), p("/d")],
+            "down past two: before the one that was fourth"
+        );
         assert_eq!(put(&f, &[p("/new")], 9), vec![p("/a"), p("/b"), p("/c"), p("/d"), p("/new")]);
     }
 

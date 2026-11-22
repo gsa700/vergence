@@ -39,9 +39,14 @@ pub fn icons_wanted() -> bool {
 /// The user's Desktop folder (the XDG user-dirs file, else ~/Desktop).
 pub fn desktop_dir() -> Option<std::path::PathBuf> {
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from)?;
-    let config = std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).unwrap_or_else(|| home.join(".config"));
+    let config =
+        std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).unwrap_or_else(|| home.join(".config"));
     let text = std::fs::read_to_string(config.join("user-dirs.dirs")).unwrap_or_default();
-    let said = text.lines().find(|l| l.trim_start().starts_with("XDG_DESKTOP_DIR=")).and_then(|l| l.split_once('=')).map(|(_, v)| v.trim().trim_matches('"').to_string());
+    let said = text
+        .lines()
+        .find(|l| l.trim_start().starts_with("XDG_DESKTOP_DIR="))
+        .and_then(|l| l.split_once('='))
+        .map(|(_, v)| v.trim().trim_matches('"').to_string());
     Some(match said {
         Some(v) if v.starts_with("$HOME/") => home.join(&v[6..]),
         Some(v) if v.starts_with('/') && v != home.to_string_lossy() => std::path::PathBuf::from(v),
@@ -58,7 +63,8 @@ impl Server {
     /// Where the desktop window goes: the main screen's work area (the dock's
     /// band left out), else the first screen.
     fn desktop_area(&self) -> Option<Rectangle<i32, Logical>> {
-        let screen = self.shelf_screen().or_else(|| self.space.outputs().next().and_then(|o| self.space.output_geometry(o)))?;
+        let screen =
+            self.shelf_screen().or_else(|| self.space.outputs().next().and_then(|o| self.space.output_geometry(o)))?;
         Some(self.work_area(screen))
     }
 
@@ -150,7 +156,10 @@ impl Server {
 
     /// Super+D: the windows out of the way (minimized), or the same back.
     pub fn show_desktop(&mut self) {
-        let hidden: Vec<Win> = std::mem::take(&mut self.desktop_hidden).into_iter().filter(|w| smithay::utils::IsAlive::alive(w)).collect();
+        let hidden: Vec<Win> = std::mem::take(&mut self.desktop_hidden)
+            .into_iter()
+            .filter(|w| smithay::utils::IsAlive::alive(w))
+            .collect();
         if !hidden.is_empty() {
             for w in hidden.iter().rev() {
                 self.unminimize(w);
@@ -173,7 +182,10 @@ impl Server {
     pub fn add_to_desktop(&mut self, id: &str) {
         let Some(dir) = desktop_dir() else { return };
         let file = format!("{id}.desktop");
-        let source = vergence_shell::apps::data_dirs().into_iter().map(|d| d.join("applications").join(&file)).find(|p| p.is_file());
+        let source = vergence_shell::apps::data_dirs()
+            .into_iter()
+            .map(|d| d.join("applications").join(&file))
+            .find(|p| p.is_file());
         let Some(source) = source else { return tracing::info!("desktop: no entry file for {id}") };
         let _ = std::fs::create_dir_all(&dir);
         let mut to = dir.join(&file);

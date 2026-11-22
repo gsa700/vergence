@@ -23,7 +23,13 @@ use std::{
 use crate::{Output, Sound, Stream, level_of, level_percent, location_pins, pin_name};
 
 unsafe extern "C" {
-    fn sysctlbyname(name: *const std::ffi::c_char, old: *mut u8, oldlen: *mut usize, new: *const u8, newlen: usize) -> i32;
+    fn sysctlbyname(
+        name: *const std::ffi::c_char,
+        old: *mut u8,
+        oldlen: *mut usize,
+        new: *const u8,
+        newlen: usize,
+    ) -> i32;
     fn ioctl(fd: i32, request: std::ffi::c_ulong, arg: *mut i32) -> i32;
 }
 
@@ -94,7 +100,8 @@ pub const HELPER: &str = "sound-default";
 /// The helper: in the prefix our program runs from (`PREFIX/bin/..`), else
 /// /usr/local's (a development build run from target/).
 fn helper_path() -> Option<PathBuf> {
-    let beside = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.parent()?.join("libexec/vergence").join(HELPER)));
+    let beside =
+        std::env::current_exe().ok().and_then(|e| Some(e.parent()?.parent()?.join("libexec/vergence").join(HELPER)));
     beside.into_iter().chain([PathBuf::from("/usr/local/libexec/vergence").join(HELPER)]).find(|p| p.is_file())
 }
 
@@ -102,11 +109,17 @@ fn helper_path() -> Option<PathBuf> {
 fn run_helper(unit: u32) -> io::Result<()> {
     let refused = |why: &str| io::Error::new(io::ErrorKind::PermissionDenied, why.to_string());
     let Some(path) = helper_path() else {
-        return Err(refused("the sound helper (libexec/vergence/sound-default) is not installed; sudo tools/install.sh puts it there"));
+        return Err(refused(
+            "the sound helper (libexec/vergence/sound-default) is not installed; sudo tools/install.sh puts it there",
+        ));
     };
     let out = match std::process::Command::new(&path).arg(unit.to_string()).env_clear().output() {
         Ok(o) => o,
-        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => return Err(refused("only members of the video group may choose the output (sudo pw groupmod video -m $USER, then log in again)")),
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+            return Err(refused(
+                "only members of the video group may choose the output (sudo pw groupmod video -m $USER, then log in again)",
+            ));
+        }
         Err(e) => return Err(e),
     };
     if out.status.success() {
@@ -130,7 +143,11 @@ pub fn helper_main(args: Vec<OsString>) -> i32 {
     let [arg] = args.as_slice() else {
         return fail("usage: sound-default UNIT (the N of pcmN)".into());
     };
-    let Some(unit) = arg.to_str().filter(|a| (1..=2).contains(&a.len()) && a.bytes().all(|b| b.is_ascii_digit())).and_then(|a| a.parse::<u32>().ok()) else {
+    let Some(unit) = arg
+        .to_str()
+        .filter(|a| (1..=2).contains(&a.len()) && a.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|a| a.parse::<u32>().ok())
+    else {
         return fail("the unit is a number, the N of pcmN".into());
     };
     if !Oss::units().contains(&unit) {
@@ -152,11 +169,16 @@ impl Oss {
 
     /// The numbers of the devices that play.
     fn units() -> Vec<u32> {
-        (0..64).filter(|n| sysctl_string(&format!("dev.pcm.{n}.%desc")).is_some()).filter(|n| sysctl_int(&format!("dev.pcm.{n}.mode")).is_some_and(|m| m & MODE_PLAY != 0)).collect()
+        (0..64)
+            .filter(|n| sysctl_string(&format!("dev.pcm.{n}.%desc")).is_some())
+            .filter(|n| sysctl_int(&format!("dev.pcm.{n}.mode")).is_some_and(|m| m & MODE_PLAY != 0))
+            .collect()
     }
 
     fn unit(id: &str) -> io::Result<u32> {
-        id.strip_prefix("pcm").and_then(|n| n.parse().ok()).ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("no output {id}")))
+        id.strip_prefix("pcm")
+            .and_then(|n| n.parse().ok())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("no output {id}")))
     }
 
     /// One of the device's mixer values, read or written through /dev/mixerN.
@@ -175,7 +197,8 @@ impl Oss {
         let parent = sysctl_string(&format!("dev.pcm.{unit}.%parent")).unwrap_or_default();
         let pins = location_pins(&sysctl_string(&format!("dev.pcm.{unit}.%location")).unwrap_or_default());
         let codec = parent.strip_prefix("hdaa").unwrap_or("");
-        let from_pins = pins.iter().find_map(|nid| pin_name(&sysctl_string(&format!("dev.hdaa.{codec}.nid{nid}_config"))?));
+        let from_pins =
+            pins.iter().find_map(|nid| pin_name(&sysctl_string(&format!("dev.hdaa.{codec}.nid{nid}_config"))?));
         // A GPU's digital out is HDMI or DisplayPort.
         let hdmi = detail.contains("HDMI") || detail.contains("DP");
         match from_pins {
@@ -198,8 +221,17 @@ impl Sound for Oss {
         for unit in Self::units() {
             let detail = sysctl_string(&format!("dev.pcm.{unit}.%desc")).unwrap_or_default();
             let volume = Self::mixer(unit, mixer_read(SOUND_MIXER_VOLUME), 0).map(level_percent).unwrap_or(0);
-            let muted = Self::mixer(unit, mixer_read(SOUND_MIXER_MUTE), 0).is_ok_and(|mask| mask & (1 << SOUND_MIXER_VOLUME) != 0);
-            out.push(Output { id: format!("pcm{unit}"), name: Self::name(unit, &detail), detail, volume, adjustable: true, muted, default: unit as i32 == default });
+            let muted = Self::mixer(unit, mixer_read(SOUND_MIXER_MUTE), 0)
+                .is_ok_and(|mask| mask & (1 << SOUND_MIXER_VOLUME) != 0);
+            out.push(Output {
+                id: format!("pcm{unit}"),
+                name: Self::name(unit, &detail),
+                detail,
+                volume,
+                adjustable: true,
+                muted,
+                default: unit as i32 == default,
+            });
         }
         Ok(out)
     }

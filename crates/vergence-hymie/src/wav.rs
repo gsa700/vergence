@@ -56,7 +56,9 @@ fn u32_at(d: &[u8], at: usize) -> u32 {
 /// The chunks walked: the format, the samples' place, and the tags.
 fn chunks(data: &[u8], tags: &mut Tags) -> Result<Chunks, Error> {
     if data.len() < 12 || &data[..4] != b"RIFF" || &data[8..12] != b"WAVE" {
-        return Err(Error::Unsupported(if data.starts_with(b"RF64") { "RF64, not RIFF WAV." } else { "Not a RIFF WAVE file." }.into()));
+        return Err(Error::Unsupported(
+            if data.starts_with(b"RF64") { "RF64, not RIFF WAV." } else { "Not a RIFF WAVE file." }.into(),
+        ));
     }
     let mut c = Chunks { format: 0, channels: 0, rate: 0, align: 0, bits: 0, start: 0, size: 0 };
     let mut have_format = false;
@@ -111,7 +113,9 @@ impl WavTrack {
             (PCM, 8, 1) => (Kind::Unsigned8, 8),
             (PCM, 9..=32, 2..=4) => (Kind::Signed, c.bits),
             (IEEE_FLOAT, 32, 4) | (IEEE_FLOAT, 64, 8) => (Kind::Float, 0),
-            _ => return Err(Error::Unsupported(format!("WAV format {}, {}-bit: not plain samples.", c.format, c.bits))),
+            _ => {
+                return Err(Error::Unsupported(format!("WAV format {}, {}-bit: not plain samples.", c.format, c.bits)));
+            }
         };
         Ok(WavTrack {
             rate: c.rate,
@@ -171,14 +175,23 @@ impl Track for WavTrack {
         let at = |i: usize| (i / ch) * self.align + (i % ch) * s;
         match (self.kind, s) {
             (Kind::Unsigned8, _) => (0..n).for_each(|i| into[i] = (src[at(i)] as f32 - 128.0) / 128.0),
-            (Kind::Signed, 2) => (0..n).for_each(|i| into[i] = i16::from_le_bytes([src[at(i)], src[at(i) + 1]]) as f32 / 32768.0),
+            (Kind::Signed, 2) => {
+                (0..n).for_each(|i| into[i] = i16::from_le_bytes([src[at(i)], src[at(i) + 1]]) as f32 / 32768.0)
+            }
             (Kind::Signed, 3) => (0..n).for_each(|i| {
                 let a = at(i);
-                into[i] = (((src[a] as i32) << 8) | ((src[a + 1] as i32) << 16) | ((src[a + 2] as i32) << 24)) as f32 / 2_147_483_648.0;
+                into[i] = (((src[a] as i32) << 8) | ((src[a + 1] as i32) << 16) | ((src[a + 2] as i32) << 24)) as f32
+                    / 2_147_483_648.0;
             }),
-            (Kind::Signed, 4) => (0..n).for_each(|i| into[i] = i32::from_le_bytes(src[at(i)..at(i) + 4].try_into().unwrap_or([0; 4])) as f32 / 2_147_483_648.0),
-            (Kind::Float, 4) => (0..n).for_each(|i| into[i] = f32::from_le_bytes(src[at(i)..at(i) + 4].try_into().unwrap_or([0; 4]))),
-            (Kind::Float, 8) => (0..n).for_each(|i| into[i] = f64::from_le_bytes(src[at(i)..at(i) + 8].try_into().unwrap_or([0; 8])) as f32),
+            (Kind::Signed, 4) => (0..n).for_each(|i| {
+                into[i] =
+                    i32::from_le_bytes(src[at(i)..at(i) + 4].try_into().unwrap_or([0; 4])) as f32 / 2_147_483_648.0
+            }),
+            (Kind::Float, 4) => {
+                (0..n).for_each(|i| into[i] = f32::from_le_bytes(src[at(i)..at(i) + 4].try_into().unwrap_or([0; 4])))
+            }
+            (Kind::Float, 8) => (0..n)
+                .for_each(|i| into[i] = f64::from_le_bytes(src[at(i)..at(i) + 8].try_into().unwrap_or([0; 8])) as f32),
             _ => return Err(damaged("A WAV sample size that makes no sense.")),
         }
         self.frame += want as u64;

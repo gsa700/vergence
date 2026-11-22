@@ -13,7 +13,12 @@ use vergence_dm::secret::Secret;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let socket = args.iter().position(|a| a == "--socket").and_then(|i| args.get(i + 1)).cloned().unwrap_or_else(|| paths::UNLOCK_SOCKET.to_string());
+    let socket = args
+        .iter()
+        .position(|a| a == "--socket")
+        .and_then(|i| args.get(i + 1))
+        .cloned()
+        .unwrap_or_else(|| paths::UNLOCK_SOCKET.to_string());
     let mut s = match UnixStream::connect(&socket) {
         Ok(s) => s,
         Err(e) => {

@@ -107,7 +107,9 @@ impl Auth {
     }
 
     fn check(&mut self, hex: &str, out: &mut Vec<u8>) {
-        if decode_hex(hex).and_then(|b| String::from_utf8(b).ok()).and_then(|s| s.parse::<u32>().ok()) == Some(self.peer_uid) {
+        if decode_hex(hex).and_then(|b| String::from_utf8(b).ok()).and_then(|s| s.parse::<u32>().ok())
+            == Some(self.peer_uid)
+        {
             self.accept(out);
         } else {
             out.extend_from_slice(b"REJECTED EXTERNAL\r\n");

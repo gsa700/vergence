@@ -123,7 +123,11 @@ fn read_tag(tag: &[u8], tags: &mut Tags) {
     let mut at = 0usize;
     if flags & 0x40 != 0 && version >= 3 && body.len() >= 4 {
         // The extended header: its size, which in 2.3 leaves itself out.
-        at = if version == 3 { (u32::from_be_bytes([body[0], body[1], body[2], body[3]]) as usize).saturating_add(4) } else { synchsafe(&body[..4]).unwrap_or(usize::MAX) };
+        at = if version == 3 {
+            (u32::from_be_bytes([body[0], body[1], body[2], body[3]]) as usize).saturating_add(4)
+        } else {
+            synchsafe(&body[..4]).unwrap_or(usize::MAX)
+        };
     }
     let (id_len, head_len) = if version == 2 { (3, 6) } else { (4, 10) };
     while at.saturating_add(head_len) <= body.len() && body[at] != 0 {
@@ -229,7 +233,12 @@ fn terminator(s: &[u8], wide: bool) -> usize {
 
 fn text(s: &[u8], encoding: u8) -> String {
     let utf16 = |s: &[u8], big: bool| -> String {
-        let units: Vec<u16> = s.as_chunks::<2>().0.iter().map(|c| if big { u16::from_be_bytes(*c) } else { u16::from_le_bytes(*c) }).collect();
+        let units: Vec<u16> = s
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| if big { u16::from_be_bytes(*c) } else { u16::from_le_bytes(*c) })
+            .collect();
         String::from_utf16_lossy(&units)
     };
     match encoding {

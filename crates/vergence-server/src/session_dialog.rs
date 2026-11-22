@@ -42,7 +42,14 @@ enum Button {
     LogOut,
 }
 
-const BUTTONS: [(Button, &str); 6] = [(Button::Sleep, "Sleep"), (Button::Restart, "Restart"), (Button::ShutDown, "Shut Down"), (Button::Lock, "Lock"), (Button::Cancel, "Cancel"), (Button::LogOut, "Log Out")];
+const BUTTONS: [(Button, &str); 6] = [
+    (Button::Sleep, "Sleep"),
+    (Button::Restart, "Restart"),
+    (Button::ShutDown, "Shut Down"),
+    (Button::Lock, "Lock"),
+    (Button::Cancel, "Cancel"),
+    (Button::LogOut, "Log Out"),
+];
 /// The default: Log Out.
 const DEFAULT: usize = 5;
 /// The power buttons come first, a gap after them.
@@ -118,7 +125,11 @@ impl Server {
                 });
             }
             Some(b @ (Button::Restart | Button::ShutDown)) => {
-                let p = if b == Button::Restart { vergence_dm::power::Power::Restart } else { vergence_dm::power::Power::ShutDown };
+                let p = if b == Button::Restart {
+                    vergence_dm::power::Power::Restart
+                } else {
+                    vergence_dm::power::Power::ShutDown
+                };
                 tracing::info!("session: {}, the apps asked to close first", p.word());
                 self.session_dialog.after_exit = Some(p);
                 self.begin_exit();
@@ -174,7 +185,12 @@ impl Server {
 
     /// In front of everything on a screen: the panel (on the pointer's
     /// screen), then the dimming over the whole of it.
-    pub fn session_dialog_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
+    pub fn session_dialog_elements(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Vec<SceneElement> {
         let mut elements = Vec::new();
         if out.to_f64().contains(self.pointer_location())
             && let Some(e) = self.session_dialog_panel(renderer, out, scale)
@@ -182,12 +198,24 @@ impl Server {
             elements.push(e);
         }
         let (id, commit) = self.session_dialog.dim.get_or_insert_with(|| (Id::new(), CommitCounter::default())).clone();
-        let phys = Rectangle::<i32, smithay::utils::Physical>::from_size(out.size.to_f64().to_physical(scale).to_i32_round());
-        elements.push(SceneElement::Solid(SolidColorRenderElement::new(id, phys, commit, [0.0, 0.0, 0.0, 0.45], Kind::Unspecified)));
+        let phys =
+            Rectangle::<i32, smithay::utils::Physical>::from_size(out.size.to_f64().to_physical(scale).to_i32_round());
+        elements.push(SceneElement::Solid(SolidColorRenderElement::new(
+            id,
+            phys,
+            commit,
+            [0.0, 0.0, 0.0, 0.45],
+            Kind::Unspecified,
+        )));
         elements
     }
 
-    fn session_dialog_panel(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Option<SceneElement> {
+    fn session_dialog_panel(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Option<SceneElement> {
         let light = self.light_style();
         let focus = self.session_dialog.focus;
         let accent = self.accent();
@@ -220,7 +248,10 @@ impl Server {
         }
         local.sort_by_key(|(i, _, _)| *i);
         self.session_dialog.panel = panel;
-        self.session_dialog.buttons = local.iter().map(|(i, x, w)| (*i, Rectangle::new((at.0 + x, at.1 + row_y).into(), (*w, BUTTON_H).into()))).collect();
+        self.session_dialog.buttons = local
+            .iter()
+            .map(|(i, x, w)| (*i, Rectangle::new((at.0 + x, at.1 + row_y).into(), (*w, BUTTON_H).into())))
+            .collect();
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (focus, light, scale.to_bits(), accent.r, accent.g, accent.b).hash(&mut h);
         let key = h.finish();
@@ -233,36 +264,90 @@ impl Server {
             scene.fill_rounded(SceneRect::new(0.0, 0.0, w, hh), 14.0, ink(s.menu));
             scene.stroke(SceneRect::new(0.0, 0.0, w, hh), 14.0, vergence_look::EDGE, ink(s.edge));
             let m = fonts.metrics(bold, 18.0);
-            vergence_render::text(&mut scene, fonts, bold, 18.0, ink(s.menu_ink), ScenePoint::new(PAD as f32, (PAD as f32 + m.ascent).round()), "Log out of Vergence?");
+            vergence_render::text(
+                &mut scene,
+                fonts,
+                bold,
+                18.0,
+                ink(s.menu_ink),
+                ScenePoint::new(PAD as f32, (PAD as f32 + m.ascent).round()),
+                "Log out of Vergence?",
+            );
             let m = fonts.metrics(face, TEXT);
             // The line under the heading: between the menus' two inks.
             let (a, b) = (s.menu_ink, s.menu_ink_off);
-            let soft = Color::rgb(((a.0 as u16 + b.0 as u16) / 2) as u8, ((a.1 as u16 + b.1 as u16) / 2) as u8, ((a.2 as u16 + b.2 as u16) / 2) as u8);
-            vergence_render::text(&mut scene, fonts, face, TEXT, soft, ScenePoint::new(PAD as f32, (PAD as f32 + 28.0 + m.ascent).round()), "Your apps will be asked to close first.");
+            let soft = Color::rgb(
+                ((a.0 as u16 + b.0 as u16) / 2) as u8,
+                ((a.1 as u16 + b.1 as u16) / 2) as u8,
+                ((a.2 as u16 + b.2 as u16) / 2) as u8,
+            );
+            vergence_render::text(
+                &mut scene,
+                fonts,
+                face,
+                TEXT,
+                soft,
+                ScenePoint::new(PAD as f32, (PAD as f32 + 28.0 + m.ascent).round()),
+                "Your apps will be asked to close first.",
+            );
             // A plain button: the menu's ink, faint, over the panel.
             let plain = Color::rgba(s.menu_ink.0, s.menu_ink.1, s.menu_ink.2, 20);
             for (i, x, bw) in &local {
                 let r = SceneRect::new(*x as f32, row_y as f32, *bw as f32, BUTTON_H as f32);
                 let default = BUTTONS[*i].0 == Button::LogOut;
                 // Only the default in the accent; the others plain.
-                let (ground, text, f) = if default { (accent, Color::rgb(0xff, 0xff, 0xff), bold) } else { (plain, ink(s.menu_ink), face) };
+                let (ground, text, f) =
+                    if default { (accent, Color::rgb(0xff, 0xff, 0xff), bold) } else { (plain, ink(s.menu_ink), face) };
                 scene.fill_rounded(r, 8.0, ground);
                 if *i == focus {
-                    scene.stroke(SceneRect::new(r.x - 2.0, r.y - 2.0, r.w + 4.0, r.h + 4.0), 10.0, 2.0, ink(s.menu_ink));
+                    scene.stroke(
+                        SceneRect::new(r.x - 2.0, r.y - 2.0, r.w + 4.0, r.h + 4.0),
+                        10.0,
+                        2.0,
+                        ink(s.menu_ink),
+                    );
                 }
                 let label = BUTTONS[*i].1;
                 let lw = fonts.layout(f, TEXT, label).1;
                 let lm = fonts.metrics(f, TEXT);
-                vergence_render::text(&mut scene, fonts, f, TEXT, text, ScenePoint::new((r.x + (r.w - lw) / 2.0).round(), (r.y + (r.h - lm.ascent - lm.descent) / 2.0 + lm.ascent).round()), label);
+                vergence_render::text(
+                    &mut scene,
+                    fonts,
+                    f,
+                    TEXT,
+                    text,
+                    ScenePoint::new(
+                        (r.x + (r.w - lw) / 2.0).round(),
+                        (r.y + (r.h - lm.ascent - lm.descent) / 2.0 + lm.ascent).round(),
+                    ),
+                    label,
+                );
             }
             let p = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)).ok()?;
-            let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+            let buffer = MemoryRenderBuffer::from_slice(
+                &p.data,
+                Fourcc::Abgr8888,
+                (p.width as i32, p.height as i32),
+                1,
+                Transform::Normal,
+                None,
+            );
             self.session_dialog.picture = Some((key, buffer));
         }
         let (_, buffer) = self.session_dialog.picture.as_ref()?;
         let a = (panel.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let b = (panel.loc + panel.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
-        MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(panel.size), Kind::Unspecified).ok().map(SceneElement::Memory)
+        MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            a.to_f64(),
+            buffer,
+            None,
+            Some(src),
+            Some(panel.size),
+            Kind::Unspecified,
+        )
+        .ok()
+        .map(SceneElement::Memory)
     }
 }

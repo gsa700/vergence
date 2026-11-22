@@ -13,7 +13,10 @@ use std::hash::{Hash, Hasher};
 use smithay::{
     backend::allocator::Fourcc,
     backend::renderer::{
-        element::{Kind, memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement}},
+        element::{
+            Kind,
+            memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
+        },
         gles::GlesRenderer,
     },
     reexports::calloop::timer::{TimeoutAction, Timer},
@@ -61,7 +64,9 @@ fn rect(r: Rectangle<i32, Logical>) -> Rect {
 impl Server {
     /// The tiles in the drawer, by their place in the list.
     fn drawer_tiles(&self) -> Vec<usize> {
-        (0..self.tiles.list.len()).filter(|i| self.tile_visible(&self.tiles.list[*i]) && !self.tile_docked(&self.tiles.list[*i])).collect()
+        (0..self.tiles.list.len())
+            .filter(|i| self.tile_visible(&self.tiles.list[*i]) && !self.tile_docked(&self.tiles.list[*i]))
+            .collect()
     }
 
     /// The drawer tile's place on the dock, if the dock shows one.
@@ -100,8 +105,11 @@ impl Server {
             self.tiles.drawer = None;
             return;
         }
-        let (Some(dock), Some(slot), Some(screen)) = (self.shelf.dock, self.drawer_slot(), self.shelf_screen()) else { return };
-        let what: Vec<(String, TileState)> = inside.iter().map(|i| (self.tiles.list[*i].tile.group.clone(), self.tiles.list[*i].tile.state)).collect();
+        let (Some(dock), Some(slot), Some(screen)) = (self.shelf.dock, self.drawer_slot(), self.shelf_screen()) else {
+            return;
+        };
+        let what: Vec<(String, TileState)> =
+            inside.iter().map(|i| (self.tiles.list[*i].tile.group.clone(), self.tiles.list[*i].tile.state)).collect();
         let (_, cells, h) = tiles::drawer_layout(&what);
         let w = tiles::DRAWER_W;
         let (mid_y, mid_x) = (slot.y + slot.h / 2 - h / 2, slot.x + slot.w / 2 - w / 2);
@@ -111,10 +119,16 @@ impl Server {
             Edge::Top => (mid_x, dock.loc.y - OFF - h),
             Edge::Bottom => (mid_x, dock.loc.y + dock.size.h + OFF),
         };
-        let (x, y) = (x.min(screen.loc.x + screen.size.w - w).max(screen.loc.x), y.min(screen.loc.y + screen.size.h - h).max(screen.loc.y));
+        let (x, y) = (
+            x.min(screen.loc.x + screen.size.w - w).max(screen.loc.x),
+            y.min(screen.loc.y + screen.size.h - h).max(screen.loc.y),
+        );
         if let Some(d) = self.tiles.drawer.as_mut() {
             d.rect = Rectangle::new((x, y).into(), (w, h).into());
-            d.cells = cells.into_iter().map(|(k, c)| (inside[k], Rectangle::new((x + c.x, y + c.y).into(), (c.w, c.h).into()))).collect();
+            d.cells = cells
+                .into_iter()
+                .map(|(k, c)| (inside[k], Rectangle::new((x + c.x, y + c.y).into(), (c.w, c.h).into())))
+                .collect();
         }
     }
 
@@ -196,7 +210,11 @@ impl Server {
     /// Lift a tile (by its place in the list) to drag it.
     pub fn tile_lift(&mut self, index: usize, from_drawer: bool, at: Point<f64, Logical>) {
         let Some(p) = self.tiles.list.get(index) else { return };
-        tracing::info!("drawer: {} lifted {}", p.tile.id, if from_drawer { "out of the drawer" } else { "off the dock" });
+        tracing::info!(
+            "drawer: {} lifted {}",
+            p.tile.id,
+            if from_drawer { "out of the drawer" } else { "off the dock" }
+        );
         self.tiles.lift = Some(TileLift { key: p.key(), from_drawer, at });
         self.tiles.hover = None;
         self.card_close();
@@ -225,7 +243,10 @@ impl Server {
             docked.retain(|d| *d != p.tile.id);
             let at = docked.iter().position(|d| *d == target).unwrap_or(docked.len());
             // Moving down the dock it goes after the tile it was dropped on, up before it.
-            let to = docked.len().min(match from { Some(f) if f <= at => at + 1, _ => at });
+            let to = docked.len().min(match from {
+                Some(f) if f <= at => at + 1,
+                _ => at,
+            });
             docked.insert(to, p.tile.id.clone());
             true
         } else if lift.from_drawer && on_dock && !into_drawer {
@@ -240,7 +261,11 @@ impl Server {
             false
         };
         if changed {
-            tracing::info!("drawer: {} now {}", p.tile.id, if docked.contains(&p.tile.id) { "on the dock" } else { "in the drawer" });
+            tracing::info!(
+                "drawer: {} now {}",
+                p.tile.id,
+                if docked.contains(&p.tile.id) { "on the dock" } else { "in the drawer" }
+            );
             self.shelf.config.tiles = Some(docked.clone());
             if let Err(e) = crate::shelf::save_tiles(&docked) {
                 tracing::warn!("drawer: the dock's tiles could not be written: {e}");
@@ -264,7 +289,12 @@ impl Server {
     }
 
     /// The open drawer, and a lifted tile under the pointer in front of it.
-    pub fn drawer_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
+    pub fn drawer_elements(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Vec<SceneElement> {
         let mut elements = Vec::new();
         if let Some(e) = self.tile_ghost(renderer, out, scale) {
             elements.push(e);
@@ -281,7 +311,8 @@ impl Server {
         }
         let area = d.rect;
         let inside = self.drawer_tiles();
-        let what: Vec<(String, TileState)> = inside.iter().map(|i| (self.tiles.list[*i].tile.group.clone(), self.tiles.list[*i].tile.state)).collect();
+        let what: Vec<(String, TileState)> =
+            inside.iter().map(|i| (self.tiles.list[*i].tile.group.clone(), self.tiles.list[*i].tile.state)).collect();
         let (headings, cells, _) = tiles::drawer_layout(&what);
         let light = self.light_style();
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -295,7 +326,12 @@ impl Server {
             let s = vergence_look::shelf_look(light);
             let ink = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
-            let (Some(face), Some(bold)) = (fonts.face("sans-serif", 400, false), fonts.face("sans-serif", 700, false).or_else(|| fonts.face("sans-serif", 600, false))) else { return elements };
+            let (Some(face), Some(bold)) = (
+                fonts.face("sans-serif", 400, false),
+                fonts.face("sans-serif", 700, false).or_else(|| fonts.face("sans-serif", 600, false)),
+            ) else {
+                return elements;
+            };
             let (w, h) = (area.size.w as f32, area.size.h as f32);
             let mut scene = Scene::new(w, h);
             if frost.is_none() {
@@ -304,7 +340,15 @@ impl Server {
             scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, ink(s.edge));
             for (name, y) in &headings {
                 let m = fonts.metrics(bold, 10.5);
-                vergence_render::text(&mut scene, fonts, bold, 10.5, ink(s.menu_ink_off), ScenePoint::new(12.0, *y as f32 + m.ascent), &name.to_uppercase());
+                vergence_render::text(
+                    &mut scene,
+                    fonts,
+                    bold,
+                    10.5,
+                    ink(s.menu_ink_off),
+                    ScenePoint::new(12.0, *y as f32 + m.ascent),
+                    &name.to_uppercase(),
+                );
             }
             for (k, c) in &cells {
                 let t = &self.tiles.list[inside[*k]].tile;
@@ -315,13 +359,38 @@ impl Server {
                 let (vh, lh) = (vm.ascent + vm.descent, lm.ascent + lm.descent);
                 let top = cell.y + (cell.h - vh - lh) / 2.0;
                 let vw = fonts.layout(bold, 13.0, &t.value).1;
-                vergence_render::text(&mut scene, fonts, bold, 13.0, color, ScenePoint::new(cell.x + (cell.w - vw) / 2.0, (top + vm.ascent).round()), &t.value);
+                vergence_render::text(
+                    &mut scene,
+                    fonts,
+                    bold,
+                    13.0,
+                    color,
+                    ScenePoint::new(cell.x + (cell.w - vw) / 2.0, (top + vm.ascent).round()),
+                    &t.value,
+                );
                 let lw = fonts.layout(face, 9.5, &t.label).1;
                 let dim = if t.state == TileState::Fine { ink(s.menu_ink_off) } else { color };
-                vergence_render::text(&mut scene, fonts, face, 9.5, dim, ScenePoint::new(cell.x + (cell.w - lw) / 2.0, (top + vh + lm.ascent).round()), &t.label);
+                vergence_render::text(
+                    &mut scene,
+                    fonts,
+                    face,
+                    9.5,
+                    dim,
+                    ScenePoint::new(cell.x + (cell.w - lw) / 2.0, (top + vh + lm.ascent).round()),
+                    &t.label,
+                );
             }
-            let Ok(p) = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) else { return elements };
-            let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+            let Ok(p) = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) else {
+                return elements;
+            };
+            let buffer = MemoryRenderBuffer::from_slice(
+                &p.data,
+                Fourcc::Abgr8888,
+                (p.width as i32, p.height as i32),
+                1,
+                Transform::Normal,
+                None,
+            );
             if let Some(d) = self.tiles.drawer.as_mut() {
                 d.picture = Some((key, buffer));
             }
@@ -346,7 +415,12 @@ impl Server {
     }
 
     /// A lifted tile, drawn as on the dock, its middle under the pointer.
-    fn tile_ghost(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Option<SceneElement> {
+    fn tile_ghost(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Option<SceneElement> {
         let lift = self.tiles.lift.clone()?;
         if !out.to_f64().contains(lift.at) {
             return None;
@@ -365,21 +439,63 @@ impl Server {
         let (vm, lm) = (fonts.metrics(bold, 13.0), fonts.metrics(face, 9.5));
         let top = (side - (vm.ascent + vm.descent) - (lm.ascent + lm.descent)) / 2.0;
         let vw = fonts.layout(bold, 13.0, &t.value).1;
-        vergence_render::text(&mut scene, fonts, bold, 13.0, color, ScenePoint::new((side - vw) / 2.0, (top + vm.ascent).round()), &t.value);
+        vergence_render::text(
+            &mut scene,
+            fonts,
+            bold,
+            13.0,
+            color,
+            ScenePoint::new((side - vw) / 2.0, (top + vm.ascent).round()),
+            &t.value,
+        );
         let lw = fonts.layout(face, 9.5, &t.label).1;
-        vergence_render::text(&mut scene, fonts, face, 9.5, ink(s.menu_ink_off), ScenePoint::new((side - lw) / 2.0, (top + vm.ascent + vm.descent + lm.ascent).round()), &t.label);
+        vergence_render::text(
+            &mut scene,
+            fonts,
+            face,
+            9.5,
+            ink(s.menu_ink_off),
+            ScenePoint::new((side - lw) / 2.0, (top + vm.ascent + vm.descent + lm.ascent).round()),
+            &t.label,
+        );
         let p = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)).ok()?;
-        let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+        let buffer = MemoryRenderBuffer::from_slice(
+            &p.data,
+            Fourcc::Abgr8888,
+            (p.width as i32, p.height as i32),
+            1,
+            Transform::Normal,
+            None,
+        );
         let half = vergence_shell::running::SLOT / 2;
-        let area = Rectangle::new((lift.at.x.round() as i32 - half, lift.at.y.round() as i32 - half).into(), (half * 2, half * 2).into());
+        let area = Rectangle::new(
+            (lift.at.x.round() as i32 - half, lift.at.y.round() as i32 - half).into(),
+            (half * 2, half * 2).into(),
+        );
         place(renderer, &buffer, area, out, scale)
     }
 }
 
 /// A picture placed on whole pixels of an output.
-fn place(renderer: &mut GlesRenderer, buffer: &MemoryRenderBuffer, area: Rectangle<i32, Logical>, out: Rectangle<i32, Logical>, scale: f64) -> Option<SceneElement> {
+fn place(
+    renderer: &mut GlesRenderer,
+    buffer: &MemoryRenderBuffer,
+    area: Rectangle<i32, Logical>,
+    out: Rectangle<i32, Logical>,
+    scale: f64,
+) -> Option<SceneElement> {
     let a = (area.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
     let b = (area.loc + area.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
     let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
-    MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(area.size), Kind::Unspecified).ok().map(SceneElement::Memory)
+    MemoryRenderBufferRenderElement::from_buffer(
+        renderer,
+        a.to_f64(),
+        buffer,
+        None,
+        Some(src),
+        Some(area.size),
+        Kind::Unspecified,
+    )
+    .ok()
+    .map(SceneElement::Memory)
 }

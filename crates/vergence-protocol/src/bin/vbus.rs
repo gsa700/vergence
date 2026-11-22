@@ -162,7 +162,10 @@ fn run(socket: Option<std::path::PathBuf>, args: &[String]) -> Result<(), Box<dy
 
 fn print_outputs(outputs: &[OutputInfo]) {
     for o in outputs {
-        println!("{} {:?} at {},{} size {}x{} scale {:.4} ({}) id {}", o.name, o.description, o.x, o.y, o.width, o.height, o.scale, o.note, o.id);
+        println!(
+            "{} {:?} at {},{} size {}x{} scale {:.4} ({}) id {}",
+            o.name, o.description, o.x, o.y, o.width, o.height, o.scale, o.note, o.id
+        );
         if !o.shown_by.is_empty() {
             println!("  shown by {}, drawn by {}", o.shown_by, o.drawn_by);
         }
@@ -170,7 +173,16 @@ fn print_outputs(outputs: &[OutputInfo]) {
             .modes
             .iter()
             .enumerate()
-            .map(|(i, m)| format!("{}{}x{}@{:.2}{}", if i as u32 == o.mode { "*" } else { "" }, m.width, m.height, m.refresh_mhz as f64 / 1000.0, if m.preferred { "+" } else { "" }))
+            .map(|(i, m)| {
+                format!(
+                    "{}{}x{}@{:.2}{}",
+                    if i as u32 == o.mode { "*" } else { "" },
+                    m.width,
+                    m.height,
+                    m.refresh_mhz as f64 / 1000.0,
+                    if m.preferred { "+" } else { "" }
+                )
+            })
             .collect();
         if !modes.is_empty() {
             println!("  modes: {}", modes.join(" "));

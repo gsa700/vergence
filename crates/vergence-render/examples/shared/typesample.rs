@@ -12,7 +12,16 @@ const SIZES: [f32; 8] = [11.0, 12.0, 13.0, 13.5, 14.0, 16.0, 20.0, 28.0];
 pub fn draw(s: &mut Scene, fonts: &mut Fonts, w: f32, h: f32) {
     let half = (w / 2.0).floor();
     half_page(s, fonts, 0.0, half, h, Color::rgb(255, 255, 255), Color::rgb(29, 29, 31), Color::rgb(110, 110, 115));
-    half_page(s, fonts, half, w - half, h, Color::rgb(30, 30, 32), Color::rgb(240, 240, 242), Color::rgb(150, 150, 156));
+    half_page(
+        s,
+        fonts,
+        half,
+        w - half,
+        h,
+        Color::rgb(30, 30, 32),
+        Color::rgb(240, 240, 242),
+        Color::rgb(150, 150, 156),
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -29,7 +38,15 @@ fn half_page(s: &mut Scene, fonts: &mut Fonts, x: f32, w: f32, h: f32, page: Col
     y += 26.0;
     for (weight, name) in [(400u16, "Regular"), (500, "Medium"), (600, "Semibold"), (700, "Bold")] {
         if let Some(face) = fonts.face("sans-serif", weight, false) {
-            text(s, fonts, face, 13.0, ink, Point::new(left, y), &format!("{name} 13: The quick brown fox jumps over the lazy dog."));
+            text(
+                s,
+                fonts,
+                face,
+                13.0,
+                ink,
+                Point::new(left, y),
+                &format!("{name} 13: The quick brown fox jumps over the lazy dog."),
+            );
             y += 18.0;
         }
     }

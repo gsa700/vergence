@@ -41,7 +41,10 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         renderer::{
-            element::{Kind, memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement}},
+            element::{
+                Kind,
+                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
+            },
             gles::GlesRenderer,
         },
     },
@@ -179,7 +182,9 @@ fn grid_of(rgba: &[u8], w: u32, h: u32) -> Vec<[u8; 3]> {
             }
         }
     }
-    sums.iter().map(|s| if s[3] == 0 { [0, 0, 0] } else { [(s[0] / s[3]) as u8, (s[1] / s[3]) as u8, (s[2] / s[3]) as u8] }).collect()
+    sums.iter()
+        .map(|s| if s[3] == 0 { [0, 0, 0] } else { [(s[0] / s[3]) as u8, (s[1] / s[3]) as u8, (s[2] / s[3]) as u8] })
+        .collect()
 }
 
 impl Server {
@@ -232,7 +237,14 @@ impl Server {
         match d.rgba {
             Some(rgba) => {
                 w.grids.insert(d.output.clone(), grid_of(&rgba, d.w, d.h));
-                let buffer = MemoryRenderBuffer::from_slice(&rgba, Fourcc::Abgr8888, (d.w as i32, d.h as i32), 1, Transform::Normal, None);
+                let buffer = MemoryRenderBuffer::from_slice(
+                    &rgba,
+                    Fourcc::Abgr8888,
+                    (d.w as i32, d.h as i32),
+                    1,
+                    Transform::Normal,
+                    None,
+                );
                 w.pictures.insert(d.output, (d.w, d.h, d.look, buffer));
             }
             None => {
@@ -250,7 +262,8 @@ impl Server {
     /// The color behind everything on an output.
     pub fn background_color(&self, output: &str) -> [f32; 4] {
         let id = self.monitor_id(output);
-        let c = self.wallpaper.as_ref().map(|w| parse_color(&w.config.for_monitor(&id).color)).unwrap_or([0.1, 0.1, 0.1]);
+        let c =
+            self.wallpaper.as_ref().map(|w| parse_color(&w.config.for_monitor(&id).color)).unwrap_or([0.1, 0.1, 0.1]);
         [c[0], c[1], c[2], 1.0]
     }
 
@@ -292,7 +305,16 @@ impl Server {
         // The newest picture for this output, even from an older size, until the new one is ready.
         let (bw, bh, _, buffer) = w.pictures.get(output)?;
         let src = Rectangle::<f64, Logical>::from_size((*bw as f64, *bh as f64).into());
-        MemoryRenderBufferRenderElement::from_buffer(renderer, Point::from((0.0, 0.0)), buffer, None, Some(src), Some(logical), Kind::Unspecified).ok()
+        MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            Point::from((0.0, 0.0)),
+            buffer,
+            None,
+            Some(src),
+            Some(logical),
+            Kind::Unspecified,
+        )
+        .ok()
     }
 
     /// Draw every output again in full (wallpaper or settings changed).
@@ -359,7 +381,11 @@ fn cache_path(look: &Look, w: u32, h: u32) -> Option<PathBuf> {
 fn cache_read(path: &std::path::Path, w: u32, h: u32) -> Option<Vec<u8>> {
     let data = vergence_types::read_regular(path, 16 + w as u64 * h as u64 * 4).ok()?;
     let want = 16 + w as usize * h as usize * 4;
-    if data.len() != want || &data[..8] != CACHE_MAGIC || data[8..12] != w.to_le_bytes() || data[12..16] != h.to_le_bytes() {
+    if data.len() != want
+        || &data[..8] != CACHE_MAGIC
+        || data[8..12] != w.to_le_bytes()
+        || data[12..16] != h.to_le_bytes()
+    {
         return None;
     }
     // Touch it, so the newest-kept rule counts it as used.
@@ -408,7 +434,13 @@ fn worker(jobs: std::sync::mpsc::Receiver<Job>, done: Sender<Done>) {
         let t = std::time::Instant::now();
         let cached = cache_path(&job.look, job.w, job.h);
         if let Some(rgba) = cached.as_deref().and_then(|c| cache_read(c, job.w, job.h)) {
-            tracing::info!("wallpaper: {} at {}x{} from the cache in {} ms", job.output, job.w, job.h, t.elapsed().as_millis());
+            tracing::info!(
+                "wallpaper: {} at {}x{} from the cache in {} ms",
+                job.output,
+                job.w,
+                job.h,
+                t.elapsed().as_millis()
+            );
             let _ = done.send(Done { look: job.look, output: job.output, w: job.w, h: job.h, rgba: Some(rgba) });
             continue;
         }
@@ -437,7 +469,14 @@ fn worker(jobs: std::sync::mpsc::Receiver<Job>, done: Sender<Done>) {
         };
         let loaded = t.elapsed().as_millis();
         let rgba = at.map(|i| sources[i].2.render(job.w, job.h, &job.look.mode, parse_color(&job.look.color)));
-        tracing::info!("wallpaper: {} at {}x{} in {} ms ({} ms to read)", job.output, job.w, job.h, t.elapsed().as_millis(), loaded);
+        tracing::info!(
+            "wallpaper: {} at {}x{} in {} ms ({} ms to read)",
+            job.output,
+            job.w,
+            job.h,
+            t.elapsed().as_millis(),
+            loaded
+        );
         if let (Some(c), Some(px)) = (&cached, &rgba) {
             cache_write(c, job.w, job.h, px);
         }
@@ -481,7 +520,12 @@ impl Source {
         canvas.fill(tiny_skia::Color::from_rgba(color[0], color[1], color[2], 1.0).unwrap());
         match self {
             Source::Raster(img) => {
-                let scaled = image::imageops::resize(img, fw.round().max(1.0) as u32, fh.round().max(1.0) as u32, image::imageops::FilterType::CatmullRom);
+                let scaled = image::imageops::resize(
+                    img,
+                    fw.round().max(1.0) as u32,
+                    fh.round().max(1.0) as u32,
+                    image::imageops::FilterType::CatmullRom,
+                );
                 // Premultiply and place it (straight alpha in, premultiplied canvas).
                 let mut pm = scaled.into_raw();
                 for p in pm.chunks_exact_mut(4) {
@@ -494,7 +538,14 @@ impl Source {
                 if let Some(size) = tiny_skia::IntSize::from_wh(iw, ih)
                     && let Some(src) = tiny_skia::Pixmap::from_vec(pm, size)
                 {
-                    canvas.draw_pixmap(x.round() as i32, y.round() as i32, src.as_ref(), &tiny_skia::PixmapPaint::default(), tiny_skia::Transform::identity(), None);
+                    canvas.draw_pixmap(
+                        x.round() as i32,
+                        y.round() as i32,
+                        src.as_ref(),
+                        &tiny_skia::PixmapPaint::default(),
+                        tiny_skia::Transform::identity(),
+                        None,
+                    );
                 }
             }
         }
@@ -551,7 +602,10 @@ mod monitor_tests {
         assert_eq!(c.image, Some(PathBuf::from("/b.svg")));
         assert_eq!(c.mode, "fit");
         assert_eq!(f.wallpaper.for_monitor("other").image, Some(PathBuf::from("/a.svg")));
-        let c = WallpaperConfig { monitor: vec![MonitorWallpaper { id: "m".into(), image: Some(PathBuf::new()), ..Default::default() }], ..f.wallpaper.clone() };
+        let c = WallpaperConfig {
+            monitor: vec![MonitorWallpaper { id: "m".into(), image: Some(PathBuf::new()), ..Default::default() }],
+            ..f.wallpaper.clone()
+        };
         assert_eq!(c.for_monitor("m").image, None);
     }
 }

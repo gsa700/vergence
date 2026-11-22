@@ -73,7 +73,14 @@ pub fn items(entries: &[Entry], pinned: &[String], windows: &[(String, bool)]) -
         if let Some(e) = entries.iter().find(|e| e.id == *id && !e.hidden)
             && !out.iter().any(|i| i.key == e.id)
         {
-            out.push(Item { key: e.id.clone(), name: e.name.clone(), icon: e.icon.clone(), windows: Vec::new(), focused: false, pinned: true });
+            out.push(Item {
+                key: e.id.clone(),
+                name: e.name.clone(),
+                icon: e.icon.clone(),
+                windows: Vec::new(),
+                focused: false,
+                pinned: true,
+            });
         }
     }
     for (index, (class, focused)) in windows.iter().enumerate() {
@@ -118,7 +125,8 @@ pub fn icon_in(slot: Rect) -> Rect {
 
 /// Which of `count` items is at a point, if any.
 pub fn item_at(dock: Rect, count: usize, upright: bool, x: i32, y: i32) -> Option<usize> {
-    (0..count).find(|i| slot(dock, *i, upright).is_some_and(|s| x >= s.x && x < s.right() && y >= s.y && y < s.bottom()))
+    (0..count)
+        .find(|i| slot(dock, *i, upright).is_some_and(|s| x >= s.x && x < s.right() && y >= s.y && y < s.bottom()))
 }
 
 /// Where an item being dragged along the dock would go: the place of the
@@ -164,7 +172,14 @@ mod tests {
     use super::*;
 
     fn entry(id: &str, name: &str, exec: &str, class: &str) -> Entry {
-        Entry { id: id.into(), name: name.into(), exec: vec![exec.into()], icon: id.into(), startup_wm_class: class.into(), ..Entry::default() }
+        Entry {
+            id: id.into(),
+            name: name.into(),
+            exec: vec![exec.into()],
+            icon: id.into(),
+            startup_wm_class: class.into(),
+            ..Entry::default()
+        }
     }
 
     fn entries() -> Vec<Entry> {
@@ -201,12 +216,17 @@ mod tests {
     fn pinned_applications_come_first_running_or_not() {
         let e = entries();
         let w = |class: &str, focused: bool| (class.to_string(), focused);
-        let pinned: Vec<String> = ["firefox", "no-such-app", "vergence-term", "firefox"].iter().map(|s| s.to_string()).collect();
+        let pinned: Vec<String> =
+            ["firefox", "no-such-app", "vergence-term", "firefox"].iter().map(|s| s.to_string()).collect();
         let got = items(&e, &pinned, &[w("xterm", false), w("vergence-term", true)]);
-        let summary: Vec<(&str, usize, bool, bool)> = got.iter().map(|i| (i.key.as_str(), i.windows.len(), i.focused, i.pinned)).collect();
+        let summary: Vec<(&str, usize, bool, bool)> =
+            got.iter().map(|i| (i.key.as_str(), i.windows.len(), i.focused, i.pinned)).collect();
         // Firefox is not running and has its place; the terminal's window is under its pin;
         // an id nothing has, and one named twice, add nothing.
-        assert_eq!(summary, [("firefox", 0, false, true), ("vergence-term", 1, true, true), ("xterm", 1, false, false)]);
+        assert_eq!(
+            summary,
+            [("firefox", 0, false, true), ("vergence-term", 1, true, true), ("xterm", 1, false, false)]
+        );
         assert_eq!(got[1].windows, [1]);
     }
 
@@ -214,11 +234,29 @@ mod tests {
     fn one_item_for_each_application_in_the_order_they_started() {
         let e = entries();
         let w = |class: &str, focused: bool| (class.to_string(), focused);
-        let got = items(&e, &[], &[w("vergence-term", false), w("firefox", false), w("XTerm", false), w("vergence-term", true), w("xterm", false)]);
-        let summary: Vec<(&str, &str, usize, bool)> = got.iter().map(|i| (i.key.as_str(), i.name.as_str(), i.windows.len(), i.focused)).collect();
-        assert_eq!(summary, [("vergence-term", "Terminal", 2, true), ("firefox", "Firefox", 1, false), ("xterm", "XTerm", 2, false)]);
+        let got = items(
+            &e,
+            &[],
+            &[
+                w("vergence-term", false),
+                w("firefox", false),
+                w("XTerm", false),
+                w("vergence-term", true),
+                w("xterm", false),
+            ],
+        );
+        let summary: Vec<(&str, &str, usize, bool)> =
+            got.iter().map(|i| (i.key.as_str(), i.name.as_str(), i.windows.len(), i.focused)).collect();
+        assert_eq!(
+            summary,
+            [("vergence-term", "Terminal", 2, true), ("firefox", "Firefox", 1, false), ("xterm", "XTerm", 2, false)]
+        );
         assert_eq!(got[0].windows, [0, 3]);
-        assert_eq!((got[0].icon.as_str(), got[2].icon.as_str()), ("vergence-term", ""), "no entry, no icon name: a letter");
+        assert_eq!(
+            (got[0].icon.as_str(), got[2].icon.as_str()),
+            ("vergence-term", ""),
+            "no entry, no icon name: a letter"
+        );
         assert!(items(&e, &[], &[]).is_empty());
     }
 
@@ -262,12 +300,28 @@ mod tests {
         let s = |v: &[&str]| v.iter().map(|a| a.to_string()).collect::<Vec<_>>();
         let items = k(&[("a", true), ("b", true), ("c", true), ("x", false), ("y", false)]);
         let pinned = s(&["a", "gone", "b", "c"]);
-        assert_eq!(dropped(&pinned, &items, 0, 2), Some(s(&["b", "c", "a", "gone"])), "moved down; an id not shown kept at the end");
+        assert_eq!(
+            dropped(&pinned, &items, 0, 2),
+            Some(s(&["b", "c", "a", "gone"])),
+            "moved down; an id not shown kept at the end"
+        );
         assert_eq!(dropped(&pinned, &items, 2, 0), Some(s(&["c", "a", "b", "gone"])));
-        assert_eq!(dropped(&pinned, &items, 0, 4), Some(s(&["b", "c", "a", "gone"])), "a pinned item stays among the pinned");
+        assert_eq!(
+            dropped(&pinned, &items, 0, 4),
+            Some(s(&["b", "c", "a", "gone"])),
+            "a pinned item stays among the pinned"
+        );
         assert_eq!(dropped(&pinned, &items, 1, 1), None, "back where it was");
-        assert_eq!(dropped(&pinned, &items, 3, 1), Some(s(&["a", "x", "b", "c", "gone"])), "pinned where it was dropped");
-        assert_eq!(dropped(&pinned, &items, 4, 3), Some(s(&["a", "b", "c", "y", "gone"])), "right after the pinned: pinned last");
+        assert_eq!(
+            dropped(&pinned, &items, 3, 1),
+            Some(s(&["a", "x", "b", "c", "gone"])),
+            "pinned where it was dropped"
+        );
+        assert_eq!(
+            dropped(&pinned, &items, 4, 3),
+            Some(s(&["a", "b", "c", "y", "gone"])),
+            "right after the pinned: pinned last"
+        );
         assert_eq!(dropped(&pinned, &items, 3, 4), None, "among the unpinned: nothing changes");
         assert_eq!(dropped(&[], &k(&[("x", false)]), 0, 0), Some(s(&["x"])), "the first pin");
         assert_eq!(dropped(&pinned, &items, 9, 0), None);

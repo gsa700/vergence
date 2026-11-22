@@ -98,23 +98,61 @@ struct SwitchState {
 /// Something being dragged.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Drag {
-    Slider { id: Id, with: With, value: f32 },
-    Select { id: Id },
-    Bar { id: Id, grab: f32 },
+    Slider {
+        id: Id,
+        with: With,
+        value: f32,
+    },
+    Select {
+        id: Id,
+    },
+    Bar {
+        id: Id,
+        grab: f32,
+    },
     /// A finger on a scrolling place: it scrolls once it has moved.
-    Flick { id: Id, finger: i32, start: f32, last: f32, at: Instant, moved: bool, velocity: f32 },
-    Drawing { id: Id, with: With },
+    Flick {
+        id: Id,
+        finger: i32,
+        start: f32,
+        last: f32,
+        at: Instant,
+        moved: bool,
+        velocity: f32,
+    },
+    Drawing {
+        id: Id,
+        with: With,
+    },
     /// Choosing text in a text area with the pointer.
-    AreaSelect { id: Id },
+    AreaSelect {
+        id: Id,
+    },
     /// A text area's scroll bar.
-    AreaBar { id: Id, grab: f32 },
+    AreaBar {
+        id: Id,
+        grab: f32,
+    },
     /// A finger on a text area: it scrolls once it has moved, else it is a tap.
-    AreaTouch { id: Id, finger: i32, start: f32, last: f32, moved: bool },
+    AreaTouch {
+        id: Id,
+        finger: i32,
+        start: f32,
+        last: f32,
+        moved: bool,
+    },
 }
 
 fn drag_id(d: &Drag) -> Id {
     match *d {
-        Drag::Slider { id, .. } | Drag::Select { id } | Drag::Bar { id, .. } | Drag::Flick { id, .. } | Drag::Drawing { id, .. } | Drag::AreaSelect { id } | Drag::AreaBar { id, .. } | Drag::AreaTouch { id, .. } => id,
+        Drag::Slider { id, .. }
+        | Drag::Select { id }
+        | Drag::Bar { id, .. }
+        | Drag::Flick { id, .. }
+        | Drag::Drawing { id, .. }
+        | Drag::AreaSelect { id }
+        | Drag::AreaBar { id, .. }
+        | Drag::AreaTouch { id, .. } => id,
     }
 }
 
@@ -395,17 +433,25 @@ impl<M: Clone> Ui<M> {
 
     pub fn layout(&mut self, root: Element<M>, width: f32, height: f32, measure: &mut dyn Measure, text_size: f32) {
         let mut nodes = Vec::new();
-        Layout { measure, text_size, factor: self.text_factor, lines_seen: Default::default() }.run(root, Rect::new(0.0, 0.0, width, height), &mut nodes);
+        Layout { measure, text_size, factor: self.text_factor, lines_seen: Default::default() }.run(
+            root,
+            Rect::new(0.0, 0.0, width, height),
+            &mut nodes,
+        );
         let before: HashSet<Id> = self.nodes.iter().map(|n| n.id).collect();
         self.nodes = nodes;
         self.size = (width, height);
         let alive = |id: Option<Id>, nodes: &[Node<M>]| id.filter(|id| nodes.iter().any(|n| n.id == *id && n.active()));
         self.hover = alive(self.hover, &self.nodes);
-        self.focus = alive(self.focus, &self.nodes).filter(|id| self.nodes.iter().any(|n| n.id == *id && n.focusable()));
+        self.focus =
+            alive(self.focus, &self.nodes).filter(|id| self.nodes.iter().any(|n| n.id == *id && n.focusable()));
         // A field that asks for the keyboard gets it when it first appears.
         // A field's text is chosen then, so typing replaces it (a name offered).
         let mut choose_all = None;
-        if let Some(n) = self.nodes.iter().find(|n| matches!(n.what, What::Field { autofocus: true, .. } | What::Area { autofocus: true, .. }) && !before.contains(&n.id)) {
+        if let Some(n) = self.nodes.iter().find(|n| {
+            matches!(n.what, What::Field { autofocus: true, .. } | What::Area { autofocus: true, .. })
+                && !before.contains(&n.id)
+        }) {
             self.focus = Some(n.id);
             if matches!(n.what, What::Field { .. }) {
                 choose_all = Some(n.id);
@@ -523,7 +569,10 @@ impl<M: Clone> Ui<M> {
     /// The topmost widget that takes input at `x`, `y`.
     fn target(&self, x: f32, y: f32) -> Option<Id> {
         let hidden = self.hidden();
-        (0..self.nodes.len()).rev().find(|&i| !hidden[i] && self.nodes[i].active() && self.hit(i, x, y)).map(|i| self.nodes[i].id)
+        (0..self.nodes.len())
+            .rev()
+            .find(|&i| !hidden[i] && self.nodes[i].active() && self.hit(i, x, y))
+            .map(|i| self.nodes[i].id)
     }
 
     /// Whether the element named `name` is in sight (not hidden for want of hover).
@@ -574,12 +623,18 @@ impl<M: Clone> Ui<M> {
     where
         M: Clone,
     {
-        (0..self.nodes.len()).rev().find(|&i| self.nodes[i].on_menu.is_some() && self.hit(i, x, y)).and_then(|i| self.nodes[i].on_menu.clone())
+        (0..self.nodes.len())
+            .rev()
+            .find(|&i| self.nodes[i].on_menu.is_some() && self.hit(i, x, y))
+            .and_then(|i| self.nodes[i].on_menu.clone())
     }
 
     /// The innermost scrolling place at `x`, `y` that has more than it shows.
     fn scroller_at(&self, x: f32, y: f32) -> Option<usize> {
-        (0..self.nodes.len()).rev().find(|&i| matches!(self.nodes[i].what, What::Scroll { content } if content > self.nodes[i].rect.h + 0.5) && self.hit(i, x, y))
+        (0..self.nodes.len()).rev().find(|&i| {
+            matches!(self.nodes[i].what, What::Scroll { content } if content > self.nodes[i].rect.h + 0.5)
+                && self.hit(i, x, y)
+        })
     }
 
     /// The nearest scrolling place around node `i`.
@@ -700,7 +755,9 @@ impl<M: Clone> Ui<M> {
     /// slide): a frame is wanted every time the monitor can show one.
     pub fn animating(&self) -> bool {
         let now = Instant::now();
-        self.scrolls.values().any(|s| s.velocity != 0.0) || (!self.steady && self.switches.values().any(|s| s.changed.is_some_and(|t| now.duration_since(t) < SLIDE)))
+        self.scrolls.values().any(|s| s.velocity != 0.0)
+            || (!self.steady
+                && self.switches.values().any(|s| s.changed.is_some_and(|t| now.duration_since(t) < SLIDE)))
     }
 
     /// Moves momentum on to `now`. Called before each frame.
@@ -710,7 +767,9 @@ impl<M: Clone> Ui<M> {
         if dt == 0.0 {
             return;
         }
-        let moving: Vec<(usize, f32)> = (0..self.nodes.len()).filter_map(|i| self.scrolls.get(&self.nodes[i].id).filter(|s| s.velocity != 0.0).map(|s| (i, s.velocity))).collect();
+        let moving: Vec<(usize, f32)> = (0..self.nodes.len())
+            .filter_map(|i| self.scrolls.get(&self.nodes[i].id).filter(|s| s.velocity != 0.0).map(|s| (i, s.velocity)))
+            .collect();
         for (i, v) in moving {
             let moved = self.scroll_by(i, v * dt);
             if let Some(s) = self.scrolls.get_mut(&self.nodes[i].id) {
@@ -727,7 +786,10 @@ impl<M: Clone> Ui<M> {
         if self.steady {
             return None;
         }
-        let focused_field = self.focus.and_then(|id| self.node(id)).is_some_and(|n| matches!(n.what, What::Field { .. } | What::Area { .. }));
+        let focused_field = self
+            .focus
+            .and_then(|id| self.node(id))
+            .is_some_and(|n| matches!(n.what, What::Field { .. } | What::Area { .. }));
         if !focused_field {
             return None;
         }
@@ -738,7 +800,8 @@ impl<M: Clone> Ui<M> {
 
     /// The caret is drawn now.
     fn caret_on(&self) -> bool {
-        self.steady || (Instant::now().saturating_duration_since(self.blink).as_millis() / BLINK.as_millis()).is_multiple_of(2)
+        self.steady
+            || (Instant::now().saturating_duration_since(self.blink).as_millis() / BLINK.as_millis()).is_multiple_of(2)
     }
 
     fn caret_moved(&mut self) {
@@ -802,7 +865,11 @@ impl<M: Clone> Ui<M> {
         let usable = self.nodes[i].active();
         match action {
             Action::Press => match &self.nodes[i].what {
-                What::Button { on_press: Some(_), .. } | What::Switch { on_toggle: Some(_), .. } | What::Choice { on_select: Some(_), .. } if usable => {
+                What::Button { on_press: Some(_), .. }
+                | What::Switch { on_toggle: Some(_), .. }
+                | What::Choice { on_select: Some(_), .. }
+                    if usable =>
+                {
                     self.reveal(i);
                     self.activate(id, &mut r);
                 }
@@ -829,7 +896,11 @@ impl<M: Clone> Ui<M> {
                 What::Field { secret: true, .. } => return Err("a secret field is not set by actions".into()),
                 What::Field { value: current, on_input: Some(_), .. } if usable => {
                     let current = current.clone();
-                    let f = self.fields.entry(id).or_insert_with(|| FieldState { text: current.clone(), sent: current, ..Default::default() });
+                    let f = self.fields.entry(id).or_insert_with(|| FieldState {
+                        text: current.clone(),
+                        sent: current,
+                        ..Default::default()
+                    });
                     f.anchor = 0;
                     f.caret = f.text.len();
                     self.field_insert(id, value, crate::edit::Kind::Other, &mut r);
@@ -869,12 +940,18 @@ impl<M: Clone> Ui<M> {
                     self.area_changed(id, &mut r);
                     r.redraw = true;
                 }
-                What::Field { .. } | What::Switch { .. } | What::Slider { .. } | What::Area { .. } => return Err("it is off".into()),
+                What::Field { .. } | What::Switch { .. } | What::Slider { .. } | What::Area { .. } => {
+                    return Err("it is off".into());
+                }
                 _ => return Err("it has no value to set".into()),
             },
             Action::Choose(name) => match &self.nodes[i].what {
                 What::Choice { options, on_select: Some(f), .. } if usable => {
-                    let k = options.iter().position(|o| o == name).or_else(|| options.iter().position(|o| o.eq_ignore_ascii_case(name))).ok_or_else(|| format!("no item named {name:?} (its items: {})", options.join(", ")))?;
+                    let k = options
+                        .iter()
+                        .position(|o| o == name)
+                        .or_else(|| options.iter().position(|o| o.eq_ignore_ascii_case(name)))
+                        .ok_or_else(|| format!("no item named {name:?} (its items: {})", options.join(", ")))?;
                     r.messages.push(f(k));
                     if self.open.is_some_and(|o| o.id == id) {
                         self.open = None;
@@ -1027,7 +1104,8 @@ impl<M: Clone> Ui<M> {
         if self.spell
             && !secret
             && let Some(sp) = vergence_spell::speller()
-            && let Some((wa, wb)) = vergence_spell::words_to_check(&f.text).into_iter().find(|(wa, wb)| *wa <= at && at <= *wb)
+            && let Some((wa, wb)) =
+                vergence_spell::words_to_check(&f.text).into_iter().find(|(wa, wb)| *wa <= at && at <= *wb)
         {
             let w = f.text[wa..wb].to_string();
             if !sp.check(&w) {
@@ -1050,7 +1128,13 @@ impl<M: Clone> Ui<M> {
             let mut acts = Vec::new();
             for (label, act) in &items {
                 let real = *act != FieldAct::Nothing;
-                lines.push(MenuLine::Item { id: MENU_ID_BASE + acts.len() as u32, label: label.clone(), keys: String::new(), enabled: real, checked: None });
+                lines.push(MenuLine::Item {
+                    id: MENU_ID_BASE + acts.len() as u32,
+                    label: label.clone(),
+                    keys: String::new(),
+                    enabled: real,
+                    checked: None,
+                });
                 acts.push(real.then(|| act.clone()));
             }
             if !items.is_empty() {
@@ -1062,7 +1146,13 @@ impl<M: Clone> Ui<M> {
                 ("Copy", FieldAct::Copy, selected && !secret, "Ctrl+C"),
                 ("Paste", FieldAct::Paste, editable, "Ctrl+V"),
             ] {
-                lines.push(MenuLine::Item { id: MENU_ID_BASE + acts.len() as u32, label: label.into(), keys: keys.into(), enabled: on, checked: None });
+                lines.push(MenuLine::Item {
+                    id: MENU_ID_BASE + acts.len() as u32,
+                    label: label.into(),
+                    keys: keys.into(),
+                    enabled: on,
+                    checked: None,
+                });
                 acts.push(on.then_some(act));
             }
             self.focus = Some(id);
@@ -1241,7 +1331,8 @@ impl<M: Clone> Ui<M> {
                 }
                 // Undo, redo (Ctrl+Shift+Z or Ctrl+Y).
                 Some(c @ ('z' | 'y')) if editable => {
-                    let back = if c == 'z' && !m.shift { f.history.undo(&mut f.text) } else { f.history.redo(&mut f.text) };
+                    let back =
+                        if c == 'z' && !m.shift { f.history.undo(&mut f.text) } else { f.history.redo(&mut f.text) };
                     let Some((caret, anchor)) = back else { return true };
                     f.caret = caret;
                     f.anchor = anchor;
@@ -1313,7 +1404,9 @@ impl<M: Clone> Ui<M> {
                 let at = self.field_offset(i, x);
                 let now = Instant::now();
                 let count = match self.click {
-                    Some((t, cid, n)) if cid == id && now.duration_since(t) < self.double && with == With::Pointer => n % 3 + 1,
+                    Some((t, cid, n)) if cid == id && now.duration_since(t) < self.double && with == With::Pointer => {
+                        n % 3 + 1
+                    }
                     _ => 1,
                 };
                 self.click = Some((now, id, count));
@@ -1352,7 +1445,9 @@ impl<M: Clone> Ui<M> {
                 }
                 let now = Instant::now();
                 let count = match self.click {
-                    Some((t, cid, n)) if cid == id && now.duration_since(t) < self.double && with == With::Pointer => n % 3 + 1,
+                    Some((t, cid, n)) if cid == id && now.duration_since(t) < self.double && with == With::Pointer => {
+                        n % 3 + 1
+                    }
                     _ => 1,
                 };
                 self.click = Some((now, id, count));
@@ -1383,7 +1478,8 @@ impl<M: Clone> Ui<M> {
         if let Some(menu) = self.field_menu.clone() {
             let row_at = |x: f32, y: f32| -> Option<usize> {
                 let m = &menu;
-                (inside(&m.rect, x, y) && y >= m.rect.y + vergence_look::MENU_PAD).then(|| (((y - m.rect.y - vergence_look::MENU_PAD) / m.row) as usize).min(m.items.len() - 1))
+                (inside(&m.rect, x, y) && y >= m.rect.y + vergence_look::MENU_PAD)
+                    .then(|| (((y - m.rect.y - vergence_look::MENU_PAD) / m.row) as usize).min(m.items.len() - 1))
             };
             match *input {
                 Input::PointerMoved { x, y } => {
@@ -1454,7 +1550,13 @@ impl<M: Clone> Ui<M> {
                 }
             }
             // A right click on a field: its menu (spelling, the clipboard).
-            Input::Button { button: MouseButton::Right, pressed: true, x, y, .. } if self.open.is_none() && self.target(x, y).and_then(|id| self.node(id)).is_some_and(|n| matches!(n.what, What::Field { .. })) => {
+            Input::Button { button: MouseButton::Right, pressed: true, x, y, .. }
+                if self.open.is_none()
+                    && self
+                        .target(x, y)
+                        .and_then(|id| self.node(id))
+                        .is_some_and(|n| matches!(n.what, What::Field { .. })) =>
+            {
                 if let Some(id) = self.target(x, y) {
                     self.open_field_menu(id, x, y);
                     self.caret_moved();
@@ -1463,7 +1565,9 @@ impl<M: Clone> Ui<M> {
                 }
             }
             // A right click on a text area: its menu (spelling, the clipboard).
-            Input::Button { button: MouseButton::Right, pressed: true, x, y, .. } if self.open.is_none() && self.target(x, y).and_then(|id| self.area_doc(id)).is_some() => {
+            Input::Button { button: MouseButton::Right, pressed: true, x, y, .. }
+                if self.open.is_none() && self.target(x, y).and_then(|id| self.area_doc(id)).is_some() =>
+            {
                 if let Some(id) = self.target(x, y)
                     && let Some(doc) = self.area_doc(id)
                 {
@@ -1484,7 +1588,9 @@ impl<M: Clone> Ui<M> {
             }
             // A right click on something with a menu message (Element::on_menu):
             // the innermost one under the pointer sends it.
-            Input::Button { button: MouseButton::Right, pressed: true, x, y, .. } if self.open.is_none() && self.menu_at(x, y).is_some() => {
+            Input::Button { button: MouseButton::Right, pressed: true, x, y, .. }
+                if self.open.is_none() && self.menu_at(x, y).is_some() =>
+            {
                 if let Some(m) = self.menu_at(x, y) {
                     r.messages.push(m);
                     r.used = true;
@@ -1493,7 +1599,9 @@ impl<M: Clone> Ui<M> {
             Input::Button { button: MouseButton::Left, pressed: false, x, y, .. } => {
                 match self.drag.take() {
                     Some(Drag::Slider { id, with: With::Pointer, .. }) => self.slider_release(id, &mut r),
-                    Some(Drag::Drawing { id, with: With::Pointer }) => self.tell_drawing(id, Touch::Release { x, y }, &mut r),
+                    Some(Drag::Drawing { id, with: With::Pointer }) => {
+                        self.tell_drawing(id, Touch::Release { x, y }, &mut r)
+                    }
                     Some(Drag::Select { .. } | Drag::Bar { .. } | Drag::AreaSelect { .. } | Drag::AreaBar { .. }) => {
                         r.used = true;
                         r.redraw = true;
@@ -1541,7 +1649,9 @@ impl<M: Clone> Ui<M> {
                 }
             }
             Input::Touch { id: finger, phase, x, y } => self.touch(finger, phase, x, y, &mut r),
-            Input::Key { sym: key, ref text, pressed: true, repeat, composing: false, modifiers } => self.key(key, text.as_deref(), repeat, modifiers, &mut r),
+            Input::Key { sym: key, ref text, pressed: true, repeat, composing: false, modifiers } => {
+                self.key(key, text.as_deref(), repeat, modifiers, &mut r)
+            }
             Input::Key { sym: key, pressed: false, .. } if key == sym::RETURN || key == ' ' as u32 => {
                 if let Some((_, With::Key)) = self.pressed {
                     self.pressed = None;
@@ -1553,7 +1663,11 @@ impl<M: Clone> Ui<M> {
                 if let Some(id) = self.focus {
                     if let Some(doc) = self.area_doc(id) {
                         let changed = doc.borrow_mut().insert(text);
-                        self.area_effect(id, crate::textarea::Effect { used: true, text: changed, moved: changed, ..Default::default() }, &mut r);
+                        self.area_effect(
+                            id,
+                            crate::textarea::Effect { used: true, text: changed, moved: changed, ..Default::default() },
+                            &mut r,
+                        );
                     } else {
                         self.field_insert(id, text, crate::edit::Kind::Other, &mut r);
                     }
@@ -1609,7 +1723,8 @@ impl<M: Clone> Ui<M> {
             (_, None) if asked.is_some() => asked.unwrap_or(Cursor::Default),
             (_, Some(Drag::AreaBar { .. })) => Cursor::Default,
             (Some(What::Area { .. }), None) if on_bar => Cursor::Default,
-            (_, Some(Drag::Select { .. } | Drag::AreaSelect { .. })) | (Some(What::Field { .. } | What::Area { .. }), _) => Cursor::Text,
+            (_, Some(Drag::Select { .. } | Drag::AreaSelect { .. }))
+            | (Some(What::Field { .. } | What::Area { .. }), _) => Cursor::Text,
             (Some(What::Drawing { cursor, .. }), _) => cursor.unwrap_or(Cursor::Default),
             // Buttons, switches, sliders: the arrow, as on the Mac and
             // Windows; the hand only where asked (a link).
@@ -1662,7 +1777,9 @@ impl<M: Clone> Ui<M> {
                     r.redraw = true;
                 }
             }
-            Some(Drag::Drawing { id, with: With::Pointer }) => self.tell_drawing(id, Touch::Move { x, y, pressed: true }, r),
+            Some(Drag::Drawing { id, with: With::Pointer }) => {
+                self.tell_drawing(id, Touch::Move { x, y, pressed: true }, r)
+            }
             Some(Drag::AreaSelect { id }) => {
                 if let Some(doc) = self.area_doc(id) {
                     doc.borrow_mut().drag_to(x, y);
@@ -1746,7 +1863,10 @@ impl<M: Clone> Ui<M> {
                     r.used = true;
                     return;
                 }
-                let grabs = self.target(x, y).and_then(|id| self.node(id)).map(|n| matches!(n.what, What::Slider { .. } | What::Drawing { .. } | What::Field { .. }));
+                let grabs = self
+                    .target(x, y)
+                    .and_then(|id| self.node(id))
+                    .map(|n| matches!(n.what, What::Slider { .. } | What::Drawing { .. } | What::Field { .. }));
                 match grabs {
                     // These take a finger at once: it drags them, not the page.
                     Some(true) => self.press_at(x, y, With::Finger(finger), r),
@@ -1755,7 +1875,15 @@ impl<M: Clone> Ui<M> {
                             if let Some(st) = self.scrolls.get_mut(&self.nodes[s].id) {
                                 st.velocity = 0.0;
                             }
-                            self.drag = Some(Drag::Flick { id: self.nodes[s].id, finger, start: y, last: y, at: now, moved: false, velocity: 0.0 });
+                            self.drag = Some(Drag::Flick {
+                                id: self.nodes[s].id,
+                                finger,
+                                start: y,
+                                last: y,
+                                at: now,
+                                moved: false,
+                                velocity: 0.0,
+                            });
                             r.used = true;
                         }
                         if grabs.is_some() {
@@ -1783,7 +1911,15 @@ impl<M: Clone> Ui<M> {
                             let dt = now.saturating_duration_since(at).as_secs_f32().max(0.004);
                             v = 0.6 * ((last - y) / dt) + 0.4 * velocity;
                         }
-                        self.drag = Some(Drag::Flick { id, finger, start, last: if moved { y } else { last }, at: now, moved, velocity: v });
+                        self.drag = Some(Drag::Flick {
+                            id,
+                            finger,
+                            start,
+                            last: if moved { y } else { last },
+                            at: now,
+                            moved,
+                            velocity: v,
+                        });
                         r.redraw = true;
                         r.used = true;
                     }
@@ -1792,13 +1928,16 @@ impl<M: Clone> Ui<M> {
                             self.slider_send(id, v, r);
                         }
                     }
-                    Some(Drag::Drawing { id, with: With::Finger(f) }) if f == finger => self.tell_drawing(id, Touch::Move { x, y, pressed: true }, r),
+                    Some(Drag::Drawing { id, with: With::Finger(f) }) if f == finger => {
+                        self.tell_drawing(id, Touch::Move { x, y, pressed: true }, r)
+                    }
                     Some(Drag::AreaTouch { id, finger: f, start, last, moved }) if f == finger => {
                         let moved = moved || (y - start).abs() > SLOP;
                         if moved && let Some(doc) = self.area_doc(id) {
                             doc.borrow_mut().wheel(0.0, last - y);
                         }
-                        self.drag = Some(Drag::AreaTouch { id, finger, start, last: if moved { y } else { last }, moved });
+                        self.drag =
+                            Some(Drag::AreaTouch { id, finger, start, last: if moved { y } else { last }, moved });
                         r.redraw = true;
                         r.used = true;
                     }
@@ -1815,7 +1954,11 @@ impl<M: Clone> Ui<M> {
                     Some(Drag::Flick { id, finger: f, moved, velocity, at, .. }) if f == finger => {
                         self.drag = None;
                         // A flick goes on by itself; a finger that stopped before lifting does not.
-                        if up && moved && now.saturating_duration_since(at) < Duration::from_millis(80) && velocity.abs() > 100.0 {
+                        if up
+                            && moved
+                            && now.saturating_duration_since(at) < Duration::from_millis(80)
+                            && velocity.abs() > 100.0
+                        {
                             if let Some(st) = self.scrolls.get_mut(&id) {
                                 st.velocity = velocity.clamp(-6000.0, 6000.0);
                             }
@@ -1834,7 +1977,10 @@ impl<M: Clone> Ui<M> {
                     }
                     Some(Drag::AreaTouch { id, finger: f, moved, .. }) if f == finger => {
                         self.drag = None;
-                        if up && !moved && let Some(doc) = self.area_doc(id) {
+                        if up
+                            && !moved
+                            && let Some(doc) = self.area_doc(id)
+                        {
                             self.focus = Some(id);
                             self.ring = false;
                             doc.borrow_mut().press(x, y, 1, false);
@@ -1978,7 +2124,9 @@ impl<M: Clone> Ui<M> {
         }
         // Page keys move the page the focus is on, or the first that scrolls.
         if matches!(key, sym::PAGE_UP | sym::PAGE_DOWN | sym::HOME | sym::END) && plain {
-            let s = focused.and_then(|i| self.scroller_of(i)).or_else(|| (0..self.nodes.len()).find(|&i| matches!(self.nodes[i].what, What::Scroll { .. })));
+            let s = focused
+                .and_then(|i| self.scroller_of(i))
+                .or_else(|| (0..self.nodes.len()).find(|&i| matches!(self.nodes[i].what, What::Scroll { .. })));
             if let Some(s) = s {
                 let page = (self.nodes[s].rect.h - 40.0).max(20.0);
                 let dy = match key {
@@ -2013,7 +2161,9 @@ impl<M: Clone> Ui<M> {
         let now = Instant::now();
         self.caret_at.set(None);
         self.spell = theme.spell;
-        let face = |fonts: &mut Fonts, weight: u16| fonts.face(&theme.font, weight, false).or_else(|| fonts.face("sans-serif", weight, false));
+        let face = |fonts: &mut Fonts, weight: u16| {
+            fonts.face(&theme.font, weight, false).or_else(|| fonts.face("sans-serif", weight, false))
+        };
         let mut ink: Vec<Color> = Vec::with_capacity(self.nodes.len());
         let hidden = self.hidden();
         // The scrolling places being drawn into, the innermost last.
@@ -2109,7 +2259,13 @@ impl<M: Clone> Ui<M> {
                         scene.stroke(r, rad, w, fade(c));
                     }
                     let strong = matches!(look, ButtonLook::Accent | ButtonLook::Chosen);
-                    mine = if on { i_c } else if strong { alpha(i_c, 170) } else { theme.dim };
+                    mine = if on {
+                        i_c
+                    } else if strong {
+                        alpha(i_c, 170)
+                    } else {
+                        theme.dim
+                    };
                     if ringed {
                         ring(scene, r, rad);
                     }
@@ -2117,20 +2273,27 @@ impl<M: Clone> Ui<M> {
                 What::Switch { on, on_toggle } => {
                     let usable = on_toggle.is_some();
                     let t = match self.switches.get(&n.id).and_then(|s| s.changed) {
-                        Some(at) if !self.steady => (now.saturating_duration_since(at).as_secs_f32() / SLIDE.as_secs_f32()).min(1.0),
+                        Some(at) if !self.steady => {
+                            (now.saturating_duration_since(at).as_secs_f32() / SLIDE.as_secs_f32()).min(1.0)
+                        }
                         _ => 1.0,
                     };
                     let pos = if *on { t } else { 1.0 - t };
                     let off_c = if theme.high_contrast { theme.dim } else { over(theme.line, alpha(theme.text, 40)) };
                     let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * pos).round() as u8;
-                    let mut track = Color::rgb(l(off_c.r, theme.accent.r), l(off_c.g, theme.accent.g), l(off_c.b, theme.accent.b));
+                    let mut track =
+                        Color::rgb(l(off_c.r, theme.accent.r), l(off_c.g, theme.accent.g), l(off_c.b, theme.accent.b));
                     if !usable {
                         track = alpha(track, 110);
                     }
                     scene.fill_rounded(r, r.h / 2.0, track);
                     let d = r.h - 4.0;
                     let kx = r.x + 2.0 + (r.w - 4.0 - d) * pos;
-                    scene.fill_rounded(Rect::new(kx, r.y + 2.0, d, d), d / 2.0, if usable { white } else { alpha(white, 160) });
+                    scene.fill_rounded(
+                        Rect::new(kx, r.y + 2.0, d, d),
+                        d / 2.0,
+                        if usable { white } else { alpha(white, 160) },
+                    );
                     if usable && self.hover == Some(n.id) {
                         scene.fill_rounded(r, r.h / 2.0, theme.hover);
                     }
@@ -2149,7 +2312,11 @@ impl<M: Clone> Ui<M> {
                     let cy = r.y + (r.h / 2.0).round() - if marks.is_empty() { 0.0 } else { 2.0 };
                     let line = if theme.high_contrast { theme.dim } else { over(theme.line, alpha(theme.text, 30)) };
                     scene.fill_rounded(Rect::new(x0, cy - 2.0, w, 4.0), 2.0, line);
-                    scene.fill_rounded(Rect::new(x0, cy - 2.0, w * f, 4.0), 2.0, if usable { theme.accent } else { theme.dim });
+                    scene.fill_rounded(
+                        Rect::new(x0, cy - 2.0, w * f, 4.0),
+                        2.0,
+                        if usable { theme.accent } else { theme.dim },
+                    );
                     for m in marks {
                         let mf = ((m - min) / (max - min)).clamp(0.0, 1.0);
                         scene.fill(Rect::new((x0 + w * mf - 0.5).round(), cy + 5.0, 1.0, 5.0), theme.dim);
@@ -2161,7 +2328,12 @@ impl<M: Clone> Ui<M> {
                         tc = over(tc, alpha(Color::rgb(0, 0, 0), 25));
                     }
                     scene.fill_rounded(thumb, THUMB / 2.0, tc);
-                    scene.stroke(thumb, THUMB / 2.0, 1.0, if theme.high_contrast { theme.text } else { alpha(Color::rgb(0, 0, 0), 60) });
+                    scene.stroke(
+                        thumb,
+                        THUMB / 2.0,
+                        1.0,
+                        if theme.high_contrast { theme.text } else { alpha(Color::rgb(0, 0, 0), 60) },
+                    );
                     if ringed {
                         ring(scene, thumb, THUMB / 2.0);
                     }
@@ -2176,15 +2348,26 @@ impl<M: Clone> Ui<M> {
                     } else {
                         scene.stroke(r, radius, 1.0, edge_c);
                     }
-                    let inner = Rect::new(r.x + FIELD_PAD_H, r.y + 1.0, (r.w - 2.0 * FIELD_PAD_H).max(0.0), (r.h - 2.0).max(0.0));
+                    let inner = Rect::new(
+                        r.x + FIELD_PAD_H,
+                        r.y + 1.0,
+                        (r.w - 2.0 * FIELD_PAD_H).max(0.0),
+                        (r.h - 2.0).max(0.0),
+                    );
                     if let Some(f) = face(fonts, 400) {
                         let state = self.fields.get(&n.id);
                         let now_text = state.map_or("", |s| s.text.as_str());
-                        let shown_text: String = if *secret { "\u{2022}".repeat(now_text.chars().count()) } else { now_text.to_string() };
+                        let shown_text: String =
+                            if *secret { "\u{2022}".repeat(now_text.chars().count()) } else { now_text.to_string() };
                         // Where each character boundary falls: a glyph for each character.
                         let (runs, total) = fonts.layout(f, *size, &shown_text);
                         let xs: Vec<f32> = runs.iter().flat_map(|run| run.glyphs.iter().map(|g| g.x)).collect();
-                        let mut stops: Vec<(usize, f32)> = now_text.char_indices().filter(|(_, c)| !c.is_control()).map(|(b, _)| b).zip(xs.iter().copied()).collect();
+                        let mut stops: Vec<(usize, f32)> = now_text
+                            .char_indices()
+                            .filter(|(_, c)| !c.is_control())
+                            .map(|(b, _)| b)
+                            .zip(xs.iter().copied())
+                            .collect();
                         stops.push((now_text.len(), total));
                         let (caret, anchor) = state.map_or((0, 0), |s| (s.caret, s.anchor));
                         let at = |b: usize| stops.iter().find(|s| s.0 == b).map_or(total, |s| s.1);
@@ -2198,17 +2381,33 @@ impl<M: Clone> Ui<M> {
                         }
                         shift = shift.clamp(0.0, (total - inner.w + 2.0).max(0.0));
                         if focused {
-                            self.caret_at.set(Some(Rect::new((inner.x + cx - shift).clamp(inner.x, inner.x + inner.w), r.y + 4.0, 1.5, (r.h - 8.0).max(1.0))));
+                            self.caret_at.set(Some(Rect::new(
+                                (inner.x + cx - shift).clamp(inner.x, inner.x + inner.w),
+                                r.y + 4.0,
+                                1.5,
+                                (r.h - 8.0).max(1.0),
+                            )));
                         }
                         scene.push_clip(inner, 0.0);
                         if focused && caret != anchor {
                             let (a, b) = (at(caret.min(anchor)), at(caret.max(anchor)));
-                            scene.fill(Rect::new(inner.x + a - shift, r.y + 4.0, b - a, r.h - 8.0), alpha(theme.accent, 90));
+                            scene.fill(
+                                Rect::new(inner.x + a - shift, r.y + 4.0, b - a, r.h - 8.0),
+                                alpha(theme.accent, 90),
+                            );
                         }
                         if now_text.is_empty() {
                             text(scene, fonts, f, *size, theme.dim, Point::new(inner.x, r.y + baseline), placeholder);
                         } else {
-                            text(scene, fonts, f, *size, if usable { theme.text } else { theme.dim }, Point::new(inner.x - shift, r.y + baseline), &shown_text);
+                            text(
+                                scene,
+                                fonts,
+                                f,
+                                *size,
+                                if usable { theme.text } else { theme.dim },
+                                Point::new(inner.x - shift, r.y + baseline),
+                                &shown_text,
+                            );
                         }
                         // Words spelled wrong, a red wave under each (not the one being typed).
                         if theme.spell
@@ -2236,7 +2435,10 @@ impl<M: Clone> Ui<M> {
                             }
                         }
                         if focused && caret == anchor && self.caret_on() {
-                            scene.fill(Rect::new((inner.x + cx - shift).round() - 0.5, r.y + 4.0, 1.5, r.h - 8.0), theme.text);
+                            scene.fill(
+                                Rect::new((inner.x + cx - shift).round() - 0.5, r.y + 4.0, 1.5, r.h - 8.0),
+                                theme.text,
+                            );
                         }
                         scene.pop_clip();
                         field_stops.push((n.id, stops, shift));
@@ -2273,7 +2475,8 @@ impl<M: Clone> Ui<M> {
                     let dest = match fit {
                         Fit::Stretch => r,
                         Fit::Contain | Fit::Cover => {
-                            let k = if *fit == Fit::Contain { (r.w / iw).min(r.h / ih) } else { (r.w / iw).max(r.h / ih) };
+                            let k =
+                                if *fit == Fit::Contain { (r.w / iw).min(r.h / ih) } else { (r.w / iw).max(r.h / ih) };
                             let (w, h) = (iw * k, ih * k);
                             Rect::new(r.x + (r.w - w) / 2.0, r.y + (r.h - h) / 2.0, w, h)
                         }
@@ -2322,7 +2525,9 @@ impl<M: Clone> Ui<M> {
         let Some(m) = &self.field_menu else { return };
         let r = m.rect;
         let look = menu_ground(scene, r, theme);
-        let Some(face) = fonts.face(&theme.font, 400, false).or_else(|| fonts.face("sans-serif", 400, false)) else { return };
+        let Some(face) = fonts.face(&theme.font, 400, false).or_else(|| fonts.face("sans-serif", 400, false)) else {
+            return;
+        };
         let size = theme.text_size;
         let ascent = fonts.metrics(face, size).ascent;
         let pad = vergence_look::MENU_PAD;
@@ -2333,7 +2538,15 @@ impl<M: Clone> Ui<M> {
                 scene.fill_rounded(row, vergence_look::MENU_ROW_RADIUS, look.hover);
             }
             let col = if *act == FieldAct::Nothing { look.ink_off } else { look.ink };
-            text(scene, fonts, face, size, col, Point::new(row.x + 8.0, (row.y + (m.row - size * 1.2) / 2.0 + ascent).round()), label);
+            text(
+                scene,
+                fonts,
+                face,
+                size,
+                col,
+                Point::new(row.x + 8.0, (row.y + (m.row - size * 1.2) / 2.0 + ascent).round()),
+                label,
+            );
         }
     }
 
@@ -2348,7 +2561,9 @@ impl<M: Clone> Ui<M> {
     fn draw_list(&self, scene: &mut Scene, fonts: &mut Fonts, theme: &Theme) {
         let Some(o) = self.open else { return };
         let Some((r, item, _)) = self.list_rect() else { return };
-        let Some(Node { what: What::Choice { options, selected, size, step, .. }, .. }) = self.node(o.id) else { return };
+        let Some(Node { what: What::Choice { options, selected, size, step, .. }, .. }) = self.node(o.id) else {
+            return;
+        };
         let look = menu_ground(scene, r, theme);
         let face: Option<FaceId> = fonts.face(&theme.font, 400, false).or_else(|| fonts.face("sans-serif", 400, false));
         let bold: Option<FaceId> = fonts.face(&theme.font, 600, false).or(face);
@@ -2369,7 +2584,15 @@ impl<M: Clone> Ui<M> {
             let col = look.ink;
             // The chosen one in semibold.
             if let Some(f) = if *selected == Some(k) { bold } else { face } {
-                text(scene, fonts, f, *size, col, Point::new(row.x + FIELD_PAD_H, (y + (item - step) / 2.0 + ascent).round()), opt);
+                text(
+                    scene,
+                    fonts,
+                    f,
+                    *size,
+                    col,
+                    Point::new(row.x + FIELD_PAD_H, (y + (item - step) / 2.0 + ascent).round()),
+                    opt,
+                );
             }
         }
         scene.pop_clip();
@@ -2389,7 +2612,8 @@ impl<M: Clone> Ui<M> {
         let mut slot: Vec<Option<usize>> = Vec::with_capacity(self.nodes.len());
         let mut in_button: Vec<bool> = Vec::with_capacity(self.nodes.len());
         for (i, n) in self.nodes.iter().enumerate() {
-            let parent_in_button = n.parent.is_some_and(|p| in_button[p] || matches!(self.nodes[p].what, What::Button { .. }));
+            let parent_in_button =
+                n.parent.is_some_and(|p| in_button[p] || matches!(self.nodes[p].what, What::Button { .. }));
             let (depth, parent) = {
                 let (mut d, mut first) = (0, None);
                 let mut p = n.parent;
@@ -2413,7 +2637,9 @@ impl<M: Clone> Ui<M> {
                 What::Choice { options, .. } => options.clone(),
                 _ => Vec::new(),
             };
-            let mk = |role, name, value: Option<String>, states| Some(Meaning { id, parent, role, name, value, states, bounds, depth, items: items.clone() });
+            let mk = |role, name, value: Option<String>, states| {
+                Some(Meaning { id, parent, role, name, value, states, bounds, depth, items: items.clone() })
+            };
             let off = |usable: bool, states: &mut Vec<&'static str>| {
                 if !usable {
                     states.insert(0, "off");
@@ -2504,7 +2730,18 @@ impl<M: Clone> Ui<M> {
         for m in self.meaning() {
             let states = if m.states.is_empty() { String::new() } else { format!(" [{}]", m.states.join(", ")) };
             let value = m.value.as_ref().map(|v| format!(" = {v:?}")).unwrap_or_default();
-            s += &format!("{}{} {:?}{}{} at {},{} {}x{}\n", "  ".repeat(m.depth), m.role, m.name, value, states, m.bounds.x, m.bounds.y, m.bounds.w, m.bounds.h);
+            s += &format!(
+                "{}{} {:?}{}{} at {},{} {}x{}\n",
+                "  ".repeat(m.depth),
+                m.role,
+                m.name,
+                value,
+                states,
+                m.bounds.x,
+                m.bounds.y,
+                m.bounds.w,
+                m.bounds.h
+            );
         }
         s
     }
@@ -2546,7 +2783,11 @@ fn menu_ground(scene: &mut Scene, r: Rect, theme: &Theme) -> MenuInk {
     let s = vergence_look::shelf_look(!theme.dark);
     let c = |k: vergence_look::Rgb| Color::rgb(k.0, k.1, k.2);
     let radius = vergence_look::MENU_RADIUS;
-    scene.fill_rounded(Rect::new(r.x - 1.0, r.y + 1.0, r.w + 2.0, r.h + 2.0), radius + 1.0, alpha(Color::rgb(0, 0, 0), 60));
+    scene.fill_rounded(
+        Rect::new(r.x - 1.0, r.y + 1.0, r.w + 2.0, r.h + 2.0),
+        radius + 1.0,
+        alpha(Color::rgb(0, 0, 0), 60),
+    );
     scene.fill_rounded(r, radius, c(s.menu));
     scene.stroke(r, radius, vergence_look::EDGE, if theme.high_contrast { theme.text } else { c(s.edge) });
     MenuInk { hover: c(s.hover), ink: c(s.menu_ink), ink_off: c(s.menu_ink_off) }

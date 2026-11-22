@@ -74,12 +74,23 @@ fn dashed(lines: &[Polyline], style: &Stroke, scale: f64) -> Vec<Polyline> {
     let total: f64 = pattern.iter().sum();
     // Drawn solid: no pattern, one finer than half a device pixel, or one
     // that would cut the path into more pieces than is reasonable.
-    let length: f64 = lines.iter().map(|l| l.points.windows(2).map(|w| ((w[1].x - w[0].x).powi(2) + (w[1].y - w[0].y).powi(2)).sqrt()).sum::<f64>()).sum();
-    if pattern.is_empty() || !total.is_finite() || total * scale < 0.5 || !length.is_finite() || length / total > MAX_DASHES as f64 {
+    let length: f64 = lines
+        .iter()
+        .map(|l| {
+            l.points.windows(2).map(|w| ((w[1].x - w[0].x).powi(2) + (w[1].y - w[0].y).powi(2)).sqrt()).sum::<f64>()
+        })
+        .sum();
+    if pattern.is_empty()
+        || !total.is_finite()
+        || total * scale < 0.5
+        || !length.is_finite()
+        || length / total > MAX_DASHES as f64
+    {
         return lines.iter().map(dedup).collect();
     }
     // An odd-length pattern repeats to even length.
-    let pattern: Vec<f64> = if pattern.len() % 2 == 1 { pattern.iter().chain(pattern.iter()).copied().collect() } else { pattern };
+    let pattern: Vec<f64> =
+        if pattern.len() % 2 == 1 { pattern.iter().chain(pattern.iter()).copied().collect() } else { pattern };
     let mut out = Vec::new();
     for line in lines {
         let line = dedup(line);
@@ -161,7 +172,15 @@ fn outline(line: &Polyline, half: f64, style: &Stroke, tol: f64, out: &mut Vec<P
         let p = pts[0];
         match style.cap {
             Cap::Round => push(out, circle(p, half, tol)),
-            Cap::Square => push(out, vec![Point::new(p.x - half, p.y - half), Point::new(p.x + half, p.y - half), Point::new(p.x + half, p.y + half), Point::new(p.x - half, p.y + half)]),
+            Cap::Square => push(
+                out,
+                vec![
+                    Point::new(p.x - half, p.y - half),
+                    Point::new(p.x + half, p.y - half),
+                    Point::new(p.x + half, p.y + half),
+                    Point::new(p.x - half, p.y + half),
+                ],
+            ),
             Cap::Butt => {}
         }
         return;
@@ -171,7 +190,15 @@ fn outline(line: &Polyline, half: f64, style: &Stroke, tol: f64, out: &mut Vec<P
     for i in 0..segs {
         let (a, b) = (pts[i], pts[(i + 1) % n]);
         let nrm = normal(a, b, half);
-        push(out, vec![Point::new(a.x + nrm.x, a.y + nrm.y), Point::new(b.x + nrm.x, b.y + nrm.y), Point::new(b.x - nrm.x, b.y - nrm.y), Point::new(a.x - nrm.x, a.y - nrm.y)]);
+        push(
+            out,
+            vec![
+                Point::new(a.x + nrm.x, a.y + nrm.y),
+                Point::new(b.x + nrm.x, b.y + nrm.y),
+                Point::new(b.x - nrm.x, b.y - nrm.y),
+                Point::new(a.x - nrm.x, a.y - nrm.y),
+            ],
+        );
     }
     // Joins at inner corners, and at the start of a closed one.
     let corners: Vec<usize> = if line.closed { (0..n).collect() } else { (1..n - 1).collect() };
@@ -232,7 +259,15 @@ fn cap(out: &mut Vec<Polyline>, from: Point, end: Point, half: f64, cap: Cap, to
             let n = normal(from, end, half);
             // Along the line, half a width further.
             let d = Point::new(n.y, -n.x);
-            push(out, vec![Point::new(end.x + n.x, end.y + n.y), Point::new(end.x + n.x + d.x, end.y + n.y + d.y), Point::new(end.x - n.x + d.x, end.y - n.y + d.y), Point::new(end.x - n.x, end.y - n.y)]);
+            push(
+                out,
+                vec![
+                    Point::new(end.x + n.x, end.y + n.y),
+                    Point::new(end.x + n.x + d.x, end.y + n.y + d.y),
+                    Point::new(end.x - n.x + d.x, end.y - n.y + d.y),
+                    Point::new(end.x - n.x, end.y - n.y),
+                ],
+            );
         }
     }
 }
@@ -241,7 +276,8 @@ fn circle(c: Point, r: f64, tol: f64) -> Vec<Point> {
     // Enough sides that no side strays more than a quarter of tol from the
     // circle (a dot's area must come out right, not only its outline).
     let tol = tol / 4.0;
-    let steps = if r > tol { (std::f64::consts::PI / (1.0 - tol / r).clamp(-1.0, 1.0).acos()).ceil() as usize } else { 4 };
+    let steps =
+        if r > tol { (std::f64::consts::PI / (1.0 - tol / r).clamp(-1.0, 1.0).acos()).ceil() as usize } else { 4 };
     let steps = steps.clamp(4, 256);
     (0..steps)
         .map(|i| {
@@ -302,7 +338,11 @@ mod tests {
         let miter = Stroke { width: 10.0, ..Default::default() };
         let bevel = Stroke { join: Join::Bevel, ..miter.clone() };
         let round = Stroke { join: Join::Round, ..miter.clone() };
-        let (m, b, r) = (area_of(&p, &miter, &Transform::IDENTITY), area_of(&p, &bevel, &Transform::IDENTITY), area_of(&p, &round, &Transform::IDENTITY));
+        let (m, b, r) = (
+            area_of(&p, &miter, &Transform::IDENTITY),
+            area_of(&p, &bevel, &Transform::IDENTITY),
+            area_of(&p, &round, &Transform::IDENTITY),
+        );
         // Two strokes of 100 x 10 overlapping in a 5 x 5 corner, plus the join's outer part.
         let base = 2000.0 - 25.0;
         assert!((m - (base + 25.0)).abs() < 1.0, "miter {m}");

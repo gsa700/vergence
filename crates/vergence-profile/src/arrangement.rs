@@ -389,7 +389,8 @@ mod tests {
         assert!(text.contains("[scaling]") && text.contains("enabled = true"), "{text}");
         assert_eq!(Store::from_toml(&text).unwrap(), s);
         // Old files (no factor, no [scaling]) still load.
-        let old = Store::from_toml("[[profile]]\nkey = \"k\"\n[[profile.output]]\nmonitor = \"m\"\nenabled = true\n").unwrap();
+        let old = Store::from_toml("[[profile]]\nkey = \"k\"\n[[profile.output]]\nmonitor = \"m\"\nenabled = true\n")
+            .unwrap();
         assert_eq!(old.profiles[0].outputs[0].factor, FIXED_ONE);
         assert!(!old.scaling.enabled);
         assert_eq!(old.scaling.preference, 100);
@@ -463,7 +464,11 @@ mod tests {
     #[test]
     fn toml_round_trip() {
         let mut s = Store::default();
-        s.put(Profile { key: "abc".into(), updated: "t".into(), outputs: vec![out("m1", "HDMI-1", 0), out("m2", "DP-1", 1920)] });
+        s.put(Profile {
+            key: "abc".into(),
+            updated: "t".into(),
+            outputs: vec![out("m1", "HDMI-1", 0), out("m2", "DP-1", 1920)],
+        });
         let text = s.to_toml();
         assert!(text.contains("[[profile]]") && text.contains("[[profile.output]]"), "{text}");
         assert_eq!(Store::from_toml(&text).unwrap(), s);

@@ -7,15 +7,18 @@
 
 use std::hash::{Hash, Hasher};
 
+use smithay::backend::allocator::Fourcc;
 use smithay::{
     backend::renderer::{
-        element::{Kind, memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement}},
+        element::{
+            Kind,
+            memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
+        },
         gles::GlesRenderer,
     },
     reexports::calloop::timer::{TimeoutAction, Timer},
     utils::{Logical, Point, Rectangle, Transform},
 };
-use smithay::backend::allocator::Fourcc;
 use vergence_protocol::tile::{ControlKind, Tile, TileState};
 use vergence_scene::{Color, Point as ScenePoint, Rect as SceneRect, Scene};
 use vergence_shell::{Edge, Rect, tiles};
@@ -27,7 +30,9 @@ use crate::{Server, decor::SceneElement};
 fn clock_look() -> tiles::ClockLook {
     let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
     let table = text.parse::<toml::Table>().ok();
-    let get = |k: &str| table.as_ref().and_then(|t| t.get("clock")).and_then(|c| c.get(k)).and_then(|v| v.as_bool()).unwrap_or(true);
+    let get = |k: &str| {
+        table.as_ref().and_then(|t| t.get("clock")).and_then(|c| c.get(k)).and_then(|v| v.as_bool()).unwrap_or(true)
+    };
     tiles::ClockLook { h24: get("24-hour"), date: get("date") }
 }
 
@@ -111,7 +116,10 @@ pub struct Tiles {
 /// ~/.local/state/vergence/applets.toml: every applet seen, for the settings
 /// app's Dock page (its Applets list, each with a switch).
 fn applets_path() -> Option<std::path::PathBuf> {
-    let state = std::env::var_os("XDG_STATE_HOME").map(std::path::PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")))?;
+    let state = std::env::var_os("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")))?;
     Some(state.join("vergence/applets.toml"))
 }
 
@@ -130,7 +138,10 @@ pub fn parse_applets(text: &str) -> std::collections::BTreeMap<String, (String, 
 
 /// Written beside and moved into place, readable by its owner only.
 fn write_applets(known: &std::collections::BTreeMap<String, (String, String)>) -> std::io::Result<()> {
-    use std::{io::Write, os::unix::fs::{DirBuilderExt, OpenOptionsExt}};
+    use std::{
+        io::Write,
+        os::unix::fs::{DirBuilderExt, OpenOptionsExt},
+    };
     let Some(path) = applets_path() else { return Ok(()) };
     if let Some(dir) = path.parent() {
         std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
@@ -279,7 +290,9 @@ impl Server {
 
     /// Tell a tile's owner something about it, if the owner is a client.
     fn tile_tell(&mut self, key: &str, make: impl FnOnce(String) -> vergence_protocol::bus::ServerMsg) {
-        if let Some((Owner::Client(client), id)) = self.tiles.list.iter().find(|p| p.key() == key).map(|p| (p.owner, p.tile.id.clone())) {
+        if let Some((Owner::Client(client), id)) =
+            self.tiles.list.iter().find(|p| p.key() == key).map(|p| (p.owner, p.tile.id.clone()))
+        {
             self.bus_send(client, make(id));
         }
     }
@@ -290,9 +303,29 @@ impl Server {
             .tiles
             .list
             .iter()
-            .map(|p| format!("{} {:?} {:?} {:?} {:?} group {:?} page {:?} rows {} chart {} controls {}", p.key(), p.owner, p.tile.value, p.tile.label, p.tile.state, p.tile.group, p.tile.page, p.tile.card.rows.len(), p.tile.card.chart.len(), p.tile.card.controls.len()))
+            .map(|p| {
+                format!(
+                    "{} {:?} {:?} {:?} {:?} group {:?} page {:?} rows {} chart {} controls {}",
+                    p.key(),
+                    p.owner,
+                    p.tile.value,
+                    p.tile.label,
+                    p.tile.state,
+                    p.tile.group,
+                    p.tile.page,
+                    p.tile.card.rows.len(),
+                    p.tile.card.chart.len(),
+                    p.tile.card.controls.len()
+                )
+            })
             .collect();
-        out.push(format!("card: {}", self.tiles.card.as_ref().map_or("none".to_string(), |c| format!("{} at {},{} {}x{}", c.id, c.rect.loc.x, c.rect.loc.y, c.rect.size.w, c.rect.size.h))));
+        out.push(format!(
+            "card: {}",
+            self.tiles.card.as_ref().map_or("none".to_string(), |c| format!(
+                "{} at {},{} {}x{}",
+                c.id, c.rect.loc.x, c.rect.loc.y, c.rect.size.w, c.rect.size.h
+            ))
+        ));
         out.join("\n")
     }
 
@@ -310,9 +343,13 @@ impl Server {
         };
         let from = match owner {
             Owner::Desktop => "the desktop".to_string(),
-            Owner::Client(c) => Some(self.bus_app_id(c)).filter(|a| !a.is_empty()).unwrap_or_else(|| "a program".into()),
+            Owner::Client(c) => {
+                Some(self.bus_app_id(c)).filter(|a| !a.is_empty()).unwrap_or_else(|| "a program".into())
+            }
         };
-        let known = self.tiles.known.get_or_insert_with(|| applets_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| parse_applets(&t)).unwrap_or_default());
+        let known = self.tiles.known.get_or_insert_with(|| {
+            applets_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| parse_applets(&t)).unwrap_or_default()
+        });
         if known.get(&tile.id) == Some(&(name.clone(), from.clone())) {
             return;
         }
@@ -349,7 +386,9 @@ impl Server {
             Some(d) => d.clone(),
             None => tiles::DOCKED.iter().map(|s| s.to_string()).collect(),
         };
-        let mut docked: Vec<usize> = (0..self.tiles.list.len()).filter(|i| self.tile_visible(&self.tiles.list[*i]) && self.tile_docked(&self.tiles.list[*i])).collect();
+        let mut docked: Vec<usize> = (0..self.tiles.list.len())
+            .filter(|i| self.tile_visible(&self.tiles.list[*i]) && self.tile_docked(&self.tiles.list[*i]))
+            .collect();
         docked.sort_by_key(|i| chosen.iter().position(|c| *c == self.tiles.list[*i].tile.id).map_or(-1, |p| p as i64));
         out.extend(docked.into_iter().map(Place::Tile));
         out
@@ -361,7 +400,8 @@ impl Server {
             .into_iter()
             .map(|place| match place {
                 Place::Drawer => {
-                    let inside: Vec<&Placed> = self.tiles.list.iter().filter(|p| self.tile_visible(p) && !self.tile_docked(p)).collect();
+                    let inside: Vec<&Placed> =
+                        self.tiles.list.iter().filter(|p| self.tile_visible(p) && !self.tile_docked(p)).collect();
                     let worst = inside.iter().map(|p| p.tile.state).max_by_key(|s| *s as u8).unwrap_or_default();
                     Shown::Drawer(inside.len(), worst)
                 }
@@ -375,7 +415,15 @@ impl Server {
         let dock = self.shelf.dock?;
         let upright = self.shelf.config.placement().upright();
         let places = self.dock_places();
-        tiles::tile_at(rect(dock), self.shelf.names.len(), places.len(), upright, at.x.floor() as i32, at.y.floor() as i32).map(|i| places[i])
+        tiles::tile_at(
+            rect(dock),
+            self.shelf.names.len(),
+            places.len(),
+            upright,
+            at.x.floor() as i32,
+            at.y.floor() as i32,
+        )
+        .map(|i| places[i])
     }
 
     /// The key of the tile at a point, on the dock or in the open drawer.
@@ -393,7 +441,8 @@ impl Server {
     /// the desktop's Sound tile, or its open card, each notch (a touchpad's
     /// travel, 15 points a step) is a volume key's 5%; up louder.
     pub fn tile_scroll(&mut self, at: Point<f64, Logical>, dy: f64, v120y: i32) {
-        let over_sound = self.key_under(at).as_deref() == Some("sound") || self.tiles.card.as_ref().is_some_and(|c| c.id == "sound" && c.rect.to_f64().contains(at));
+        let over_sound = self.key_under(at).as_deref() == Some("sound")
+            || self.tiles.card.as_ref().is_some_and(|c| c.id == "sound" && c.rect.to_f64().contains(at));
         if !over_sound {
             return;
         }
@@ -476,7 +525,14 @@ impl Server {
         }
         self.card_close();
         tracing::info!("tiles: card {id} open");
-        self.tiles.card = Some(Open { id: id.to_string(), rect: Rectangle::default(), title: Rectangle::default(), picture: None, controls: Vec::new(), sliding: None });
+        self.tiles.card = Some(Open {
+            id: id.to_string(),
+            rect: Rectangle::default(),
+            title: Rectangle::default(),
+            picture: None,
+            controls: Vec::new(),
+            sliding: None,
+        });
         self.tiles.live.set(id == "network");
         self.tile_tell(id, |id| vergence_protocol::bus::ServerMsg::CardOpened { id });
         self.redraw_all();
@@ -563,7 +619,11 @@ impl Server {
         let Some(c) = self.tiles.card.as_ref() else { return };
         let Some(index) = self.tiles.list.iter().position(|p| p.key() == c.id) else { return };
         let Some(&(_, r)) = c.controls.iter().find(|(j, _)| *j == i) else { return };
-        let Some(ControlKind::Slider { value, min, max, step }) = self.tiles.list[index].tile.card.controls.get(i).map(|k| k.kind) else { return };
+        let Some(ControlKind::Slider { value, min, max, step }) =
+            self.tiles.list[index].tile.card.controls.get(i).map(|k| k.kind)
+        else {
+            return;
+        };
         // The track as drawn: from 14 + TRACK_X to 14 short of the card's edge,
         // the knob's middle 7 in from each end.
         let (x0, x1) = (r.loc.x as f64 + 14.0 + TRACK_X as f64 + 7.0, (r.loc.x + r.size.w) as f64 - 14.0 - 7.0);
@@ -595,13 +655,20 @@ impl Server {
         tracing::info!("tiles: {tile} {name} = {value}");
         match owner {
             Owner::Desktop => self.desktop_tile_action(&tile, &name, value),
-            Owner::Client(client) => self.bus_send(client, vergence_protocol::bus::ServerMsg::TileAction { id: tile, control: name, value }),
+            Owner::Client(client) => {
+                self.bus_send(client, vergence_protocol::bus::ServerMsg::TileAction { id: tile, control: name, value })
+            }
         }
     }
 
     /// The open card, beside its tile on the side the windows are, kept on
     /// the dock's screen.
-    pub fn card_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
+    pub fn card_elements(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Vec<SceneElement> {
         let Some(id) = self.tiles.card.as_ref().map(|c| c.id.clone()) else { return Vec::new() };
         let Some(index) = self.tiles.list.iter().position(|p| p.key() == id) else {
             self.tiles.card = None;
@@ -641,7 +708,12 @@ impl Server {
         let ink = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
         let side = self.shelf_side(dock);
         let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
-        let (Some(face), Some(bold)) = (fonts.face("sans-serif", 400, false), fonts.face("sans-serif", 600, false).or_else(|| fonts.face("sans-serif", 700, false))) else { return Vec::new() };
+        let (Some(face), Some(bold)) = (
+            fonts.face("sans-serif", 400, false),
+            fonts.face("sans-serif", 600, false).or_else(|| fonts.face("sans-serif", 700, false)),
+        ) else {
+            return Vec::new();
+        };
         // Its height from what it holds.
         let card = &tile.card;
         let pad = 12.0;
@@ -671,14 +743,25 @@ impl Server {
             Edge::Top => (middle.1, beside.loc.y - OFF - hi),
             Edge::Bottom => (middle.1, beside.loc.y + beside.size.h + OFF),
         };
-        let (x, y) = (x.min(screen.loc.x + screen.size.w - wi).max(screen.loc.x), y.min(screen.loc.y + screen.size.h - hi).max(screen.loc.y));
+        let (x, y) = (
+            x.min(screen.loc.x + screen.size.w - wi).max(screen.loc.x),
+            y.min(screen.loc.y + screen.size.h - hi).max(screen.loc.y),
+        );
         let area: Rectangle<i32, Logical> = Rectangle::new((x, y).into(), (wi, hi).into());
         let open = self.tiles.card.as_mut().expect("open");
         open.rect = area;
         open.title = Rectangle::new((x, y).into(), (wi, (pad + 18.0) as i32).into());
         open.controls = (0..card.controls.len())
             // Across the whole card, so a press just past a slider's end still takes it.
-            .map(|i| (i, Rectangle::new((x, y + (controls_top + i as f32 * CONTROL_H) as i32).into(), (wi, CONTROL_H as i32).into())))
+            .map(|i| {
+                (
+                    i,
+                    Rectangle::new(
+                        (x, y + (controls_top + i as f32 * CONTROL_H) as i32).into(),
+                        (wi, CONTROL_H as i32).into(),
+                    ),
+                )
+            })
             .collect();
         if open.picture.as_ref().map(|(k, _)| *k) != Some(key) {
             let mut scene = Scene::new(w, h);
@@ -692,17 +775,41 @@ impl Server {
             };
             let mut top = pad;
             let title = if tile.page.is_empty() { card.title.clone() } else { format!("{}  \u{203a}", card.title) };
-            vergence_render::text(&mut scene, fonts, bold, 12.5, ink(s.menu_ink_off), ScenePoint::new(14.0, baseline(fonts, top, 18.0, 12.5)), &title);
+            vergence_render::text(
+                &mut scene,
+                fonts,
+                bold,
+                12.5,
+                ink(s.menu_ink_off),
+                ScenePoint::new(14.0, baseline(fonts, top, 18.0, 12.5)),
+                &title,
+            );
             top += 18.0;
             if !card.big.is_empty() {
-                vergence_render::text(&mut scene, fonts, face, 32.0, state_ink(tile.state, light, s.menu_ink), ScenePoint::new(13.0, baseline(fonts, top, 40.0, 32.0)), &card.big);
+                vergence_render::text(
+                    &mut scene,
+                    fonts,
+                    face,
+                    32.0,
+                    state_ink(tile.state, light, s.menu_ink),
+                    ScenePoint::new(13.0, baseline(fonts, top, 40.0, 32.0)),
+                    &card.big,
+                );
                 top += 40.0;
             }
             for (name, value) in &card.rows {
                 let b = baseline(fonts, top, 20.0, 13.0);
                 vergence_render::text(&mut scene, fonts, face, 13.0, ink(s.menu_ink), ScenePoint::new(14.0, b), name);
                 let vw = fonts.layout(face, 13.0, value).1;
-                vergence_render::text(&mut scene, fonts, face, 13.0, ink(s.menu_ink), ScenePoint::new(w - 14.0 - vw, b), value);
+                vergence_render::text(
+                    &mut scene,
+                    fonts,
+                    face,
+                    13.0,
+                    ink(s.menu_ink),
+                    ScenePoint::new(w - 14.0 - vw, b),
+                    value,
+                );
                 top += 20.0;
             }
             if card.chart.len() > 1 {
@@ -713,7 +820,9 @@ impl Server {
                 let room = ((hi - lo) * 0.1).max(hi.abs().max(1.0) * 0.01);
                 let (lo, span) = (lo - room, hi - lo + 2.0 * room);
                 let n = card.chart.len() - 1;
-                let pt = |i: usize, v: f32| ScenePoint::new(cx + cw * i as f32 / n as f32, cy + ch - ((v - lo) / span).clamp(0.0, 1.0) * ch);
+                let pt = |i: usize, v: f32| {
+                    ScenePoint::new(cx + cw * i as f32 / n as f32, cy + ch - ((v - lo) / span).clamp(0.0, 1.0) * ch)
+                };
                 for i in 0..n {
                     scene.line(pt(i, card.chart[i]), pt(i + 1, card.chart[i + 1]), 1.5, accent);
                 }
@@ -728,23 +837,51 @@ impl Server {
                         let r = SceneRect::new(14.0, top + 3.0, w - 28.0, CONTROL_H - 6.0);
                         scene.fill_rounded(r, vergence_look::RADIUS, ink(s.hover));
                         let lw = fonts.layout(face, 13.0, &k.label).1;
-                        vergence_render::text(&mut scene, fonts, face, 13.0, ink(s.menu_ink), ScenePoint::new((w - lw) / 2.0, baseline(fonts, top, CONTROL_H, 13.0)), &k.label);
+                        vergence_render::text(
+                            &mut scene,
+                            fonts,
+                            face,
+                            13.0,
+                            ink(s.menu_ink),
+                            ScenePoint::new((w - lw) / 2.0, baseline(fonts, top, CONTROL_H, 13.0)),
+                            &k.label,
+                        );
                     }
                     ControlKind::Switch(on) => {
-                        vergence_render::text(&mut scene, fonts, face, 13.0, ink(s.menu_ink), ScenePoint::new(14.0, baseline(fonts, top, CONTROL_H, 13.0)), &k.label);
+                        vergence_render::text(
+                            &mut scene,
+                            fonts,
+                            face,
+                            13.0,
+                            ink(s.menu_ink),
+                            ScenePoint::new(14.0, baseline(fonts, top, CONTROL_H, 13.0)),
+                            &k.label,
+                        );
                         let pill = SceneRect::new(w - 14.0 - 36.0, mid - 10.0, 36.0, 20.0);
                         scene.fill_rounded(pill, 10.0, if on { accent } else { ink(s.field) });
                         let knob = SceneRect::new(if on { pill.x + 18.0 } else { pill.x + 2.0 }, mid - 8.0, 16.0, 16.0);
                         scene.fill_rounded(knob, 8.0, Color::rgb(0xff, 0xff, 0xff));
                     }
                     ControlKind::Slider { value, min, max, .. } => {
-                        vergence_render::text(&mut scene, fonts, face, 13.0, ink(s.menu_ink), ScenePoint::new(14.0, baseline(fonts, top, CONTROL_H, 13.0)), &k.label);
+                        vergence_render::text(
+                            &mut scene,
+                            fonts,
+                            face,
+                            13.0,
+                            ink(s.menu_ink),
+                            ScenePoint::new(14.0, baseline(fonts, top, CONTROL_H, 13.0)),
+                            &k.label,
+                        );
                         let (x0, x1) = (14.0 + TRACK_X, w - 14.0);
                         let f = ((value - min) / (max - min)).clamp(0.0, 1.0) as f32;
                         let at = x0 + 7.0 + (x1 - x0 - 14.0) * f;
                         scene.fill_rounded(SceneRect::new(x0, mid - 2.0, x1 - x0, 4.0), 2.0, ink(s.field));
                         scene.fill_rounded(SceneRect::new(x0, mid - 2.0, at - x0, 4.0), 2.0, accent);
-                        scene.fill_rounded(SceneRect::new(at - 7.0, mid - 7.0, 14.0, 14.0), 7.0, Color::rgb(0xff, 0xff, 0xff));
+                        scene.fill_rounded(
+                            SceneRect::new(at - 7.0, mid - 7.0, 14.0, 14.0),
+                            7.0,
+                            Color::rgb(0xff, 0xff, 0xff),
+                        );
                         scene.stroke(SceneRect::new(at - 7.0, mid - 7.0, 14.0, 14.0), 7.0, 1.0, ink(s.edge));
                     }
                 }
@@ -754,17 +891,46 @@ impl Server {
                 top += 4.0;
             }
             if !card.note.is_empty() {
-                vergence_render::text(&mut scene, fonts, face, 11.0, ink(s.menu_ink_off), ScenePoint::new(14.0, baseline(fonts, top, 18.0, 11.0)), &card.note);
+                vergence_render::text(
+                    &mut scene,
+                    fonts,
+                    face,
+                    11.0,
+                    ink(s.menu_ink_off),
+                    ScenePoint::new(14.0, baseline(fonts, top, 18.0, 11.0)),
+                    &card.note,
+                );
             }
-            let Ok(p) = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) else { return Vec::new() };
-            let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+            let Ok(p) = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) else {
+                return Vec::new();
+            };
+            let buffer = MemoryRenderBuffer::from_slice(
+                &p.data,
+                Fourcc::Abgr8888,
+                (p.width as i32, p.height as i32),
+                1,
+                Transform::Normal,
+                None,
+            );
             self.tiles.card.as_mut().expect("open").picture = Some((key, buffer));
         }
         let Some((_, buffer)) = self.tiles.card.as_ref().and_then(|c| c.picture.as_ref()) else { return Vec::new() };
         let a = (area.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let b = (area.loc + area.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
-        let mut out: Vec<SceneElement> = MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(area.size), Kind::Unspecified).ok().map(SceneElement::Memory).into_iter().collect();
+        let mut out: Vec<SceneElement> = MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            a.to_f64(),
+            buffer,
+            None,
+            Some(src),
+            Some(area.size),
+            Kind::Unspecified,
+        )
+        .ok()
+        .map(SceneElement::Memory)
+        .into_iter()
+        .collect();
         if let Some(program) = frost {
             let dst = Rectangle::<i32, smithay::utils::Physical>::new(a, (b.x - a.x, b.y - a.y).into());
             let mut slot = self.tiles.card_frost.take();

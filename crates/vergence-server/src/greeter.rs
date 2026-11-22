@@ -72,10 +72,14 @@ fn people() -> Vec<Person> {
             }
             let uid: u32 = f[2].parse().ok()?;
             let shell = f[6];
-            let real = !shell.ends_with("/nologin") && !shell.ends_with("/false") && std::path::Path::new(shell).is_file();
+            let real =
+                !shell.ends_with("/nologin") && !shell.ends_with("/false") && std::path::Path::new(shell).is_file();
             (uid != 0 && uid >= vergence_dm::paths::MIN_UID && real).then(|| {
                 let gecos = f[4].split(',').next().unwrap_or("").trim();
-                Person { login: f[0].to_string(), name: if gecos.is_empty() { f[0].to_string() } else { gecos.to_string() } }
+                Person {
+                    login: f[0].to_string(),
+                    name: if gecos.is_empty() { f[0].to_string() } else { gecos.to_string() },
+                }
             })
         })
         .collect();
@@ -143,7 +147,11 @@ impl Server {
         g.field = Secret::new();
         g.prompt = "Password".into();
         g.naming = g.people.is_empty();
-        g.text_size = keep_file().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| t.trim().parse().ok()).filter(|n| [100, 125, 150].contains(n)).unwrap_or(100);
+        g.text_size = keep_file()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|t| t.trim().parse().ok())
+            .filter(|n| [100, 125, 150].contains(n))
+            .unwrap_or(100);
         g.layout = std::env::var("XKB_DEFAULT_LAYOUT").ok().filter(|l| !l.is_empty()).unwrap_or_else(|| "us".into());
         tracing::info!("greeter: {} people, {} sessions", g.people.len(), g.sessions.len());
         let out = self.input.seat.lock();
@@ -217,7 +225,9 @@ impl Server {
             k::KEY_Up if !self.greeter.waiting => self.greeter_choose((self.greeter.chosen + n - 1) % n),
             k::KEY_Down if !self.greeter.waiting => self.greeter_choose((self.greeter.chosen + 1) % n),
             k::KEY_F3 => self.greeter_text_size(),
-            k::KEY_F2 if !self.greeter.sessions.is_empty() => self.greeter.session = (self.greeter.session + 1) % self.greeter.sessions.len(),
+            k::KEY_F2 if !self.greeter.sessions.is_empty() => {
+                self.greeter.session = (self.greeter.session + 1) % self.greeter.sessions.len()
+            }
             k::KEY_Escape => {
                 self.greeter_drop_talk();
                 if let Some(f) = self.greeter.field.as_mut() {
@@ -289,7 +299,11 @@ impl Server {
     /// The next text size (100, 125, 150 %), kept for the next start.
     fn greeter_text_size(&mut self) {
         let g = &mut self.greeter;
-        g.text_size = match g.text_size { 100 => 125, 125 => 150, _ => 100 };
+        g.text_size = match g.text_size {
+            100 => 125,
+            125 => 150,
+            _ => 100,
+        };
         if let Some(p) = keep_file() {
             let _ = std::fs::write(p, format!("{}\n", g.text_size));
         }
@@ -299,7 +313,8 @@ impl Server {
     /// Sleep at once; Restart and Shut Down on a second press.
     fn greeter_power(&mut self, p: vergence_dm::power::Power) {
         use vergence_dm::power::Power;
-        let confirmed = matches!(self.greeter.confirm, Some((q, at)) if q == p && at.elapsed() < Duration::from_secs(5));
+        let confirmed =
+            matches!(self.greeter.confirm, Some((q, at)) if q == p && at.elapsed() < Duration::from_secs(5));
         if p != Power::Sleep && !confirmed {
             self.greeter.confirm = Some((p, Instant::now()));
             let what = if p == Power::Restart { "Restart" } else { "Shut Down" };
@@ -310,7 +325,17 @@ impl Server {
         match vergence_dm::power::ask(p) {
             Ok(()) => {
                 tracing::info!("greeter: vdm will {}", p.word());
-                self.greeter.message = Some((if p == Power::Sleep { "Going to sleep…" } else if p == Power::Restart { "Restarting…" } else { "Shutting down…" }.into(), false));
+                self.greeter.message = Some((
+                    if p == Power::Sleep {
+                        "Going to sleep…"
+                    } else if p == Power::Restart {
+                        "Restarting…"
+                    } else {
+                        "Shutting down…"
+                    }
+                    .into(),
+                    false,
+                ));
             }
             Err(e) => {
                 tracing::warn!("greeter: {}: {e}", p.word());
@@ -326,8 +351,12 @@ impl Server {
         let (tx, rx) = std::sync::mpsc::channel();
         self.greeter.talk = Some(tx);
         self.greeter.told_why = false;
-        let first = vec![ToVdm::Hello { version: proto::VERSION, service: Service::Login }, ToVdm::Login { user, session }];
-        if let Err(e) = std::thread::Builder::new().name("greeter".into()).spawn(move || crate::lock::converse(heard, rx, vergence_dm::paths::GREETER_SOCKET, first)) {
+        let first =
+            vec![ToVdm::Hello { version: proto::VERSION, service: Service::Login }, ToVdm::Login { user, session }];
+        if let Err(e) = std::thread::Builder::new()
+            .name("greeter".into())
+            .spawn(move || crate::lock::converse(heard, rx, vergence_dm::paths::GREETER_SOCKET, first))
+        {
             tracing::warn!("greeter: {e}");
             self.greeter.talk = None;
         }
@@ -422,9 +451,16 @@ impl Server {
             return;
         }
         self.greeter.placed = true;
-        let Some(o) = outputs.iter().find(|o| o.user_data().get::<crate::memory::MonitorId>().is_some_and(|m| m.0 == want)) else { return };
+        let Some(o) =
+            outputs.iter().find(|o| o.user_data().get::<crate::memory::MonitorId>().is_some_and(|m| m.0 == want))
+        else {
+            return;
+        };
         let Some(r) = self.space.output_geometry(o) else { return };
-        let centre = smithay::utils::Point::<f64, smithay::utils::Logical>::from((r.loc.x as f64 + r.size.w as f64 / 2.0, r.loc.y as f64 + r.size.h as f64 / 2.0));
+        let centre = smithay::utils::Point::<f64, smithay::utils::Logical>::from((
+            r.loc.x as f64 + r.size.w as f64 / 2.0,
+            r.loc.y as f64 + r.size.h as f64 / 2.0,
+        ));
         tracing::info!("greeter: starting on {} (the last session's main screen)", o.name());
         self.pointer_to(centre, smithay::backend::input::InputTime::now());
         self.redraw_all();
@@ -432,7 +468,13 @@ impl Server {
 
     /// All a screen shows at the login screen: the dialog (on the pointer's
     /// screen), a dimming, the wallpaper.
-    pub fn greeter_elements(&mut self, renderer: &mut GlesRenderer, output: &Output, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
+    pub fn greeter_elements(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        output: &Output,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Vec<SceneElement> {
         let mut elements = Vec::new();
         if out.to_f64().contains(self.pointer_location())
             && let Some(e) = self.greeter_panel(renderer, out, scale)
@@ -440,8 +482,15 @@ impl Server {
             elements.push(e);
         }
         let (id, commit) = self.greeter.dim.get_or_insert_with(|| (Id::new(), CommitCounter::default())).clone();
-        let phys = Rectangle::<i32, smithay::utils::Physical>::from_size(out.size.to_f64().to_physical(scale).to_i32_round());
-        elements.push(SceneElement::Solid(SolidColorRenderElement::new(id, phys, commit, [0.0, 0.0, 0.0, 0.45], Kind::Unspecified)));
+        let phys =
+            Rectangle::<i32, smithay::utils::Physical>::from_size(out.size.to_f64().to_physical(scale).to_i32_round());
+        elements.push(SceneElement::Solid(SolidColorRenderElement::new(
+            id,
+            phys,
+            commit,
+            [0.0, 0.0, 0.0, 0.45],
+            Kind::Unspecified,
+        )));
         if let Some(mode) = output.current_mode()
             && let Some(e) = self.wallpaper_element(renderer, &output.name(), mode.size, out.size)
         {
@@ -450,18 +499,37 @@ impl Server {
         elements
     }
 
-    fn greeter_panel(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Option<SceneElement> {
+    fn greeter_panel(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Option<SceneElement> {
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
         let (local, _) = vergence_shell::tiles::now_at(secs)?;
         let time = format!("{:02}:{:02}", local.hour, local.min);
-        let host = std::fs::read_to_string("/etc/hostname").ok().map(|h| h.trim().to_string()).filter(|h| !h.is_empty()).unwrap_or_else(|| {
-            std::process::Command::new("hostname").output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default()
-        });
+        let host = std::fs::read_to_string("/etc/hostname")
+            .ok()
+            .map(|h| h.trim().to_string())
+            .filter(|h| !h.is_empty())
+            .unwrap_or_else(|| {
+                std::process::Command::new("hostname")
+                    .output()
+                    .ok()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                    .unwrap_or_default()
+            });
         let paused = self.greeter_pause_left();
         let g = &self.greeter;
         let n_rows = g.people.len() + 1;
         let dots = g.field.as_ref().map_or(0, |f| f.chars());
-        let shown = if g.naming { Some(g.other.clone()) } else if g.echo { g.field.as_ref().map(|f| String::from_utf8_lossy(f.as_bytes()).into_owned()) } else { None };
+        let shown = if g.naming {
+            Some(g.other.clone())
+        } else if g.echo {
+            g.field.as_ref().map(|f| String::from_utf8_lossy(f.as_bytes()).into_owned())
+        } else {
+            None
+        };
         let session_name = g.sessions.get(g.session).map_or("Vergence".to_string(), |s| s.name.clone());
         let (w, row_h) = (420.0f32, 34.0f32);
         let list_top = 120.0f32;
@@ -471,7 +539,12 @@ impl Server {
         let f = g.text_size as f32 / 100.0;
         let (wi, hi) = ((w * f).round() as i32, (h * f).round() as i32);
         let at = (out.loc.x + (out.size.w - wi) / 2, out.loc.y + (out.size.h - hi) / 2);
-        let lr = |x: f32, y: f32, rw: f32, rh: f32| -> Rectangle<i32, Logical> { Rectangle::new((at.0 + (x * f).round() as i32, at.1 + (y * f).round() as i32).into(), ((rw * f).round() as i32, (rh * f).round() as i32).into()) };
+        let lr = |x: f32, y: f32, rw: f32, rh: f32| -> Rectangle<i32, Logical> {
+            Rectangle::new(
+                (at.0 + (x * f).round() as i32, at.1 + (y * f).round() as i32).into(),
+                ((rw * f).round() as i32, (rh * f).round() as i32).into(),
+            )
+        };
         let layout = g.layout.clone();
         let mut hsh = std::collections::hash_map::DefaultHasher::new();
         (&time, &host, &g.people, g.chosen, dots, &shown).hash(&mut hsh);
@@ -485,16 +558,23 @@ impl Server {
         let (pw, ph, pgap) = (100.0f32, 28.0f32, 12.0f32);
         let power_y = field_top + 120.0;
         let power_x0 = (w - 3.0 * pw - 2.0 * pgap) / 2.0;
-        let power_local: Vec<(vergence_dm::power::Power, &str, f32)> = [(vergence_dm::power::Power::Sleep, "Sleep"), (vergence_dm::power::Power::Restart, "Restart"), (vergence_dm::power::Power::ShutDown, "Shut Down")]
-            .into_iter()
-            .enumerate()
-            .map(|(i, (p, l))| (p, l, power_x0 + i as f32 * (pw + pgap)))
-            .collect();
+        let power_local: Vec<(vergence_dm::power::Power, &str, f32)> = [
+            (vergence_dm::power::Power::Sleep, "Sleep"),
+            (vergence_dm::power::Power::Restart, "Restart"),
+            (vergence_dm::power::Power::ShutDown, "Shut Down"),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (p, l))| (p, l, power_x0 + i as f32 * (pw + pgap)))
+        .collect();
         self.greeter.power = power_local.iter().map(|(p, _, x)| (*p, lr(*x, power_y, pw, ph))).collect();
         if self.greeter.picture.as_ref().map(|(k, ..)| *k) != Some(key) {
             let s = vergence_look::shelf_look(false);
             let ink = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
-            let accent = { let a = vergence_look::ACCENT; Color::rgb(a.0, a.1, a.2) };
+            let accent = {
+                let a = vergence_look::ACCENT;
+                Color::rgb(a.0, a.1, a.2)
+            };
             let people = self.greeter.people.clone();
             let chosen = self.greeter.chosen;
             let naming = self.greeter.naming;
@@ -505,13 +585,26 @@ impl Server {
             let face = fonts.face("sans-serif", 400, false)?;
             let bold = fonts.face("sans-serif", 600, false).unwrap_or(face);
             let mut scene = Scene::new(w, h);
-            scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS * 2.0, Color::rgba(s.menu.0, s.menu.1, s.menu.2, 240));
+            scene.fill_rounded(
+                SceneRect::new(0.0, 0.0, w, h),
+                vergence_look::RADIUS * 2.0,
+                Color::rgba(s.menu.0, s.menu.1, s.menu.2, 240),
+            );
             scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS * 2.0, vergence_look::EDGE, ink(s.edge));
-            let centered = |fonts: &mut vergence_text::Fonts, scene: &mut Scene, f, size: f32, color, y: f32, t: &str| {
-                let m = fonts.metrics(f, size);
-                let tw = fonts.layout(f, size, t).1;
-                vergence_render::text(scene, fonts, f, size, color, ScenePoint::new(((w - tw) / 2.0).round(), (y + m.ascent).round()), t);
-            };
+            let centered =
+                |fonts: &mut vergence_text::Fonts, scene: &mut Scene, f, size: f32, color, y: f32, t: &str| {
+                    let m = fonts.metrics(f, size);
+                    let tw = fonts.layout(f, size, t).1;
+                    vergence_render::text(
+                        scene,
+                        fonts,
+                        f,
+                        size,
+                        color,
+                        ScenePoint::new(((w - tw) / 2.0).round(), (y + m.ascent).round()),
+                        t,
+                    );
+                };
             centered(fonts, &mut scene, face, 44.0, ink(s.menu_ink), 16.0, &time);
             centered(fonts, &mut scene, face, 13.0, ink(s.menu_ink_off), 78.0, &host);
             // The people: initials in a circle and a name; the chosen one shaded.
@@ -522,15 +615,42 @@ impl Server {
                     scene.fill_rounded(r, vergence_look::RADIUS, ink(s.hover));
                 }
                 let (initials, name) = match people.get(i) {
-                    Some(p) => (p.name.split_whitespace().filter_map(|x| x.chars().next()).take(2).collect::<String>().to_uppercase(), p.name.clone()),
+                    Some(p) => (
+                        p.name
+                            .split_whitespace()
+                            .filter_map(|x| x.chars().next())
+                            .take(2)
+                            .collect::<String>()
+                            .to_uppercase(),
+                        p.name.clone(),
+                    ),
                     None => ("…".to_string(), "Other…".to_string()),
                 };
                 scene.fill_rounded(SceneRect::new(r.x + 6.0, r.y + 3.0, 24.0, 24.0), 12.0, ink(s.tile));
                 let iw = fonts.layout(bold, 11.0, &initials).1;
                 let im = fonts.metrics(bold, 11.0);
-                vergence_render::text(&mut scene, fonts, bold, 11.0, ink(s.tile_ink), ScenePoint::new((r.x + 18.0 - iw / 2.0).round(), (r.y + 15.0 - (im.ascent + im.descent) / 2.0 + im.ascent).round()), &initials);
+                vergence_render::text(
+                    &mut scene,
+                    fonts,
+                    bold,
+                    11.0,
+                    ink(s.tile_ink),
+                    ScenePoint::new(
+                        (r.x + 18.0 - iw / 2.0).round(),
+                        (r.y + 15.0 - (im.ascent + im.descent) / 2.0 + im.ascent).round(),
+                    ),
+                    &initials,
+                );
                 let m = fonts.metrics(face, 14.0);
-                vergence_render::text(&mut scene, fonts, face, 14.0, ink(s.menu_ink), ScenePoint::new(r.x + 40.0, (r.y + (r.h - m.ascent - m.descent) / 2.0 + m.ascent).round()), &name);
+                vergence_render::text(
+                    &mut scene,
+                    fonts,
+                    face,
+                    14.0,
+                    ink(s.menu_ink),
+                    ScenePoint::new(r.x + 40.0, (r.y + (r.h - m.ascent - m.descent) / 2.0 + m.ascent).round()),
+                    &name,
+                );
             }
             // The field.
             centered(fonts, &mut scene, face, 12.0, ink(s.menu_ink_off), field_top, &prompt);
@@ -545,11 +665,26 @@ impl Server {
             match &shown {
                 Some(t) => {
                     let m = fonts.metrics(face, 14.0);
-                    vergence_render::text(&mut scene, fonts, face, 14.0, ink(s.menu_ink), ScenePoint::new(field.x + 12.0, (field.y + (field.h - m.ascent - m.descent) / 2.0 + m.ascent).round()), t);
+                    vergence_render::text(
+                        &mut scene,
+                        fonts,
+                        face,
+                        14.0,
+                        ink(s.menu_ink),
+                        ScenePoint::new(
+                            field.x + 12.0,
+                            (field.y + (field.h - m.ascent - m.descent) / 2.0 + m.ascent).round(),
+                        ),
+                        t,
+                    );
                 }
                 None => {
                     for i in 0..dots.min(24) {
-                        scene.fill_rounded(SceneRect::new(field.x + 14.0 + i as f32 * 12.0, field.y + field.h / 2.0 - 4.0, 8.0, 8.0), 4.0, ink(s.menu_ink));
+                        scene.fill_rounded(
+                            SceneRect::new(field.x + 14.0 + i as f32 * 12.0, field.y + field.h / 2.0 - 4.0, 8.0, 8.0),
+                            4.0,
+                            ink(s.menu_ink),
+                        );
                     }
                 }
             }
@@ -561,21 +696,60 @@ impl Server {
             };
             let color = if bad { Color::rgb(0xff, 0x8a, 0x80) } else { ink(s.menu_ink_off) };
             centered(fonts, &mut scene, face, 12.0, color, field_top + 62.0, &msg);
-            centered(fonts, &mut scene, face, 12.0, ink(s.menu_ink_off), field_top + 88.0, &format!("Session: {session_name} (F2)  ·  Keyboard: {layout}"));
+            centered(
+                fonts,
+                &mut scene,
+                face,
+                12.0,
+                ink(s.menu_ink_off),
+                field_top + 88.0,
+                &format!("Session: {session_name} (F2)  ·  Keyboard: {layout}"),
+            );
             // The text size button.
             let sb = SceneRect::new(w - 52.0, 14.0, 38.0, 26.0);
             scene.fill_rounded(sb, vergence_look::RADIUS, ink(s.tile));
             let (aw, am) = (fonts.layout(face, 13.0, "Aa").1, fonts.metrics(face, 13.0));
-            vergence_render::text(&mut scene, fonts, face, 13.0, ink(s.tile_ink), ScenePoint::new((sb.x + (sb.w - aw) / 2.0).round(), (sb.y + (sb.h - am.ascent - am.descent) / 2.0 + am.ascent).round()), "Aa");
+            vergence_render::text(
+                &mut scene,
+                fonts,
+                face,
+                13.0,
+                ink(s.tile_ink),
+                ScenePoint::new(
+                    (sb.x + (sb.w - aw) / 2.0).round(),
+                    (sb.y + (sb.h - am.ascent - am.descent) / 2.0 + am.ascent).round(),
+                ),
+                "Aa",
+            );
             for (_, label, x) in &power_local {
                 let r = SceneRect::new(*x, power_y, pw, ph);
                 scene.fill_rounded(r, vergence_look::RADIUS, ink(s.tile));
                 let lw = fonts.layout(face, 12.5, label).1;
                 let lm = fonts.metrics(face, 12.5);
-                vergence_render::text(&mut scene, fonts, face, 12.5, ink(s.tile_ink), ScenePoint::new((r.x + (r.w - lw) / 2.0).round(), (r.y + (r.h - lm.ascent - lm.descent) / 2.0 + lm.ascent).round()), label);
+                vergence_render::text(
+                    &mut scene,
+                    fonts,
+                    face,
+                    12.5,
+                    ink(s.tile_ink),
+                    ScenePoint::new(
+                        (r.x + (r.w - lw) / 2.0).round(),
+                        (r.y + (r.h - lm.ascent - lm.descent) / 2.0 + lm.ascent).round(),
+                    ),
+                    label,
+                );
             }
-            let p = vergence_render::Cpu::new().render(&scene, fonts, (scale * f as f64) as f32, Color::rgba(0, 0, 0, 0)).ok()?;
-            let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+            let p = vergence_render::Cpu::new()
+                .render(&scene, fonts, (scale * f as f64) as f32, Color::rgba(0, 0, 0, 0))
+                .ok()?;
+            let buffer = MemoryRenderBuffer::from_slice(
+                &p.data,
+                Fourcc::Abgr8888,
+                (p.width as i32, p.height as i32),
+                1,
+                Transform::Normal,
+                None,
+            );
             self.greeter.picture = Some((key, buffer, wi, hi));
         }
         let (_, buffer, wi, hi) = self.greeter.picture.as_ref()?;
@@ -583,6 +757,16 @@ impl Server {
         let a = (area.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let b = (area.loc + area.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
-        MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(area.size), Kind::Unspecified).ok().map(SceneElement::Memory)
+        MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            a.to_f64(),
+            buffer,
+            None,
+            Some(src),
+            Some(area.size),
+            Kind::Unspecified,
+        )
+        .ok()
+        .map(SceneElement::Memory)
     }
 }

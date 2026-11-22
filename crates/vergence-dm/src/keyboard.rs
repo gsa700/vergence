@@ -38,7 +38,8 @@ fn values(text: &str) -> Vec<(String, String)> {
             if l.starts_with('#') {
                 return None;
             }
-            l.split_once('=').map(|(k, v)| (k.trim().to_string(), v.trim().trim_matches('"').trim_matches('\'').to_string()))
+            l.split_once('=')
+                .map(|(k, v)| (k.trim().to_string(), v.trim().trim_matches('"').trim_matches('\'').to_string()))
         })
         .collect()
 }
@@ -51,7 +52,10 @@ pub fn from_texts(vconsole: &str, rc_conf: &str) -> Option<Layout> {
         return Some(Layout { layout: get("XKBLAYOUT"), variant: get("XKBVARIANT"), options: get("XKBOPTIONS") });
     }
     let r = values(rc_conf);
-    let keymap = [get("KEYMAP")].into_iter().chain(r.iter().filter(|(n, _)| n == "KEYMAP" || n == "keymap").map(|(_, x)| x.clone())).find(|k| !k.is_empty())?;
+    let keymap = [get("KEYMAP")]
+        .into_iter()
+        .chain(r.iter().filter(|(n, _)| n == "KEYMAP" || n == "keymap").map(|(_, x)| x.clone()))
+        .find(|k| !k.is_empty())?;
     Some(Layout { layout: layout_of_keymap(&keymap)?, ..Default::default() })
 }
 
@@ -68,7 +72,10 @@ mod tests {
     #[test]
     fn layouts_from_the_systems_files() {
         let fedora = "KEYMAP=us\nFONT=eurlatgr\nXKBLAYOUT=us\nXKBOPTIONS=caps:none\n";
-        assert_eq!(from_texts(fedora, ""), Some(Layout { layout: "us".into(), variant: String::new(), options: "caps:none".into() }));
+        assert_eq!(
+            from_texts(fedora, ""),
+            Some(Layout { layout: "us".into(), variant: String::new(), options: "caps:none".into() })
+        );
         assert_eq!(from_texts("", "# Keymap\nKEYMAP=en\n").map(|l| l.layout), Some("us".into()));
         assert_eq!(from_texts("", "keymap=\"de.kbd\"\n").map(|l| l.layout), Some("de".into()));
         assert_eq!(from_texts("KEYMAP=de-latin1\n", "").map(|l| l.layout), Some("de".into()));

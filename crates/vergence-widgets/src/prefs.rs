@@ -19,7 +19,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
-use crate::{Align, ButtonLook, Element, Length, Padding, Program, Theme, Waker, Window, button, choice, column, label, panel, row, rule, scroll, space, switch};
+use crate::{
+    Align, ButtonLook, Element, Length, Padding, Program, Theme, Waker, Window, button, choice, column, label, panel,
+    row, rule, scroll, space, switch,
+};
 
 /// A value as written in desktop.toml.
 #[derive(Debug, Clone, PartialEq)]
@@ -159,9 +162,29 @@ pub struct Prefs {
 }
 
 impl Prefs {
-    pub fn new(app: &str, app_id: &str, section: &str, default_dark: bool, rows: Box<dyn Rows>, open: Rc<Cell<bool>>) -> Prefs {
+    pub fn new(
+        app: &str,
+        app_id: &str,
+        section: &str,
+        default_dark: bool,
+        rows: Box<dyn Rows>,
+        open: Rc<Cell<bool>>,
+    ) -> Prefs {
         open.set(true);
-        let mut p = Prefs { app: app.into(), app_id: app_id.into(), section: section.into(), default_dark, rows, open, on_write: None, text: String::new(), stamp: None, alive: Arc::new(AtomicBool::new(true)), drafts: Default::default(), size: None };
+        let mut p = Prefs {
+            app: app.into(),
+            app_id: app_id.into(),
+            section: section.into(),
+            default_dark,
+            rows,
+            open,
+            on_write: None,
+            text: String::new(),
+            stamp: None,
+            alive: Arc::new(AtomicBool::new(true)),
+            drafts: Default::default(),
+            size: None,
+        };
         p.reread();
         p
     }
@@ -218,7 +241,17 @@ impl Prefs {
             left.push(label(r.help.clone()).size(11.0).dim().wrap().width(Length::FILL));
         }
         if let Some(why) = &r.locked {
-            return panel(row(vec![column(left).spacing(2.0).width(Length::FILL), label(why.clone()).size(12.0).dim().wrap().width(Length::Fixed(230.0))]).spacing(16.0).align(Align::Center).width(Length::FILL)).padding(Padding::hv(8.0, 12.0)).width(Length::FILL);
+            return panel(
+                row(vec![
+                    column(left).spacing(2.0).width(Length::FILL),
+                    label(why.clone()).size(12.0).dim().wrap().width(Length::Fixed(230.0)),
+                ])
+                .spacing(16.0)
+                .align(Align::Center)
+                .width(Length::FILL),
+            )
+            .padding(Padding::hv(8.0, 12.0))
+            .width(Length::FILL);
         }
         let control: Element<PrefsMsg> = match &r.control {
             Control::Choose { choices, desktop, app_default } => {
@@ -260,23 +293,38 @@ impl Prefs {
                     let back = if d.starts_with("Built-in") { "Use the built-in" } else { "Use the desktop's" };
                     left.push(
                         row(vec![
-                            button(label(back).size(11.0).color(theme.accent)).look(ButtonLook::Plain).padding(Padding::hv(0.0, 0.0)).on_press(PrefsMsg::Set(key, None)).name(format!("{}: {}", r.name, back.to_lowercase())),
+                            button(label(back).size(11.0).color(theme.accent))
+                                .look(ButtonLook::Plain)
+                                .padding(Padding::hv(0.0, 0.0))
+                                .on_press(PrefsMsg::Set(key, None))
+                                .name(format!("{}: {}", r.name, back.to_lowercase())),
                             space().width(Length::FILL),
                         ])
                         .width(Length::FILL),
                     );
                 }
                 let key = r.key.clone();
-                choice(names, selected, move |i| PrefsMsg::Set(key.clone(), values.get(i).cloned().flatten())).width(Length::Fixed(230.0)).name(r.name.clone())
+                choice(names, selected, move |i| PrefsMsg::Set(key.clone(), values.get(i).cloned().flatten()))
+                    .width(Length::Fixed(230.0))
+                    .name(r.name.clone())
             }
             Control::Switch { default } => {
                 let on = own.as_deref().map_or(*default, |v| v == "true");
                 let (key, default) = (r.key.clone(), *default);
-                switch(on, move |b| PrefsMsg::Set(key.clone(), (b != default).then_some(Value::Flag(b)))).name(r.name.clone())
+                switch(on, move |b| PrefsMsg::Set(key.clone(), (b != default).then_some(Value::Flag(b))))
+                    .name(r.name.clone())
             }
-            Control::Button { label: words, id } => button(label(words.clone()).size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(PrefsMsg::Button(*id)).name(words.clone()),
+            Control::Button { label: words, id } => button(label(words.clone()).size(12.0))
+                .padding(Padding::hv(4.0, 12.0))
+                .on_press(PrefsMsg::Button(*id))
+                .name(words.clone()),
             Control::Percent { min, desktop, now } => {
-                let shown = self.drafts.get(&r.key).cloned().unwrap_or_else(|| own.as_deref().and_then(|v| v.parse::<f32>().ok()).map(|x| format!("{:.0}", x * 100.0)).unwrap_or_default());
+                let shown = self.drafts.get(&r.key).cloned().unwrap_or_else(|| {
+                    own.as_deref()
+                        .and_then(|v| v.parse::<f32>().ok())
+                        .map(|x| format!("{:.0}", x * 100.0))
+                        .unwrap_or_default()
+                });
                 if own.is_none() {
                     left.push(label(desktop.clone()).size(11.0).dim());
                 }
@@ -284,7 +332,11 @@ impl Prefs {
                     let key = r.key.clone();
                     left.push(
                         row(vec![
-                            button(label("Use the desktop's").size(11.0).color(theme.accent)).look(ButtonLook::Plain).padding(Padding::hv(0.0, 0.0)).on_press(PrefsMsg::Set(key, None)).name(format!("{}: use the desktop's", r.name)),
+                            button(label("Use the desktop's").size(11.0).color(theme.accent))
+                                .look(ButtonLook::Plain)
+                                .padding(Padding::hv(0.0, 0.0))
+                                .on_press(PrefsMsg::Set(key, None))
+                                .name(format!("{}: use the desktop's", r.name)),
                             space().width(Length::FILL),
                         ])
                         .width(Length::FILL),
@@ -297,8 +349,15 @@ impl Prefs {
                 let at = shown.parse::<u32>().ok().filter(|n| (min..=100).contains(n)).unwrap_or(*now) as f32;
                 let (k1, k2) = (key.clone(), key.clone());
                 row(vec![
-                    crate::slider(min as f32, 100.0, at, move |v| PrefsMsg::Slid(k1.clone(), v.round() as u32)).step(1.0).on_release(PrefsMsg::Let(k2, min)).width(Length::Fixed(150.0)).name(format!("{} slider", r.name)),
-                    crate::field(shown, move |t| PrefsMsg::Typed(key.clone(), t, min)).placeholder(now.to_string()).width(Length::Fixed(64.0)).name(format!("{} ({help})", r.name)),
+                    crate::slider(min as f32, 100.0, at, move |v| PrefsMsg::Slid(k1.clone(), v.round() as u32))
+                        .step(1.0)
+                        .on_release(PrefsMsg::Let(k2, min))
+                        .width(Length::Fixed(150.0))
+                        .name(format!("{} slider", r.name)),
+                    crate::field(shown, move |t| PrefsMsg::Typed(key.clone(), t, min))
+                        .placeholder(now.to_string())
+                        .width(Length::Fixed(64.0))
+                        .name(format!("{} ({help})", r.name)),
                     label("%").size(13.0),
                 ])
                 .spacing(6.0)
@@ -306,7 +365,14 @@ impl Prefs {
                 .into()
             }
         };
-        panel(row(vec![column(left).spacing(2.0).width(Length::FILL), control]).spacing(16.0).align(Align::Center).width(Length::FILL)).padding(Padding::hv(8.0, 12.0)).width(Length::FILL)
+        panel(
+            row(vec![column(left).spacing(2.0).width(Length::FILL), control])
+                .spacing(16.0)
+                .align(Align::Center)
+                .width(Length::FILL),
+        )
+        .padding(Padding::hv(8.0, 12.0))
+        .width(Length::FILL)
     }
 }
 
@@ -356,10 +422,21 @@ impl Program for Prefs {
                 }
                 inner.push(self.row_view(r, theme));
             }
-            let card = panel(column(inner).width(Length::FILL)).color(theme.card).radius(10.0).padding(2.0).width(Length::FILL);
-            all.push(column(vec![label(part.title).size(12.0).dim().weight(600), card]).spacing(6.0).width(Length::FILL));
+            let card = panel(column(inner).width(Length::FILL))
+                .color(theme.card)
+                .radius(10.0)
+                .padding(2.0)
+                .width(Length::FILL);
+            all.push(
+                column(vec![label(part.title).size(12.0).dim().weight(600), card]).spacing(6.0).width(Length::FILL),
+            );
         }
-        scroll(panel(column(all).spacing(18.0).width(Length::FILL)).padding(Padding { top: 18.0, bottom: 22.0, left: 20.0, right: 20.0 }).width(Length::FILL)).name(format!("{} Settings", self.app))
+        scroll(
+            panel(column(all).spacing(18.0).width(Length::FILL))
+                .padding(Padding { top: 18.0, bottom: 22.0, left: 20.0, right: 20.0 })
+                .width(Length::FILL),
+        )
+        .name(format!("{} Settings", self.app))
     }
 
     fn update(&mut self, m: PrefsMsg, window: &mut Window) {
@@ -415,7 +492,14 @@ impl Program for Prefs {
     fn style(&self) -> vergence_ui::Style {
         // Small enough to be made short (it scrolls); it opens as tall as its rows
         // want, or at the size it was last left at.
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: false, min: (520.0, 260.0), max: (900.0, 0.0), alone: false, frosted: false }
+        vergence_ui::Style {
+            kind: vergence_ui::WinKind::Dialog,
+            modal: false,
+            min: (520.0, 260.0),
+            max: (900.0, 0.0),
+            alone: false,
+            frosted: false,
+        }
     }
 
     /// It opens at a guess from its rows (the width kept from before), then
@@ -452,7 +536,10 @@ impl Drop for Prefs {
 
 /// Where settings windows' last sizes are kept (owner only).
 fn sizes_path() -> Option<std::path::PathBuf> {
-    let state = std::env::var_os("XDG_STATE_HOME").map(std::path::PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")))?;
+    let state = std::env::var_os("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")))?;
     Some(state.join("vergence/settings-windows.toml"))
 }
 
@@ -482,14 +569,25 @@ fn keep_size(app: &str, w: u32, h: u32) {
         return;
     }
     let old = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut lines: Vec<String> = old.lines().filter(|l| l.split_once('=').is_none_or(|(k, _)| k.trim().trim_matches('"') != app)).map(String::from).collect();
+    let mut lines: Vec<String> = old
+        .lines()
+        .filter(|l| l.split_once('=').is_none_or(|(k, _)| k.trim().trim_matches('"') != app))
+        .map(String::from)
+        .collect();
     lines.push(format!("\"{app}\" = \"{w}x{h}\""));
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
     let beside = path.with_extension("toml.new");
     let text = lines.join("\n") + "\n";
-    let _ = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&beside).and_then(|mut f| f.write_all(text.as_bytes())).and_then(|_| std::fs::rename(&beside, &path));
+    let _ = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&beside)
+        .and_then(|mut f| f.write_all(text.as_bytes()))
+        .and_then(|_| std::fs::rename(&beside, &path));
 }
 
 /// What a percentage's field holds, as a fraction, if it is `min` to 100.
@@ -500,7 +598,10 @@ fn percent_of(digits: &str, min: u32) -> Option<f32> {
 
 /// ~/.config/vergence/desktop.toml.
 pub fn desktop_path() -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))?;
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))?;
     Some(base.join("vergence/desktop.toml"))
 }
 
@@ -523,8 +624,15 @@ pub fn set_key(text: &str, section: &str, key: &str, value: Option<&str>) -> Str
         out.push_str(&format!("{section}\n{key} = {v}\n"));
         return out;
     };
-    let end = lines.iter().enumerate().skip(start + 1).find(|(_, l)| l.trim_start().starts_with('[')).map_or(lines.len(), |(i, _)| i);
-    let found = (start + 1..end).find(|&i| lines[i].split_once('=').is_some_and(|(k, _)| k.trim() == key) && !lines[i].trim_start().starts_with('#'));
+    let end = lines
+        .iter()
+        .enumerate()
+        .skip(start + 1)
+        .find(|(_, l)| l.trim_start().starts_with('['))
+        .map_or(lines.len(), |(i, _)| i);
+    let found = (start + 1..end).find(|&i| {
+        lines[i].split_once('=').is_some_and(|(k, _)| k.trim() == key) && !lines[i].trim_start().starts_with('#')
+    });
     let mut out: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
     match (found, value) {
         (Some(i), Some(v)) => out[i] = format!("{key} = {v}"),
@@ -556,7 +664,10 @@ mod tests {
     fn a_key_is_set_changed_and_taken_away_and_the_rest_stays() {
         let t = "# mine\n[appearance]\ncolor-scheme = \"dark\"\n\n[terminal]\nopacity = 0.97 # see-through\nscheme = \"tango\"\n\n[[touch.panel]]\nname = \"x\"\n";
         let a = set_key(t, "[terminal]", "style", Some("\"light\""));
-        assert_eq!(a, "# mine\n[appearance]\ncolor-scheme = \"dark\"\n\n[terminal]\nopacity = 0.97 # see-through\nscheme = \"tango\"\nstyle = \"light\"\n\n[[touch.panel]]\nname = \"x\"\n");
+        assert_eq!(
+            a,
+            "# mine\n[appearance]\ncolor-scheme = \"dark\"\n\n[terminal]\nopacity = 0.97 # see-through\nscheme = \"tango\"\nstyle = \"light\"\n\n[[touch.panel]]\nname = \"x\"\n"
+        );
         let b = set_key(&a, "[terminal]", "style", Some("\"dark\""));
         assert!(b.contains("style = \"dark\"") && !b.contains("light"));
         let c = set_key(&b, "[terminal]", "style", None);

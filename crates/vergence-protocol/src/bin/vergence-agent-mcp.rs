@@ -163,10 +163,15 @@ impl Parser<'_> {
             }
             Some(c) if *c == b'-' || c.is_ascii_digit() => {
                 let start = self.i;
-                while self.i < self.b.len() && matches!(self.b[self.i], b'-' | b'+' | b'.' | b'e' | b'E' | b'0'..=b'9') {
+                while self.i < self.b.len() && matches!(self.b[self.i], b'-' | b'+' | b'.' | b'e' | b'E' | b'0'..=b'9')
+                {
                     self.i += 1;
                 }
-                std::str::from_utf8(&self.b[start..self.i]).ok().and_then(|t| t.parse().ok()).map(J::Num).ok_or_else(|| "a bad number".into())
+                std::str::from_utf8(&self.b[start..self.i])
+                    .ok()
+                    .and_then(|t| t.parse().ok())
+                    .map(J::Num)
+                    .ok_or_else(|| "a bad number".into())
             }
             Some(_) => Err("unexpected character".into()),
         }
@@ -295,7 +300,11 @@ fn to_json(v: &J) -> String {
 // ------------------------------------------------------------------ tools
 
 fn schema(props: Vec<(&str, J)>, required: &[&str]) -> J {
-    obj(vec![("type", s("object")), ("properties", obj(props)), ("required", J::Arr(required.iter().map(|r| s(*r)).collect()))])
+    obj(vec![
+        ("type", s("object")),
+        ("properties", obj(props)),
+        ("required", J::Arr(required.iter().map(|r| s(*r)).collect())),
+    ])
 }
 
 fn prop(kind: &str, about: &str) -> J {
@@ -308,40 +317,95 @@ fn tools() -> J {
     J::Arr(vec![
         obj(vec![
             ("name", s("windows")),
-            ("description", s("Every window on the Vergence desktop: its id (client/window), kind, title, app, which one has the keyboard, which publish their meaning (Vergence's own apps; only these can be read and acted on), and what you may do with each app (asked, just now, timed with minutes left, session, always, never).")),
+            (
+                "description",
+                s(
+                    "Every window on the Vergence desktop: its id (client/window), kind, title, app, which one has the keyboard, which publish their meaning (Vergence's own apps; only these can be read and acted on), and what you may do with each app (asked, just now, timed with minutes left, session, always, never).",
+                ),
+            ),
             ("inputSchema", schema(vec![], &[])),
         ]),
         obj(vec![
             ("name", s("tree")),
-            ("description", s("A window's widgets: each one's id, role, name, value, states (focused, off, selected, secret...), a choice's items, and its place on the screens in points. The first use of an app asks the person; the call waits for the answer.")),
-            ("inputSchema", schema(vec![("window", prop("string", "The window's id from `windows`, as client/window (\"4/1\")."))], &["window"])),
+            (
+                "description",
+                s(
+                    "A window's widgets: each one's id, role, name, value, states (focused, off, selected, secret...), a choice's items, and its place on the screens in points. The first use of an app asks the person; the call waits for the answer.",
+                ),
+            ),
+            (
+                "inputSchema",
+                schema(
+                    vec![("window", prop("string", "The window's id from `windows`, as client/window (\"4/1\")."))],
+                    &["window"],
+                ),
+            ),
         ]),
         obj(vec![
             ("name", s("find")),
-            ("description", s(format!("Widgets by path, with their window and id. {PATHS} A search across every window only shows apps you are already allowed; name a window to be asked about its app."))),
+            (
+                "description",
+                s(format!(
+                    "Widgets by path, with their window and id. {PATHS} A search across every window only shows apps you are already allowed; name a window to be asked about its app."
+                )),
+            ),
             ("inputSchema", schema(vec![("path", prop("string", "The path."))], &["path"])),
         ]),
-        obj(vec![("name", s("focused")), ("description", s("The focused widget of the window the person is using, and the text caret, if a field has one.")), ("inputSchema", schema(vec![], &[]))]),
+        obj(vec![
+            ("name", s("focused")),
+            (
+                "description",
+                s("The focused widget of the window the person is using, and the text caret, if a field has one."),
+            ),
+            ("inputSchema", schema(vec![], &[])),
+        ]),
         obj(vec![
             ("name", s("act")),
-            ("description", s(format!(
-                "Act on one widget as the person would: press (buttons, switches, choices), focus, reveal (scroll it into view), set (a field's or text area's whole text, a slider's number, a switch's on/off; never a secret field), choose (a choice's item by name). Name the widget by `path` (it must lead to exactly one) or by `window` and `node`. Waits for the window to show what happened and answers with the widget as it is after. The person sees a ring where you act; the first use of an app asks them, and the call waits. {PATHS}"
-            ))),
-            ("inputSchema", schema(
-                vec![
-                    ("action", obj(vec![("type", s("string")), ("enum", J::Arr(vec![s("press"), s("focus"), s("reveal"), s("set"), s("choose")])), ("description", s("What to do."))])),
-                    ("path", prop("string", "The widget, by path.")),
-                    ("window", prop("string", "Or the window (client/window) ...")),
-                    ("node", prop("string", "... and the widget's id (a string: ids are 64-bit).")),
-                    ("value", prop("string", "For set: the value. For choose: the item's name.")),
-                ],
-                &["action"],
-            )),
+            (
+                "description",
+                s(format!(
+                    "Act on one widget as the person would: press (buttons, switches, choices), focus, reveal (scroll it into view), set (a field's or text area's whole text, a slider's number, a switch's on/off; never a secret field), choose (a choice's item by name). Name the widget by `path` (it must lead to exactly one) or by `window` and `node`. Waits for the window to show what happened and answers with the widget as it is after. The person sees a ring where you act; the first use of an app asks them, and the call waits. {PATHS}"
+                )),
+            ),
+            (
+                "inputSchema",
+                schema(
+                    vec![
+                        (
+                            "action",
+                            obj(vec![
+                                ("type", s("string")),
+                                ("enum", J::Arr(vec![s("press"), s("focus"), s("reveal"), s("set"), s("choose")])),
+                                ("description", s("What to do.")),
+                            ]),
+                        ),
+                        ("path", prop("string", "The widget, by path.")),
+                        ("window", prop("string", "Or the window (client/window) ...")),
+                        ("node", prop("string", "... and the widget's id (a string: ids are 64-bit).")),
+                        ("value", prop("string", "For set: the value. For choose: the item's name.")),
+                    ],
+                    &["action"],
+                ),
+            ),
         ]),
         obj(vec![
             ("name", s("wait")),
-            ("description", s("Waits until something changes after `since` (the focus, a caret, a window's widgets, the window with the keyboard, your timed grant running out), or until timeout_ms; answers with the changes and `latest`, the number to wait from next time. Start with since 0 to learn the latest.")),
-            ("inputSchema", schema(vec![("since", prop("number", "The last change number seen (0 at first).")), ("timeout_ms", prop("number", "How long to wait at most, up to 30000 (default 5000)."))], &[])),
+            (
+                "description",
+                s(
+                    "Waits until something changes after `since` (the focus, a caret, a window's widgets, the window with the keyboard, your timed grant running out), or until timeout_ms; answers with the changes and `latest`, the number to wait from next time. Start with since 0 to learn the latest.",
+                ),
+            ),
+            (
+                "inputSchema",
+                schema(
+                    vec![
+                        ("since", prop("number", "The last change number seen (0 at first).")),
+                        ("timeout_ms", prop("number", "How long to wait at most, up to 30000 (default 5000).")),
+                    ],
+                    &[],
+                ),
+            ),
         ]),
     ])
 }
@@ -357,7 +421,10 @@ impl Bus {
     fn connect(&mut self) -> Result<&mut Client, String> {
         if self.client.is_none() {
             let mut c = Client::connect("vergence-agent-mcp").map_err(|e| format!("no Vergence session bus: {e}"))?;
-            match c.request(|serial| ClientMsg::Agent(AgentRequest::Hello { serial, name: self.name.clone() })).map_err(|e| e.to_string())? {
+            match c
+                .request(|serial| ClientMsg::Agent(AgentRequest::Hello { serial, name: self.name.clone() }))
+                .map_err(|e| e.to_string())?
+            {
                 ServerMsg::Done { .. } => {}
                 other => return Err(format!("unexpected {other:?}")),
             }
@@ -387,7 +454,10 @@ fn node_text(n: &Node) -> String {
     let value = n.value.as_ref().map(|v| format!(" = {v:?}")).unwrap_or_default();
     let states = if n.states.is_empty() { String::new() } else { format!(" [{}]", n.states.join(", ")) };
     let items = if n.items.is_empty() { String::new() } else { format!(" items {:?}", n.items) };
-    format!("node \"{}\" {} {:?}{value}{states}{items} at {:.0},{:.0} {:.0}x{:.0}", n.id, n.role, n.name, n.x, n.y, n.w, n.h)
+    format!(
+        "node \"{}\" {} {:?}{value}{states}{items} at {:.0},{:.0} {:.0}x{:.0}",
+        n.id, n.role, n.name, n.x, n.y, n.w, n.h
+    )
 }
 
 fn found_text(f: &AgentFound) -> String {
@@ -397,18 +467,30 @@ fn found_text(f: &AgentFound) -> String {
 fn change_text(n: u64, c: &AgentChange) -> String {
     match c {
         AgentChange::Window { client, window } => format!("{n}: the keyboard went to window \"{client}/{window}\""),
-        AgentChange::Focus { client, window, node } => format!("{n}: in window \"{client}/{window}\" the focus moved to node \"{node}\""),
-        AgentChange::Caret { client, window, at } => format!("{n}: in window \"{client}/{window}\" the caret moved{}", at.map(|(x, y, _, _)| format!(" to {x:.0},{y:.0}")).unwrap_or_default()),
+        AgentChange::Focus { client, window, node } => {
+            format!("{n}: in window \"{client}/{window}\" the focus moved to node \"{node}\"")
+        }
+        AgentChange::Caret { client, window, at } => format!(
+            "{n}: in window \"{client}/{window}\" the caret moved{}",
+            at.map(|(x, y, _, _)| format!(" to {x:.0},{y:.0}")).unwrap_or_default()
+        ),
         AgentChange::Tree { client, window } => format!("{n}: window \"{client}/{window}\" changed"),
-        AgentChange::Time { app, minutes_left: 0 } => format!("{n}: your time with {app} is up; the person is asked again at your next request"),
-        AgentChange::Time { app, minutes_left } => format!("{n}: your time with {app} ends in {minutes_left} min; ask the person for more (the tile's button) before a long step"),
+        AgentChange::Time { app, minutes_left: 0 } => {
+            format!("{n}: your time with {app} is up; the person is asked again at your next request")
+        }
+        AgentChange::Time { app, minutes_left } => format!(
+            "{n}: your time with {app} ends in {minutes_left} min; ask the person for more (the tile's button) before a long step"
+        ),
     }
 }
 
 fn window_id(v: Option<&J>) -> Result<(u32, u32), String> {
     let t = v.and_then(J::str).ok_or("window is \"client/window\"")?;
     let (a, b) = t.split_once('/').ok_or("window is \"client/window\"")?;
-    Ok((a.trim().parse().map_err(|_| "window is \"client/window\"")?, b.trim().parse().map_err(|_| "window is \"client/window\"")?))
+    Ok((
+        a.trim().parse().map_err(|_| "window is \"client/window\"")?,
+        b.trim().parse().map_err(|_| "window is \"client/window\"")?,
+    ))
 }
 
 fn latest(bus: &mut Bus) -> Result<u64, String> {
@@ -437,7 +519,10 @@ fn call(bus: &mut Bus, name: &str, args: &J) -> Result<String, String> {
                         other => format!(", {other}"),
                     };
                     let allowed = if w.meaning { allowed } else { String::new() };
-                    format!("window \"{}/{}\" {} {:?} (app {}){mark} at {:.0},{:.0} {:.0}x{:.0} on {}{meaning}{allowed}", w.client, w.window, w.kind, w.title, w.app_id, w.at.0, w.at.1, w.at.2, w.at.3, w.screen)
+                    format!(
+                        "window \"{}/{}\" {} {:?} (app {}){mark} at {:.0},{:.0} {:.0}x{:.0} on {}{meaning}{allowed}",
+                        w.client, w.window, w.kind, w.title, w.app_id, w.at.0, w.at.1, w.at.2, w.at.3, w.screen
+                    )
                 })
                 .collect::<Vec<_>>()
                 .join("\n")),
@@ -448,7 +533,9 @@ fn call(bus: &mut Bus, name: &str, args: &J) -> Result<String, String> {
             match bus.ask(|serial| AgentRequest::Tree { serial, client, window })? {
                 AgentEvent::Tree { title, focus, caret, nodes, .. } => {
                     let mut out = vec![format!("window \"{client}/{window}\" {title:?}, focus node \"{focus}\"")];
-                    out.extend(nodes.iter().map(|n| format!("{}{}", if n.id == focus { "> " } else { "  " }, node_text(n))));
+                    out.extend(
+                        nodes.iter().map(|n| format!("{}{}", if n.id == focus { "> " } else { "  " }, node_text(n))),
+                    );
                     if let Some((x, y, w, h)) = caret {
                         out.push(format!("caret at {x:.0},{y:.0} {w:.0}x{h:.0}"));
                     }
@@ -460,14 +547,20 @@ fn call(bus: &mut Bus, name: &str, args: &J) -> Result<String, String> {
         "find" => {
             let path = args.get("path").and_then(J::str).ok_or("path is needed")?.to_string();
             match bus.ask(|serial| AgentRequest::Find { serial, path: path.clone() })? {
-                AgentEvent::Found { found, .. } if found.is_empty() => Ok(format!("nothing at {path:?} (in apps you may use)")),
+                AgentEvent::Found { found, .. } if found.is_empty() => {
+                    Ok(format!("nothing at {path:?} (in apps you may use)"))
+                }
                 AgentEvent::Found { found, .. } => Ok(found.iter().map(found_text).collect::<Vec<_>>().join("\n")),
                 other => Err(format!("unexpected {other:?}")),
             }
         }
         "focused" => match bus.ask(|serial| AgentRequest::Focused { serial })? {
             AgentEvent::Focused { found: None, .. } => Ok("nothing focused in a window with meaning".into()),
-            AgentEvent::Focused { found: Some(f), caret, .. } => Ok(format!("{}{}", found_text(&f), caret.map(|(x, y, w, h)| format!("\ncaret at {x:.0},{y:.0} {w:.0}x{h:.0}")).unwrap_or_default())),
+            AgentEvent::Focused { found: Some(f), caret, .. } => Ok(format!(
+                "{}{}",
+                found_text(&f),
+                caret.map(|(x, y, w, h)| format!("\ncaret at {x:.0},{y:.0} {w:.0}x{h:.0}")).unwrap_or_default()
+            )),
             other => Err(format!("unexpected {other:?}")),
         },
         "act" => {
@@ -489,11 +582,21 @@ fn call(bus: &mut Bus, name: &str, args: &J) -> Result<String, String> {
                 match found.as_slice() {
                     [one] => (one.client, one.window, one.node.id, one.node.role.clone(), one.node.name.clone()),
                     [] => return Err(format!("nothing at {path:?} (in apps you may use)")),
-                    many => return Err(format!("{} widgets at {path:?}; name one exactly (a fuller path, or window and node):\n{}", many.len(), many.iter().map(found_text).collect::<Vec<_>>().join("\n"))),
+                    many => {
+                        return Err(format!(
+                            "{} widgets at {path:?}; name one exactly (a fuller path, or window and node):\n{}",
+                            many.len(),
+                            many.iter().map(found_text).collect::<Vec<_>>().join("\n")
+                        ));
+                    }
                 }
             } else {
                 let (c, w) = window_id(args.get("window"))?;
-                let n = args.get("node").and_then(J::str).and_then(|n| n.trim().parse().ok()).ok_or("node is the widget's id, as a string")?;
+                let n = args
+                    .get("node")
+                    .and_then(J::str)
+                    .and_then(|n| n.trim().parse().ok())
+                    .ok_or("node is the widget's id, as a string")?;
                 (c, w, n, String::new(), String::new())
             };
             let since = latest(bus)?;
@@ -513,7 +616,11 @@ fn call(bus: &mut Bus, name: &str, args: &J) -> Result<String, String> {
                 std::thread::sleep(Duration::from_millis(30));
             }
             let after = match bus.ask(|serial| AgentRequest::Tree { serial, client, window }) {
-                Ok(AgentEvent::Tree { nodes, .. }) => nodes.into_iter().find(|n| n.id == node).map(|n| format!("\nnow: {}", node_text(&n))).unwrap_or_else(|| "\n(the widget is gone now: the window changed around it)".into()),
+                Ok(AgentEvent::Tree { nodes, .. }) => nodes
+                    .into_iter()
+                    .find(|n| n.id == node)
+                    .map(|n| format!("\nnow: {}", node_text(&n)))
+                    .unwrap_or_else(|| "\n(the widget is gone now: the window changed around it)".into()),
                 _ => String::new(),
             };
             Ok(format!("done in window \"{client}/{window}\"{after}"))
@@ -523,7 +630,8 @@ fn call(bus: &mut Bus, name: &str, args: &J) -> Result<String, String> {
             let timeout = args.get("timeout_ms").and_then(J::num).unwrap_or(5000.0).clamp(0.0, WAIT_MAX as f64) as u64;
             let until = Instant::now() + Duration::from_millis(timeout);
             loop {
-                if let AgentEvent::Changes { latest, changes, .. } = bus.ask(|serial| AgentRequest::Changes { serial, since })?
+                if let AgentEvent::Changes { latest, changes, .. } =
+                    bus.ask(|serial| AgentRequest::Changes { serial, since })?
                     && (!changes.is_empty() || since == 0 || Instant::now() >= until)
                 {
                     {
@@ -549,7 +657,11 @@ fn reply(id: &J, result: J) -> String {
 }
 
 fn error(id: &J, code: i64, message: &str) -> String {
-    to_json(&obj(vec![("jsonrpc", s("2.0")), ("id", id.clone()), ("error", obj(vec![("code", J::Num(code as f64)), ("message", s(message))]))]))
+    to_json(&obj(vec![
+        ("jsonrpc", s("2.0")),
+        ("id", id.clone()),
+        ("error", obj(vec![("code", J::Num(code as f64)), ("message", s(message))])),
+    ]))
 }
 
 /// One message: the line to answer with, if any (notifications have none).
@@ -574,8 +686,16 @@ fn handle(bus: &mut Bus, line: &str) -> Option<String> {
                 obj(vec![
                     ("protocolVersion", s(version)),
                     ("capabilities", obj(vec![("tools", obj(vec![]))])),
-                    ("serverInfo", obj(vec![("name", s("vergence-agent-mcp")), ("version", s(env!("CARGO_PKG_VERSION")))])),
-                    ("instructions", s("Vergence's apps, by meaning: read windows and act on widgets by name. Every app is asked about once, in the desktop's own question; the person sees a ring where you act. Use `windows` first, then `find` or `tree`, then `act`.")),
+                    (
+                        "serverInfo",
+                        obj(vec![("name", s("vergence-agent-mcp")), ("version", s(env!("CARGO_PKG_VERSION")))]),
+                    ),
+                    (
+                        "instructions",
+                        s(
+                            "Vergence's apps, by meaning: read windows and act on widgets by name. Every app is asked about once, in the desktop's own question; the person sees a ring where you act. Use `windows` first, then `find` or `tree`, then `act`.",
+                        ),
+                    ),
                 ]),
             )
         }
@@ -588,7 +708,13 @@ fn handle(bus: &mut Bus, line: &str) -> Option<String> {
                 Ok(t) => (t, false),
                 Err(e) => (e, true),
             };
-            reply(&id, obj(vec![("content", J::Arr(vec![obj(vec![("type", s("text")), ("text", s(text))])])), ("isError", J::Bool(failed))]))
+            reply(
+                &id,
+                obj(vec![
+                    ("content", J::Arr(vec![obj(vec![("type", s("text")), ("text", s(text))])])),
+                    ("isError", J::Bool(failed)),
+                ]),
+            )
         }
         _ => error(&id, -32601, &format!("no method {method:?}")),
     })
@@ -596,7 +722,12 @@ fn handle(bus: &mut Bus, line: &str) -> Option<String> {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let name = args.iter().position(|a| a == "--name").and_then(|i| args.get(i + 1)).cloned().unwrap_or_else(|| "Claude".into());
+    let name = args
+        .iter()
+        .position(|a| a == "--name")
+        .and_then(|i| args.get(i + 1))
+        .cloned()
+        .unwrap_or_else(|| "Claude".into());
     let mut bus = Bus { name, client: None };
     let stdin = std::io::stdin();
     let mut out = std::io::stdout().lock();
@@ -667,8 +798,15 @@ mod tests {
         let mut bus = Bus { name: "Test".into(), client: None };
         let init = handle(&mut bus, r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}"#).unwrap();
         let v = parse(&init).unwrap();
-        assert_eq!(v.get("result").and_then(|r| r.get("protocolVersion")).and_then(J::str), Some("2025-03-26"), "the client's version, known");
-        assert!(handle(&mut bus, r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).is_none(), "a notification gets no answer");
+        assert_eq!(
+            v.get("result").and_then(|r| r.get("protocolVersion")).and_then(J::str),
+            Some("2025-03-26"),
+            "the client's version, known"
+        );
+        assert!(
+            handle(&mut bus, r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).is_none(),
+            "a notification gets no answer"
+        );
         let list = parse(&handle(&mut bus, r#"{"jsonrpc":"2.0","id":"a","method":"tools/list"}"#).unwrap()).unwrap();
         let tools = list.get("result").and_then(|r| r.get("tools")).unwrap();
         let J::Arr(t) = tools else { panic!() };

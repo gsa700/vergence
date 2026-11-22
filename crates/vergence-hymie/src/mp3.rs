@@ -202,16 +202,25 @@ fn hdr_is_layer_1(h: [u8; 4]) -> bool {
 }
 
 pub fn hdr_valid(h: [u8; 4]) -> bool {
-    h[0] == 0xff && ((h[1] & 0xF0) == 0xf0 || (h[1] & 0xFE) == 0xe2) && hdr_get_layer(h) != 0 && hdr_get_bitrate(h) != 15 && hdr_get_sample_rate(h) != 3
+    h[0] == 0xff
+        && ((h[1] & 0xF0) == 0xf0 || (h[1] & 0xFE) == 0xe2)
+        && hdr_get_layer(h) != 0
+        && hdr_get_bitrate(h) != 15
+        && hdr_get_sample_rate(h) != 3
 }
 
 pub fn hdr_compare(h1: [u8; 4], h2: [u8; 4]) -> bool {
-    hdr_valid(h2) && (h1[1] ^ h2[1]) & 0xFE == 0 && (h1[2] ^ h2[2]) & 0x0C == 0 && !(hdr_is_free_format(h1) ^ hdr_is_free_format(h2))
+    hdr_valid(h2)
+        && (h1[1] ^ h2[1]) & 0xFE == 0
+        && (h1[2] ^ h2[2]) & 0x0C == 0
+        && !(hdr_is_free_format(h1) ^ hdr_is_free_format(h2))
 }
 
 pub fn hdr_bitrate_kbps(h: [u8; 4]) -> u32 {
     // Layer 0 is no header (hdr_valid): its index would be before the table.
-    let i = hdr_test_mpeg1(h) as usize * 45 + (hdr_get_layer(h) as usize).wrapping_sub(1).wrapping_mul(15) + hdr_get_bitrate(h) as usize;
+    let i = hdr_test_mpeg1(h) as usize * 45
+        + (hdr_get_layer(h) as usize).wrapping_sub(1).wrapping_mul(15)
+        + hdr_get_bitrate(h) as usize;
     2 * HALF_RATE.get(i).copied().unwrap_or(0) as u32
 }
 
@@ -226,7 +235,8 @@ pub fn hdr_frame_samples(h: [u8; 4]) -> usize {
 }
 
 pub fn hdr_frame_bytes(h: [u8; 4], free_format_size: usize) -> usize {
-    let mut frame_bytes = hdr_frame_samples(h) * hdr_bitrate_kbps(h) as usize * 125 / hdr_sample_rate_hz(h).max(1) as usize;
+    let mut frame_bytes =
+        hdr_frame_samples(h) * hdr_bitrate_kbps(h) as usize * 125 / hdr_sample_rate_hz(h).max(1) as usize;
     if hdr_is_layer_1(h) {
         frame_bytes &= !3; // slot align
     }
@@ -234,11 +244,7 @@ pub fn hdr_frame_bytes(h: [u8; 4], free_format_size: usize) -> usize {
 }
 
 pub fn hdr_padding(h: [u8; 4]) -> usize {
-    if hdr_test_padding(h) {
-        if hdr_is_layer_1(h) { 4 } else { 1 }
-    } else {
-        0
-    }
+    if hdr_test_padding(h) { if hdr_is_layer_1(h) { 4 } else { 1 } } else { 0 }
 }
 
 // ------------------------------------------------------------ Layer III
@@ -330,7 +336,14 @@ fn l3_read_side_info(bs: &mut Bs, gr: &mut [GrInfo; 4], hdr: [u8; 4]) -> i32 {
 
 /// L3_read_scalefactors: `scf` and `ist_pos` from their starts, the band
 /// counts from `scf_count` (a row of g_scf_partitions).
-fn l3_read_scalefactors(scf: &mut [u8], ist_pos: &mut [u8], scf_size: &[u8; 4], scf_count: &[u8], bitbuf: &mut Bs, mut scfsi: i32) {
+fn l3_read_scalefactors(
+    scf: &mut [u8],
+    ist_pos: &mut [u8],
+    scf_size: &[u8; 4],
+    scf_count: &[u8],
+    bitbuf: &mut Bs,
+    mut scfsi: i32,
+) {
     let mut at = 0;
     let mut i = 0;
     while i < 4 && scf_count[i] != 0 {
@@ -457,7 +470,9 @@ fn l3_huffman(dst: &mut [f32], bs: &mut Bs, gr_info: &GrInfo, scf: &[f32; 40], l
     let mut scf_at = 0usize;
     let mut d = 0usize;
     let mut next = (bs.pos / 8) as usize;
-    let mut cache: u32 = ((((bs.byte(next) * 256) + bs.byte(next + 1)) * 256 + bs.byte(next + 2)) * 256 + bs.byte(next + 3)) << (bs.pos & 7);
+    let mut cache: u32 = ((((bs.byte(next) * 256) + bs.byte(next + 1)) * 256 + bs.byte(next + 2)) * 256
+        + bs.byte(next + 3))
+        << (bs.pos & 7);
     let mut sh: i32 = (bs.pos & 7) - 8;
     next += 4;
     let mut np: i32;
@@ -869,7 +884,8 @@ fn mp3d_dct_ii(grbuf: &mut [f32], n: usize) {
             t[i + 24] = (t3 - t2) * SEC[3 * i + 2];
         }
         for x in t.as_chunks_mut::<8>().0 {
-            let (mut x0, mut x1, mut x2, mut x3, mut x4, mut x5, mut x6, mut x7) = (x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7]);
+            let (mut x0, mut x1, mut x2, mut x3, mut x4, mut x5, mut x6, mut x7) =
+                (x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7]);
             let mut xt = x0 - x7;
             x0 += x7;
             x7 = x1 - x6;
@@ -1013,7 +1029,14 @@ fn mp3d_synth(grbuf: &[f32], xl: usize, pcm: &mut [f32], dstl: usize, nch: usize
     }
 }
 
-fn mp3d_synth_granule(qmf_state: &mut [f32; 960], grbuf: &mut [f32; 1152], nbands: usize, nch: usize, pcm: &mut [f32], lins: &mut [f32]) {
+fn mp3d_synth_granule(
+    qmf_state: &mut [f32; 960],
+    grbuf: &mut [f32; 1152],
+    nbands: usize,
+    nch: usize,
+    pcm: &mut [f32],
+    lins: &mut [f32],
+) {
     for i in 0..nch {
         mp3d_dct_ii(&mut grbuf[576 * i..], nbands);
     }
@@ -1074,7 +1097,9 @@ pub fn mp3d_find_frame(mp3: &[u8], free_format_bytes: &mut usize) -> (usize, usi
                 }
                 k += 1;
             }
-            if (frame_bytes != 0 && i + frame_and_padding <= n && mp3d_match_frame(&mp3[i..], frame_bytes)) || (i == 0 && frame_and_padding == n) {
+            if (frame_bytes != 0 && i + frame_and_padding <= n && mp3d_match_frame(&mp3[i..], frame_bytes))
+                || (i == 0 && frame_and_padding == n)
+            {
                 return (i, frame_and_padding);
             }
             *free_format_bytes = 0;
@@ -1171,7 +1196,8 @@ impl Mp3Decoder {
         for ch in 0..nch {
             let gr = self.gr_info[gr0 + ch];
             let mut aa_bands = 31;
-            let n_long_bands = (if gr.mixed_block_flag != 0 { 2 } else { 0 }) << (hdr_get_my_sample_rate(hdr) == 2) as usize;
+            let n_long_bands =
+                (if gr.mixed_block_flag != 0 { 2 } else { 0 }) << (hdr_get_my_sample_rate(hdr) == 2) as usize;
             let g = &mut self.grbuf[576 * ch..576 * ch + 576];
 
             if gr.n_short_sfb != 0 {
@@ -1251,7 +1277,14 @@ impl Mp3Decoder {
             for igr in 0..granules {
                 self.grbuf.fill(0.0);
                 self.l3_decode(igr * ch, ch);
-                mp3d_synth_granule(&mut self.qmf_state, &mut self.grbuf, 18, ch, &mut pcm[576 * ch * igr..], &mut self.syn);
+                mp3d_synth_granule(
+                    &mut self.qmf_state,
+                    &mut self.grbuf,
+                    18,
+                    ch,
+                    &mut pcm[576 * ch * igr..],
+                    &mut self.syn,
+                );
             }
         }
         self.l3_save_reservoir();
@@ -1475,8 +1508,18 @@ fn info_tag(data: &[u8], frame: usize, frame_bytes: usize, h: [u8; 4]) -> Info {
     let none = [i32::MIN, 0, i32::MIN, 0];
     let (lsf, mono) = (!hdr_test_mpeg1(h), hdr_is_mono(h));
     let end = (frame + frame_bytes).min(data.len());
-    let mut r = frame + 4 + if lsf { if mono { 9 } else { 17 } } else if mono { 17 } else { 32 };
-    let be32 = |i: usize| -> u32 { if i + 4 <= end { u32::from_be_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]) } else { 0 } };
+    let mut r = frame
+        + 4
+        + if lsf {
+            if mono { 9 } else { 17 }
+        } else if mono {
+            17
+        } else {
+            32
+        };
+    let be32 = |i: usize| -> u32 {
+        if i + 4 <= end { u32::from_be_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]) } else { 0 }
+    };
     let be16 = |i: usize| -> u32 { if i + 2 <= end { (data[i] as u32) << 8 | data[i + 1] as u32 } else { 0 } };
 
     let mut frames: i64 = 0;
@@ -1535,7 +1578,8 @@ fn info_tag(data: &[u8], frame: usize, frame_bytes: usize, h: [u8; 4]) -> Info {
             }
         }
         r += 2; // encoding flags, bitrate
-        let delays = if r + 3 <= end { (data[r] as i64) << 16 | (data[r + 1] as i64) << 8 | data[r + 2] as i64 } else { 0 };
+        let delays =
+            if r + 3 <= end { (data[r] as i64) << 16 | (data[r + 1] as i64) << 8 | data[r + 2] as i64 } else { 0 };
         r += 3;
         if version == 0x4C414D45 || version == 0x4C617666 || version == 0x4C617663 {
             // "LAME", "Lavf", "Lavc"
@@ -1576,7 +1620,9 @@ fn audio_end(data: &[u8], start: usize) -> usize {
     let len = data.len() as i64;
     let mut end = len;
     let at = |i: i64, s: &[u8]| i >= 0 && i + s.len() as i64 <= len && &data[i as usize..i as usize + s.len()] == s;
-    let le32 = |i: i64| i32::from_le_bytes([data[i as usize], data[i as usize + 1], data[i as usize + 2], data[i as usize + 3]]);
+    let le32 = |i: i64| {
+        i32::from_le_bytes([data[i as usize], data[i as usize + 1], data[i as usize + 2], data[i as usize + 3]])
+    };
     if end >= 128 && at(end - 128, b"TAG") {
         end -= 128;
     }
@@ -1586,7 +1632,10 @@ fn audio_end(data: &[u8], start: usize) -> usize {
         end -= size + if flags & 0x80000000 != 0 { 32 } else { 0 };
     } else if at(end - 9, b"LYRICS200") && end >= 15 {
         // int.TryParse on the six digits before it.
-        if let Some(lyrics) = std::str::from_utf8(&data[(end - 15) as usize..(end - 9) as usize]).ok().and_then(|s| s.trim().parse::<i64>().ok()) {
+        if let Some(lyrics) = std::str::from_utf8(&data[(end - 15) as usize..(end - 9) as usize])
+            .ok()
+            .and_then(|s| s.trim().parse::<i64>().ok())
+        {
             end -= lyrics + 15;
         }
     }
@@ -1657,7 +1706,8 @@ impl Track for Mp3Track {
                 break;
             }
             let n = n as usize;
-            into[done * channels..(done + n) * channels].copy_from_slice(&self.pcm[self.pcm_offset * channels..(self.pcm_offset + n) * channels]);
+            into[done * channels..(done + n) * channels]
+                .copy_from_slice(&self.pcm[self.pcm_offset * channels..(self.pcm_offset + n) * channels]);
             self.pcm_offset += n;
             done += n;
         }

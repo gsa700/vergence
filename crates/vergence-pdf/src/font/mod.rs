@@ -23,8 +23,8 @@ use std::sync::OnceLock;
 
 use vergence_raster::{Path, Transform};
 
-use crate::object::{Dict, Object};
 use crate::Document;
+use crate::object::{Dict, Object};
 use cff::Cff;
 use truetype::TrueType;
 use type1::Type1;
@@ -75,7 +75,8 @@ impl Font {
     /// From a font dictionary.
     pub fn load(doc: &Document, d: &Dict) -> Font {
         let subtype = d.name("Subtype").unwrap_or(b"").to_vec();
-        let mut font = if subtype == b"Type0" { Self::composite(doc, d) } else { Self::simple(doc, d, subtype == b"Type3") };
+        let mut font =
+            if subtype == b"Type0" { Self::composite(doc, d) } else { Self::simple(doc, d, subtype == b"Type3") };
         if let Object::Stream(s) = doc.get_in(d, "ToUnicode") {
             font.to_unicode = parse_to_unicode(&doc.stream(&s).data);
         }
@@ -90,16 +91,31 @@ impl Font {
         let base = base_name(d);
         // Type 3: glyph space to text space by its own matrix; widths in glyph space.
         let type3 = type3.then(|| {
-            let v: Vec<f64> = doc.get_in(d, "FontMatrix").as_array().map(|a| a.iter().filter_map(|x| doc.resolve(x).as_f64()).collect()).unwrap_or_default();
-            let matrix = if v.len() == 6 && v.iter().all(|x| x.is_finite()) { Transform::new(v[0], v[1], v[2], v[3], v[4], v[5]) } else { Transform::new(0.001, 0.0, 0.0, 0.001, 0.0, 0.0) };
-            Type3 { procs: doc.get_in(d, "CharProcs").as_dict().cloned().unwrap_or_default(), matrix, resources: doc.get_in(d, "Resources").as_dict().cloned() }
+            let v: Vec<f64> = doc
+                .get_in(d, "FontMatrix")
+                .as_array()
+                .map(|a| a.iter().filter_map(|x| doc.resolve(x).as_f64()).collect())
+                .unwrap_or_default();
+            let matrix = if v.len() == 6 && v.iter().all(|x| x.is_finite()) {
+                Transform::new(v[0], v[1], v[2], v[3], v[4], v[5])
+            } else {
+                Transform::new(0.001, 0.0, 0.0, 0.001, 0.0, 0.0)
+            };
+            Type3 {
+                procs: doc.get_in(d, "CharProcs").as_dict().cloned().unwrap_or_default(),
+                matrix,
+                resources: doc.get_in(d, "Resources").as_dict().cloned(),
+            }
         });
         let width_scale = type3.as_ref().map_or(0.001, |t| t.matrix.a);
         // The encoding: a base, then /Differences.
         let enc = doc.get_in(d, "Encoding");
         let (base_enc, diffs) = match &enc {
             Object::Name(n) => (Some(n.clone()), None),
-            Object::Dict(e) => (e.name("BaseEncoding").map(<[u8]>::to_vec), doc.get_in(e, "Differences").as_array().map(<[Object]>::to_vec)),
+            Object::Dict(e) => (
+                e.name("BaseEncoding").map(<[u8]>::to_vec),
+                doc.get_in(e, "Differences").as_array().map(<[Object]>::to_vec),
+            ),
             _ => (None, None),
         };
         let table: &[&str; 256] = match base_enc.as_deref() {
@@ -169,7 +185,15 @@ impl Font {
             Program::None if type3.is_none() => substitute(&base, flags),
             _ => None,
         };
-        Font { kind: Kind::Simple { names, widths, symbolic }, program, substitute, missing_width: descriptor.get("MissingWidth").and_then(Object::as_f64).unwrap_or(0.0) / 1000.0, cache: RefCell::new(HashMap::new()), to_unicode: HashMap::new(), type3 }
+        Font {
+            kind: Kind::Simple { names, widths, symbolic },
+            program,
+            substitute,
+            missing_width: descriptor.get("MissingWidth").and_then(Object::as_f64).unwrap_or(0.0) / 1000.0,
+            cache: RefCell::new(HashMap::new()),
+            to_unicode: HashMap::new(),
+            type3,
+        }
     }
 
     fn composite(doc: &Document, d: &Dict) -> Font {
@@ -179,13 +203,17 @@ impl Font {
             _ => CMap::Identity,
         };
         let desc = match doc.get_in(d, "DescendantFonts") {
-            Object::Array(a) => a.first().map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap_or_default(),
+            Object::Array(a) => {
+                a.first().map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap_or_default()
+            }
             _ => Dict::default(),
         };
         let descriptor = doc.get_in(&desc, "FontDescriptor").as_dict().cloned().unwrap_or_default();
         let program = embedded(doc, &descriptor);
         let cid_to_gid = match doc.get_in(&desc, "CIDToGIDMap") {
-            Object::Stream(s) => Some(doc.stream(&s).data.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes(*c)).take(1 << 20).collect()),
+            Object::Stream(s) => Some(
+                doc.stream(&s).data.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes(*c)).take(1 << 20).collect(),
+            ),
             _ => None,
         };
         let default = doc.get_in(&desc, "DW").as_f64().unwrap_or(1000.0) / 1000.0;
@@ -218,7 +246,15 @@ impl Font {
             Program::None => substitute(&base_name(d), flags),
             _ => None,
         };
-        Font { kind: Kind::Composite { cmap, cid_to_gid, widths, default }, program, substitute, missing_width: default, cache: RefCell::new(HashMap::new()), to_unicode: HashMap::new(), type3: None }
+        Font {
+            kind: Kind::Composite { cmap, cid_to_gid, widths, default },
+            program,
+            substitute,
+            missing_width: default,
+            cache: RefCell::new(HashMap::new()),
+            to_unicode: HashMap::new(),
+            type3: None,
+        }
     }
 
     /// The codes in a string, each with whether it is the single-byte
@@ -226,7 +262,10 @@ impl Font {
     pub fn codes(&self, s: &[u8]) -> Vec<(u32, bool)> {
         match &self.kind {
             Kind::Simple { .. } => s.iter().map(|b| (*b as u32, *b == 32)).collect(),
-            Kind::Composite { cmap: CMap::Identity, .. } => s.chunks(2).map(|c| (if c.len() == 2 { (c[0] as u32) << 8 | c[1] as u32 } else { c[0] as u32 }, false)).collect(),
+            Kind::Composite { cmap: CMap::Identity, .. } => s
+                .chunks(2)
+                .map(|c| (if c.len() == 2 { (c[0] as u32) << 8 | c[1] as u32 } else { c[0] as u32 }, false))
+                .collect(),
             Kind::Composite { cmap: CMap::Ranges { spaces, .. }, .. } => {
                 let mut out = Vec::new();
                 let mut i = 0;
@@ -254,7 +293,9 @@ impl Font {
 
     fn cid(&self, code: u32) -> u32 {
         match &self.kind {
-            Kind::Composite { cmap: CMap::Ranges { cids, .. }, .. } => cids.iter().find(|(lo, hi, _)| code >= *lo && code <= *hi).map_or(0, |(lo, _, c)| c + (code - lo)),
+            Kind::Composite { cmap: CMap::Ranges { cids, .. }, .. } => {
+                cids.iter().find(|(lo, hi, _)| code >= *lo && code <= *hi).map_or(0, |(lo, _, c)| c + (code - lo))
+            }
             _ => code,
         }
     }
@@ -262,7 +303,12 @@ impl Font {
     /// The pen's move for `code`, in ems.
     pub fn width(&self, code: u32) -> f64 {
         match &self.kind {
-            Kind::Simple { widths, .. } => widths.get(code as usize).copied().flatten().or_else(|| self.program_width(code)).unwrap_or(self.missing_width),
+            Kind::Simple { widths, .. } => widths
+                .get(code as usize)
+                .copied()
+                .flatten()
+                .or_else(|| self.program_width(code))
+                .unwrap_or(self.missing_width),
             Kind::Composite { widths, default, .. } => {
                 let cid = self.cid(code);
                 widths.iter().rev().find(|(lo, hi, _)| cid >= *lo && cid <= *hi).map_or(*default, |w| w.2)
@@ -309,7 +355,9 @@ impl Font {
             return Some(t.clone());
         }
         match &self.kind {
-            Kind::Simple { names, .. } => names.get(code as usize).cloned().flatten().and_then(|n| encoding::unicode_of(&n)).map(String::from),
+            Kind::Simple { names, .. } => {
+                names.get(code as usize).cloned().flatten().and_then(|n| encoding::unicode_of(&n)).map(String::from)
+            }
             Kind::Composite { .. } => None,
         }
     }
@@ -317,7 +365,12 @@ impl Font {
     fn make_glyph(&self, code: u32) -> Option<Path> {
         if let Program::Type1(t) = &self.program {
             let Kind::Simple { names, .. } = &self.kind else { return None };
-            let name = names.get(code as usize).cloned().flatten().filter(|n| t.has(n)).or_else(|| t.encoding.get(code as usize).cloned().flatten())?;
+            let name = names
+                .get(code as usize)
+                .cloned()
+                .flatten()
+                .filter(|n| t.has(n))
+                .or_else(|| t.encoding.get(code as usize).cloned().flatten())?;
             let m = t.matrix;
             return Some(t.outline(&name)?.transformed(&Transform::new(m[0], m[1], m[2], m[3], m[4], m[5])));
         }
@@ -350,7 +403,12 @@ impl Font {
     fn cff_gid(&self, cff: &Cff, code: u32) -> Option<u16> {
         match &self.kind {
             Kind::Composite { .. } => cff.gid_of_cid(self.cid(code)),
-            Kind::Simple { names, .. } => names.get(code as usize).cloned().flatten().and_then(|n| cff.gid_of_name(&n)).or_else(|| cff.gid_of_code(code)),
+            Kind::Simple { names, .. } => names
+                .get(code as usize)
+                .cloned()
+                .flatten()
+                .and_then(|n| cff.gid_of_name(&n))
+                .or_else(|| cff.gid_of_code(code)),
         }
     }
 
@@ -387,11 +445,14 @@ impl Font {
                 {
                     return Some(g);
                 }
-                if let Some(g) = tt.lookup(1, 0, code).or_else(|| tt.lookup(3, 0, 0xF000 | code)).or_else(|| tt.lookup(3, 1, code)) {
+                if let Some(g) =
+                    tt.lookup(1, 0, code).or_else(|| tt.lookup(3, 0, 0xF000 | code)).or_else(|| tt.lookup(3, 1, code))
+                {
                     return Some(g);
                 }
                 // A subset with no usable cmap: the code as the glyph index, as viewers do.
-                (matches!(self.program, Program::TrueType(_)) && (code as usize) < tt.num_glyphs()).then_some(code as u16)
+                (matches!(self.program, Program::TrueType(_)) && (code as usize) < tt.num_glyphs())
+                    .then_some(code as u16)
             }
         }
     }
@@ -406,19 +467,17 @@ fn symbol_char(code: u8) -> Option<char> {
     match code {
         b'A'..=b'Z' => pick(UPPER, code - b'A'),
         b'a'..=b'z' => pick(LOWER, code - b'a'),
-        0x20..=0x40 | 0x5B | 0x5D | 0x5F | 0x7B..=0x7D => {
-            Some(match code {
-                0x22 => '∀',
-                0x24 => '∃',
-                0x27 => '∋',
-                0x2A => '∗',
-                0x2D => '−',
-                0x40 => '≅',
-                0x5C => '∴',
-                0x5E => '⊥',
-                _ => code as char,
-            })
-        }
+        0x20..=0x40 | 0x5B | 0x5D | 0x5F | 0x7B..=0x7D => Some(match code {
+            0x22 => '∀',
+            0x24 => '∃',
+            0x27 => '∋',
+            0x2A => '∗',
+            0x2D => '−',
+            0x40 => '≅',
+            0x5C => '∴',
+            0x5E => '⊥',
+            _ => code as char,
+        }),
         0xA1 => Some('ϒ'),
         0xA2 => Some('′'),
         0xA3 => Some('≤'),
@@ -562,7 +621,13 @@ pub fn preload_substitutes() {
 fn substitute(base: &str, flags: i64) -> Option<Rc<TrueType>> {
     let lower = base.to_ascii_lowercase();
     let mono = flags & 1 != 0 || lower.contains("courier") || lower.contains("mono");
-    let serif = !mono && (flags & 2 != 0 || lower.contains("times") || lower.contains("serif") || lower.contains("roman") || lower.contains("georgia") || lower.contains("garamond"));
+    let serif = !mono
+        && (flags & 2 != 0
+            || lower.contains("times")
+            || lower.contains("serif")
+            || lower.contains("roman")
+            || lower.contains("georgia")
+            || lower.contains("garamond"));
     let bold = lower.contains("bold") || lower.contains("black") || lower.contains("heavy") || flags & 0x40000 != 0;
     let italic = lower.contains("italic") || lower.contains("oblique") || flags & 64 != 0;
     let families: &[&str] = if mono {
@@ -605,9 +670,12 @@ thread_local! {
 /// A ToUnicode CMap: codes to text (UTF-16BE), from bfchar and bfrange.
 fn parse_to_unicode(data: &[u8]) -> HashMap<u32, String> {
     let mut out = HashMap::new();
-    let code = |o: &Object| -> Option<u32> { o.as_bytes().filter(|b| !b.is_empty() && b.len() <= 4).map(|b| b.iter().fold(0u32, |a, x| a << 8 | *x as u32)) };
+    let code = |o: &Object| -> Option<u32> {
+        o.as_bytes().filter(|b| !b.is_empty() && b.len() <= 4).map(|b| b.iter().fold(0u32, |a, x| a << 8 | *x as u32))
+    };
     let text = |b: &[u8]| -> String {
-        let units: Vec<u16> = b.chunks(2).map(|c| if c.len() == 2 { u16::from_be_bytes([c[0], c[1]]) } else { c[0] as u16 }).collect();
+        let units: Vec<u16> =
+            b.chunks(2).map(|c| if c.len() == 2 { u16::from_be_bytes([c[0], c[1]]) } else { c[0] as u16 }).collect();
         String::from_utf16_lossy(&units)
     };
     for op in crate::content::parse(data) {
@@ -716,7 +784,15 @@ mod tests {
     #[test]
     fn an_embedded_cmap_maps_codes_to_cids() {
         let cmap = parse_cmap(b"1 begincodespacerange <00> <7F> <8000> <FFFF> endcodespacerange 2 begincidrange <20> <7E> 1 <8140> <817E> 633 endcidrange 1 begincidchar <8150> 999 endcidchar");
-        let font = Font { kind: Kind::Composite { cmap, cid_to_gid: None, widths: vec![], default: 1.0 }, program: Program::None, substitute: None, missing_width: 1.0, cache: RefCell::new(HashMap::new()), to_unicode: HashMap::new(), type3: None };
+        let font = Font {
+            kind: Kind::Composite { cmap, cid_to_gid: None, widths: vec![], default: 1.0 },
+            program: Program::None,
+            substitute: None,
+            missing_width: 1.0,
+            cache: RefCell::new(HashMap::new()),
+            to_unicode: HashMap::new(),
+            type3: None,
+        };
         let codes = font.codes(b"A\x81\x41 ");
         assert_eq!(codes, vec![(0x41, false), (0x8141, false), (0x20, true)]);
         assert_eq!(font.cid(0x41), 34);

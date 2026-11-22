@@ -164,7 +164,11 @@ pub fn serve(input: &mut impl Read, output: &mut impl Write) -> std::io::Result<
 
 /// As [`serve`], with `open` making each track from a file's bytes (the AAC
 /// helper's plays AAC too).
-pub fn serve_with(input: &mut impl Read, output: &mut impl Write, open_track: impl Fn(Vec<u8>) -> Result<Box<dyn Track>, Error>) -> std::io::Result<()> {
+pub fn serve_with(
+    input: &mut impl Read,
+    output: &mut impl Write,
+    open_track: impl Fn(Vec<u8>) -> Result<Box<dyn Track>, Error>,
+) -> std::io::Result<()> {
     struct Open {
         playing: Box<dyn Track>,
         drawing: Box<dyn Track>,
@@ -189,7 +193,10 @@ pub fn serve_with(input: &mut impl Read, output: &mut impl Write, open_track: im
                     title: tags.title,
                     artist: tags.artist,
                     album: tags.album,
-                    cover: tags.picture.and_then(|p| vergence_decode::decode_bytes(&p.data, Some((COVER_PX, COVER_PX))).ok()).and_then(|pic| Some((pic.width, pic.height, pic.frames.into_iter().next()?.rgba))),
+                    cover: tags
+                        .picture
+                        .and_then(|p| vergence_decode::decode_bytes(&p.data, Some((COVER_PX, COVER_PX))).ok())
+                        .and_then(|pic| Some((pic.width, pic.height, pic.frames.into_iter().next()?.rgba))),
                 };
                 open = Some(Open { playing, drawing, peaks: Vec::new(), drawn: 0, told: 0 });
                 Ok(info.encode())
@@ -204,8 +211,12 @@ pub fn serve_with(input: &mut impl Read, output: &mut impl Write, open_track: im
             }),
             b'P' => (|| {
                 let o = open.as_mut().ok_or("no file")?;
-                let slices = u32::from_le_bytes(body.get(..4).ok_or("short")?.try_into().map_err(|_| "short")?).clamp(1, 1 << 16) as usize;
-                let step = body.get(4..8).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as u64).map_or(PEAK_STEP, |s| s.clamp(4096, PEAK_STEP));
+                let slices = u32::from_le_bytes(body.get(..4).ok_or("short")?.try_into().map_err(|_| "short")?)
+                    .clamp(1, 1 << 16) as usize;
+                let step = body
+                    .get(4..8)
+                    .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as u64)
+                    .map_or(PEAK_STEP, |s| s.clamp(4096, PEAK_STEP));
                 let frames = o.drawing.frames().max(1);
                 if o.peaks.len() != slices {
                     o.peaks = vec![[(0.0, 0.0); 2]; slices];
@@ -223,7 +234,8 @@ pub fn serve_with(input: &mut impl Read, output: &mut impl Write, open_track: im
                         break;
                     }
                     for f in 0..n {
-                        let s = ((((o.drawn + f as u64) as u128) * slices as u128 / frames as u128) as usize).min(slices - 1);
+                        let s = ((((o.drawn + f as u64) as u128) * slices as u128 / frames as u128) as usize)
+                            .min(slices - 1);
                         for c in 0..ch.min(2) {
                             let v = buf[f * ch + c];
                             let p = &mut o.peaks[s][c];
@@ -237,7 +249,11 @@ pub fn serve_with(input: &mut impl Read, output: &mut impl Write, open_track: im
                     o.drawn += n as u64;
                 }
                 // The slices now whole (the last only at the end).
-                let done = if o.drawn >= frames { slices } else { ((o.drawn as u128 * slices as u128 / frames as u128) as usize).min(slices) };
+                let done = if o.drawn >= frames {
+                    slices
+                } else {
+                    ((o.drawn as u128 * slices as u128 / frames as u128) as usize).min(slices)
+                };
                 let mut b = Vec::new();
                 b.extend_from_slice(&(o.told as u32).to_le_bytes());
                 b.extend_from_slice(&((done - o.told) as u32).to_le_bytes());
@@ -258,7 +274,8 @@ pub fn serve_with(input: &mut impl Read, output: &mut impl Write, open_track: im
             })(),
             b'R' => (|| {
                 let o = open.as_mut().ok_or("no file")?;
-                let n = u32::from_le_bytes(body.get(..4).ok_or("short")?.try_into().map_err(|_| "short")?).min(READ_MAX) as usize;
+                let n = u32::from_le_bytes(body.get(..4).ok_or("short")?.try_into().map_err(|_| "short")?).min(READ_MAX)
+                    as usize;
                 let mut buf = vec![0f32; n * o.playing.channels() as usize];
                 let got = o.playing.read(&mut buf).map_err(|e| e.to_string())?;
                 Ok(buf[..got * o.playing.channels() as usize].iter().flat_map(|v| v.to_le_bytes()).collect())
@@ -293,7 +310,13 @@ pub fn helper_main_with(open_track: impl Fn(Vec<u8>) -> Result<Box<dyn Track>, E
 fn helper_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
-    [dir.join("vergence-hymie"), dir.parent()?.join("libexec/vergence/vergence-hymie"), PathBuf::from("/usr/local/libexec/vergence/vergence-hymie")].into_iter().find(|p| p.is_file())
+    [
+        dir.join("vergence-hymie"),
+        dir.parent()?.join("libexec/vergence/vergence-hymie"),
+        PathBuf::from("/usr/local/libexec/vergence/vergence-hymie"),
+    ]
+    .into_iter()
+    .find(|p| p.is_file())
 }
 
 /// The AAC helper: beside the main helper that sent the file on (a
@@ -306,7 +329,13 @@ fn aac_helper_path(main: &Path) -> Option<PathBuf> {
     }
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
-    [dir.join("vergence-hymie-aac"), dir.parent()?.join("libexec/vergence/vergence-hymie-aac"), PathBuf::from("/usr/local/libexec/vergence/vergence-hymie-aac")].into_iter().find(|p| p.is_file())
+    [
+        dir.join("vergence-hymie-aac"),
+        dir.parent()?.join("libexec/vergence/vergence-hymie-aac"),
+        PathBuf::from("/usr/local/libexec/vergence/vergence-hymie-aac"),
+    ]
+    .into_iter()
+    .find(|p| p.is_file())
 }
 
 /// A sound file open in its helper.
@@ -327,7 +356,8 @@ impl Drop for Sound {
 impl Sound {
     /// A sound file opened in a new helper.
     pub fn open(path: &Path) -> Result<Sound, Error> {
-        let program = helper_path().ok_or_else(|| Error::Io("the sound helper (libexec/vergence/vergence-hymie) is not installed".into()))?;
+        let program = helper_path()
+            .ok_or_else(|| Error::Io("the sound helper (libexec/vergence/vergence-hymie) is not installed".into()))?;
         Sound::with_bytes(&program, crate::read_file(path)?)
     }
 
@@ -337,7 +367,12 @@ impl Sound {
     pub fn with_bytes(program: &Path, data: Vec<u8>) -> Result<Sound, Error> {
         match Sound::start(program, &data) {
             Err(Error::NeedsAac) => {
-                let aac = aac_helper_path(program).ok_or_else(|| Error::Io("AAC is played by its own helper (libexec/vergence/vergence-hymie-aac), which is not installed".into()))?;
+                let aac = aac_helper_path(program).ok_or_else(|| {
+                    Error::Io(
+                        "AAC is played by its own helper (libexec/vergence/vergence-hymie-aac), which is not installed"
+                            .into(),
+                    )
+                })?;
                 Sound::start(&aac, &data)
             }
             other => other,
@@ -345,8 +380,15 @@ impl Sound {
     }
 
     fn start(program: &Path, data: &[u8]) -> Result<Sound, Error> {
-        let mut child = std::process::Command::new(program).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn().map_err(|e| Error::Io(e.to_string()))?;
-        let (Some(to), Some(from)) = (child.stdin.take(), child.stdout.take()) else { return Err(Error::Io("no pipe".into())) };
+        let mut child = std::process::Command::new(program)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| Error::Io(e.to_string()))?;
+        let (Some(to), Some(from)) = (child.stdin.take(), child.stdout.take()) else {
+            return Err(Error::Io("no pipe".into()));
+        };
         let mut s = Sound { child, to, from, info: Info::default() };
         s.info = Info::decode(&s.ask(b'D', data)?).ok_or_else(|| crate::damaged("a garbled answer"))?;
         Ok(s)
@@ -388,7 +430,8 @@ impl Sound {
         let mut body = slices.to_le_bytes().to_vec();
         body.extend_from_slice(&frames.to_le_bytes());
         let b = self.ask(b'P', &body)?;
-        let first = u32::from_le_bytes(b.get(..4).ok_or_else(|| crate::damaged("short"))?.try_into().unwrap_or([0; 4])) as usize;
+        let first = u32::from_le_bytes(b.get(..4).ok_or_else(|| crate::damaged("short"))?.try_into().unwrap_or([0; 4]))
+            as usize;
         let v: Vec<f32> = b.get(8..).unwrap_or(&[]).as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
         Ok((first, v.as_chunks::<4>().0.iter().map(|c| [(c[0], c[1]), (c[2], c[3])]).collect()))
     }
@@ -421,7 +464,13 @@ mod tests {
         let info = super::Info::decode(&info).unwrap();
         assert_eq!((info.rate, info.channels, info.frames), (44_100, 2, 66_150));
         assert_eq!(info.title.as_deref(), Some("Test Tone"));
-        assert!(info.cover.is_some_and(|(w, h, d)| (w, h) == (64, 64) && d.len() == 64 * 64 * 4 && d[2] > d[0] + 100 && d[3] == 255), "the blue cover, decoded");
+        assert!(
+            info.cover.is_some_and(|(w, h, d)| (w, h) == (64, 64)
+                && d.len() == 64 * 64 * 4
+                && d[2] > d[0] + 100
+                && d[3] == 255),
+            "the blue cover, decoded"
+        );
         let (_, peaks) = super::read_frame(&mut r, 1 << 26).unwrap().unwrap();
         assert_eq!(u32::from_le_bytes(peaks[4..8].try_into().unwrap()), 100, "a short track's waveform in one piece");
         let (k, _) = super::read_frame(&mut r, 1 << 26).unwrap().unwrap();

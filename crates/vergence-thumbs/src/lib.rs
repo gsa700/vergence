@@ -53,7 +53,10 @@ pub fn uri(path: &Path) -> String {
 
 /// The thumbnail cache's top: `$XDG_CACHE_HOME/thumbnails`, else `~/.cache/thumbnails`.
 pub fn cache_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
     Some(base.join("thumbnails"))
 }
 
@@ -108,7 +111,11 @@ fn fresh(bytes: &[u8], uri: &str, mtime: u64) -> bool {
 
 fn decoded(p: vergence_decode::Picture) -> Option<Image> {
     let f = p.frames.into_iter().next()?;
-    (f.rgba.len() == p.width as usize * p.height as usize * 4).then_some(Image { width: p.width, height: p.height, rgba: f.rgba })
+    (f.rgba.len() == p.width as usize * p.height as usize * 4).then_some(Image {
+        width: p.width,
+        height: p.height,
+        rgba: f.rgba,
+    })
 }
 
 /// The file's thumbnail if the cache has a fresh one (never made here).
@@ -132,9 +139,13 @@ pub fn shrink(img: &Image, size: u32) -> Image {
     let (nw, nh) = (((w as f64 * k).round() as u32).max(1), ((h as f64 * k).round() as u32).max(1));
     let mut rgba = vec![0u8; (nw * nh * 4) as usize];
     for y in 0..nh {
-        let (y0, y1) = ((y as u64 * h as u64 / nh as u64) as u32, (((y + 1) as u64 * h as u64).div_ceil(nh as u64) as u32).min(h));
+        let (y0, y1) =
+            ((y as u64 * h as u64 / nh as u64) as u32, (((y + 1) as u64 * h as u64).div_ceil(nh as u64) as u32).min(h));
         for x in 0..nw {
-            let (x0, x1) = ((x as u64 * w as u64 / nw as u64) as u32, (((x + 1) as u64 * w as u64).div_ceil(nw as u64) as u32).min(w));
+            let (x0, x1) = (
+                (x as u64 * w as u64 / nw as u64) as u32,
+                (((x + 1) as u64 * w as u64).div_ceil(nw as u64) as u32).min(w),
+            );
             // Colors weighted by their alpha, so clear pixels do not darken the edges.
             let mut sum = [0u64; 4];
             for sy in y0..y1.max(y0 + 1) {
@@ -239,7 +250,17 @@ pub fn get(path: &Path) -> Option<Image> {
         return None;
     }
     let pdf = vergence_types::of_file(path) == "application/pdf";
-    let made = std::fs::metadata(path).ok().filter(|m| m.is_file() && m.len() <= MAX_FILE).and_then(|_| if pdf { pdf_page(path, SIZE) } else { vergence_decode::decode_file(path, Some((SIZE, SIZE))).ok().and_then(decoded) }).map(|img| shrink(&img, SIZE));
+    let made = std::fs::metadata(path)
+        .ok()
+        .filter(|m| m.is_file() && m.len() <= MAX_FILE)
+        .and_then(|_| {
+            if pdf {
+                pdf_page(path, SIZE)
+            } else {
+                vergence_decode::decode_file(path, Some((SIZE, SIZE))).ok().and_then(decoded)
+            }
+        })
+        .map(|img| shrink(&img, SIZE));
     match made {
         Some(img) => {
             if let Some(bytes) = encode(&img, &link, time) {
@@ -278,7 +299,11 @@ const WORKERS: usize = 2;
 
 impl Thumbnailer {
     pub fn new(woken: impl Fn() + Send + Sync + 'static) -> Thumbnailer {
-        let shared = Arc::new(Shared { queue: Mutex::new((VecDeque::new(), HashSet::new())), ready: Condvar::new(), done: Mutex::new(HashMap::new()) });
+        let shared = Arc::new(Shared {
+            queue: Mutex::new((VecDeque::new(), HashSet::new())),
+            ready: Condvar::new(),
+            done: Mutex::new(HashMap::new()),
+        });
         let woken = Arc::new(woken);
         for _ in 0..WORKERS {
             let (s, woken) = (shared.clone(), woken.clone());
@@ -336,7 +361,6 @@ impl Thumbnailer {
             q.1.remove(&p);
         }
     }
-
 }
 
 #[cfg(test)]

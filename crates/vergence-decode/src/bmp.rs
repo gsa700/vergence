@@ -68,12 +68,16 @@ pub fn decode(b: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
             n => n.min(1 << bpp),
         } as usize;
         let at = 14 + header as usize;
-        (0..colors).map(|i| b.get(at + 4 * i..at + 4 * i + 3).map(|c| [c[2], c[1], c[0]]).ok_or_else(|| bad("short palette"))).collect::<Result<_, _>>()?
+        (0..colors)
+            .map(|i| b.get(at + 4 * i..at + 4 * i + 3).map(|c| [c[2], c[1], c[0]]).ok_or_else(|| bad("short palette")))
+            .collect::<Result<_, _>>()?
     } else {
         Vec::new()
     };
     let row_bytes = ((w as usize * bpp as usize).div_ceil(32)) * 4;
-    let need = offset.checked_add(row_bytes.checked_mul(h as usize).ok_or_else(|| bad("too big"))?).ok_or_else(|| bad("too big"))?;
+    let need = offset
+        .checked_add(row_bytes.checked_mul(h as usize).ok_or_else(|| bad("too big"))?)
+        .ok_or_else(|| bad("too big"))?;
     if b.len() < need {
         return Err(bad("pixels cut short"));
     }
@@ -152,7 +156,8 @@ mod tests {
         assert_eq!((w, h), (3, 1));
         assert_eq!(rgba, vec![255, 128, 0, 255, 0, 0, 0, 255, 255, 128, 0, 255]);
         // 1 bit: 0b1010_0000 over 3 pixels.
-        let (_, _, rgba) = decode(&file(3, 1, 1, &[[0, 0, 0, 0], [255, 255, 255, 0]], &[0b1010_0000, 0, 0, 0])).unwrap();
+        let (_, _, rgba) =
+            decode(&file(3, 1, 1, &[[0, 0, 0, 0], [255, 255, 255, 0]], &[0b1010_0000, 0, 0, 0])).unwrap();
         assert_eq!(rgba.chunks(4).map(|p| p[0]).collect::<Vec<_>>(), vec![255, 0, 255]);
     }
 

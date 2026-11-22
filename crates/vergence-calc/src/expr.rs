@@ -199,7 +199,10 @@ impl Parser<'_> {
             }
             let right = self.power()?;
             // "50 × 10%" takes 10 percent of 50: the percent is already a fraction.
-            left = Val { v: if op == Some(false) { left.v.div(&right.v)? } else { left.v.mul(&right.v)? }, percent: false };
+            left = Val {
+                v: if op == Some(false) { left.v.div(&right.v)? } else { left.v.mul(&right.v)? },
+                percent: false,
+            };
         }
         Ok(left)
     }

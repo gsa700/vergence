@@ -80,7 +80,13 @@ pub fn init_winit(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Res
             );
             let _global = output.create_global::<Server>(&state.display_handle);
             output.user_data().insert_if_missing(|| crate::memory::MonitorId(format!("nested:{}", output.name())));
-            Virtual { damage: OutputDamageTracker::from_output(&output), output, scale, texture: None, region: Rectangle::default() }
+            Virtual {
+                damage: OutputDamageTracker::from_output(&output),
+                output,
+                scale,
+                texture: None,
+                region: Rectangle::default(),
+            }
         })
         .collect();
 
@@ -106,7 +112,9 @@ pub fn init_winit(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Res
                 let scene = state.scene(renderer, &v.output, v.output.current_scale().fractional_scale());
                 let texture = v.texture.as_mut().unwrap();
                 let mut fb = renderer.bind(texture).expect("bind texture");
-                v.damage.render_output(renderer, &mut fb, 0, &scene, state.background_color(&v.output.name())).expect("render output");
+                v.damage
+                    .render_output(renderer, &mut fb, 0, &scene, state.background_color(&v.output.name()))
+                    .expect("render output");
             }
 
             // Then side by side in the host window.
@@ -117,7 +125,16 @@ pub fn init_winit(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Res
                 for v in &virtuals {
                     if let Some(t) = &v.texture {
                         frame
-                            .render_texture_at(t, v.region.loc, 1, 1.0, Transform::Normal, &[Rectangle::from_size(v.region.size)], &[], 1.0)
+                            .render_texture_at(
+                                t,
+                                v.region.loc,
+                                1,
+                                1.0,
+                                Transform::Normal,
+                                &[Rectangle::from_size(v.region.size)],
+                                &[],
+                                1.0,
+                            )
                             .expect("compose");
                     }
                 }
@@ -177,11 +194,7 @@ fn lay_out(virtuals: &mut [Virtual], state: &mut Server, window: Size<i32, Physi
         v.output.change_current_state(Some(mode), Some(Transform::Normal), Some(Scale::Fractional(v.scale)), None);
         v.output.set_preferred(mode);
         state.space.map_output(&v.output, (logical_x.round() as i32, 0));
-        state.regions.push(OutputRegion {
-            window: v.region.to_f64(),
-            logical_x,
-            scale: v.scale,
-        });
+        state.regions.push(OutputRegion { window: v.region.to_f64(), logical_x, scale: v.scale });
         logical_x += col as f64 / v.scale;
     }
     state.window_px = window;

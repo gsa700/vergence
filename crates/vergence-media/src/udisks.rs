@@ -18,7 +18,12 @@ const RETRY: Duration = Duration::from_secs(60);
 
 /// Every object udisks has: (path, its interfaces' properties).
 fn objects(c: &mut Client) -> Result<Vec<(String, Value)>, String> {
-    let r = c.call(Message::method_call(DEST, ROOT, "org.freedesktop.DBus.ObjectManager", "GetManagedObjects", &[]), super::CALL).map_err(|e| e.to_string())?;
+    let r = c
+        .call(
+            Message::method_call(DEST, ROOT, "org.freedesktop.DBus.ObjectManager", "GetManagedObjects", &[]),
+            super::CALL,
+        )
+        .map_err(|e| e.to_string())?;
     let args = r.args().map_err(|e| format!("{e:?}"))?;
     let Some(Value::Array(_, items)) = args.into_iter().next() else { return Err("udisks gave no objects".into()) };
     Ok(items
@@ -46,7 +51,10 @@ fn opt(key: &str, v: Value) -> Value {
 /// sticks"): nothing on a drive runs as a program. udisks adds its own
 /// nosuid and nodev, and allows noexec for any file system by default.
 fn mount_options() -> Value {
-    Value::Array("{sv}".into(), vec![opt("auth.no_user_interaction", Value::Bool(true)), opt("options", Value::Str("noexec".into()))])
+    Value::Array(
+        "{sv}".into(),
+        vec![opt("auth.no_user_interaction", Value::Bool(true)), opt("options", Value::Str("noexec".into()))],
+    )
 }
 
 fn flag(dict: &Value, key: &str) -> bool {
@@ -64,11 +72,20 @@ fn mount_points(ifaces: &Value) -> Vec<String> {
 /// Whether udisks means a file system to be mounted for the user, and it is not yet.
 fn wants_mount(ifaces: &Value) -> bool {
     let Some(block) = lookup(ifaces, BLOCK) else { return false };
-    lookup(ifaces, FS).is_some() && flag(block, "HintAuto") && !flag(block, "HintIgnore") && !flag(block, "HintSystem") && mount_points(ifaces).is_empty()
+    lookup(ifaces, FS).is_some()
+        && flag(block, "HintAuto")
+        && !flag(block, "HintIgnore")
+        && !flag(block, "HintSystem")
+        && mount_points(ifaces).is_empty()
 }
 
 fn label(ifaces: &Value) -> String {
-    lookup(ifaces, BLOCK).and_then(|b| lookup(b, "IdLabel")).and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(str::to_string).unwrap_or_else(|| "a drive".into())
+    lookup(ifaces, BLOCK)
+        .and_then(|b| lookup(b, "IdLabel"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| "a drive".into())
 }
 
 /// Mounts the file systems that are new since `seen` (and, the first time,
@@ -85,7 +102,11 @@ fn mount_new(c: &mut Client, seen: Option<&HashSet<String>>, told: &dyn Fn(&str)
         let m = Message::method_call(DEST, path, FS, "Mount", &[mount_options()]);
         match c.call(m, super::CALL) {
             Ok(r) => {
-                let at = r.args().ok().and_then(|a| a.first().and_then(|v| v.as_str().map(str::to_string))).unwrap_or_default();
+                let at = r
+                    .args()
+                    .ok()
+                    .and_then(|a| a.first().and_then(|v| v.as_str().map(str::to_string)))
+                    .unwrap_or_default();
                 told(&format!("media: {} mounted at {at}", label(ifaces)));
             }
             Err(e) => {
@@ -110,7 +131,8 @@ pub fn automount(told: &dyn Fn(&str)) {
 
 fn watch(told: &dyn Fn(&str)) -> Result<(), String> {
     let mut c = Client::system().map_err(|e| e.to_string())?;
-    c.add_match(&format!("type='signal',sender='{DEST}',interface='org.freedesktop.DBus.ObjectManager'")).map_err(|e| e.to_string())?;
+    c.add_match(&format!("type='signal',sender='{DEST}',interface='org.freedesktop.DBus.ObjectManager'"))
+        .map_err(|e| e.to_string())?;
     // What is plugged in at the session's start is mounted too.
     let mut seen = mount_new(&mut c, None, told)?;
     told(&format!("media: watching udisks2 ({} objects)", seen.len()));
@@ -133,8 +155,11 @@ pub fn eject(path: &Path) -> Result<bool, String> {
     let mut c = Client::system().map_err(|e| e.to_string())?;
     let all = objects(&mut c)?;
     let want = path.to_string_lossy();
-    let Some((obj, ifaces)) = all.iter().find(|(_, i)| mount_points(i).iter().any(|m| *m == want)) else { return Ok(false) };
-    c.call(Message::method_call(DEST, obj, FS, "Unmount", &[quiet()]), super::CALL).map_err(|e| plain(&e.to_string()))?;
+    let Some((obj, ifaces)) = all.iter().find(|(_, i)| mount_points(i).iter().any(|m| *m == want)) else {
+        return Ok(false);
+    };
+    c.call(Message::method_call(DEST, obj, FS, "Unmount", &[quiet()]), super::CALL)
+        .map_err(|e| plain(&e.to_string()))?;
     // Then the drive itself is powered off, if it can be (best effort: the
     // file system is let go of already, so it is safe to pull out).
     // A disk image's loop device is taken away (files milestone 3, step 7).
@@ -162,10 +187,21 @@ pub fn mount_image(image: &Path) -> Result<std::path::PathBuf, String> {
         .arg(image)
         .stdin(std::process::Stdio::null())
         .output()
-        .map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { "udisksctl is not installed (it comes with udisks2)".to_string() } else { e.to_string() })?;
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                "udisksctl is not installed (it comes with udisks2)".to_string()
+            } else {
+                e.to_string()
+            }
+        })?;
     let said = String::from_utf8_lossy(&out.stdout);
     // "Mapped file /x/y.iso as /dev/loop0."
-    let Some(dev) = said.split_whitespace().last().map(|d| d.trim_end_matches('.').to_string()).filter(|d| d.starts_with("/dev/loop")) else {
+    let Some(dev) = said
+        .split_whitespace()
+        .last()
+        .map(|d| d.trim_end_matches('.').to_string())
+        .filter(|d| d.starts_with("/dev/loop"))
+    else {
         return Err(plain(String::from_utf8_lossy(&out.stderr).trim()));
     };
     let mut c = Client::system().map_err(|e| e.to_string())?;
@@ -173,13 +209,21 @@ pub fn mount_image(image: &Path) -> Result<std::path::PathBuf, String> {
     // automounter may mount it first, which is as good.
     for _ in 0..30 {
         let all = objects(&mut c)?;
-        if let Some((obj, ifaces)) = all.iter().find(|(_, i)| lookup(i, BLOCK).and_then(|b| lookup(b, "Device")).and_then(bytes_str).as_deref() == Some(dev.as_str())) {
+        if let Some((obj, ifaces)) = all.iter().find(|(_, i)| {
+            lookup(i, BLOCK).and_then(|b| lookup(b, "Device")).and_then(bytes_str).as_deref() == Some(dev.as_str())
+        }) {
             if let Some(at) = mount_points(ifaces).into_iter().next() {
                 return Ok(at.into());
             }
             if lookup(ifaces, FS).is_some() {
-                let r = c.call(Message::method_call(DEST, obj, FS, "Mount", &[mount_options()]), super::CALL).map_err(|e| plain(&e.to_string()))?;
-                let at = r.args().ok().and_then(|a| a.first().and_then(|v| v.as_str().map(str::to_string))).unwrap_or_default();
+                let r = c
+                    .call(Message::method_call(DEST, obj, FS, "Mount", &[mount_options()]), super::CALL)
+                    .map_err(|e| plain(&e.to_string()))?;
+                let at = r
+                    .args()
+                    .ok()
+                    .and_then(|a| a.first().and_then(|v| v.as_str().map(str::to_string)))
+                    .unwrap_or_default();
                 return Ok(at.into());
             }
         }
@@ -204,15 +248,35 @@ mod tests {
     use super::*;
 
     fn dict(items: Vec<(&str, Value)>) -> Value {
-        Value::Array("{sv}".into(), items.into_iter().map(|(k, v)| Value::Entry(Box::new(Value::Str(k.into())), Box::new(Value::Variant(Box::new(v))))).collect())
+        Value::Array(
+            "{sv}".into(),
+            items
+                .into_iter()
+                .map(|(k, v)| Value::Entry(Box::new(Value::Str(k.into())), Box::new(Value::Variant(Box::new(v)))))
+                .collect(),
+        )
     }
 
     fn ifaces(auto: bool, system: bool, mounted: Option<&str>) -> Value {
-        let pts = Value::Array("ay".into(), mounted.into_iter().map(|m| Value::Array("y".into(), m.bytes().chain([0]).map(Value::Byte).collect())).collect());
+        let pts = Value::Array(
+            "ay".into(),
+            mounted
+                .into_iter()
+                .map(|m| Value::Array("y".into(), m.bytes().chain([0]).map(Value::Byte).collect()))
+                .collect(),
+        );
         Value::Array(
             "{sa{sv}}".into(),
             vec![
-                Value::Entry(Box::new(Value::Str(BLOCK.into())), Box::new(dict(vec![("HintAuto", Value::Bool(auto)), ("HintSystem", Value::Bool(system)), ("HintIgnore", Value::Bool(false)), ("IdLabel", Value::Str("STICK".into()))]))),
+                Value::Entry(
+                    Box::new(Value::Str(BLOCK.into())),
+                    Box::new(dict(vec![
+                        ("HintAuto", Value::Bool(auto)),
+                        ("HintSystem", Value::Bool(system)),
+                        ("HintIgnore", Value::Bool(false)),
+                        ("IdLabel", Value::Str("STICK".into())),
+                    ])),
+                ),
                 Value::Entry(Box::new(Value::Str(FS.into())), Box::new(dict(vec![("MountPoints", pts)]))),
             ],
         )

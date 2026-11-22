@@ -35,7 +35,8 @@ pub struct Pressed {
 impl Keys {
     pub fn from_text(text: String) -> Option<Keys> {
         let ctx = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
-        let keymap = xkb::Keymap::new_from_string(&ctx, text.clone(), xkb::KEYMAP_FORMAT_TEXT_V1, xkb::KEYMAP_COMPILE_NO_FLAGS)?;
+        let keymap =
+            xkb::Keymap::new_from_string(&ctx, text.clone(), xkb::KEYMAP_FORMAT_TEXT_V1, xkb::KEYMAP_COMPILE_NO_FLAGS)?;
         let state = xkb::State::new(&keymap);
         Some(Keys { state, text, told: (0, 0, 0, 0) })
     }
@@ -43,7 +44,8 @@ impl Keys {
     /// A key (xkb's code: evdev's plus 8) went down or up.
     pub fn feed(&mut self, code: xkb::Keycode, pressed: bool) -> Pressed {
         let sym = self.state.key_get_one_sym(code).raw();
-        let typed = if pressed { self.state.key_get_utf8(code).chars().next().filter(|c| !c.is_control()) } else { None };
+        let typed =
+            if pressed { self.state.key_get_utf8(code).chars().next().filter(|c| !c.is_control()) } else { None };
         self.state.update_key(code, if pressed { xkb::KeyDirection::Down } else { xkb::KeyDirection::Up });
         let now = self.serialized();
         let mods_changed = now != self.told;
@@ -70,7 +72,12 @@ impl Keys {
     /// The modifiers in effect, for the seat.
     pub fn mods(&self) -> vergence_seat::keyboard::Mods {
         let on = |name: &str| self.state.mod_name_is_active(name, xkb::STATE_MODS_EFFECTIVE);
-        vergence_seat::keyboard::Mods { ctrl: on(xkb::MOD_NAME_CTRL), alt: on(xkb::MOD_NAME_ALT), shift: on(xkb::MOD_NAME_SHIFT), logo: on(xkb::MOD_NAME_LOGO) }
+        vergence_seat::keyboard::Mods {
+            ctrl: on(xkb::MOD_NAME_CTRL),
+            alt: on(xkb::MOD_NAME_ALT),
+            shift: on(xkb::MOD_NAME_SHIFT),
+            logo: on(xkb::MOD_NAME_LOGO),
+        }
     }
 }
 
@@ -117,7 +124,9 @@ pub fn seat_key(sym: u32, code: u32) -> vergence_seat::keyboard::Key {
         k::KEY_8 | k::KEY_asterisk | k::KEY_KP_Multiply => Key::Eight,
         k::KEY_Delete | k::KEY_KP_Delete => Key::Delete,
         k::KEY_XF86PowerOff => Key::Power,
-        s if (k::KEY_XF86Switch_VT_1..k::KEY_XF86Switch_VT_1 + 12).contains(&s) => Key::Vt((s - k::KEY_XF86Switch_VT_1 + 1) as u8),
+        s if (k::KEY_XF86Switch_VT_1..k::KEY_XF86Switch_VT_1 + 12).contains(&s) => {
+            Key::Vt((s - k::KEY_XF86Switch_VT_1 + 1) as u8)
+        }
         _ => Key::Other,
     }
 }
@@ -154,7 +163,9 @@ mod tests {
 
     #[test]
     fn the_seats_letters_reach_it() {
-        for (syms, key) in [((k::KEY_d, k::KEY_D), Key::D), ((k::KEY_l, k::KEY_L), Key::L), ((k::KEY_q, k::KEY_Q), Key::Q)] {
+        for (syms, key) in
+            [((k::KEY_d, k::KEY_D), Key::D), ((k::KEY_l, k::KEY_L), Key::L), ((k::KEY_q, k::KEY_Q), Key::Q)]
+        {
             assert_eq!(seat_key(syms.0, 0), key);
             assert_eq!(seat_key(syms.1, 0), key);
         }

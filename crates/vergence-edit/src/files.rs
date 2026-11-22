@@ -34,7 +34,9 @@ pub struct Loaded {
 pub fn load(path: &Path) -> Result<Loaded, String> {
     let meta = match fs::metadata(path) {
         Ok(m) => m,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Loaded { text: String::new(), bom: false, read_only: None }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Loaded { text: String::new(), bom: false, read_only: None });
+        }
         Err(e) => return Err(format!("{} could not be opened: {}", name(path), plain(&e))),
     };
     if meta.is_dir() {
@@ -43,7 +45,14 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
     if !meta.is_file() {
         return Err(format!("{} is not a file the editor can open (a pipe, a device or a socket).", name(path)));
     }
-    let too_large = |len: u64| format!("{} is too large to open ({} MB; the most is {} MB).", name(path), len / (1024 * 1024), MAX_BYTES / (1024 * 1024));
+    let too_large = |len: u64| {
+        format!(
+            "{} is too large to open ({} MB; the most is {} MB).",
+            name(path),
+            len / (1024 * 1024),
+            MAX_BYTES / (1024 * 1024)
+        )
+    };
     if meta.len() > MAX_BYTES {
         return Err(too_large(meta.len()));
     }
@@ -65,7 +74,11 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
         }
         Err(e) => {
             let text = String::from_utf8_lossy(e.as_bytes()).into_owned();
-            Ok(Loaded { text, bom: false, read_only: Some("This file is not UTF-8 text, so it is open read-only.".into()) })
+            Ok(Loaded {
+                text,
+                bom: false,
+                read_only: Some("This file is not UTF-8 text, so it is open read-only.".into()),
+            })
         }
     }
 }
@@ -85,7 +98,9 @@ fn writable(path: &Path) -> bool {
 pub fn save(path: &Path, text: &str, bom: bool) -> Result<(), String> {
     // A link: write what it points at, so the link stays.
     let target: PathBuf = match fs::symlink_metadata(path) {
-        Ok(m) if m.file_type().is_symlink() => fs::canonicalize(path).map_err(|e| format!("{} points nowhere: {}", name(path), plain(&e)))?,
+        Ok(m) if m.file_type().is_symlink() => {
+            fs::canonicalize(path).map_err(|e| format!("{} points nowhere: {}", name(path), plain(&e)))?
+        }
         _ => path.to_path_buf(),
     };
     let old = fs::metadata(&target).ok();

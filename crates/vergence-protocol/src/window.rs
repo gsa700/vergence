@@ -241,40 +241,89 @@ pub enum WinRequest {
     /// window of a program that keeps tokens; empty if the program keeps none
     /// (its windows are then told apart by the order they open in).
     /// Reply: [`WinEvent::Created`], then a [`WinEvent::Configure`].
-    Create { serial: u32, window: u32, role: String, token: String, title: String, width: f64, height: f64, parent: u32, place: Place },
-    Destroy { window: u32 },
-    Title { window: u32, title: String },
+    Create {
+        serial: u32,
+        window: u32,
+        role: String,
+        token: String,
+        title: String,
+        width: f64,
+        height: f64,
+        parent: u32,
+        place: Place,
+    },
+    Destroy {
+        window: u32,
+    },
+    Title {
+        window: u32,
+        title: String,
+    },
     /// The configure with this serial is drawn for.
-    AckConfigure { window: u32, serial: u32 },
+    AckConfigure {
+        window: u32,
+        serial: u32,
+    },
     /// A new picture, and what changed since the last one (empty: all of it).
     /// Shared memory is copied when the server reads this message: the client
     /// may draw into it again at once. A GPU buffer is read while the server
     /// draws: it is free again once a later picture has been attached and a
     /// `Frame` has followed (the server swaps pictures at attach), so a client
     /// takes two or more in turn.
-    Attach { window: u32, buffer: Buffer, damage: Vec<Damage> },
+    Attach {
+        window: u32,
+        buffer: Buffer,
+        damage: Vec<Damage>,
+    },
     /// The pointer's shape over this window (the cursor-shape protocol's numbers).
-    Cursor { window: u32, shape: u16 },
-    Maximize { window: u32, on: bool },
-    Minimize { window: u32 },
+    Cursor {
+        window: u32,
+        shape: u16,
+    },
+    Maximize {
+        window: u32,
+        on: bool,
+    },
+    Minimize {
+        window: u32,
+    },
     /// Ask again where to be (Contract 2).
-    Place { window: u32, place: Place },
+    Place {
+        window: u32,
+        place: Place,
+    },
     /// The window's meaning now (Contract 3): its widgets, the focused one
     /// (0: none) and the text caret, if a field has one.
-    Meaning { window: u32, focus: u64, caret: Option<(f64, f64, f64, f64)>, nodes: Vec<Node> },
+    Meaning {
+        window: u32,
+        focus: u64,
+        caret: Option<(f64, f64, f64, f64)>,
+        nodes: Vec<Node>,
+    },
     /// This client has what is to be pasted, in these kinds of data, in
     /// answer to the press or key of `input_serial`.
-    Copy { input_serial: u32, kinds: Vec<String> },
+    Copy {
+        input_serial: u32,
+        kinds: Vec<String>,
+    },
     /// The clipboard's data in this kind, please. Reply: [`WinEvent::ClipboardData`].
-    Paste { serial: u32, kind: String },
+    Paste {
+        serial: u32,
+        kind: String,
+    },
     /// What the window's bar shows now; the server draws it (it draws every
     /// native window's bar). Sent again whenever it changes.
-    Bar { window: u32, bar: Bar },
+    Bar {
+        window: u32,
+        bar: Bar,
+    },
     /// This window draws under its bar (look milestone 1): its pictures are
     /// taller by the `inset` each [`WinEvent::Configure`] gives, the strip
     /// at their top lies under the server's bar (frosted there), and nothing
     /// that takes input belongs in it. Sent once, after Create.
-    UnderBar { window: u32 },
+    UnderBar {
+        window: u32,
+    },
     /// What kind of window this is, whether it is modal (only a dialog can
     /// be), and its smallest and largest size in points (0 on an axis: no
     /// limit). After Create, and again whenever it changes (window styles
@@ -283,50 +332,93 @@ pub enum WinRequest {
     /// 6b): the window has no ground of its own; the server frosts what is
     /// behind it under its whole body, joined with its bar into one surface,
     /// as macOS's Quick Look window (the content an inset card on it).
-    Style { window: u32, kind: WinKind, modal: bool, min: (f64, f64), max: (f64, f64), frosted: bool },
+    Style {
+        window: u32,
+        kind: WinKind,
+        modal: bool,
+        min: (f64, f64),
+        max: (f64, f64),
+        frosted: bool,
+    },
     /// The window's commands now (app settings milestone 1): what its app
     /// menu holds (crate::commands). `terminal`: its Ctrl+letter keys belong
     /// to the programs it runs, so roles' keys take Shift. After Create, and
     /// again whenever they change (a command enabled, a switch flipped).
-    Commands { window: u32, terminal: bool, commands: Vec<crate::commands::Command> },
+    Commands {
+        window: u32,
+        terminal: bool,
+        commands: Vec<crate::commands::Command>,
+    },
     /// The style its bar is drawn in (app settings milestone 1): the
     /// desktop's, or the app's own light or dark. After Create, and again
     /// whenever the app's setting changes.
-    BarStyle { window: u32, style: BarStyle },
+    BarStyle {
+        window: u32,
+        style: BarStyle,
+    },
     /// The size the window would like now, in points (a calculator opening
     /// its scientific keys; tools milestone 1). The server decides: within
     /// the window's limits and its screen, not while maximized or snapped.
-    Size { window: u32, width: f64, height: f64 },
+    Size {
+        window: u32,
+        width: f64,
+        height: f64,
+    },
     /// Start dragging (files milestone 1, step 8), while the pointer's left
     /// button is held on this window: what is dragged, each kind with its
     /// data (file drags are a few paths, so the data goes with the drag:
     /// [`MAX_DRAG_BYTES`] in all), and the words the server's ghost shows.
-    DragStart { window: u32, label: String, items: Vec<(String, Vec<u8>)> },
+    DragStart {
+        window: u32,
+        label: String,
+        items: Vec<(String, Vec<u8>)>,
+    },
     /// The answer to [`WinEvent::DragOver`]: what a drop here would do
     /// ([`DROP_NONE`], [`DROP_COPY`], [`DROP_MOVE`]).
-    DragAccept { window: u32, action: u8 },
+    DragAccept {
+        window: u32,
+        action: u8,
+    },
     /// Bring this window forward with the keyboard: the program was handed
     /// something to show by a start the person just made (a file opened in
     /// File Viewer going to the running Text Editor). The server grants it
     /// by the rule a new window takes the keyboard by (opened.rs).
-    Activate { window: u32 },
+    Activate {
+        window: u32,
+    },
     /// Open the server's menu for this window at (x, y) in it, with the
     /// window's commands (as last sent): a right click the program wants
     /// answered in the desktop's own menu style (the desktop's icons; step 9).
-    ContextMenu { window: u32, x: f64, y: f64 },
+    ContextMenu {
+        window: u32,
+        x: f64,
+        y: f64,
+    },
     /// Open the server's menu for this window at (x, y) in it with these
     /// lines (bus v20): a right click on something in the window (a file
     /// in File Viewer, the ground around them). The window's own menu, not
     /// its app menu's commands; a chosen line comes back as
     /// [`WinEvent::Command`] with its id.
-    Menu { window: u32, x: f64, y: f64, lines: Vec<MenuLine> },
+    Menu {
+        window: u32,
+        x: f64,
+        y: f64,
+        lines: Vec<MenuLine>,
+    },
     /// The desktop's bare ground was clicked (bus v23, overview milestone
     /// 1, step 6): the windows move aside, or come back. Heard only from a
     /// window of the Desktop kind; any other's is ignored.
-    GroundClicked { window: u32 },
+    GroundClicked {
+        window: u32,
+    },
     /// The answer to [`WinEvent::Act`] with this serial (bus v24): done, or
     /// why not ("it is off", "no such node").
-    Acted { window: u32, serial: u32, ok: bool, why: String },
+    Acted {
+        window: u32,
+        serial: u32,
+        ok: bool,
+        why: String,
+    },
     /// The window as a display list (display lists milestone 1, bus v30):
     /// a scene in vergence-scene's keyed wire form (version 2), `len` bytes
     /// at the start of the memfd `fd`, read when the server reads this
@@ -334,7 +426,12 @@ pub enum WinRequest {
     /// are kept by their keys until `forget` names them; a later scene may
     /// name them by key alone. In place of a picture (Attach) until the next
     /// Attach or Scene.
-    Scene { window: u32, fd: Fd, len: u32, forget: Vec<u64> },
+    Scene {
+        window: u32,
+        fd: Fd,
+        len: u32,
+        forget: Vec<u64>,
+    },
 }
 
 /// A line of a window's right-click menu ([`WinRequest::Menu`]).
@@ -343,11 +440,20 @@ pub enum MenuLine {
     /// Something to do: its id (sent back), what it is called, its keys as
     /// shown at the right, whether it can be done now (faint if not), and
     /// whether it is a setting that is on or off.
-    Item { id: u32, label: String, keys: String, enabled: bool, checked: Option<bool> },
+    Item {
+        id: u32,
+        label: String,
+        keys: String,
+        enabled: bool,
+        checked: Option<bool>,
+    },
     Separator,
     /// A submenu (Open With ▸): its name and its lines, which hold no
     /// submenus of their own.
-    Sub { label: String, lines: Vec<MenuLine> },
+    Sub {
+        label: String,
+        lines: Vec<MenuLine>,
+    },
 }
 
 impl MenuLine {
@@ -415,7 +521,11 @@ fn get_menu_lines(d: &mut Decoder, nested: bool) -> Result<Vec<MenuLine>, WireEr
     }
     let text = |d: &mut Decoder| -> Result<String, WireError> {
         let t = d.str()?;
-        if t.len() > MAX_LABEL || t.chars().any(char::is_control) { Err(WireError::BadValue("menu text")) } else { Ok(t) }
+        if t.len() > MAX_LABEL || t.chars().any(char::is_control) {
+            Err(WireError::BadValue("menu text"))
+        } else {
+            Ok(t)
+        }
     };
     let mut lines = Vec::with_capacity(n);
     for _ in 0..n {
@@ -553,7 +663,11 @@ pub const MAX_TEXT: f64 = 2.0;
 #[derive(Debug, Clone, PartialEq)]
 pub enum WinEvent {
     /// The window exists; `token` names it on later runs (Contract 2).
-    Created { serial: u32, window: u32, token: String },
+    Created {
+        serial: u32,
+        window: u32,
+        token: String,
+    },
     /// Draw at this size, for this scale (Contract 1); answer with AckConfigure.
     /// `inset`: the strip at the top of the window's picture under the
     /// server's bar (points; 0 unless it asked with [`WinRequest::UnderBar`]):
@@ -561,84 +675,226 @@ pub enum WinEvent {
     /// `text`: how much larger than its sizes say to draw text on this
     /// screen (version 21): the screen's calculated scale over the one it is
     /// shown at, so a size looks the same on every screen (1 = as given).
-    Configure { window: u32, serial: u32, width: f64, height: f64, scale: f64, maximized: bool, activated: bool, inset: f64, text: f64 },
+    Configure {
+        window: u32,
+        serial: u32,
+        width: f64,
+        height: f64,
+        scale: f64,
+        maximized: bool,
+        activated: bool,
+        inset: f64,
+        text: f64,
+    },
     /// The user asked for the window to close.
-    Close { window: u32 },
+    Close {
+        window: u32,
+    },
     /// The last picture is on the screen: draw the next when there is one.
-    Frame { window: u32, time_ms: u32 },
-    PointerEnter { window: u32, serial: u32, x: f64, y: f64 },
-    PointerLeave { window: u32 },
-    PointerMotion { window: u32, time_ms: u32, x: f64, y: f64 },
-    PointerButton { window: u32, serial: u32, time_ms: u32, button: u32, pressed: bool },
+    Frame {
+        window: u32,
+        time_ms: u32,
+    },
+    PointerEnter {
+        window: u32,
+        serial: u32,
+        x: f64,
+        y: f64,
+    },
+    PointerLeave {
+        window: u32,
+    },
+    PointerMotion {
+        window: u32,
+        time_ms: u32,
+        x: f64,
+        y: f64,
+    },
+    PointerButton {
+        window: u32,
+        serial: u32,
+        time_ms: u32,
+        button: u32,
+        pressed: bool,
+    },
     /// Scrolling: `source` 0 wheel, 1 finger, 2 continuous, 3 wheel tilt;
     /// the amounts in reference units, and in 120ths of a notch for a wheel.
-    PointerAxis { window: u32, time_ms: u32, source: u8, dx: f64, dy: f64, v120x: i32, v120y: i32 },
+    PointerAxis {
+        window: u32,
+        time_ms: u32,
+        source: u8,
+        dx: f64,
+        dy: f64,
+        v120x: i32,
+        v120y: i32,
+    },
     /// The keymap (xkb's text format, `size` bytes, in a descriptor).
-    Keymap { fd: Fd, size: u32 },
-    KeyboardEnter { window: u32, serial: u32 },
-    KeyboardLeave { window: u32 },
-    Key { window: u32, serial: u32, time_ms: u32, key: u32, pressed: bool },
-    Modifiers { depressed: u32, latched: u32, locked: u32, group: u32 },
+    Keymap {
+        fd: Fd,
+        size: u32,
+    },
+    KeyboardEnter {
+        window: u32,
+        serial: u32,
+    },
+    KeyboardLeave {
+        window: u32,
+    },
+    Key {
+        window: u32,
+        serial: u32,
+        time_ms: u32,
+        key: u32,
+        pressed: bool,
+    },
+    Modifiers {
+        depressed: u32,
+        latched: u32,
+        locked: u32,
+        group: u32,
+    },
     /// Repeats a second (0: none) and the delay before the first, in ms.
-    Repeat { rate: i32, delay: i32 },
+    Repeat {
+        rate: i32,
+        delay: i32,
+    },
     /// A finger: `phase` 0 down, 1 moved, 2 up, 3 canceled.
-    Touch { window: u32, time_ms: u32, id: i32, phase: u8, x: f64, y: f64 },
+    Touch {
+        window: u32,
+        time_ms: u32,
+        id: i32,
+        phase: u8,
+        x: f64,
+        y: f64,
+    },
     /// There is something to paste, in these kinds.
-    ClipboardOffer { kinds: Vec<String> },
+    ClipboardOffer {
+        kinds: Vec<String>,
+    },
     /// Someone is pasting what this client copied: write it in `kind` to `fd`, then close it.
-    ClipboardSend { kind: String, fd: Fd },
+    ClipboardSend {
+        kind: String,
+        fd: Fd,
+    },
     /// What was asked for with Paste, to be read from `fd`.
-    ClipboardData { serial: u32, fd: Fd },
+    ClipboardData {
+        serial: u32,
+        fd: Fd,
+    },
     // The bar's events (bar milestone 1): what the user did with the tabs
     // the server drew. The program decides what each means.
     /// A tab was chosen.
-    TabChosen { window: u32, tab: u32 },
+    TabChosen {
+        window: u32,
+        tab: u32,
+    },
     /// A tab's close button, its middle click or its menu's Close.
-    TabClose { window: u32, tab: u32 },
+    TabClose {
+        window: u32,
+        tab: u32,
+    },
     /// "Close the others" from a tab's menu.
-    TabCloseOthers { window: u32, tab: u32 },
+    TabCloseOthers {
+        window: u32,
+        tab: u32,
+    },
     /// The + was pressed.
-    TabNew { window: u32 },
+    TabNew {
+        window: u32,
+    },
     /// A tab was dragged to another place in the row (`to` counted with the
     /// tab taken out first).
-    TabMoved { window: u32, tab: u32, to: u32 },
+    TabMoved {
+        window: u32,
+        tab: u32,
+        to: u32,
+    },
     /// A tab was dragged out of the window, or "Move to a new window" was
     /// chosen: open a window for it there (`place` for its Create).
-    TabOut { window: u32, tab: u32, place: Place },
+    TabOut {
+        window: u32,
+        tab: u32,
+        place: Place,
+    },
     /// A tab was dropped on another window of this program's bar, at `to`.
-    TabJoin { window: u32, tab: u32, into: u32, to: u32 },
+    TabJoin {
+        window: u32,
+        tab: u32,
+        into: u32,
+        to: u32,
+    },
     /// One of the program's own tab-menu entries was chosen.
-    TabMenu { window: u32, tab: u32, entry: u32 },
+    TabMenu {
+        window: u32,
+        tab: u32,
+        entry: u32,
+    },
     /// One of the program's own bar buttons ([`Bar::Tools`]) was pressed.
-    BarButton { window: u32, id: u32 },
+    BarButton {
+        window: u32,
+        id: u32,
+    },
     /// The wallpaper's average color behind the window (0xRRGGBB), for it to
     /// mix a little into its grounds; None: no tint (light style, the switch
     /// off, Reduce transparency or High contrast).
-    Tint { window: u32, rgb: Option<u32> },
+    Tint {
+        window: u32,
+        rgb: Option<u32>,
+    },
     /// A command of the window's app menu was chosen (its id), from the menu
     /// or its search.
-    Command { window: u32, id: u32 },
+    Command {
+        window: u32,
+        id: u32,
+    },
     /// A drag is over this window at (x, y), with these kinds; `mods`: the
     /// keys held ([`DRAG_CTRL`], [`DRAG_SHIFT`]). Answer with DragAccept.
-    DragOver { window: u32, x: f64, y: f64, kinds: Vec<String>, mods: u8 },
+    DragOver {
+        window: u32,
+        x: f64,
+        y: f64,
+        kinds: Vec<String>,
+        mods: u8,
+    },
     /// The drag left this window (or ended elsewhere).
-    DragLeave { window: u32 },
+    DragLeave {
+        window: u32,
+    },
     /// Dropped here: what to do (as this window accepted it) and the data.
-    DragDrop { window: u32, x: f64, y: f64, action: u8, items: Vec<(String, Vec<u8>)> },
+    DragDrop {
+        window: u32,
+        x: f64,
+        y: f64,
+        action: u8,
+        items: Vec<(String, Vec<u8>)>,
+    },
     /// To the window the drag started from: it ended, with this action
     /// ([`DROP_NONE`]: nowhere took it).
-    DragEnded { window: u32, action: u8 },
+    DragEnded {
+        window: u32,
+        action: u8,
+    },
     /// Do `action` to the widget whose meaning node is `node` (Contract 3,
     /// bus v24): answered by [`WinRequest::Acted`] with the same serial.
-    Act { window: u32, serial: u32, node: u64, action: Action },
+    Act {
+        window: u32,
+        serial: u32,
+        node: u64,
+        action: Action,
+    },
     /// The server will not draw this window's scenes any more (bus v31,
     /// display lists step 6: one too costly, or drawing it too slow): send
     /// pixels for it from now on. `why` is for the log.
-    ScenesOff { window: u32, why: String },
+    ScenesOff {
+        window: u32,
+        why: String,
+    },
     /// The session is ending (bus v33, session milestone 1): the Close that
     /// follows is the session's, not the user's, so what the program keeps
     /// of this window stays for the next session.
-    SessionEnding { window: u32 },
+    SessionEnding {
+        window: u32,
+    },
 }
 
 pub(crate) mod op {
@@ -765,7 +1021,12 @@ pub(crate) fn get_nodes(d: &mut Decoder) -> Result<Vec<Node>, WireError> {
             return Err(WireError::TooLong(ns));
         }
         let states = (0..ns).map(|_| d.str()).collect::<Result<_, _>>()?;
-        let (x, y, w, h) = (finite(d.f64()?, "bounds")?, finite(d.f64()?, "bounds")?, finite(d.f64()?, "bounds")?, finite(d.f64()?, "bounds")?);
+        let (x, y, w, h) = (
+            finite(d.f64()?, "bounds")?,
+            finite(d.f64()?, "bounds")?,
+            finite(d.f64()?, "bounds")?,
+            finite(d.f64()?, "bounds")?,
+        );
         let ni = d.count(4)?;
         if ni > MAX_ITEMS {
             return Err(WireError::TooLong(ni));
@@ -856,13 +1117,14 @@ fn put_bar(e: &mut Encoder, bar: &Bar) {
         Bar::Tools { buttons, from } => {
             e.u8(2).count(buttons.len());
             for b in buttons {
-                e.u32(b.id).u8(match b.icon {
-                    BarIcon::Back => 0,
-                    BarIcon::Forward => 1,
-                    BarIcon::Label => 2,
-                })
-                .str(&b.name)
-                .bool(b.enabled);
+                e.u32(b.id)
+                    .u8(match b.icon {
+                        BarIcon::Back => 0,
+                        BarIcon::Forward => 1,
+                        BarIcon::Label => 2,
+                    })
+                    .str(&b.name)
+                    .bool(b.enabled);
             }
             e.f64(*from);
         }
@@ -980,7 +1242,13 @@ impl WinRequest {
                     }
                     Buffer::Dmabuf { planes, width, height, format, modifier } => {
                         fds.extend(planes.iter().map(|p| p.fd.raw()));
-                        e.u8(planes.len() as u8).u32(*window).u8(1).u32(*width).u32(*height).u32(*format).u64(*modifier);
+                        e.u8(planes.len() as u8)
+                            .u32(*window)
+                            .u8(1)
+                            .u32(*width)
+                            .u32(*height)
+                            .u32(*format)
+                            .u64(*modifier);
                         for p in planes {
                             e.u32(p.offset).u32(p.stride);
                         }
@@ -1047,7 +1315,14 @@ impl WinRequest {
             }
             WinRequest::Style { window, kind, modal, min, max, frosted } => {
                 let mut e = Encoder::frame(op::STYLE);
-                e.u32(*window).u8(kind.byte()).u8(*modal as u8).f64(min.0).f64(min.1).f64(max.0).f64(max.1).bool(*frosted);
+                e.u32(*window)
+                    .u8(kind.byte())
+                    .u8(*modal as u8)
+                    .f64(min.0)
+                    .f64(min.1)
+                    .f64(max.0)
+                    .f64(max.1)
+                    .bool(*frosted);
                 e
             }
             WinRequest::Commands { window, terminal, commands } => {
@@ -1154,7 +1429,10 @@ impl WinRequest {
                     0 => {
                         let (width, height, stride, format) = (d.u32()?, d.u32()?, d.u32()?, d.u32()?);
                         size(width, height)?;
-                        if got.len() != 1 || (stride as u64) < width as u64 * 4 || stride as u64 * height as u64 > 1 << 30 {
+                        if got.len() != 1
+                            || (stride as u64) < width as u64 * 4
+                            || stride as u64 * height as u64 > 1 << 30
+                        {
                             return Err(WireError::BadValue("shared memory picture"));
                         }
                         Buffer::Shm { fd: got.remove(0), width, height, stride, format }
@@ -1177,7 +1455,9 @@ impl WinRequest {
                 if n > MAX_DAMAGE {
                     return Err(WireError::TooLong(n));
                 }
-                let damage = (0..n).map(|_| Ok(Damage { x: d.i32()?, y: d.i32()?, w: d.i32()?, h: d.i32()? })).collect::<Result<_, WireError>>()?;
+                let damage = (0..n)
+                    .map(|_| Ok(Damage { x: d.i32()?, y: d.i32()?, w: d.i32()?, h: d.i32()? }))
+                    .collect::<Result<_, WireError>>()?;
                 WinRequest::Attach { window, buffer, damage }
             }
             op::CURSOR => WinRequest::Cursor { window: d.u32()?, shape: d.u16()? },
@@ -1187,7 +1467,16 @@ impl WinRequest {
             op::MEANING => {
                 let window = d.u32()?;
                 let focus = d.u64()?;
-                let caret = if d.bool()? { Some((finite(d.f64()?, "caret")?, finite(d.f64()?, "caret")?, finite(d.f64()?, "caret")?, finite(d.f64()?, "caret")?)) } else { None };
+                let caret = if d.bool()? {
+                    Some((
+                        finite(d.f64()?, "caret")?,
+                        finite(d.f64()?, "caret")?,
+                        finite(d.f64()?, "caret")?,
+                        finite(d.f64()?, "caret")?,
+                    ))
+                } else {
+                    None
+                };
                 let nodes = get_nodes(&mut d)?;
                 WinRequest::Meaning { window, focus, caret, nodes }
             }
@@ -1218,7 +1507,11 @@ impl WinRequest {
                 }
                 let text = |d: &mut Decoder| -> Result<String, WireError> {
                     let t = d.str()?;
-                    if t.len() > MAX_LABEL || t.chars().any(char::is_control) { Err(WireError::BadValue("command text")) } else { Ok(t) }
+                    if t.len() > MAX_LABEL || t.chars().any(char::is_control) {
+                        Err(WireError::BadValue("command text"))
+                    } else {
+                        Ok(t)
+                    }
                 };
                 let mut commands: Vec<Command> = Vec::with_capacity(n);
                 for _ in 0..n {
@@ -1274,7 +1567,9 @@ impl WinRequest {
                 WinRequest::DragAccept { window, action }
             }
             op::ACTIVATE => WinRequest::Activate { window: d.u32()? },
-            op::CONTEXT_MENU => WinRequest::ContextMenu { window: d.u32()?, x: finite(d.f64()?, "x")?, y: finite(d.f64()?, "y")? },
+            op::CONTEXT_MENU => {
+                WinRequest::ContextMenu { window: d.u32()?, x: finite(d.f64()?, "x")?, y: finite(d.f64()?, "y")? }
+            }
             op::MENU => {
                 let (window, x, y) = (d.u32()?, finite(d.f64()?, "x")?, finite(d.f64()?, "y")?);
                 WinRequest::Menu { window, x, y, lines: get_menu_lines(&mut d, false)? }
@@ -1321,7 +1616,15 @@ impl WinEvent {
             }
             WinEvent::Configure { window, serial, width, height, scale, maximized, activated, inset, text } => {
                 let mut e = Encoder::frame(op::CONFIGURE);
-                e.u32(*window).u32(*serial).f64(*width).f64(*height).f64(*scale).bool(*maximized).bool(*activated).f64(*inset).f64(*text);
+                e.u32(*window)
+                    .u32(*serial)
+                    .f64(*width)
+                    .f64(*height)
+                    .f64(*scale)
+                    .bool(*maximized)
+                    .bool(*activated)
+                    .f64(*inset)
+                    .f64(*text);
                 e
             }
             WinEvent::Close { window } => {
@@ -1550,21 +1853,54 @@ impl WinEvent {
             },
             op::CLOSE => WinEvent::Close { window: d.u32()? },
             op::FRAME => WinEvent::Frame { window: d.u32()?, time_ms: d.u32()? },
-            op::POINTER_ENTER => WinEvent::PointerEnter { window: d.u32()?, serial: d.u32()?, x: d.f64()?, y: d.f64()? },
+            op::POINTER_ENTER => {
+                WinEvent::PointerEnter { window: d.u32()?, serial: d.u32()?, x: d.f64()?, y: d.f64()? }
+            }
             op::POINTER_LEAVE => WinEvent::PointerLeave { window: d.u32()? },
-            op::POINTER_MOTION => WinEvent::PointerMotion { window: d.u32()?, time_ms: d.u32()?, x: d.f64()?, y: d.f64()? },
-            op::POINTER_BUTTON => WinEvent::PointerButton { window: d.u32()?, serial: d.u32()?, time_ms: d.u32()?, button: d.u32()?, pressed: d.bool()? },
-            op::POINTER_AXIS => WinEvent::PointerAxis { window: d.u32()?, time_ms: d.u32()?, source: d.u8()?, dx: d.f64()?, dy: d.f64()?, v120x: d.i32()?, v120y: d.i32()? },
+            op::POINTER_MOTION => {
+                WinEvent::PointerMotion { window: d.u32()?, time_ms: d.u32()?, x: d.f64()?, y: d.f64()? }
+            }
+            op::POINTER_BUTTON => WinEvent::PointerButton {
+                window: d.u32()?,
+                serial: d.u32()?,
+                time_ms: d.u32()?,
+                button: d.u32()?,
+                pressed: d.bool()?,
+            },
+            op::POINTER_AXIS => WinEvent::PointerAxis {
+                window: d.u32()?,
+                time_ms: d.u32()?,
+                source: d.u8()?,
+                dx: d.f64()?,
+                dy: d.f64()?,
+                v120x: d.i32()?,
+                v120y: d.i32()?,
+            },
             op::KEYMAP => {
                 let fd = one(fds, &mut d)?;
                 WinEvent::Keymap { fd, size: d.u32()? }
             }
             op::KEYBOARD_ENTER => WinEvent::KeyboardEnter { window: d.u32()?, serial: d.u32()? },
             op::KEYBOARD_LEAVE => WinEvent::KeyboardLeave { window: d.u32()? },
-            op::KEY => WinEvent::Key { window: d.u32()?, serial: d.u32()?, time_ms: d.u32()?, key: d.u32()?, pressed: d.bool()? },
-            op::MODIFIERS => WinEvent::Modifiers { depressed: d.u32()?, latched: d.u32()?, locked: d.u32()?, group: d.u32()? },
+            op::KEY => WinEvent::Key {
+                window: d.u32()?,
+                serial: d.u32()?,
+                time_ms: d.u32()?,
+                key: d.u32()?,
+                pressed: d.bool()?,
+            },
+            op::MODIFIERS => {
+                WinEvent::Modifiers { depressed: d.u32()?, latched: d.u32()?, locked: d.u32()?, group: d.u32()? }
+            }
             op::REPEAT => WinEvent::Repeat { rate: d.i32()?, delay: d.i32()? },
-            op::TOUCH => WinEvent::Touch { window: d.u32()?, time_ms: d.u32()?, id: d.i32()?, phase: d.u8()?, x: d.f64()?, y: d.f64()? },
+            op::TOUCH => WinEvent::Touch {
+                window: d.u32()?,
+                time_ms: d.u32()?,
+                id: d.i32()?,
+                phase: d.u8()?,
+                x: d.f64()?,
+                y: d.f64()?,
+            },
             op::CLIPBOARD_OFFER => WinEvent::ClipboardOffer { kinds: get_kinds(&mut d)? },
             op::CLIPBOARD_SEND => {
                 let fd = one(fds, &mut d)?;
@@ -1653,17 +1989,33 @@ mod tests {
             let (bytes, _) = m.encode().unwrap();
             WinRequest::decode(op::STYLE, &bytes[6..], &mut NoFds)
         };
-        let style = |kind, modal, min: (f64, f64), max: (f64, f64)| WinRequest::Style { window: 1, kind, modal, min, max, frosted: false };
+        let style = |kind, modal, min: (f64, f64), max: (f64, f64)| WinRequest::Style {
+            window: 1,
+            kind,
+            modal,
+            min,
+            max,
+            frosted: false,
+        };
         assert!(decode(style(WinKind::Normal, false, (0.0, 0.0), (0.0, 0.0))).is_ok());
         assert!(decode(style(WinKind::Normal, false, (-1.0, 0.0), (0.0, 0.0))).is_err(), "a negative size");
         assert!(decode(style(WinKind::Normal, false, (0.0, f64::NAN), (0.0, 0.0))).is_err(), "not a number");
         assert!(decode(style(WinKind::Normal, false, (500.0, 0.0), (400.0, 0.0))).is_err(), "largest below smallest");
-        assert!(decode(style(WinKind::Normal, false, (500.0, 300.0), (0.0, 200.0))).is_err(), "largest height below smallest");
+        assert!(
+            decode(style(WinKind::Normal, false, (500.0, 300.0), (0.0, 200.0))).is_err(),
+            "largest height below smallest"
+        );
         // Fixed size: smallest and largest the same.
         assert!(decode(style(WinKind::Normal, false, (400.0, 300.0), (400.0, 300.0))).is_ok());
         // Modal is a dialog's only.
-        assert_eq!(decode(style(WinKind::Palette, true, (0.0, 0.0), (0.0, 0.0))).unwrap(), style(WinKind::Palette, false, (0.0, 0.0), (0.0, 0.0)));
-        assert_eq!(decode(style(WinKind::Dialog, true, (0.0, 0.0), (0.0, 0.0))).unwrap(), style(WinKind::Dialog, true, (0.0, 0.0), (0.0, 0.0)));
+        assert_eq!(
+            decode(style(WinKind::Palette, true, (0.0, 0.0), (0.0, 0.0))).unwrap(),
+            style(WinKind::Palette, false, (0.0, 0.0), (0.0, 0.0))
+        );
+        assert_eq!(
+            decode(style(WinKind::Dialog, true, (0.0, 0.0), (0.0, 0.0))).unwrap(),
+            style(WinKind::Dialog, true, (0.0, 0.0), (0.0, 0.0))
+        );
         // An unknown kind.
         let (mut bytes, _) = style(WinKind::Normal, false, (0.0, 0.0), (0.0, 0.0)).encode().unwrap();
         bytes[6 + 4] = 9;
@@ -1681,19 +2033,34 @@ mod tests {
         assert!(decode(menu(vec![MenuLine::item(0, "Open", "")])).is_err(), "id 0");
         assert!(decode(menu(vec![MenuLine::item(1, "", "")])).is_err(), "no label");
         assert!(decode(menu(vec![MenuLine::item(1, "a\nb", "")])).is_err(), "a control character");
-        assert!(decode(menu(vec![MenuLine::item(1, &"x".repeat(crate::commands::MAX_LABEL + 1), "")])).is_err(), "label too long");
+        assert!(
+            decode(menu(vec![MenuLine::item(1, &"x".repeat(crate::commands::MAX_LABEL + 1), "")])).is_err(),
+            "label too long"
+        );
         let many: Vec<MenuLine> = (1..=MAX_MENU_LINES as u32 + 1).map(|i| MenuLine::item(i, "x", "")).collect();
         assert!(decode(menu(many.clone())).is_err(), "too many lines");
         assert!(decode(menu(vec![MenuLine::Sub { label: "S".into(), lines: many }])).is_err(), "too many in a submenu");
         let inner = MenuLine::Sub { label: "In".into(), lines: vec![MenuLine::item(2, "x", "")] };
-        assert!(decode(menu(vec![MenuLine::Sub { label: "Out".into(), lines: vec![inner] }])).is_err(), "a submenu in a submenu");
+        assert!(
+            decode(menu(vec![MenuLine::Sub { label: "Out".into(), lines: vec![inner] }])).is_err(),
+            "a submenu in a submenu"
+        );
     }
 
     #[test]
     fn a_bad_bar_is_refused() {
         let tabs = |ids: &[u32], front: u32| WinRequest::Bar {
             window: 1,
-            bar: Bar::Tabs { tabs: ids.iter().map(|&id| Tab { id, title: "t".into(), closable: true, alert: false, edited: false }).collect(), front, plus: true, accent: None, menu: vec![] },
+            bar: Bar::Tabs {
+                tabs: ids
+                    .iter()
+                    .map(|&id| Tab { id, title: "t".into(), closable: true, alert: false, edited: false })
+                    .collect(),
+                front,
+                plus: true,
+                accent: None,
+                menu: vec![],
+            },
         };
         let decode = |m: WinRequest| {
             let (bytes, _) = m.encode().unwrap();
@@ -1707,7 +2074,22 @@ mod tests {
         assert!(decode(tabs(&[], 5)).is_err(), "front with no tabs");
         let many: Vec<u32> = (1..=MAX_TABS as u32 + 1).collect();
         assert!(decode(tabs(&many, 1)).is_err(), "too many tabs");
-        let long = WinRequest::Bar { window: 1, bar: Bar::Tabs { tabs: vec![Tab { id: 1, title: "x".repeat(MAX_TAB_TITLE + 1), closable: true, alert: false, edited: false }], front: 1, plus: false, accent: None, menu: vec![] } };
+        let long = WinRequest::Bar {
+            window: 1,
+            bar: Bar::Tabs {
+                tabs: vec![Tab {
+                    id: 1,
+                    title: "x".repeat(MAX_TAB_TITLE + 1),
+                    closable: true,
+                    alert: false,
+                    edited: false,
+                }],
+                front: 1,
+                plus: false,
+                accent: None,
+                menu: vec![],
+            },
+        };
         assert!(decode(long).is_err(), "title too long");
     }
 
@@ -1716,12 +2098,30 @@ mod tests {
         let a = shm();
         let planes = vec![Plane { fd: shm(), offset: 0, stride: 1024 }, Plane { fd: shm(), offset: 4096, stride: 512 }];
         let all = vec![
-            WinRequest::Create { serial: 7, window: 1, role: "main".into(), token: "".into(), title: "Terminal".into(), width: 880.0, height: 640.0, parent: 0, place: Place::Monitor { id: "abc".into(), x: 10.0, y: 20.5 } },
+            WinRequest::Create {
+                serial: 7,
+                window: 1,
+                role: "main".into(),
+                token: "".into(),
+                title: "Terminal".into(),
+                width: 880.0,
+                height: 640.0,
+                parent: 0,
+                place: Place::Monitor { id: "abc".into(), x: 10.0, y: 20.5 },
+            },
             WinRequest::Destroy { window: 1 },
             WinRequest::Title { window: 1, title: "x".into() },
             WinRequest::AckConfigure { window: 1, serial: 9 },
-            WinRequest::Attach { window: 1, buffer: Buffer::Shm { fd: a.clone(), width: 100, height: 50, stride: 400, format: 0 }, damage: vec![Damage { x: 0, y: 0, w: 10, h: 10 }] },
-            WinRequest::Attach { window: 1, buffer: Buffer::Dmabuf { planes, width: 256, height: 128, format: 0x3432_5258, modifier: 1 << 56 }, damage: vec![] },
+            WinRequest::Attach {
+                window: 1,
+                buffer: Buffer::Shm { fd: a.clone(), width: 100, height: 50, stride: 400, format: 0 },
+                damage: vec![Damage { x: 0, y: 0, w: 10, h: 10 }],
+            },
+            WinRequest::Attach {
+                window: 1,
+                buffer: Buffer::Dmabuf { planes, width: 256, height: 128, format: 0x3432_5258, modifier: 1 << 56 },
+                damage: vec![],
+            },
             WinRequest::Cursor { window: 1, shape: 2 },
             WinRequest::Maximize { window: 1, on: true },
             WinRequest::Minimize { window: 1 },
@@ -1731,8 +2131,32 @@ mod tests {
                 focus: 3,
                 caret: Some((1.0, 2.0, 1.5, 14.0)),
                 nodes: vec![
-                    Node { id: 3, parent: 0, role: "button".into(), name: "Save".into(), value: None, states: vec!["focused".into()], x: 1.0, y: 2.0, w: 30.0, h: 20.0, items: vec![] },
-                    Node { id: 4, parent: 0, role: "choice".into(), name: "Font".into(), value: Some("Inter".into()), states: vec![], x: 1.0, y: 30.0, w: 90.0, h: 20.0, items: vec!["Inter".into(), "JetBrains Mono".into()] },
+                    Node {
+                        id: 3,
+                        parent: 0,
+                        role: "button".into(),
+                        name: "Save".into(),
+                        value: None,
+                        states: vec!["focused".into()],
+                        x: 1.0,
+                        y: 2.0,
+                        w: 30.0,
+                        h: 20.0,
+                        items: vec![],
+                    },
+                    Node {
+                        id: 4,
+                        parent: 0,
+                        role: "choice".into(),
+                        name: "Font".into(),
+                        value: Some("Inter".into()),
+                        states: vec![],
+                        x: 1.0,
+                        y: 30.0,
+                        w: 90.0,
+                        h: 20.0,
+                        items: vec!["Inter".into(), "JetBrains Mono".into()],
+                    },
                 ],
             },
             WinRequest::Copy { input_serial: 5, kinds: vec!["text/plain;charset=utf-8".into()] },
@@ -1750,9 +2174,30 @@ mod tests {
                 },
             },
             WinRequest::UnderBar { window: 1 },
-            WinRequest::Style { window: 1, kind: WinKind::Dialog, modal: true, min: (320.0, 200.0), max: (0.0, 0.0), frosted: false },
-            WinRequest::Style { window: 2, kind: WinKind::Sidebar, modal: false, min: (760.0, 480.0), max: (1100.0, 0.0), frosted: false },
-            WinRequest::Style { window: 3, kind: WinKind::Dialog, modal: false, min: (240.0, 160.0), max: (0.0, 0.0), frosted: true },
+            WinRequest::Style {
+                window: 1,
+                kind: WinKind::Dialog,
+                modal: true,
+                min: (320.0, 200.0),
+                max: (0.0, 0.0),
+                frosted: false,
+            },
+            WinRequest::Style {
+                window: 2,
+                kind: WinKind::Sidebar,
+                modal: false,
+                min: (760.0, 480.0),
+                max: (1100.0, 0.0),
+                frosted: false,
+            },
+            WinRequest::Style {
+                window: 3,
+                kind: WinKind::Dialog,
+                modal: false,
+                min: (240.0, 160.0),
+                max: (0.0, 0.0),
+                frosted: true,
+            },
             WinRequest::Commands {
                 window: 1,
                 terminal: true,
@@ -1764,7 +2209,14 @@ mod tests {
             },
             WinRequest::BarStyle { window: 1, style: BarStyle::Light },
             WinRequest::Size { window: 1, width: 680.0, height: 560.0 },
-            WinRequest::DragStart { window: 1, label: "2 items".into(), items: vec![("text/uri-list".into(), b"file:///a\r\nfile:///b\r\n".to_vec()), ("text/plain".into(), b"/a\n/b".to_vec())] },
+            WinRequest::DragStart {
+                window: 1,
+                label: "2 items".into(),
+                items: vec![
+                    ("text/uri-list".into(), b"file:///a\r\nfile:///b\r\n".to_vec()),
+                    ("text/plain".into(), b"/a\n/b".to_vec()),
+                ],
+            },
             WinRequest::DragAccept { window: 1, action: DROP_MOVE },
             WinRequest::Activate { window: 1 },
             WinRequest::ContextMenu { window: 1, x: 40.0, y: 60.5 },
@@ -1778,7 +2230,14 @@ mod tests {
                 y: 30.5,
                 lines: vec![
                     MenuLine::item(1, "Open", "Enter"),
-                    MenuLine::Sub { label: "Open With".into(), lines: vec![MenuLine::item(100, "Edit", ""), MenuLine::Separator, MenuLine::item(101, "Other…", "").enabled(false)] },
+                    MenuLine::Sub {
+                        label: "Open With".into(),
+                        lines: vec![
+                            MenuLine::item(100, "Edit", ""),
+                            MenuLine::Separator,
+                            MenuLine::item(101, "Other…", "").enabled(false),
+                        ],
+                    },
                     MenuLine::Separator,
                     MenuLine::item(2, "Hidden files", "Ctrl+H").checked(true),
                 ],
@@ -1787,7 +2246,10 @@ mod tests {
             WinRequest::Bar {
                 window: 1,
                 bar: Bar::Tabs {
-                    tabs: vec![Tab { id: 4, title: "~/src".into(), closable: true, alert: false, edited: true }, Tab { id: 9, title: "htop".into(), closable: false, alert: true, edited: false }],
+                    tabs: vec![
+                        Tab { id: 4, title: "~/src".into(), closable: true, alert: false, edited: true },
+                        Tab { id: 9, title: "htop".into(), closable: false, alert: true, edited: false },
+                    ],
                     front: 9,
                     plus: true,
                     accent: Some(0x3b82f6),
@@ -1823,7 +2285,17 @@ mod tests {
     fn every_event_survives_the_wire() {
         let all = vec![
             WinEvent::Created { serial: 7, window: 1, token: "t1".into() },
-            WinEvent::Configure { window: 1, serial: 2, width: 880.0, height: 640.0, scale: 1.5, maximized: false, activated: true, inset: 36.0, text: 1.27 },
+            WinEvent::Configure {
+                window: 1,
+                serial: 2,
+                width: 880.0,
+                height: 640.0,
+                scale: 1.5,
+                maximized: false,
+                activated: true,
+                inset: 36.0,
+                text: 1.27,
+            },
             WinEvent::Close { window: 1 },
             WinEvent::Frame { window: 1, time_ms: 1234 },
             WinEvent::PointerEnter { window: 1, serial: 3, x: 1.5, y: 2.5 },
@@ -1855,7 +2327,13 @@ mod tests {
             WinEvent::Command { window: 1, id: 7 },
             WinEvent::DragOver { window: 1, x: 10.5, y: 20.0, kinds: vec!["text/uri-list".into()], mods: DRAG_CTRL },
             WinEvent::DragLeave { window: 1 },
-            WinEvent::DragDrop { window: 1, x: 3.0, y: 4.0, action: DROP_COPY, items: vec![("text/uri-list".into(), b"file:///a\r\n".to_vec())] },
+            WinEvent::DragDrop {
+                window: 1,
+                x: 3.0,
+                y: 4.0,
+                action: DROP_COPY,
+                items: vec![("text/uri-list".into(), b"file:///a\r\n".to_vec())],
+            },
             WinEvent::DragEnded { window: 1, action: DROP_NONE },
             WinEvent::Act { window: 1, serial: 7, node: 1 << 40, action: Action::Press },
             WinEvent::Act { window: 1, serial: 8, node: 3, action: Action::Focus },
@@ -1869,7 +2347,13 @@ mod tests {
             let (bytes, fds) = m.encode().unwrap();
             let (opcode, payload, mut got) = cross(&bytes, &fds);
             let back = WinEvent::decode(opcode, &payload, &mut got).unwrap();
-            let hide = |s: String| s.split("Fd(").enumerate().map(|(i, p)| if i == 0 { p.to_string() } else { p[p.find(')').unwrap()..].to_string() }).collect::<Vec<_>>().join("Fd(");
+            let hide = |s: String| {
+                s.split("Fd(")
+                    .enumerate()
+                    .map(|(i, p)| if i == 0 { p.to_string() } else { p[p.find(')').unwrap()..].to_string() })
+                    .collect::<Vec<_>>()
+                    .join("Fd(")
+            };
             assert_eq!(hide(format!("{back:?}")), hide(format!("{m:?}")));
             assert!(got.is_empty());
         }
@@ -1877,18 +2361,30 @@ mod tests {
 
     #[test]
     fn a_picture_that_does_not_add_up_is_refused() {
-        let ok = WinRequest::Attach { window: 1, buffer: Buffer::Shm { fd: shm(), width: 100, height: 50, stride: 400, format: 0 }, damage: vec![] };
+        let ok = WinRequest::Attach {
+            window: 1,
+            buffer: Buffer::Shm { fd: shm(), width: 100, height: 50, stride: 400, format: 0 },
+            damage: vec![],
+        };
         let (bytes, _) = ok.encode().unwrap();
         let payload = &bytes[6..];
         // The descriptor did not come.
         assert!(WinRequest::decode(op::ATTACH, payload, &mut NoFds).is_err());
         // A stride too short for the width.
-        let bad = WinRequest::Attach { window: 1, buffer: Buffer::Shm { fd: shm(), width: 100, height: 50, stride: 100, format: 0 }, damage: vec![] };
+        let bad = WinRequest::Attach {
+            window: 1,
+            buffer: Buffer::Shm { fd: shm(), width: 100, height: 50, stride: 100, format: 0 },
+            damage: vec![],
+        };
         let (bytes, fds) = bad.encode().unwrap();
         let (opcode, payload, mut got) = cross(&bytes, &fds);
         assert!(WinRequest::decode(opcode, &payload, &mut got).is_err());
         // A side too large.
-        let huge = WinRequest::Attach { window: 1, buffer: Buffer::Shm { fd: shm(), width: MAX_SIDE + 1, height: 1, stride: (MAX_SIDE + 1) * 4, format: 0 }, damage: vec![] };
+        let huge = WinRequest::Attach {
+            window: 1,
+            buffer: Buffer::Shm { fd: shm(), width: MAX_SIDE + 1, height: 1, stride: (MAX_SIDE + 1) * 4, format: 0 },
+            damage: vec![],
+        };
         let (bytes, fds) = huge.encode().unwrap();
         let (opcode, payload, mut got) = cross(&bytes, &fds);
         assert!(WinRequest::decode(opcode, &payload, &mut got).is_err());

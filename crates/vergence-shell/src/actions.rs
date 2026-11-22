@@ -48,10 +48,18 @@ pub fn builtin() -> Vec<Action> {
         Action::new("desktop.show", "Show the desktop", "minimize all windows hide"),
         Action::new("lock.screen", "Lock the screen", "lock away secure password super l"),
         Action::new("dock.drawer", "Open the drawer", "applets tiles status dock"),
-        Action::new("session.exit", "Log Out…", "log out logout exit vergence quit session end sleep restart shut down power off"),
+        Action::new(
+            "session.exit",
+            "Log Out…",
+            "log out logout exit vergence quit session end sleep restart shut down power off",
+        ),
     ];
     for (page, name, words) in PAGES {
-        out.push(Action::new(&format!("settings.{page}"), &format!("{name} settings"), &format!("open preferences {words}")));
+        out.push(Action::new(
+            &format!("settings.{page}"),
+            &format!("{name} settings"),
+            &format!("open preferences {words}"),
+        ));
     }
     out
 }
@@ -59,7 +67,13 @@ pub fn builtin() -> Vec<Action> {
 /// Whether an action is found by what was typed: every word typed begins
 /// a word of its name or of its other words (case not looked at).
 pub fn matches(a: &Action, typed: &str) -> bool {
-    let words: Vec<String> = a.name.split(|c: char| !c.is_alphanumeric()).chain(a.words.iter().map(String::as_str)).filter(|w| !w.is_empty()).map(str::to_lowercase).collect();
+    let words: Vec<String> = a
+        .name
+        .split(|c: char| !c.is_alphanumeric())
+        .chain(a.words.iter().map(String::as_str))
+        .filter(|w| !w.is_empty())
+        .map(str::to_lowercase)
+        .collect();
     let typed: Vec<String> = typed.split_whitespace().map(str::to_lowercase).collect();
     !typed.is_empty() && typed.iter().all(|t| words.iter().any(|w| w.starts_with(t.as_str())))
 }

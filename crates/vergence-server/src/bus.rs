@@ -15,7 +15,10 @@
 use std::{
     collections::{HashMap, HashSet},
     io::{ErrorKind, Write},
-    os::unix::{fs::PermissionsExt, net::{UnixListener, UnixStream}},
+    os::unix::{
+        fs::PermissionsExt,
+        net::{UnixListener, UnixStream},
+    },
     path::PathBuf,
 };
 
@@ -133,9 +136,10 @@ impl Server {
         let Ok(write_half) = stream.try_clone() else { return };
         self.bus.next_id = self.bus.next_id.wrapping_add(1).max(1);
         let id = self.bus.next_id;
-        let res = self.loop_handle.insert_source(Generic::new(stream, Interest::READ, Mode::Level), move |_, s, state| {
-            Ok(if state.bus_readable(id, s) { PostAction::Continue } else { PostAction::Remove })
-        });
+        let res =
+            self.loop_handle.insert_source(Generic::new(stream, Interest::READ, Mode::Level), move |_, s, state| {
+                Ok(if state.bus_readable(id, s) { PostAction::Continue } else { PostAction::Remove })
+            });
         if let Err(e) = res {
             return tracing::warn!("bus: {e}");
         }
@@ -235,14 +239,20 @@ impl Server {
         match m {
             ClientMsg::Hello { version, app_id } => {
                 if hello {
-                    return self.bus_send(id, ServerMsg::Error { serial: 0, code: ErrorCode::BadMessage, message: "second Hello".into() });
+                    return self.bus_send(
+                        id,
+                        ServerMsg::Error { serial: 0, code: ErrorCode::BadMessage, message: "second Hello".into() },
+                    );
                 }
                 if version != VERSION {
-                    self.bus_send(id, ServerMsg::Error {
-                        serial: 0,
-                        code: ErrorCode::Version,
-                        message: format!("this server speaks version {VERSION}"),
-                    });
+                    self.bus_send(
+                        id,
+                        ServerMsg::Error {
+                            serial: 0,
+                            code: ErrorCode::Version,
+                            message: format!("this server speaks version {VERSION}"),
+                        },
+                    );
                     return self.bus_close(id);
                 }
                 tracing::info!("bus: client {id} is {app_id:?} (uid {})", c.uid);
@@ -250,7 +260,10 @@ impl Server {
                 self.bus_send(id, ServerMsg::Welcome { version: VERSION, client_id: id });
             }
             _ if !hello => {
-                self.bus_send(id, ServerMsg::Error { serial: 0, code: ErrorCode::NoHello, message: "say Hello first".into() });
+                self.bus_send(
+                    id,
+                    ServerMsg::Error { serial: 0, code: ErrorCode::NoHello, message: "say Hello first".into() },
+                );
                 self.bus_close(id);
             }
             ClientMsg::Ping { serial } => self.bus_send(id, ServerMsg::Pong { serial }),
@@ -268,7 +281,14 @@ impl Server {
                 if self.notify_close(crate::notify::Origin::Bus(id), nid) {
                     self.bus_send(id, ServerMsg::Done { serial });
                 } else {
-                    self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::Denied, message: format!("no notification {nid} of yours") });
+                    self.bus_send(
+                        id,
+                        ServerMsg::Error {
+                            serial,
+                            code: ErrorCode::Denied,
+                            message: format!("no notification {nid} of yours"),
+                        },
+                    );
                 }
             }
             // Live tiles (tiles.rs).
@@ -280,13 +300,27 @@ impl Server {
                 if self.tile_remove(crate::tiles::Owner::Client(id), &tile) {
                     self.bus_send(id, ServerMsg::Done { serial });
                 } else {
-                    self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::Denied, message: format!("no tile {tile:?} of yours") });
+                    self.bus_send(
+                        id,
+                        ServerMsg::Error {
+                            serial,
+                            code: ErrorCode::Denied,
+                            message: format!("no tile {tile:?} of yours"),
+                        },
+                    );
                 }
             }
             // Privacy > Agents (agents.rs; bus v27).
             // Not for agents: they neither read nor change who may do what.
             ClientMsg::ListGrants { serial } | ClientMsg::RevokeGrants { serial, .. } if c.agent.is_some() => {
-                self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::Denied, message: "agents do not see or change grants".into() });
+                self.bus_send(
+                    id,
+                    ServerMsg::Error {
+                        serial,
+                        code: ErrorCode::Denied,
+                        message: "agents do not see or change grants".into(),
+                    },
+                );
             }
             ClientMsg::ListGrants { serial } => {
                 let grants = self.agents_grants();
@@ -315,12 +349,22 @@ impl Server {
             }
             ClientMsg::ForceQuit { serial, app } => match self.force_quit(&app) {
                 Ok(_) => self.bus_send(id, ServerMsg::Done { serial }),
-                Err(message) => self.bus_send(id, ServerMsg::Error { serial, code: vergence_protocol::bus::ErrorCode::Denied, message }),
+                Err(message) => self.bus_send(
+                    id,
+                    ServerMsg::Error { serial, code: vergence_protocol::bus::ErrorCode::Denied, message },
+                ),
             },
             // The Screenshot app opens the bar (capture.rs; bus v32).
             ClientMsg::ScreenshotBar { serial } => {
                 if self.lock.on || crate::greeter() {
-                    self.bus_send(id, ServerMsg::Error { serial, code: vergence_protocol::bus::ErrorCode::Denied, message: "the screen is locked".into() });
+                    self.bus_send(
+                        id,
+                        ServerMsg::Error {
+                            serial,
+                            code: vergence_protocol::bus::ErrorCode::Denied,
+                            message: "the screen is locked".into(),
+                        },
+                    );
                 } else {
                     self.bar_open(false);
                     self.bus_send(id, ServerMsg::Done { serial });
@@ -373,16 +417,41 @@ impl Server {
             ClientMsg::Agent(vergence_protocol::agent::AgentRequest::Hello { serial, name }) => {
                 let name = crate::agents::clean_agent_name(&name);
                 if !crate::meaning::agents_allowed() {
-                    return self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::Denied, message: "agents are turned off (Settings > Privacy > Agents)".into() });
+                    return self.bus_send(
+                        id,
+                        ServerMsg::Error {
+                            serial,
+                            code: ErrorCode::Denied,
+                            message: "agents are turned off (Settings > Privacy > Agents)".into(),
+                        },
+                    );
                 }
                 if name.is_empty() {
-                    return self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::BadMessage, message: "an agent needs a name".into() });
+                    return self.bus_send(
+                        id,
+                        ServerMsg::Error {
+                            serial,
+                            code: ErrorCode::BadMessage,
+                            message: "an agent needs a name".into(),
+                        },
+                    );
                 }
                 if self.bus.clients.get(&id).is_some_and(|c| c.agent.is_some()) {
-                    return self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::BadMessage, message: "an agent says who it is once".into() });
+                    return self.bus_send(
+                        id,
+                        ServerMsg::Error {
+                            serial,
+                            code: ErrorCode::BadMessage,
+                            message: "an agent says who it is once".into(),
+                        },
+                    );
                 }
                 if let Some(c) = self.bus.clients.get_mut(&id) {
-                    let program = c.pid.and_then(vergence_dm::elevate::program_path).map(|p| p.display().to_string()).unwrap_or_default();
+                    let program = c
+                        .pid
+                        .and_then(vergence_dm::elevate::program_path)
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default();
                     tracing::info!("bus: client {id} is the agent {name:?} ({program})");
                     c.agent = Some(crate::agents::Who { name, program });
                 }
@@ -390,10 +459,24 @@ impl Server {
             }
             ClientMsg::Agent(r) => {
                 if !crate::meaning::agents_allowed() {
-                    return self.bus_send(id, ServerMsg::Error { serial: r.serial(), code: ErrorCode::Denied, message: "agents are turned off (Settings > Privacy > Agents)".into() });
+                    return self.bus_send(
+                        id,
+                        ServerMsg::Error {
+                            serial: r.serial(),
+                            code: ErrorCode::Denied,
+                            message: "agents are turned off (Settings > Privacy > Agents)".into(),
+                        },
+                    );
                 }
                 if self.bus.clients.get(&id).is_none_or(|c| c.agent.is_none()) {
-                    return self.bus_send(id, ServerMsg::Error { serial: r.serial(), code: ErrorCode::Denied, message: "say who the agent is first (the agent interface's Hello)".into() });
+                    return self.bus_send(
+                        id,
+                        ServerMsg::Error {
+                            serial: r.serial(),
+                            code: ErrorCode::Denied,
+                            message: "say who the agent is first (the agent interface's Hello)".into(),
+                        },
+                    );
                 }
                 // Bounded (Fable's review): a looping agent cannot hold the server.
                 if let Some(c) = self.bus.clients.get_mut(&id) {
@@ -401,13 +484,27 @@ impl Server {
                     let tokens = (tokens + at.elapsed().as_secs_f64() * AGENT_RATE).min(AGENT_BURST);
                     if tokens < 1.0 {
                         c.agent_tokens = (tokens, std::time::Instant::now());
-                        return self.bus_send(id, ServerMsg::Error { serial: r.serial(), code: ErrorCode::Failed, message: "too many requests; slow down".into() });
+                        return self.bus_send(
+                            id,
+                            ServerMsg::Error {
+                                serial: r.serial(),
+                                code: ErrorCode::Failed,
+                                message: "too many requests; slow down".into(),
+                            },
+                        );
                     }
                     c.agent_tokens = (tokens - 1.0, std::time::Instant::now());
                 }
                 // Nothing is read or done while the screen is locked.
                 if self.lock.on {
-                    return self.bus_send(id, ServerMsg::Error { serial: r.serial(), code: ErrorCode::Denied, message: "the screen is locked".into() });
+                    return self.bus_send(
+                        id,
+                        ServerMsg::Error {
+                            serial: r.serial(),
+                            code: ErrorCode::Denied,
+                            message: "the screen is locked".into(),
+                        },
+                    );
                 }
                 self.agent_request(id, r);
             }
@@ -423,7 +520,11 @@ impl Server {
         // Our own copies of the message's descriptors, kept until written:
         // the message (and the files it names) may be dropped before then.
         // SAFETY: each raw descriptor belongs to `m`, alive for this statement.
-        let fds = match raw.iter().map(|fd| unsafe { std::os::fd::BorrowedFd::borrow_raw(*fd) }.try_clone_to_owned()).collect::<std::io::Result<Vec<_>>>() {
+        let fds = match raw
+            .iter()
+            .map(|fd| unsafe { std::os::fd::BorrowedFd::borrow_raw(*fd) }.try_clone_to_owned())
+            .collect::<std::io::Result<Vec<_>>>()
+        {
             Ok(f) => f,
             Err(e) => return tracing::warn!("bus: can't keep the descriptors of {m:?}: {e}"),
         };
@@ -485,16 +586,17 @@ impl Server {
             return;
         }
         let Ok(half) = c.stream.try_clone() else { return self.bus_close(id) };
-        let res = self.loop_handle.insert_source(Generic::new(half, Interest::WRITE, Mode::Level), move |_, _, state| {
-            if state.bus_flush(id) {
-                if let Some(c) = state.bus.clients.get_mut(&id) {
-                    c.write_source = None;
+        let res =
+            self.loop_handle.insert_source(Generic::new(half, Interest::WRITE, Mode::Level), move |_, _, state| {
+                if state.bus_flush(id) {
+                    if let Some(c) = state.bus.clients.get_mut(&id) {
+                        c.write_source = None;
+                    }
+                    Ok(PostAction::Remove)
+                } else {
+                    Ok(PostAction::Continue)
                 }
-                Ok(PostAction::Remove)
-            } else {
-                Ok(PostAction::Continue)
-            }
-        });
+            });
         match res {
             Ok(token) => c.write_source = Some(token),
             Err(e) => {
@@ -594,7 +696,8 @@ impl Server {
 
     /// Settings changed (settings.rs): subscribers get the changed ones.
     pub fn bus_settings_changed(&mut self, changed: &[vergence_protocol::bus::Setting]) {
-        let ids: Vec<u32> = self.bus.clients.iter().filter(|(_, c)| c.topics.contains(&Topic::Settings)).map(|(id, _)| *id).collect();
+        let ids: Vec<u32> =
+            self.bus.clients.iter().filter(|(_, c)| c.topics.contains(&Topic::Settings)).map(|(id, _)| *id).collect();
         for id in ids {
             self.bus_send(id, ServerMsg::Settings { serial: 0, complete: false, settings: changed.to_vec() });
         }
@@ -615,9 +718,13 @@ impl Server {
             return;
         }
         self.bus.last_outputs = Some(outputs.clone());
-        let ids: Vec<u32> = self.bus.clients.iter().filter(|(_, c)| c.topics.contains(&Topic::Outputs)).map(|(id, _)| *id).collect();
+        let ids: Vec<u32> =
+            self.bus.clients.iter().filter(|(_, c)| c.topics.contains(&Topic::Outputs)).map(|(id, _)| *id).collect();
         for id in ids {
-            self.bus_send(id, ServerMsg::Outputs { serial: 0, outputs: outputs.clone(), setup: self.memory.setup.clone() });
+            self.bus_send(
+                id,
+                ServerMsg::Outputs { serial: 0, outputs: outputs.clone(), setup: self.memory.setup.clone() },
+            );
         }
     }
 }

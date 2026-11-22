@@ -64,7 +64,9 @@ impl Pointer {
     /// else Vergence's own (install.sh, vergence-harness cursors; 2026-11-18)
     /// where it is installed, else Adwaita.
     pub fn load() -> Pointer {
-        let theme_name = configured_theme().or_else(|| std::env::var("XCURSOR_THEME").ok()).unwrap_or_else(|| if own_theme_installed() { "Vergence".into() } else { "Adwaita".into() });
+        let theme_name = configured_theme()
+            .or_else(|| std::env::var("XCURSOR_THEME").ok())
+            .unwrap_or_else(|| if own_theme_installed() { "Vergence".into() } else { "Adwaita".into() });
         // Apps started from now on draw their own pointers in it too.
         unsafe { std::env::set_var("XCURSOR_THEME", &theme_name) };
         let size = std::env::var("XCURSOR_SIZE").ok().and_then(|s| s.parse().ok()).unwrap_or(24);
@@ -81,7 +83,13 @@ impl Pointer {
 
     /// The pointer's elements for an output at `scale`, with the pointer at `at`
     /// (physical, on that output). Front-most first.
-    pub fn elements(&mut self, renderer: &mut GlesRenderer, at: Point<f64, Physical>, scale: f64, time: Duration) -> Vec<Drawn> {
+    pub fn elements(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        at: Point<f64, Physical>,
+        scale: f64,
+        time: Duration,
+    ) -> Vec<Drawn> {
         // A client's cursor surface that has gone away: back to the arrow.
         if let CursorImageStatus::Surface(s) = &self.status
             && !s.is_alive()
@@ -108,7 +116,14 @@ impl Pointer {
         }
     }
 
-    fn themed(&mut self, renderer: &mut GlesRenderer, icon: CursorIcon, at: Point<f64, Physical>, scale: f64, time: Duration) -> Vec<Drawn> {
+    fn themed(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        icon: CursorIcon,
+        at: Point<f64, Physical>,
+        scale: f64,
+        time: Duration,
+    ) -> Vec<Drawn> {
         let icon = self.resolve(icon);
         let Some(Some(src)) = self.sources.get(&icon) else { return Vec::new() };
         let first = &src.frames[0];
@@ -123,11 +138,9 @@ impl Pointer {
             .into();
         let px = logical.to_f64().to_physical(scale);
         let (pw, ph) = ((px.w.round() as i32).max(1), (px.h.round() as i32).max(1));
-        let hot: Point<f64, Physical> = (
-            first.xhot as f64 * pw as f64 / first.width as f64,
-            first.yhot as f64 * ph as f64 / first.height as f64,
-        )
-            .into();
+        let hot: Point<f64, Physical> =
+            (first.xhot as f64 * pw as f64 / first.width as f64, first.yhot as f64 * ph as f64 / first.height as f64)
+                .into();
 
         let frames = self.scaled.entry((icon, pw, ph)).or_insert_with(|| {
             tracing::info!("pointer: {icon:?} from {}x{} to {pw}x{ph} px ({:.4})", first.width, first.height, scale);
@@ -151,7 +164,15 @@ impl Pointer {
         // The whole buffer as the source: with only a size given, Smithay crops the
         // source to that size too (24x24 of 79x79 showed the arrow's top-left, enlarged).
         let whole = Rectangle::<f64, Logical>::from_size((pw as f64, ph as f64).into());
-        match MemoryRenderBufferRenderElement::from_buffer(renderer, at - hot, &frame.buffer, None, Some(whole), Some(logical), Kind::Cursor) {
+        match MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            at - hot,
+            &frame.buffer,
+            None,
+            Some(whole),
+            Some(logical),
+            Kind::Cursor,
+        ) {
             Ok(e) => vec![Drawn::Theme(e)],
             Err(e) => {
                 tracing::warn!("pointer image: {e:?}");
@@ -197,7 +218,8 @@ impl Pointer {
         let icon = self.resolve(CursorIcon::Default);
         let first = &self.sources.get(&icon)?.as_ref()?.frames[0];
         let f = px.max(1) as f64 / first.size as f64;
-        let (w, h) = (((first.width as f64 * f).round() as usize).max(1), ((first.height as f64 * f).round() as usize).max(1));
+        let (w, h) =
+            (((first.width as f64 * f).round() as usize).max(1), ((first.height as f64 * f).round() as usize).max(1));
         let pixels = shrink(&first.pixels_rgba, first.width as usize, first.height as usize, w, h);
         let hx = (first.xhot as f64 * w as f64 / first.width as f64).round() as u16;
         let hy = (first.yhot as f64 * h as f64 / first.height as f64).round() as u16;
@@ -211,7 +233,10 @@ impl Pointer {
 fn own_theme_installed() -> bool {
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     let data = std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
-    home.map(|h| h.join(".icons")).into_iter().chain(data.split(':').filter(|d| !d.is_empty()).map(|d| std::path::Path::new(d).join("icons"))).any(|d| d.join("Vergence/cursors/default").exists())
+    home.map(|h| h.join(".icons"))
+        .into_iter()
+        .chain(data.split(':').filter(|d| !d.is_empty()).map(|d| std::path::Path::new(d).join("icons")))
+        .any(|d| d.join("Vergence/cursors/default").exists())
 }
 
 /// Gtk/CursorThemeName from ~/.config/vergence/settings.toml.

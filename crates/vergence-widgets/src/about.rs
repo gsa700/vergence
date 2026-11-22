@@ -2,7 +2,9 @@
 //! is and its license, the same in every app of ours. The About role of the
 //! app menu opens it; a dialog over the app's window.
 
-use crate::{Align, ButtonLook, Element, Length, Padding, Program, Theme, Window, button, column, label, panel, row, space};
+use crate::{
+    Align, ButtonLook, Element, Length, Padding, Program, Theme, Window, button, column, label, panel, row, space,
+};
 
 pub struct About {
     pub app_id: String,
@@ -44,7 +46,16 @@ impl Program for About {
                 label(format!("Version {}", self.version)).size(12.0).dim(),
                 label(self.what.clone()).wrap().width(Length::FILL),
                 label("Part of Vergence. Apache-2.0 OR GPL-2.0-or-later.").size(11.0).dim().wrap().width(Length::FILL),
-                row(vec![space().width(Length::FILL), button(label("Close").size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(4.0, 14.0)).on_press(Close).name("Close")]).align(Align::Center).width(Length::FILL),
+                row(vec![
+                    space().width(Length::FILL),
+                    button(label("Close").size(12.0))
+                        .look(ButtonLook::Accent)
+                        .padding(Padding::hv(4.0, 14.0))
+                        .on_press(Close)
+                        .name("Close"),
+                ])
+                .align(Align::Center)
+                .width(Length::FILL),
             ])
             .spacing(8.0)
             .width(Length::FILL),
@@ -61,6 +72,13 @@ impl Program for About {
     }
 
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: false, min: (380.0, 210.0), max: (0.0, 0.0), alone: false, frosted: false }
+        vergence_ui::Style {
+            kind: vergence_ui::WinKind::Dialog,
+            modal: false,
+            min: (380.0, 210.0),
+            max: (0.0, 0.0),
+            alone: false,
+            frosted: false,
+        }
     }
 }

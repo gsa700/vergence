@@ -65,7 +65,14 @@ pub fn model_key(edid: &[u8]) -> Option<String> {
     if serial == 0 && text.is_none() {
         return None;
     }
-    Some(format!("{:02x}{:02x}-{:02x}{:02x}-{serial}-{}", edid[8], edid[9], edid[11], edid[10], text.unwrap_or_default()))
+    Some(format!(
+        "{:02x}{:02x}-{:02x}{:02x}-{serial}-{}",
+        edid[8],
+        edid[9],
+        edid[11],
+        edid[10],
+        text.unwrap_or_default()
+    ))
 }
 
 /// Version of the key format, hashed first so a future change of format

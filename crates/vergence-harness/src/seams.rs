@@ -117,7 +117,9 @@ fn along(shot: &Shot, points: impl Iterator<Item = (i32, i32)>, want: Rgb) -> (u
 pub fn run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
     let usage = || "seams <shot.png> --scale S --window X Y W H [--bar H]".to_string();
     let path = args.first().ok_or_else(usage)?;
-    let num = |name: &str, k: usize| -> Option<f64> { args.iter().position(|a| a == name).and_then(|i| args.get(i + 1 + k)).and_then(|v| v.parse().ok()) };
+    let num = |name: &str, k: usize| -> Option<f64> {
+        args.iter().position(|a| a == name).and_then(|i| args.get(i + 1 + k)).and_then(|v| v.parse().ok())
+    };
     let scale = num("--scale", 0).filter(|s| s.is_finite() && *s > 0.0).ok_or_else(usage)?;
     let (x, y, w, h) = match (num("--window", 0), num("--window", 1), num("--window", 2), num("--window", 3)) {
         (Some(x), Some(y), Some(w), Some(h)) if w > 0.0 && h > 0.0 => (x, y, w, h),
@@ -155,7 +157,12 @@ pub fn run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
     line(&mut c, "body inside the right line", rows().map(|y| (r - 2, y)).collect(), BODY);
     // Nothing of the pattern outside its pixels (a picture shown too big).
     let outside: Vec<(i32, i32)> = cols().map(|x| (x, b)).chain(rows().map(|y| (r, y))).collect();
-    let spill = outside.iter().filter(|(x, y)| shot.at(*x, *y).is_some_and(|p| near(p, BOTTOM, SLACK) || near(p, RIGHT, SLACK) || near(p, BODY, SLACK))).count();
+    let spill = outside
+        .iter()
+        .filter(|(x, y)| {
+            shot.at(*x, *y).is_some_and(|p| near(p, BOTTOM, SLACK) || near(p, RIGHT, SLACK) || near(p, BODY, SLACK))
+        })
+        .count();
     c.on_grid(spill == 0, &format!("nothing of it past its last row and column: {spill} pixels"));
     if let Some(bar) = bar {
         let (bt, bb) = edges(y - bar, bar, scale);

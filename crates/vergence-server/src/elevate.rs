@@ -114,7 +114,15 @@ impl Server {
                 }
                 if let Some(p) = self.seat.get_pointer() {
                     let pos = self.pointer_location();
-                    p.motion(self, None, &smithay::input::pointer::MotionEvent { location: pos, serial: smithay::utils::SERIAL_COUNTER.next_serial(), time: smithay::backend::input::InputTime::now() });
+                    p.motion(
+                        self,
+                        None,
+                        &smithay::input::pointer::MotionEvent {
+                            location: pos,
+                            serial: smithay::utils::SERIAL_COUNTER.next_serial(),
+                            time: smithay::backend::input::InputTime::now(),
+                        },
+                    );
                     p.frame(self);
                 }
                 self.pointer_image.status = smithay::input::pointer::CursorImageStatus::default_named();
@@ -223,8 +231,12 @@ impl Server {
             let (Some(a), Some(heard)) = (self.elevate.ask.clone(), self.elevate.heard.clone()) else { return };
             let (tx, rx) = std::sync::mpsc::channel();
             self.elevate.talk = Some(tx);
-            let first = vec![ToVdm::Hello { version: proto::VERSION, service: Service::Elevate }, ToVdm::Answering(a.id)];
-            if let Err(e) = std::thread::Builder::new().name("elevate".into()).spawn(move || crate::lock::converse(heard, rx, vergence_dm::paths::ELEVATE_SOCKET, first)) {
+            let first =
+                vec![ToVdm::Hello { version: proto::VERSION, service: Service::Elevate }, ToVdm::Answering(a.id)];
+            if let Err(e) = std::thread::Builder::new()
+                .name("elevate".into())
+                .spawn(move || crate::lock::converse(heard, rx, vergence_dm::paths::ELEVATE_SOCKET, first))
+            {
                 tracing::warn!("elevate: {e}");
                 self.elevate.talk = None;
                 return;
@@ -314,7 +326,12 @@ impl Server {
 
     /// In front of everything on a screen: the panel (on the pointer's
     /// screen), then the dimming over the whole of it.
-    pub fn elevate_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
+    pub fn elevate_elements(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Vec<SceneElement> {
         let mut elements = Vec::new();
         if out.to_f64().contains(self.pointer_location())
             && let Some(e) = self.elevate_panel(renderer, out, scale)
@@ -322,22 +339,36 @@ impl Server {
             elements.push(e);
         }
         let (id, commit) = self.elevate.dim.get_or_insert_with(|| (Id::new(), CommitCounter::default())).clone();
-        let phys = Rectangle::<i32, smithay::utils::Physical>::from_size(out.size.to_f64().to_physical(scale).to_i32_round());
-        elements.push(SceneElement::Solid(SolidColorRenderElement::new(id, phys, commit, [0.0, 0.0, 0.0, 0.5], Kind::Unspecified)));
+        let phys =
+            Rectangle::<i32, smithay::utils::Physical>::from_size(out.size.to_f64().to_physical(scale).to_i32_round());
+        elements.push(SceneElement::Solid(SolidColorRenderElement::new(
+            id,
+            phys,
+            commit,
+            [0.0, 0.0, 0.0, 0.5],
+            Kind::Unspecified,
+        )));
         elements
     }
 
-    fn elevate_panel(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Option<SceneElement> {
+    fn elevate_panel(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Option<SceneElement> {
         let light = self.light_style();
         let accent = self.accent();
         let paused = self.elevate_pause_left();
         let e = &self.elevate;
         let ask = e.ask.clone()?;
         let dots = e.field.as_ref().map_or(0, |f| f.chars());
-        let shown = if e.echo { e.field.as_ref().map(|f| String::from_utf8_lossy(f.as_bytes()).into_owned()) } else { None };
+        let shown =
+            if e.echo { e.field.as_ref().map(|f| String::from_utf8_lossy(f.as_bytes()).into_owned()) } else { None };
         let (prompt, message, waiting) = (e.prompt.clone(), e.message.clone(), e.waiting);
         let mut hsh = std::collections::hash_map::DefaultHasher::new();
-        (&ask, dots, &shown, &prompt, &message, waiting, paused, light, scale.to_bits(), accent.r, accent.g, accent.b).hash(&mut hsh);
+        (&ask, dots, &shown, &prompt, &message, waiting, paused, light, scale.to_bits(), accent.r, accent.g, accent.b)
+            .hash(&mut hsh);
         let key = hsh.finish();
         if self.elevate.picture.as_ref().map(|(k, ..)| *k) != Some(key) {
             let s = vergence_look::shelf_look(light);
@@ -364,24 +395,72 @@ impl Server {
             scene.fill_rounded(SceneRect::new(0.0, 0.0, W, h), vergence_look::RADIUS * 2.0, ink(s.menu));
             scene.stroke(SceneRect::new(0.0, 0.0, W, h), vergence_look::RADIUS * 2.0, vergence_look::EDGE, ink(s.edge));
             let m = fonts.metrics(bold, 16.0);
-            vergence_render::text(&mut scene, fonts, bold, 16.0, ink(s.menu_ink), ScenePoint::new(pad, (22.0 + m.ascent).round()), &format!("{} asks for permission", ask.who));
+            vergence_render::text(
+                &mut scene,
+                fonts,
+                bold,
+                16.0,
+                ink(s.menu_ink),
+                ScenePoint::new(pad, (22.0 + m.ascent).round()),
+                &format!("{} asks for permission", ask.who),
+            );
             let m = fonts.metrics(face, 13.5);
             for (i, l) in lines.iter().enumerate() {
-                vergence_render::text(&mut scene, fonts, face, 13.5, ink(s.menu_ink), ScenePoint::new(pad, (what_top + i as f32 * 19.0 + m.ascent).round()), l);
+                vergence_render::text(
+                    &mut scene,
+                    fonts,
+                    face,
+                    13.5,
+                    ink(s.menu_ink),
+                    ScenePoint::new(pad, (what_top + i as f32 * 19.0 + m.ascent).round()),
+                    l,
+                );
             }
             let m = fonts.metrics(face, 12.0);
-            vergence_render::text(&mut scene, fonts, face, 12.0, ink(s.menu_ink_off), ScenePoint::new(pad, (field_top - 18.0 + m.ascent).round()), &format!("{prompt}, to allow it (an administrator's own):"));
+            vergence_render::text(
+                &mut scene,
+                fonts,
+                face,
+                12.0,
+                ink(s.menu_ink_off),
+                ScenePoint::new(pad, (field_top - 18.0 + m.ascent).round()),
+                &format!("{prompt}, to allow it (an administrator's own):"),
+            );
             let field = SceneRect::new(pad, field_top, W - 2.0 * pad, 32.0);
-            scene.fill_rounded(field, vergence_look::RADIUS, if paused > 0 { Color::rgba(s.field.0, s.field.1, s.field.2, 110) } else { ink(s.field) });
-            scene.stroke(field, vergence_look::RADIUS, vergence_look::EDGE, if paused > 0 { ink(s.edge) } else { accent });
+            scene.fill_rounded(
+                field,
+                vergence_look::RADIUS,
+                if paused > 0 { Color::rgba(s.field.0, s.field.1, s.field.2, 110) } else { ink(s.field) },
+            );
+            scene.stroke(
+                field,
+                vergence_look::RADIUS,
+                vergence_look::EDGE,
+                if paused > 0 { ink(s.edge) } else { accent },
+            );
             match &shown {
                 Some(t) => {
                     let m = fonts.metrics(face, 14.0);
-                    vergence_render::text(&mut scene, fonts, face, 14.0, ink(s.menu_ink), ScenePoint::new(field.x + 12.0, (field.y + (field.h - m.ascent - m.descent) / 2.0 + m.ascent).round()), t);
+                    vergence_render::text(
+                        &mut scene,
+                        fonts,
+                        face,
+                        14.0,
+                        ink(s.menu_ink),
+                        ScenePoint::new(
+                            field.x + 12.0,
+                            (field.y + (field.h - m.ascent - m.descent) / 2.0 + m.ascent).round(),
+                        ),
+                        t,
+                    );
                 }
                 None => {
                     for i in 0..dots.min(28) {
-                        scene.fill_rounded(SceneRect::new(field.x + 14.0 + i as f32 * 12.0, field.y + field.h / 2.0 - 4.0, 8.0, 8.0), 4.0, ink(s.menu_ink));
+                        scene.fill_rounded(
+                            SceneRect::new(field.x + 14.0 + i as f32 * 12.0, field.y + field.h / 2.0 - 4.0, 8.0, 8.0),
+                            4.0,
+                            ink(s.menu_ink),
+                        );
                     }
                 }
             }
@@ -392,20 +471,47 @@ impl Server {
                 (None, _) => (String::new(), false),
             };
             let m = fonts.metrics(face, 12.0);
-            vergence_render::text(&mut scene, fonts, face, 12.0, if bad { Color::rgb(0xd9, 0x3f, 0x3f) } else { ink(s.menu_ink_off) }, ScenePoint::new(pad, (field_top + 44.0 + m.ascent).round()), &msg);
+            vergence_render::text(
+                &mut scene,
+                fonts,
+                face,
+                12.0,
+                if bad { Color::rgb(0xd9, 0x3f, 0x3f) } else { ink(s.menu_ink_off) },
+                ScenePoint::new(pad, (field_top + 44.0 + m.ascent).round()),
+                &msg,
+            );
             // Cancel and Allow, Allow the default (Enter), at the bottom right.
             let (bw, bh, gap) = (104.0f32, 32.0f32, 10.0f32);
             let row_y = h - pad - bh;
             for (i, label) in ["Cancel", "Allow"].iter().enumerate() {
                 let r = SceneRect::new(W - pad - 2.0 * bw - gap + i as f32 * (bw + gap), row_y, bw, bh);
-                let (ground, text) = if i == 1 { (accent, Color::rgb(0xff, 0xff, 0xff)) } else { (ink(s.tile), ink(s.tile_ink)) };
+                let (ground, text) =
+                    if i == 1 { (accent, Color::rgb(0xff, 0xff, 0xff)) } else { (ink(s.tile), ink(s.tile_ink)) };
                 scene.fill_rounded(r, vergence_look::RADIUS, ground);
                 let lw = fonts.layout(face, 13.5, label).1;
                 let lm = fonts.metrics(face, 13.5);
-                vergence_render::text(&mut scene, fonts, face, 13.5, text, ScenePoint::new((r.x + (r.w - lw) / 2.0).round(), (r.y + (r.h - lm.ascent - lm.descent) / 2.0 + lm.ascent).round()), label);
+                vergence_render::text(
+                    &mut scene,
+                    fonts,
+                    face,
+                    13.5,
+                    text,
+                    ScenePoint::new(
+                        (r.x + (r.w - lw) / 2.0).round(),
+                        (r.y + (r.h - lm.ascent - lm.descent) / 2.0 + lm.ascent).round(),
+                    ),
+                    label,
+                );
             }
             let p = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)).ok()?;
-            let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+            let buffer = MemoryRenderBuffer::from_slice(
+                &p.data,
+                Fourcc::Abgr8888,
+                (p.width as i32, p.height as i32),
+                1,
+                Transform::Normal,
+                None,
+            );
             self.elevate.picture = Some((key, buffer, W as i32, h as i32));
         }
         let (_, _, wi, hi) = self.elevate.picture.as_ref()?;
@@ -413,13 +519,26 @@ impl Server {
         let at = (out.loc.x + (out.size.w - wi) / 2, out.loc.y + (out.size.h - hi) / 2);
         let (bw, bh, gap, pad) = (104, 32, 10, 22);
         let row_y = at.1 + hi - pad - bh;
-        self.elevate.buttons = [Rectangle::new((at.0 + wi - pad - 2 * bw - gap, row_y).into(), (bw, bh).into()), Rectangle::new((at.0 + wi - pad - bw, row_y).into(), (bw, bh).into())];
+        self.elevate.buttons = [
+            Rectangle::new((at.0 + wi - pad - 2 * bw - gap, row_y).into(), (bw, bh).into()),
+            Rectangle::new((at.0 + wi - pad - bw, row_y).into(), (bw, bh).into()),
+        ];
         let area: Rectangle<i32, Logical> = Rectangle::new(at.into(), (wi, hi).into());
         let a = (area.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let b = (area.loc + area.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
         let buffer = &self.elevate.picture.as_ref()?.1;
-        MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(area.size), Kind::Unspecified).ok().map(SceneElement::Memory)
+        MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            a.to_f64(),
+            buffer,
+            None,
+            Some(src),
+            Some(area.size),
+            Kind::Unspecified,
+        )
+        .ok()
+        .map(SceneElement::Memory)
     }
 }
 

@@ -96,18 +96,48 @@ fn main() {
         "color" => flood(path, "color-lines/s", |b, r, cols, _| {
             for _ in 0..cols {
                 let v = r.next();
-                let _ = write!(b, "\x1b[38;2;{};{};{};48;2;{};{};{}m{}", v as u8, (v >> 8) as u8, (v >> 16) as u8, (v >> 24) as u8, (v >> 32) as u8, (v >> 40) as u8, (b'!' + (v >> 48) as u8 % 94) as char);
+                let _ = write!(
+                    b,
+                    "\x1b[38;2;{};{};{};48;2;{};{};{}m{}",
+                    v as u8,
+                    (v >> 8) as u8,
+                    (v >> 16) as u8,
+                    (v >> 24) as u8,
+                    (v >> 32) as u8,
+                    (v >> 40) as u8,
+                    (b'!' + (v >> 48) as u8 % 94) as char
+                );
             }
             b.extend_from_slice(b"\x1b[0m\r\n");
         }),
         "cursor" => flood(path, "cursor-batches/s", |b, r, cols, rows| {
             for _ in 0..250 {
                 let v = r.next();
-                let _ = write!(b, "\x1b[{};{}H\x1b[38;5;{}m{}", 1 + r.below(rows), 1 + r.below(cols), v as u8, (b'!' + (v >> 8) as u8 % 94) as char);
+                let _ = write!(
+                    b,
+                    "\x1b[{};{}H\x1b[38;5;{}m{}",
+                    1 + r.below(rows),
+                    1 + r.below(cols),
+                    v as u8,
+                    (b'!' + (v >> 8) as u8 % 94) as char
+                );
             }
         }),
         "unicode" => flood(path, "unicode-lines/s", |b, r, cols, _| {
-            const PIECES: [&str; 12] = ["日本語", "한국어", "Việt", "e\u{301}a\u{308}", "Ελληνικά", "Кириллица", "│┼─╬", "▀▄█░", "→⇒∀∃", "😀🚀", "ａｂｃ", "żółć"];
+            const PIECES: [&str; 12] = [
+                "日本語",
+                "한국어",
+                "Việt",
+                "e\u{301}a\u{308}",
+                "Ελληνικά",
+                "Кириллица",
+                "│┼─╬",
+                "▀▄█░",
+                "→⇒∀∃",
+                "😀🚀",
+                "ａｂｃ",
+                "żółć",
+            ];
             let mut width = 0;
             while width + 8 < cols {
                 let piece = PIECES[r.below(PIECES.len() as u64) as usize];
@@ -126,7 +156,9 @@ fn main() {
             loop {
                 let started = Instant::now();
                 match std::process::Command::new(command).args(&args[3..]).status() {
-                    Ok(status) if status.success() => report(path, &format!("{command}-seconds {:.3}", started.elapsed().as_secs_f64())),
+                    Ok(status) if status.success() => {
+                        report(path, &format!("{command}-seconds {:.3}", started.elapsed().as_secs_f64()))
+                    }
                     // The command failed: most likely its terminal is gone. (On FreeBSD
                     // this loop, which never writes to the terminal itself, was not
                     // ended by the terminal's end, and ran on: 2026-11-10, canary.)

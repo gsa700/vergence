@@ -79,13 +79,27 @@ fn apart(a: &Pixmap, b: &Pixmap) -> (u8, usize) {
 /// Draws a scene both ways and holds them to the tolerance: no byte more
 /// than `worst` apart, and at most `per_mille` pixels in a thousand more
 /// than one step apart.
-fn agree(gpu: &mut Gpu, scene: &Scene, fonts: &mut Fonts, scale: f32, background: Color, worst: u8, per_mille: usize, what: &str) {
+fn agree(
+    gpu: &mut Gpu,
+    scene: &Scene,
+    fonts: &mut Fonts,
+    scale: f32,
+    background: Color,
+    worst: u8,
+    per_mille: usize,
+    what: &str,
+) {
     let reference = Cpu::new().render(scene, fonts, scale, background).unwrap();
     let drawn = gpu.render(scene, fonts, scale, background).unwrap();
     let (far, beyond) = apart(&reference, &drawn);
     let pixels = (reference.width * reference.height) as usize;
-    eprintln!("{what} at scale {scale}: worst byte difference {far}, {beyond} of {pixels} pixels more than one step apart");
-    assert!(far <= worst && beyond * 1000 <= pixels * per_mille, "{what} at scale {scale}: worst byte difference {far} (allowed {worst}), {beyond} of {pixels} pixels more than one step apart (allowed {per_mille} in a thousand)");
+    eprintln!(
+        "{what} at scale {scale}: worst byte difference {far}, {beyond} of {pixels} pixels more than one step apart"
+    );
+    assert!(
+        far <= worst && beyond * 1000 <= pixels * per_mille,
+        "{what} at scale {scale}: worst byte difference {far} (allowed {worst}), {beyond} of {pixels} pixels more than one step apart (allowed {per_mille} in a thousand)"
+    );
 }
 
 fn none() -> Fonts {
@@ -116,7 +130,11 @@ impl Rng {
 fn busy() -> Scene {
     let mut rng = Rng(0x0bad_cafe_1234_5677);
     let mut s = Scene::new(300.0, 200.0);
-    let pic = s.image(Image { width: 3, height: 3, rgba: (0..36).map(|i| (i * 7) as u8 | if i % 4 == 3 { 0x80 } else { 0 }).collect() });
+    let pic = s.image(Image {
+        width: 3,
+        height: 3,
+        rgba: (0..36).map(|i| (i * 7) as u8 | if i % 4 == 3 { 0x80 } else { 0 }).collect(),
+    });
     let mut open = false;
     for i in 0..400 {
         let r = Rect::new(rng.unit() * 320.0 - 20.0, rng.unit() * 220.0 - 20.0, rng.unit() * 90.0, rng.unit() * 60.0);
@@ -138,7 +156,15 @@ fn busy() -> Scene {
                 s.draw_image(pic, r, rng.unit());
             }
             7 if !open => {
-                s.push_clip(Rect::new(rng.unit() * 150.0, rng.unit() * 100.0, 60.0 + rng.unit() * 150.0, 40.0 + rng.unit() * 100.0), if i % 2 == 0 { 0.0 } else { rng.unit() * 20.0 });
+                s.push_clip(
+                    Rect::new(
+                        rng.unit() * 150.0,
+                        rng.unit() * 100.0,
+                        60.0 + rng.unit() * 150.0,
+                        40.0 + rng.unit() * 100.0,
+                    ),
+                    if i % 2 == 0 { 0.0 } else { rng.unit() * 20.0 },
+                );
                 open = true;
             }
             _ if open => {
@@ -187,7 +213,8 @@ fn simple_shapes_agree_with_the_reference() {
     scenes.push(("clips", s));
     let mut s = Scene::new(16.0, 8.0);
     let two = s.image(Image { width: 2, height: 1, rgba: vec![255, 0, 0, 255, 0, 0, 255, 255] });
-    let half = s.image(Image { width: 2, height: 2, rgba: vec![255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 0, 128] });
+    let half =
+        s.image(Image { width: 2, height: 2, rgba: vec![255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 0, 128] });
     s.draw_image(two, Rect::new(0.0, 0.0, 8.0, 4.0), 1.0);
     s.draw_image(half, Rect::new(8.5, 0.5, 7.0, 7.0), 0.6);
     scenes.push(("pictures", s));
@@ -227,7 +254,15 @@ fn text_agrees_with_the_reference() {
             s.fill(cell, Color::rgb(c.b / 3, c.r / 3, c.g / 3));
             let ch = (b'!' + ((row * 40 + col) % 90) as u8) as char;
             let mut one = [0u8; 4];
-            text(&mut s, &mut fonts, mono, 13.33, Color::rgb(c.r, c.g, c.b), Point::new(cell.x, cell.y + 14.0), ch.encode_utf8(&mut one));
+            text(
+                &mut s,
+                &mut fonts,
+                mono,
+                13.33,
+                Color::rgb(c.r, c.g, c.b),
+                Point::new(cell.x, cell.y + 14.0),
+                ch.encode_utf8(&mut one),
+            );
         }
     }
     for scale in [1.0, 2.25, 3.0] {
@@ -256,8 +291,17 @@ fn a_buffer_for_the_display_server_holds_the_same_picture() {
     for scale in [1.0, 2.25] {
         let own = gpu.render(&s, &mut none(), scale, Color::rgb(10, 20, 30)).unwrap();
         let buffer = gpu.buffer(own.width, own.height).unwrap();
-        assert!(buffer.stride >= own.width * 4 && buffer.format == 0x3432_5241, "stride {} format {:#x} modifier {:#x}", buffer.stride, buffer.format, buffer.modifier);
-        eprintln!("buffer {} x {}: stride {}, offset {}, modifier {:#x}", buffer.width, buffer.height, buffer.stride, buffer.offset, buffer.modifier);
+        assert!(
+            buffer.stride >= own.width * 4 && buffer.format == 0x3432_5241,
+            "stride {} format {:#x} modifier {:#x}",
+            buffer.stride,
+            buffer.format,
+            buffer.modifier
+        );
+        eprintln!(
+            "buffer {} x {}: stride {}, offset {}, modifier {:#x}",
+            buffer.width, buffer.height, buffer.stride, buffer.offset, buffer.modifier
+        );
         gpu.draw_into(&buffer, &s, &mut none(), scale, Color::rgb(10, 20, 30)).unwrap();
         // The same renderer into the shared buffer and into its own texture: the same pixels.
         assert_eq!(gpu.read(&buffer).unwrap().hash(), own.hash(), "at scale {scale}");
@@ -354,12 +398,21 @@ fn a_grid_of_cells_is_drawn_as_its_fills_and_glyphs() {
                     while end < columns && lined(&row[end]) && row[end].ink == row[x].ink {
                         end += 1;
                     }
-                    plain.fill(Rect::new(origin.x + x as f32 * cw, top + ch - 2.0, (end - x) as f32 * cw, 1.0), row[x].ink);
+                    plain.fill(
+                        Rect::new(origin.x + x as f32 * cw, top + ch - 2.0, (end - x) as f32 * cw, 1.0),
+                        row[x].ink,
+                    );
                 }
                 x = end;
             }
             for (c, cell) in row.iter().enumerate().filter(|(_, cell)| cell.flags & CELL_GLYPH != 0) {
-                plain.glyphs(0, size, cell.ink, Point::new(origin.x, top + baseline), vec![Glyph { id: cell.glyph, x: c as f32 * cw, y: 0.0 }]);
+                plain.glyphs(
+                    0,
+                    size,
+                    cell.ink,
+                    Point::new(origin.x, top + baseline),
+                    vec![Glyph { id: cell.glyph, x: c as f32 * cw, y: 0.0 }],
+                );
             }
         }
         if clip.is_some() {
@@ -374,7 +427,10 @@ fn a_grid_of_cells_is_drawn_as_its_fills_and_glyphs() {
         for scale in [1.0, 2.25, 3.0] {
             let a = gpu.render(&grid, &mut fonts, scale, BLACK).unwrap();
             let b = gpu.render(&plain, &mut fonts, scale, BLACK).unwrap();
-            assert!(a.data == b.data, "a grid and its fills and glyphs differ on the GPU at scale {scale}, clip {clip:?}");
+            assert!(
+                a.data == b.data,
+                "a grid and its fills and glyphs differ on the GPU at scale {scale}, clip {clip:?}"
+            );
             // Three steps, where a screen of opaque text is held to two: some of these
             // inks are translucent, which is one more multiplication the CPU renderer
             // rounds and the GPU does not (three apart seen with Techbench's variable
@@ -401,24 +457,62 @@ fn the_frost_shader_on_the_gpu_matches_its_cpu_reference() {
         }
     }
     for f in [
-        Frost { tint: [51, 61, 82], strength: 0.5, ink: [235, 235, 235], need: 7.0, radius: 10.0, invert: false, cap: false },
-        Frost { tint: [228, 230, 235], strength: 0.3, ink: [29, 29, 31], need: 5.85, radius: 6.0, invert: false, cap: false },
-        Frost { tint: [228, 230, 235], strength: 0.3, ink: [29, 29, 31], need: 14.0, radius: 6.0, invert: true, cap: false },
-        Frost { tint: [216, 219, 226], strength: 0.5, ink: [29, 29, 31], need: 5.85, radius: 6.0, invert: false, cap: true },
+        Frost {
+            tint: [51, 61, 82],
+            strength: 0.5,
+            ink: [235, 235, 235],
+            need: 7.0,
+            radius: 10.0,
+            invert: false,
+            cap: false,
+        },
+        Frost {
+            tint: [228, 230, 235],
+            strength: 0.3,
+            ink: [29, 29, 31],
+            need: 5.85,
+            radius: 6.0,
+            invert: false,
+            cap: false,
+        },
+        Frost {
+            tint: [228, 230, 235],
+            strength: 0.3,
+            ink: [29, 29, 31],
+            need: 14.0,
+            radius: 6.0,
+            invert: true,
+            cap: false,
+        },
+        Frost {
+            tint: [216, 219, 226],
+            strength: 0.5,
+            ink: [29, 29, 31],
+            need: 5.85,
+            radius: 6.0,
+            invert: false,
+            cap: true,
+        },
     ] {
         let cpu = frost(&rgba, w, h, h, &f);
         let unit = |c: [u8; 3]| [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0];
         let t = unit(f.tint);
-        let gpu = match g.shader_pass(FROST_SHADER, &rgba, w as u32, h as u32, &[
-            ("texel", &[1.0 / w as f32, 1.0 / h as f32]),
-            ("radius", &[f.radius]),
-            ("tint", &[t[0], t[1], t[2], f.strength]),
-            ("ink", &unit(f.ink)),
-            ("need", &[f.need]),
-            ("corner", &[0.0]),
-            ("invert", &[if f.invert { 1.0 } else { 0.0 }]),
-            ("cap", &[if f.cap { 1.0 } else { 0.0 }]),
-        ]) {
+        let gpu = match g.shader_pass(
+            FROST_SHADER,
+            &rgba,
+            w as u32,
+            h as u32,
+            &[
+                ("texel", &[1.0 / w as f32, 1.0 / h as f32]),
+                ("radius", &[f.radius]),
+                ("tint", &[t[0], t[1], t[2], f.strength]),
+                ("ink", &unit(f.ink)),
+                ("need", &[f.need]),
+                ("corner", &[0.0]),
+                ("invert", &[if f.invert { 1.0 } else { 0.0 }]),
+                ("cap", &[if f.cap { 1.0 } else { 0.0 }]),
+            ],
+        ) {
             Ok(p) => p,
             Err(e) => panic!("the frost shader on this GPU: {e}"),
         };
@@ -430,7 +524,10 @@ fn the_frost_shader_on_the_gpu_matches_its_cpu_reference() {
             total += d as u64;
         }
         let mean = total as f64 / (w * h) as f64;
-        assert!(mean < 1.0 && far * 100 <= w * h, "{f:?}: mean {mean:.2}, {far} pixels off by more than 3, worst {worst}");
+        assert!(
+            mean < 1.0 && far * 100 <= w * h,
+            "{f:?}: mean {mean:.2}, {far} pixels off by more than 3, worst {worst}"
+        );
     }
 }
 
@@ -443,7 +540,15 @@ fn the_round_shader_on_the_gpu_matches_its_arithmetic() {
     let rgba = vec![200u8; (w * h * 4) as usize];
     // Bottom corners only, then the top ones too (a window drawn under its bar).
     for top in [false, true] {
-        let out = g.shader_pass(ROUND_SHADER, &rgba, w, h, &[("size", &[w as f32, h as f32]), ("radius", &[r]), ("top", &[if top { 1.0 } else { 0.0 }])]).expect("the round shader on this GPU");
+        let out = g
+            .shader_pass(
+                ROUND_SHADER,
+                &rgba,
+                w,
+                h,
+                &[("size", &[w as f32, h as f32]), ("radius", &[r]), ("top", &[if top { 1.0 } else { 0.0 }])],
+            )
+            .expect("the round shader on this GPU");
         for y in 0..h {
             for x in 0..w {
                 let want = (200.0 * cover(x as f32 + 0.5, y as f32 + 0.5, w as f32, h as f32, r, top)).round() as i32;

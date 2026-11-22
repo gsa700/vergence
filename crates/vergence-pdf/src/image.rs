@@ -9,11 +9,11 @@
 //! jbig2.rs (ours), arithmetic-coded streams so far. What cannot be
 //! decoded comes back as [`Decoded::Undecoded`].
 
+use crate::Document;
 use crate::color::ColorSpace;
 use crate::filter;
 use crate::function::Bits;
 use crate::object::{Dict, Object};
-use crate::Document;
 use vergence_raster::Image;
 
 /// The most samples an image may have.
@@ -60,7 +60,9 @@ pub fn expand_inline(d: &Dict) -> Dict {
                 b"DCT" => b"DCTDecode".to_vec(),
                 other => other.to_vec(),
             }),
-            Object::Array(a) => Object::Array(a.iter().map(|x| if let Object::Name(_) = x { value_name(x) } else { x.clone() }).collect()),
+            Object::Array(a) => Object::Array(
+                a.iter().map(|x| if let Object::Name(_) = x { value_name(x) } else { x.clone() }).collect(),
+            ),
             other => other.clone(),
         }
     };
@@ -82,13 +84,28 @@ fn value_name(x: &Object) -> Object {
 
 /// An image from its dictionary and its bytes after the non-picture
 /// filters (`data`; `image_filter` names a picture codec left to apply).
-pub fn decode(doc: &Document, dict: &Dict, data: &[u8], image_filter: Option<&[u8]>, parms: Option<&Dict>, resources: Option<&Dict>) -> Decoded {
+pub fn decode(
+    doc: &Document,
+    dict: &Dict,
+    data: &[u8],
+    image_filter: Option<&[u8]>,
+    parms: Option<&Dict>,
+    resources: Option<&Dict>,
+) -> Decoded {
     decode_at(doc, dict, data, image_filter, parms, resources, 0)
 }
 
 /// `depth` 1 for a mask: a mask's own masks are never followed (a file
 /// could make one its own).
-fn decode_at(doc: &Document, dict: &Dict, data: &[u8], image_filter: Option<&[u8]>, parms: Option<&Dict>, resources: Option<&Dict>, depth: usize) -> Decoded {
+fn decode_at(
+    doc: &Document,
+    dict: &Dict,
+    data: &[u8],
+    image_filter: Option<&[u8]>,
+    parms: Option<&Dict>,
+    resources: Option<&Dict>,
+    depth: usize,
+) -> Decoded {
     if image_filter == Some(b"DCTDecode") {
         return jpeg(doc, dict, data, resources, depth);
     }
@@ -162,7 +179,9 @@ fn decode_at(doc: &Document, dict: &Dict, data: &[u8], image_filter: Option<&[u8
     // samples are simply consecutive; missing ones read as 0, as below.
     // One-component images of 1, 2 or 4 bits too: each row starts on a
     // byte, so a sample is a shift and a mask (a 33M-pixel fax page).
-    let fast = key.is_none() && decode_arr.is_empty() && ((n == 1 && bpc <= 8) || (bpc == 8 && matches!(cs, ColorSpace::Rgb | ColorSpace::Cmyk)));
+    let fast = key.is_none()
+        && decode_arr.is_empty()
+        && ((n == 1 && bpc <= 8) || (bpc == 8 && matches!(cs, ColorSpace::Rgb | ColorSpace::Cmyk)));
     let sample = |i: usize| data.get(i).copied().unwrap_or(0);
     let (bpc_u, stride) = (bpc as usize, (w * bpc as usize).div_ceil(8));
     for y in 0..if fast { h } else { 0 } {
@@ -201,7 +220,9 @@ fn decode_at(doc: &Document, dict: &Dict, data: &[u8], image_filter: Option<&[u8
                 let (d0, d1) = ranges[k];
                 comps[k] = d0 + *r as f64 * (d1 - d0) / max;
             }
-            let keyed = key.as_ref().is_some_and(|k| k.len() >= 2 * n && raw.iter().enumerate().all(|(i, v)| *v >= k[2 * i] && *v <= k[2 * i + 1]));
+            let keyed = key.as_ref().is_some_and(|k| {
+                k.len() >= 2 * n && raw.iter().enumerate().all(|(i, v)| *v >= k[2 * i] && *v <= k[2 * i + 1])
+            });
             let rgb = if !cache.is_empty() {
                 let slot = raw[0] as usize;
                 *cache[slot].get_or_insert_with(|| to_bytes(cs.to_rgb(&comps).unwrap_or([1.0; 3])))
@@ -234,7 +255,7 @@ fn decode_at(doc: &Document, dict: &Dict, data: &[u8], image_filter: Option<&[u8
         None
     } else {
         match &smask {
-        Object::Stream(_) => Some((smask.clone(), true)),
+            Object::Stream(_) => Some((smask.clone(), true)),
             _ => match doc.get_in(dict, "Mask") {
                 m @ Object::Stream(_) => Some((m, false)),
                 _ => None,
@@ -243,8 +264,18 @@ fn decode_at(doc: &Document, dict: &Dict, data: &[u8], image_filter: Option<&[u8
     };
     if let Some((Object::Stream(s), soft)) = mask {
         let d = doc.stream(&s);
-        let alpha = match decode_at(doc, &s.dict, &d.data, d.image.as_ref().map(|(n, _)| n.as_slice()), d.image.as_ref().and_then(|(_, p)| p.as_ref()), resources, depth + 1) {
-            Decoded::Color(img) if soft => Some((img.width, img.height, img.data.as_chunks::<4>().0.iter().map(|p| p[0]).collect::<Vec<u8>>())),
+        let alpha = match decode_at(
+            doc,
+            &s.dict,
+            &d.data,
+            d.image.as_ref().map(|(n, _)| n.as_slice()),
+            d.image.as_ref().and_then(|(_, p)| p.as_ref()),
+            resources,
+            depth + 1,
+        ) {
+            Decoded::Color(img) if soft => {
+                Some((img.width, img.height, img.data.as_chunks::<4>().0.iter().map(|p| p[0]).collect::<Vec<u8>>()))
+            }
             Decoded::Stencil { width, height, alpha } => Some((width, height, alpha)),
             _ => None,
         };
@@ -293,7 +324,8 @@ fn jpx(doc: &Document, dict: &Dict, data: &[u8], resources: Option<&Dict>, depth
         (None, None) => n_from(p.channels.len() - usize::from(p.alpha.is_some())),
     };
     let alpha = p.alpha.or_else(|| (wants_alpha && p.channels.len() > n).then_some(n));
-    let colors: Vec<&crate::jpx::Channel> = p.channels.iter().enumerate().filter(|(i, _)| Some(*i) != alpha).map(|(_, c)| c).take(n).collect();
+    let colors: Vec<&crate::jpx::Channel> =
+        p.channels.iter().enumerate().filter(|(i, _)| Some(*i) != alpha).map(|(_, c)| c).take(n).collect();
     if n == 0 || colors.len() < n {
         return undecoded();
     }
@@ -315,7 +347,24 @@ fn jpx(doc: &Document, dict: &Dict, data: &[u8], resources: Option<&Dict>, depth
             samples.push(to8(c.data.get(i).copied().unwrap_or(0), c.depth));
         }
     }
-    let mut d: Dict = Dict(dict.0.iter().filter(|(k, _)| !matches!(k.as_slice(), b"Width" | b"Height" | b"BitsPerComponent" | b"Filter" | b"DecodeParms" | b"Decode" | b"SMaskInData")).cloned().collect());
+    let mut d: Dict = Dict(
+        dict.0
+            .iter()
+            .filter(|(k, _)| {
+                !matches!(
+                    k.as_slice(),
+                    b"Width"
+                        | b"Height"
+                        | b"BitsPerComponent"
+                        | b"Filter"
+                        | b"DecodeParms"
+                        | b"Decode"
+                        | b"SMaskInData"
+                )
+            })
+            .cloned()
+            .collect(),
+    );
     if cs.is_none() {
         d.0.retain(|(k, _)| k != b"ColorSpace");
         let name: &[u8] = match n {
@@ -348,10 +397,20 @@ fn jpx(doc: &Document, dict: &Dict, data: &[u8], resources: Option<&Dict>, depth
 /// matches, else gray, RGB or CMYK by the JPEG's own count; CMYK as
 /// stored, the /Decode array applied as for any image).
 fn jpeg(doc: &Document, dict: &Dict, data: &[u8], resources: Option<&Dict>, depth: usize) -> Decoded {
-    let Ok((w, h, channels, samples)) = vergence_decode::jpeg_samples(data) else { return Decoded::Undecoded(Some(b"DCTDecode".to_vec())) };
+    let Ok((w, h, channels, samples)) = vergence_decode::jpeg_samples(data) else {
+        return Decoded::Undecoded(Some(b"DCTDecode".to_vec()));
+    };
     let cs = ColorSpace::parse(&doc.get_in(dict, "ColorSpace"), doc, resources);
     let keep = cs.as_ref().is_some_and(|c| c.components() == channels as usize);
-    let mut d: Dict = Dict(dict.0.iter().filter(|(k, _)| !matches!(k.as_slice(), b"Width" | b"Height" | b"BitsPerComponent" | b"Filter" | b"DecodeParms")).cloned().collect());
+    let mut d: Dict = Dict(
+        dict.0
+            .iter()
+            .filter(|(k, _)| {
+                !matches!(k.as_slice(), b"Width" | b"Height" | b"BitsPerComponent" | b"Filter" | b"DecodeParms")
+            })
+            .cloned()
+            .collect(),
+    );
     if !keep {
         d.0.retain(|(k, _)| k != b"ColorSpace" && k != b"Decode");
         let name: &[u8] = match channels {
@@ -370,12 +429,21 @@ fn jpeg(doc: &Document, dict: &Dict, data: &[u8], resources: Option<&Dict>, dept
 /// JBIG2: the page decoded (with /JBIG2Globals), turned into 1-bit rows
 /// with 0 black, as PDF's samples are, sized to the image's own Width and
 /// Height.
-fn jbig2(doc: &Document, dict: &Dict, data: &[u8], parms: Option<&Dict>, resources: Option<&Dict>, depth: usize) -> Decoded {
+fn jbig2(
+    doc: &Document,
+    dict: &Dict,
+    data: &[u8],
+    parms: Option<&Dict>,
+    resources: Option<&Dict>,
+    depth: usize,
+) -> Decoded {
     let globals = parms.and_then(|p| match doc.get_in(p, "JBIG2Globals") {
         Object::Stream(s) => Some(doc.stream(&s).data),
         _ => None,
     });
-    let Some(page) = crate::jbig2::decode(globals.as_deref(), data) else { return Decoded::Undecoded(Some(b"JBIG2Decode".to_vec())) };
+    let Some(page) = crate::jbig2::decode(globals.as_deref(), data) else {
+        return Decoded::Undecoded(Some(b"JBIG2Decode".to_vec()));
+    };
     let w = doc.get_in(dict, "Width").as_int().filter(|w| *w > 0).map_or(page.w, |w| w as usize).min(1 << 16);
     let h = doc.get_in(dict, "Height").as_int().filter(|h| *h > 0).map_or(page.h, |h| h as usize).min(1 << 16);
     let stride = w.div_ceil(8);
@@ -387,7 +455,15 @@ fn jbig2(doc: &Document, dict: &Dict, data: &[u8], parms: Option<&Dict>, resourc
             }
         }
     }
-    let mut d: Dict = Dict(dict.0.iter().filter(|(k, _)| !matches!(k.as_slice(), b"Width" | b"Height" | b"BitsPerComponent" | b"Filter" | b"DecodeParms")).cloned().collect());
+    let mut d: Dict = Dict(
+        dict.0
+            .iter()
+            .filter(|(k, _)| {
+                !matches!(k.as_slice(), b"Width" | b"Height" | b"BitsPerComponent" | b"Filter" | b"DecodeParms")
+            })
+            .cloned()
+            .collect(),
+    );
     d.0.push((b"Width".to_vec(), Object::Int(w as i64)));
     d.0.push((b"Height".to_vec(), Object::Int(h as i64)));
     d.0.push((b"BitsPerComponent".to_vec(), Object::Int(1)));
@@ -396,7 +472,14 @@ fn jbig2(doc: &Document, dict: &Dict, data: &[u8], parms: Option<&Dict>, resourc
 
 /// CCITT fax: decoded to 1-bit rows (a 0 bit black unless BlackIs1), then
 /// the usual path at 1 bit per component.
-fn fax(doc: &Document, dict: &Dict, data: &[u8], parms: Option<&Dict>, resources: Option<&Dict>, depth: usize) -> Decoded {
+fn fax(
+    doc: &Document,
+    dict: &Dict,
+    data: &[u8],
+    parms: Option<&Dict>,
+    resources: Option<&Dict>,
+    depth: usize,
+) -> Decoded {
     let empty = Dict::default();
     let p = parms.unwrap_or(&empty);
     let int = |k: &str| doc.get_in(p, k).as_int();
@@ -419,7 +502,15 @@ fn fax(doc: &Document, dict: &Dict, data: &[u8], parms: Option<&Dict>, resources
     if height == 0 {
         return Decoded::Undecoded(Some(b"CCITTFaxDecode".to_vec()));
     }
-    let mut d: Dict = Dict(dict.0.iter().filter(|(k, _)| !matches!(k.as_slice(), b"Width" | b"Height" | b"BitsPerComponent" | b"Filter" | b"DecodeParms")).cloned().collect());
+    let mut d: Dict = Dict(
+        dict.0
+            .iter()
+            .filter(|(k, _)| {
+                !matches!(k.as_slice(), b"Width" | b"Height" | b"BitsPerComponent" | b"Filter" | b"DecodeParms")
+            })
+            .cloned()
+            .collect(),
+    );
     d.0.push((b"Width".to_vec(), Object::Int(params.columns as i64)));
     d.0.push((b"Height".to_vec(), Object::Int(height as i64)));
     d.0.push((b"BitsPerComponent".to_vec(), Object::Int(1)));
@@ -436,7 +527,14 @@ fn to_bytes(c: [f32; 3]) -> [u8; 3] {
 /// An image XObject's stream, decoded.
 pub fn from_stream(doc: &Document, s: &crate::object::Stream, resources: Option<&Dict>) -> Decoded {
     let d = doc.stream(s);
-    decode(doc, &s.dict, &d.data, d.image.as_ref().map(|(n, _)| n.as_slice()), d.image.as_ref().and_then(|(_, p)| p.as_ref()), resources)
+    decode(
+        doc,
+        &s.dict,
+        &d.data,
+        d.image.as_ref().map(|(n, _)| n.as_slice()),
+        d.image.as_ref().and_then(|(_, p)| p.as_ref()),
+        resources,
+    )
 }
 
 /// An inline image's dictionary and data.
@@ -444,5 +542,12 @@ pub fn inline(doc: &Document, dict: &Dict, data: &[u8], resources: Option<&Dict>
     let dict = expand_inline(dict);
     let (names, parms) = filter::filters_of(&dict);
     let d = filter::decode(data, &names, &parms);
-    decode(doc, &dict, &d.data, d.image.as_ref().map(|(n, _)| n.as_slice()), d.image.as_ref().and_then(|(_, p)| p.as_ref()), resources)
+    decode(
+        doc,
+        &dict,
+        &d.data,
+        d.image.as_ref().map(|(n, _)| n.as_slice()),
+        d.image.as_ref().and_then(|(_, p)| p.as_ref()),
+        resources,
+    )
 }

@@ -148,7 +148,10 @@ pub struct Frame {
 
 /// What the bar's description is made of ([`App::bar`]): the native
 /// protocol's own types.
-pub use vergence_protocol::window::{Bar, BarButton, BarIcon, DROP_COPY, DROP_MOVE, DROP_NONE, MenuEntry as BarMenuEntry, Place as BarPlace, Tab as BarTab};
+pub use vergence_protocol::window::{
+    Bar, BarButton, BarIcon, DROP_COPY, DROP_MOVE, DROP_NONE, MenuEntry as BarMenuEntry, Place as BarPlace,
+    Tab as BarTab,
+};
 
 /// What the user did with the tabs the server drew ([`App::tab`]); each
 /// tab named by the id the program gave it in [`App::bar`].
@@ -160,13 +163,26 @@ pub enum TabEvent {
     /// The + was pressed.
     New,
     /// Dragged to another place in the row (counted with it taken out first).
-    Moved { tab: u32, to: u32 },
+    Moved {
+        tab: u32,
+        to: u32,
+    },
     /// Dragged out of the window, or "Move to a new window": a window for it, there.
-    Out { tab: u32, place: BarPlace },
+    Out {
+        tab: u32,
+        place: BarPlace,
+    },
     /// Dropped on another window of this program, at `to`.
-    Join { tab: u32, into: u32, to: u32 },
+    Join {
+        tab: u32,
+        into: u32,
+        to: u32,
+    },
     /// One of the program's own tab-menu entries.
-    Menu { tab: u32, entry: u32 },
+    Menu {
+        tab: u32,
+        entry: u32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,21 +197,47 @@ pub enum Button {
 /// Something the user did. Positions are in the window, in reference units.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Input {
-    PointerMoved { x: f32, y: f32 },
+    PointerMoved {
+        x: f32,
+        y: f32,
+    },
     /// The pointer left the window.
     PointerLeft,
     /// A button went down or up, at the place the pointer was then.
-    Button { button: Button, pressed: bool, x: f32, y: f32, modifiers: Modifiers },
+    Button {
+        button: Button,
+        pressed: bool,
+        x: f32,
+        y: f32,
+        modifiers: Modifiers,
+    },
     /// The wheel or a touchpad: positive `dy` scrolls down, positive `dx` right.
-    Scroll { x: f32, y: f32, dx: f32, dy: f32 },
+    Scroll {
+        x: f32,
+        y: f32,
+        dx: f32,
+        dy: f32,
+    },
     /// A key: its symbol ([`sym`], or a character's code), the text it
     /// types if it types any, and whether this is a held key repeating.
     /// `composing`: the key went into a dead-key or compose sequence that is
     /// not finished; it types nothing and should not be taken as a command.
-    Key { sym: u32, text: Option<String>, pressed: bool, repeat: bool, composing: bool, modifiers: Modifiers },
+    Key {
+        sym: u32,
+        text: Option<String>,
+        pressed: bool,
+        repeat: bool,
+        composing: bool,
+        modifiers: Modifiers,
+    },
     /// A finger on the window ([`touch`]): `id` tells it from the others
     /// while it is down. Where it lifted is where it last was.
-    Touch { id: i32, phase: touch::Phase, x: f32, y: f32 },
+    Touch {
+        id: i32,
+        phase: touch::Phase,
+        x: f32,
+        y: f32,
+    },
     /// The window gained or lost the keyboard.
     Focus(bool),
     /// The clipboard's text, asked for with [`Window::paste`].
@@ -257,7 +299,9 @@ pub const DEFAULT_MONO_TEXT: f32 = 16.0;
 pub fn font_name(value: &str, family: &str, units: f32) -> (String, f32) {
     let value = value.trim();
     match value.rsplit_once(' ') {
-        Some((name, size)) if size.parse::<f32>().is_ok_and(|s| (4.0..=96.0).contains(&s)) => (name.trim().to_string(), size.parse::<f32>().unwrap_or(0.0) * 96.0 / 72.0),
+        Some((name, size)) if size.parse::<f32>().is_ok_and(|s| (4.0..=96.0).contains(&s)) => {
+            (name.trim().to_string(), size.parse::<f32>().unwrap_or(0.0) * 96.0 / 72.0)
+        }
         _ if !value.is_empty() => (value.to_string(), units),
         _ => (family.to_string(), units),
     }
@@ -273,7 +317,8 @@ impl DesktopFonts {
             })
         };
         let (family, size) = font_name(&value("Gtk/FontName").unwrap_or_default(), "sans-serif", DEFAULT_TEXT);
-        let (mono, mono_size) = font_name(&value("Gtk/MonospaceFontName").unwrap_or_default(), "monospace", DEFAULT_MONO_TEXT);
+        let (mono, mono_size) =
+            font_name(&value("Gtk/MonospaceFontName").unwrap_or_default(), "monospace", DEFAULT_MONO_TEXT);
         DesktopFonts { family, size, mono, mono_size }
     }
 
@@ -403,7 +448,10 @@ pub struct Edges {
 
 impl Edges {
     fn wire(self) -> u32 {
-        (self.top as u32 * wl::EDGE_TOP) | (self.bottom as u32 * wl::EDGE_BOTTOM) | (self.left as u32 * wl::EDGE_LEFT) | (self.right as u32 * wl::EDGE_RIGHT)
+        (self.top as u32 * wl::EDGE_TOP)
+            | (self.bottom as u32 * wl::EDGE_BOTTOM)
+            | (self.left as u32 * wl::EDGE_LEFT)
+            | (self.right as u32 * wl::EDGE_RIGHT)
     }
 }
 
@@ -612,16 +660,16 @@ impl Waker {
     }
 }
 
-/// A program with one window.
-/// A window's kind, for [`Style`].
-pub use vergence_protocol::window::WinKind;
 /// An app menu's commands and their roles (app settings milestone 1), and
 /// the bar style an app asks for.
 pub use vergence_protocol::commands::{Command as AppCommand, Role};
-pub use vergence_protocol::window::BarStyle;
-pub use vergence_protocol::window::MenuLine;
 /// What an agent asks of a widget by its meaning node (Contract 3, bus v24).
 pub use vergence_protocol::window::Action;
+pub use vergence_protocol::window::BarStyle;
+pub use vergence_protocol::window::MenuLine;
+/// A program with one window.
+/// A window's kind, for [`Style`].
+pub use vergence_protocol::window::WinKind;
 
 /// What kind of window an app's is, and its size limits in points (0: none):
 /// told to the server on the native road (window styles milestone 1).
@@ -1137,8 +1185,10 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
         let (changed, waker) = (layout_changed.clone(), Waker { pipe: wake_pipe, pending: wake_pending.clone() });
         // Vergence's settings and desktop files' times, and GNOME's layout and
         // light or dark when running there.
-        let time = |p: Option<std::path::PathBuf>| p.and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok());
-        let stamp = move || (time(bar::settings_path()), time(bar::desktop_path()), bar::host_layout(), bar::host_light());
+        let time =
+            |p: Option<std::path::PathBuf>| p.and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok());
+        let stamp =
+            move || (time(bar::settings_path()), time(bar::desktop_path()), bar::host_layout(), bar::host_light());
         std::thread::Builder::new().name("settings".into()).spawn(move || {
             let mut seen = stamp();
             loop {
@@ -1213,7 +1263,11 @@ impl<'a> Runner<'a> {
     /// decoration or fractional-scale object).
     fn by_object(&self, object: u32) -> Option<usize> {
         self.windows.iter().position(|w| {
-            w.surface == object || w.xdg_surface == object || w.toplevel == object || w.decoration == Some(object) || w.scale_object == Some(object)
+            w.surface == object
+                || w.xdg_surface == object
+                || w.toplevel == object
+                || w.decoration == Some(object)
+                || w.scale_object == Some(object)
         })
     }
 
@@ -1238,7 +1292,8 @@ impl<'a> Runner<'a> {
         let decoration = match self.decoration_manager {
             Some(manager) => {
                 let d = self.client.get_decoration(manager, toplevel)?;
-                self.client.set_decoration_mode(d, if own_frame { wl::DECORATION_CLIENT } else { wl::DECORATION_SERVER })?;
+                self.client
+                    .set_decoration_mode(d, if own_frame { wl::DECORATION_CLIENT } else { wl::DECORATION_SERVER })?;
                 Some(d)
             }
             None => None,
@@ -1358,7 +1413,12 @@ impl<'a> Runner<'a> {
             let now = Instant::now();
             let repeat = self.repeat.as_ref().map(|r| r.next.saturating_duration_since(now));
             let paste = self.paste.as_ref().map(|p| (p.started + PASTE_TIMEOUT).saturating_duration_since(now));
-            let timer = self.windows.iter().flat_map(|w| w.timers.iter().map(|t| t.1)).min().map(|t| t.saturating_duration_since(now));
+            let timer = self
+                .windows
+                .iter()
+                .flat_map(|w| w.timers.iter().map(|t| t.1))
+                .min()
+                .map(|t| t.saturating_duration_since(now));
             let wait = [repeat, paste, timer].into_iter().flatten().min();
             let pipe = self.paste.as_ref().map(|p| p.pipe.as_raw_fd());
             let (events, [pipe_ready, woken]) = self.client.dispatch_or([pipe, Some(self.wake.as_raw_fd())], wait)?;
@@ -1452,7 +1512,11 @@ impl<'a> Runner<'a> {
                 Command::Size(..) => {}
                 // Drags under other desktops: Wayland drag and drop, later;
                 // activation: xdg-activation, later.
-                Command::Drag(..) | Command::Activate | Command::ContextMenu(..) | Command::Menu(..) | Command::GroundClicked => {}
+                Command::Drag(..)
+                | Command::Activate
+                | Command::ContextMenu(..)
+                | Command::Menu(..)
+                | Command::GroundClicked => {}
                 Command::Minimize => self.client.set_minimized(toplevel)?,
                 Command::Copy(text) => {
                     if let (Some(manager), Some(device)) = (self.data_manager, self.data_device) {
@@ -1483,7 +1547,11 @@ impl<'a> Runner<'a> {
             return Ok(());
         }
         let Some(offer) = self.selection else { return Ok(()) };
-        let Some(kind) = self.offers.get(&offer).and_then(|kinds| TEXT_KINDS.iter().find(|k| kinds.iter().any(|have| have == *k))) else { return Ok(()) };
+        let Some(kind) =
+            self.offers.get(&offer).and_then(|kinds| TEXT_KINDS.iter().find(|k| kinds.iter().any(|have| have == *k)))
+        else {
+            return Ok(());
+        };
         let (read_end, write_end) = vergence_wl::conn::pipe()?;
         self.client.receive(offer, kind, write_end.as_raw_fd())?;
         // Sent now, so that our copy of the writing end can be closed: the
@@ -1532,7 +1600,8 @@ impl<'a> Runner<'a> {
                 if width > 0 && height > 0 {
                     w.suggested = Some((width as u32, height as u32));
                 }
-                let (active, maximized) = (states.contains(&wl::STATE_ACTIVATED), states.contains(&wl::STATE_MAXIMIZED));
+                let (active, maximized) =
+                    (states.contains(&wl::STATE_ACTIVATED), states.contains(&wl::STATE_MAXIMIZED));
                 if (w.frame || w.edges) && (active, maximized) != (w.active, w.maximized) {
                     w.dirty = true;
                 }
@@ -1611,7 +1680,9 @@ impl<'a> Runner<'a> {
                     self.ask_close(self.windows[i].id)?;
                 }
             }
-            Event::Error { object, code, message } => return Err(other(format!("the display server refused: {message} (object {object}, code {code})"))),
+            Event::Error { object, code, message } => {
+                return Err(other(format!("the display server refused: {message} (object {object}, code {code})")));
+            }
 
             Event::SeatCapabilities { seat, capabilities } => {
                 if capabilities & wl::SEAT_POINTER != 0 && self.pointer.is_none() {
@@ -1678,7 +1749,10 @@ impl<'a> Runner<'a> {
                 };
                 let (x, y) = self.windows[i].pointer_at.unwrap_or_default();
                 if let Some(edges) = self.windows[i].on_edge {
-                    if pressed && button == Button::Left && let Some(seat) = self.seat {
+                    if pressed
+                        && button == Button::Left
+                        && let Some(seat) = self.seat
+                    {
                         self.client.start_resize(self.windows[i].toplevel, seat, serial, edges.wire())?;
                     }
                     return Ok(());
@@ -1787,7 +1861,10 @@ impl<'a> Runner<'a> {
                 if pressed {
                     self.input_serial = serial;
                     let repeats = self.repeat_rate > 0 && self.keyboard.as_ref().is_some_and(|k| k.repeats(key));
-                    self.repeat = repeats.then(|| Repeat { key, next: Instant::now() + Duration::from_millis(self.repeat_delay.max(0) as u64) });
+                    self.repeat = repeats.then(|| Repeat {
+                        key,
+                        next: Instant::now() + Duration::from_millis(self.repeat_delay.max(0) as u64),
+                    });
                 } else if self.repeat.as_ref().is_some_and(|r| r.key == key) {
                     self.repeat = None;
                 }
@@ -1919,7 +1996,9 @@ impl<'a> Runner<'a> {
             match part {
                 Some(bar::Part::Button(bar::WinButton::Close)) => self.ask_close(self.windows[i].id)?,
                 Some(bar::Part::Button(bar::WinButton::Minimize)) => self.client.set_minimized(toplevel)?,
-                Some(bar::Part::Button(bar::WinButton::Maximize)) => self.client.set_maximized(toplevel, !self.windows[i].maximized)?,
+                Some(bar::Part::Button(bar::WinButton::Maximize)) => {
+                    self.client.set_maximized(toplevel, !self.windows[i].maximized)?
+                }
                 _ => {}
             }
         }
@@ -1933,7 +2012,27 @@ impl<'a> Runner<'a> {
         let layout = self.bar_layout(i);
         let font = self.fonts.face("sans-serif", 400, false);
         let w = &self.windows[i];
-        let look = bar::Look { bar: vergence_look::bar_look(self.light), frosted: false, focused: w.active, pane: Color::rgb(0, 0, 0), pane_ink: Color::rgb(255, 255, 255), font, font_size: BAR_FONT_SIZE, titles: &[], alerts: &[], edited: &[], title, shown: 0, hover: w.bar_hover, dragged: None, tools: &[], tool_names: &[], app_icon: None, menu_open: false, root: as_root() };
+        let look = bar::Look {
+            bar: vergence_look::bar_look(self.light),
+            frosted: false,
+            focused: w.active,
+            pane: Color::rgb(0, 0, 0),
+            pane_ink: Color::rgb(255, 255, 255),
+            font,
+            font_size: BAR_FONT_SIZE,
+            titles: &[],
+            alerts: &[],
+            edited: &[],
+            title,
+            shown: 0,
+            hover: w.bar_hover,
+            dragged: None,
+            tools: &[],
+            tool_names: &[],
+            app_icon: None,
+            menu_open: false,
+            root: as_root(),
+        };
         bar::draw(scene, &mut self.fonts, &layout, &look);
     }
 
@@ -2007,7 +2106,15 @@ impl<'a> Runner<'a> {
 
     /// Draws window `i`'s scene on the GPU into a buffer the server has
     /// taken, if there is one free. Ok(None): not this time (draw in software).
-    fn draw_on_gpu(&mut self, i: usize, scene: &Scene, scale: f32, background: Color, pw: u32, ph: u32) -> io::Result<Option<u32>> {
+    fn draw_on_gpu(
+        &mut self,
+        i: usize,
+        scene: &Scene,
+        scale: f32,
+        background: Color,
+        pw: u32,
+        ph: u32,
+    ) -> io::Result<Option<u32>> {
         let (Some(gpu), Some(dmabuf)) = (self.gpu.as_mut(), self.dmabuf) else { return Ok(None) };
         let w = &mut self.windows[i];
         // Buffers of another size that the server is done with are let go.
@@ -2024,12 +2131,22 @@ impl<'a> Runner<'a> {
         let fits = |b: &GpuBuffer| (b.width, b.height) == (pw, ph);
         let Some(index) = w.shared.iter().position(|s| !s.busy && fits(&s.buffer)) else {
             // None free: ask the server to take more, up to the few a window needs.
-            let have = w.shared.iter().filter(|s| fits(&s.buffer)).count() + w.asked.iter().filter(|(_, b)| fits(b)).count();
+            let have =
+                w.shared.iter().filter(|s| fits(&s.buffer)).count() + w.asked.iter().filter(|(_, b)| fits(b)).count();
             let mut failed = false;
             for _ in have..GPU_BUFFERS.min(have + 2) {
                 match gpu.buffer(pw, ph) {
                     Ok(b) => {
-                        let params = self.client.create_dmabuf(dmabuf, std::os::fd::AsRawFd::as_raw_fd(&b.fd), pw as i32, ph as i32, b.format, b.modifier, b.offset, b.stride)?;
+                        let params = self.client.create_dmabuf(
+                            dmabuf,
+                            std::os::fd::AsRawFd::as_raw_fd(&b.fd),
+                            pw as i32,
+                            ph as i32,
+                            b.format,
+                            b.modifier,
+                            b.offset,
+                            b.stride,
+                        )?;
                         w.asked.push((params, b));
                     }
                     Err(_) => {
@@ -2061,7 +2178,19 @@ impl<'a> Runner<'a> {
         let t = Instant::now();
         let w = &self.windows[i];
         let bar_h = w.bar_h();
-        let frame = Frame { width: w.width as f32, height: (w.height as f32 - bar_h).max(1.0), scale: w.scale120 as f32 / 120.0, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: false, top: 0.0 , tint: None, text: 1.0, native: false };
+        let frame = Frame {
+            width: w.width as f32,
+            height: (w.height as f32 - bar_h).max(1.0),
+            scale: w.scale120 as f32 / 120.0,
+            time: w.started.elapsed().as_secs_f64(),
+            number: w.frames,
+            drawn_by: w.drawn_by,
+            bar_by_server: false,
+            top: 0.0,
+            tint: None,
+            text: 1.0,
+            native: false,
+        };
         let mut scene = self.windows[i].app.get().scene(&frame, &mut self.fonts);
         if self.windows[i].frame {
             let title = self.windows[i].app.get().title();
@@ -2072,7 +2201,12 @@ impl<'a> Runner<'a> {
             // The line the server draws round a window, in the same colors.
             let style = vergence_look::bar_look(self.light);
             let c = if w.active { style.edge } else { style.edge_off };
-            scene.stroke(vergence_scene::Rect::new(0.0, 0.0, scene.width, scene.height), 0.0, vergence_look::EDGE, Color::rgb(c.0, c.1, c.2));
+            scene.stroke(
+                vergence_scene::Rect::new(0.0, 0.0, scene.width, scene.height),
+                0.0,
+                vergence_look::EDGE,
+                Color::rgb(c.0, c.1, c.2),
+            );
         }
         let background = self.windows[i].app.get().background();
         let (pw, ph) = pixel_size(&scene, frame.scale).map_err(other)?;
@@ -2095,7 +2229,11 @@ impl<'a> Runner<'a> {
         }
         let stride = pw as usize * 4;
         let alpha = background.a != 255;
-        let index = match self.windows[i].buffers.iter().position(|b| !b.busy && (b.width, b.height, b.alpha) == (pw, ph, alpha)) {
+        let index = match self.windows[i]
+            .buffers
+            .iter()
+            .position(|b| !b.busy && (b.width, b.height, b.alpha) == (pw, ph, alpha))
+        {
             Some(k) => k,
             None => {
                 let file = ShmFile::new(stride * ph as usize)?;
@@ -2145,7 +2283,8 @@ mod tests {
     #[test]
     fn the_desktops_dark_or_light_forces_every_app_and_app_default_lets_each_choose() {
         use super::{BarStyle, Pick, app_pick, bar_style_setting, content_light, table_value};
-        let forced = "[appearance]\ncolor-scheme = \"dark\"\n[terminal]\nstyle = \"light\" # mine\nbar-style = \"light\"\n";
+        let forced =
+            "[appearance]\ncolor-scheme = \"dark\"\n[terminal]\nstyle = \"light\" # mine\nbar-style = \"light\"\n";
         assert!(!content_light(forced, "[terminal]", true), "the desktop's Dark wins over the app's light");
         assert_eq!(bar_style_setting(forced, "[terminal]", BarStyle::Light), BarStyle::Desktop);
         let free = "[appearance]\ncolor-scheme = \"default\"\n[terminal]\nstyle = \"light\"\nbar-style = \"dark\"\n";
@@ -2210,11 +2349,16 @@ mod font_tests {
 
     #[test]
     fn desktop_fonts_are_points() {
-        let f = DesktopFonts::from_text("\"Gtk/FontName\" = \"Inter Variable 9.75\"\n\"Gtk/MonospaceFontName\" = \"JetBrains Mono 12\"\n");
+        let f = DesktopFonts::from_text(
+            "\"Gtk/FontName\" = \"Inter Variable 9.75\"\n\"Gtk/MonospaceFontName\" = \"JetBrains Mono 12\"\n",
+        );
         assert_eq!((f.family.as_str(), f.size), ("Inter Variable", 13.0));
         assert_eq!((f.mono.as_str(), f.mono_size), ("JetBrains Mono", 16.0));
         let none = DesktopFonts::from_text("");
-        assert_eq!((none.family.as_str(), none.size, none.mono.as_str(), none.mono_size), ("sans-serif", DEFAULT_TEXT, "monospace", DEFAULT_MONO_TEXT));
+        assert_eq!(
+            (none.family.as_str(), none.size, none.mono.as_str(), none.mono_size),
+            ("sans-serif", DEFAULT_TEXT, "monospace", DEFAULT_MONO_TEXT)
+        );
         assert_eq!(font_name("Noto Sans", "x", 13.0), ("Noto Sans".to_string(), 13.0), "no number: the default size");
     }
 }

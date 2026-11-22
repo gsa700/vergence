@@ -185,11 +185,14 @@ impl Message {
         w.u32(self.body.len() as u32);
         w.u32(self.serial);
         let mut fields = Vec::new();
-        let mut field = |code: u8, v: Value| fields.push(Value::Struct(vec![Value::Byte(code), Value::Variant(Box::new(v))]));
+        let mut field =
+            |code: u8, v: Value| fields.push(Value::Struct(vec![Value::Byte(code), Value::Variant(Box::new(v))]));
         if let Some(p) = &self.path {
             field(1, Value::Path(p.clone()));
         }
-        for (code, v) in [(2, &self.interface), (3, &self.member), (4, &self.error_name), (6, &self.destination), (7, &self.sender)] {
+        for (code, v) in
+            [(2, &self.interface), (3, &self.member), (4, &self.error_name), (6, &self.destination), (7, &self.sender)]
+        {
             if let Some(s) = v {
                 field(code, Value::Str(s.clone()));
             }
@@ -250,7 +253,8 @@ mod tests {
 
     #[test]
     fn replies_and_signals() {
-        let mut call = Message::method_call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "Hello", &[]);
+        let mut call =
+            Message::method_call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "Hello", &[]);
         call.serial = 1;
         call.sender = Some(":1.9".into());
         let mut r = Message::method_return(&call, "org.freedesktop.DBus", &[Value::Str(":1.9".into())]);
@@ -259,8 +263,17 @@ mod tests {
         assert_eq!((back.reply_serial, back.destination.as_deref()), (Some(1), Some(":1.9")));
         let mut e = Message::error(&call, "org.freedesktop.DBus", "org.freedesktop.DBus.Error.ServiceUnknown", "no");
         e.serial = 2;
-        assert_eq!(Message::parse(&e.serialize()).unwrap().error_name.as_deref(), Some("org.freedesktop.DBus.Error.ServiceUnknown"));
-        let mut s = Message::signal("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "NameAcquired", &[Value::Str(":1.9".into())]);
+        assert_eq!(
+            Message::parse(&e.serialize()).unwrap().error_name.as_deref(),
+            Some("org.freedesktop.DBus.Error.ServiceUnknown")
+        );
+        let mut s = Message::signal(
+            "org.freedesktop.DBus",
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus",
+            "NameAcquired",
+            &[Value::Str(":1.9".into())],
+        );
         s.serial = 3;
         assert_eq!(Message::parse(&s.serialize()).unwrap(), s);
     }
@@ -273,24 +286,54 @@ mod tests {
         let opts = Value::Array(
             "{sv}".into(),
             vec![
-                Value::Entry(Box::new(Value::Str("handle_token".into())), Box::new(Value::Variant(Box::new(Value::Str("t1".into()))))),
-                Value::Entry(Box::new(Value::Str("multiple".into())), Box::new(Value::Variant(Box::new(Value::Bool(true))))),
-                Value::Entry(Box::new(Value::Str("accept_label".into())), Box::new(Value::Variant(Box::new(Value::Str("_Attach".into()))))),
+                Value::Entry(
+                    Box::new(Value::Str("handle_token".into())),
+                    Box::new(Value::Variant(Box::new(Value::Str("t1".into())))),
+                ),
+                Value::Entry(
+                    Box::new(Value::Str("multiple".into())),
+                    Box::new(Value::Variant(Box::new(Value::Bool(true)))),
+                ),
+                Value::Entry(
+                    Box::new(Value::Str("accept_label".into())),
+                    Box::new(Value::Variant(Box::new(Value::Str("_Attach".into())))),
+                ),
                 Value::Entry(
                     Box::new(Value::Str("filters".into())),
                     Box::new(Value::Variant(Box::new(Value::Array(
                         "(sa(us))".into(),
                         vec![
-                            Value::Struct(vec![Value::Str("Markdown".into()), Value::Array("(us)".into(), vec![Value::Struct(vec![Value::U32(0), Value::Str("*.md".into())])])]),
-                            Value::Struct(vec![Value::Str("Pictures".into()), Value::Array("(us)".into(), vec![Value::Struct(vec![Value::U32(1), Value::Str("image/*".into())])])]),
+                            Value::Struct(vec![
+                                Value::Str("Markdown".into()),
+                                Value::Array(
+                                    "(us)".into(),
+                                    vec![Value::Struct(vec![Value::U32(0), Value::Str("*.md".into())])],
+                                ),
+                            ]),
+                            Value::Struct(vec![
+                                Value::Str("Pictures".into()),
+                                Value::Array(
+                                    "(us)".into(),
+                                    vec![Value::Struct(vec![Value::U32(1), Value::Str("image/*".into())])],
+                                ),
+                            ]),
                         ],
                     )))),
                 ),
-                Value::Entry(Box::new(Value::Str("current_folder".into())), Box::new(Value::Variant(Box::new(Value::Array("y".into(), folder))))),
+                Value::Entry(
+                    Box::new(Value::Str("current_folder".into())),
+                    Box::new(Value::Variant(Box::new(Value::Array("y".into(), folder)))),
+                ),
             ],
         );
         let args = vec![Value::Str(String::new()), Value::Str("Pick".into()), opts];
-        let mut m = Message::method_call("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop", "org.freedesktop.portal.FileChooser", "OpenFile", &args);
+        let mut m = Message::method_call(
+            "org.freedesktop.portal.Desktop",
+            "/org/freedesktop/portal/desktop",
+            "org.freedesktop.portal.FileChooser",
+            "OpenFile",
+            &args,
+        );
         m.serial = 7;
         m.sender = Some(":1.2".into());
         let back = Message::parse(&m.serialize()).unwrap();

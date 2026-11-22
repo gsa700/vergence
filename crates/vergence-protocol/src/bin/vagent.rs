@@ -85,7 +85,10 @@ fn acted(e: AgentEvent) -> Result<String, String> {
 fn run(name: &str, args: &[String]) -> Result<String, String> {
     let Some(cmd) = args.first() else { return Err(usage()) };
     let mut c = Client::connect("vagent").map_err(|e| format!("no Vergence session bus: {e}"))?;
-    match c.request(|serial| ClientMsg::Agent(AgentRequest::Hello { serial, name: name.into() })).map_err(|e| e.to_string())? {
+    match c
+        .request(|serial| ClientMsg::Agent(AgentRequest::Hello { serial, name: name.into() }))
+        .map_err(|e| e.to_string())?
+    {
         ServerMsg::Done { .. } => {}
         other => return Err(format!("unexpected {other:?}")),
     }
@@ -103,7 +106,10 @@ fn run(name: &str, args: &[String]) -> Result<String, String> {
                         ("timed", _) => format!(", allowed for {} more min", w.minutes_left),
                         (a, _) => format!(", allowed {a}"),
                     };
-                    format!("{mark}{}/{} {} {:?} ({}) at {:.0},{:.0} {:.0}x{:.0} on {}{meaning}{allowed}", w.client, w.window, w.kind, w.title, w.app_id, w.at.0, w.at.1, w.at.2, w.at.3, w.screen)
+                    format!(
+                        "{mark}{}/{} {} {:?} ({}) at {:.0},{:.0} {:.0}x{:.0} on {}{meaning}{allowed}",
+                        w.client, w.window, w.kind, w.title, w.app_id, w.at.0, w.at.1, w.at.2, w.at.3, w.screen
+                    )
                 })
                 .collect::<Vec<_>>()
                 .join("\n")),
@@ -114,7 +120,9 @@ fn run(name: &str, args: &[String]) -> Result<String, String> {
             match ask(&mut c, |serial| AgentRequest::Tree { serial, client, window })? {
                 AgentEvent::Tree { title, focus, caret, nodes, .. } => {
                     let mut out = vec![format!("{title:?}, focus #{focus}")];
-                    out.extend(nodes.iter().map(|n| format!("{}{}", if n.id == focus { "> " } else { "  " }, node_line(n))));
+                    out.extend(
+                        nodes.iter().map(|n| format!("{}{}", if n.id == focus { "> " } else { "  " }, node_line(n))),
+                    );
                     if let Some((x, y, w, h)) = caret {
                         out.push(format!("  caret at {x:.0},{y:.0} {w:.0}x{h:.0}"));
                     }
@@ -130,7 +138,11 @@ fn run(name: &str, args: &[String]) -> Result<String, String> {
         },
         "focused" => match ask(&mut c, |serial| AgentRequest::Focused { serial })? {
             AgentEvent::Focused { found: None, .. } => Ok("nothing focused in a native window".into()),
-            AgentEvent::Focused { found: Some(f), caret, .. } => Ok(format!("{}{}", found_line(&f), caret.map(|(x, y, w, h)| format!("\ncaret at {x:.0},{y:.0} {w:.0}x{h:.0}")).unwrap_or_default())),
+            AgentEvent::Focused { found: Some(f), caret, .. } => Ok(format!(
+                "{}{}",
+                found_line(&f),
+                caret.map(|(x, y, w, h)| format!("\ncaret at {x:.0},{y:.0} {w:.0}x{h:.0}")).unwrap_or_default()
+            )),
             other => Err(format!("unexpected {other:?}")),
         },
         "do" => {
@@ -142,15 +154,37 @@ fn run(name: &str, args: &[String]) -> Result<String, String> {
             let f = match found.as_slice() {
                 [one] => one.clone(),
                 [] => return Err(format!("nothing at {path:?}")),
-                many => return Err(format!("{} widgets at {path:?}; name one more exactly:\n{}", many.len(), many.iter().map(found_line).collect::<Vec<_>>().join("\n"))),
+                many => {
+                    return Err(format!(
+                        "{} widgets at {path:?}; name one more exactly:\n{}",
+                        many.len(),
+                        many.iter().map(found_line).collect::<Vec<_>>().join("\n")
+                    ));
+                }
             };
             let action = action(verb, rest(3))?;
-            acted(ask(&mut c, |serial| AgentRequest::Act { serial, client: f.client, window: f.window, node: f.node.id, action, role: f.node.role.clone(), name: f.node.name.clone() })?)
+            acted(ask(&mut c, |serial| AgentRequest::Act {
+                serial,
+                client: f.client,
+                window: f.window,
+                node: f.node.id,
+                action,
+                role: f.node.role.clone(),
+                name: f.node.name.clone(),
+            })?)
         }
         "act" => {
             let (client, window, node) = (num(1)? as u32, num(2)? as u32, num(3)?);
             let action = action(args.get(4).ok_or_else(usage)?, rest(5))?;
-            acted(ask(&mut c, |serial| AgentRequest::Act { serial, client, window, node, action, role: String::new(), name: String::new() })?)
+            acted(ask(&mut c, |serial| AgentRequest::Act {
+                serial,
+                client,
+                window,
+                node,
+                action,
+                role: String::new(),
+                name: String::new(),
+            })?)
         }
         "changes" => {
             let since = args.get(1).and_then(|a| a.parse().ok()).unwrap_or(0);

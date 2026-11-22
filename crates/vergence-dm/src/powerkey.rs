@@ -40,7 +40,9 @@ pub struct Hold {
 /// The inhibitor program, where there is one.
 #[cfg(target_os = "linux")]
 fn inhibit_program() -> Option<&'static str> {
-    ["/usr/bin/systemd-inhibit", "/bin/systemd-inhibit", "/usr/bin/elogind-inhibit", "/bin/elogind-inhibit"].into_iter().find(|p| std::path::Path::new(p).is_file())
+    ["/usr/bin/systemd-inhibit", "/bin/systemd-inhibit", "/usr/bin/elogind-inhibit", "/bin/elogind-inhibit"]
+        .into_iter()
+        .find(|p| std::path::Path::new(p).is_file())
 }
 
 #[cfg(target_os = "freebsd")]
@@ -52,7 +54,12 @@ fn sysctl_get() -> Option<String> {
 
 #[cfg(target_os = "freebsd")]
 fn sysctl_set(v: &str) -> bool {
-    Command::new("/sbin/sysctl").arg(format!("hw.acpi.power_button_state={v}")).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
+    Command::new("/sbin/sysctl")
+        .arg(format!("hw.acpi.power_button_state={v}"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 /// A state of the button worth putting back: a sleep state, not NONE.
@@ -85,7 +92,13 @@ pub fn hold() -> (Hold, String) {
     {
         if let Some(p) = inhibit_program() {
             let child = Command::new(p)
-                .args(["--what=handle-power-key", "--who=Vergence", "--why=The power key asks first (Log Out, Sleep, Restart, Shut Down)", "--mode=block", "cat"])
+                .args([
+                    "--what=handle-power-key",
+                    "--who=Vergence",
+                    "--why=The power key asks first (Log Out, Sleep, Restart, Shut Down)",
+                    "--mode=block",
+                    "cat",
+                ])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())

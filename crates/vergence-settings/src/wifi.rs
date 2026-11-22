@@ -105,7 +105,12 @@ pub enum WifiMsg {
 /// The thread: wpa_supplicant's events, and a tick every RESCAN.
 fn listen(mail: Mail) {
     loop {
-        let wifi: Vec<String> = ifaces::list().unwrap_or_default().into_iter().filter(|f| f.kind == ifaces::Kind::WiFi).map(|f| f.name).collect();
+        let wifi: Vec<String> = ifaces::list()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|f| f.kind == ifaces::Kind::WiFi)
+            .map(|f| f.name)
+            .collect();
         let sock = wpa::sockets().into_iter().find(|(n, _)| wifi.contains(n)).map(|(_, p)| p);
         let Some(sock) = sock else {
             std::thread::sleep(RESCAN);
@@ -233,7 +238,12 @@ fn traffic_chart<M: 'static>(rx: Vec<f64>, tx: Vec<f64>) -> Element<M> {
             }
             let x0 = r.x + r.w - step * (s.len() - 1) as f32;
             for (i, p) in s.windows(2).enumerate() {
-                scene.line(Point::new(x0 + step * i as f32, y_of(p[0])), Point::new(x0 + step * (i + 1) as f32, y_of(p[1])), 1.6, c);
+                scene.line(
+                    Point::new(x0 + step * i as f32, y_of(p[0])),
+                    Point::new(x0 + step * (i + 1) as f32, y_of(p[1])),
+                    1.6,
+                    c,
+                );
             }
         };
         draw(scene, &tx, Color::rgba(t.accent.r, t.accent.g, t.accent.b, 110));
@@ -334,13 +344,19 @@ impl App {
         self.wifi.problem = None;
         let Some(iface) = self.wifi.iface.clone() else {
             self.wifi.socket = None;
-            self.wifi.problem = Some(("This computer has no Wi-Fi device".into(), "Plug in a Wi-Fi adapter, or use a network cable.".into()));
+            self.wifi.problem = Some((
+                "This computer has no Wi-Fi device".into(),
+                "Plug in a Wi-Fi adapter, or use a network cable.".into(),
+            ));
             return;
         };
         self.wifi.socket = wpa::find(&iface);
         let Some(sock) = self.wifi.socket.clone() else {
             self.wifi.problem = Some(if Path::new("/run/NetworkManager").is_dir() {
-                ("Wi-Fi is NetworkManager's on this computer, for now".into(), "Vergence will speak to NetworkManager in a later milestone; until then, use its own tools.".into())
+                (
+                    "Wi-Fi is NetworkManager's on this computer, for now".into(),
+                    "Vergence will speak to NetworkManager in a later milestone; until then, use its own tools.".into(),
+                )
             } else {
                 (format!("wpa_supplicant is not running for {iface}"), "Run sudo tools/install.sh once (it enables wpa_supplicant where there is a Wi-Fi card), or start it by hand.".into())
             });
@@ -360,7 +376,8 @@ impl App {
         self.wifi.status = client.status().unwrap_or_default();
         self.wifi.signal = client.signal().ok().flatten();
         self.wifi.known = client.networks().unwrap_or_default();
-        self.wifi.nets = if self.wifi_wanted() { wpa::by_network(client.scan_results().unwrap_or_default()) } else { Vec::new() };
+        self.wifi.nets =
+            if self.wifi_wanted() { wpa::by_network(client.scan_results().unwrap_or_default()) } else { Vec::new() };
     }
 
     fn wifi_client(&self) -> Option<wpa::Client> {
@@ -437,12 +454,18 @@ impl App {
                     self.wifi.signal = Some(g);
                 }
                 let iface = self.wifi.iface.clone();
-                let counters = ifaces::list().ok().and_then(|all| all.into_iter().find(|f| Some(&f.name) == iface.as_ref())).and_then(|f| Some((f.rx_bytes?, f.tx_bytes?)));
+                let counters = ifaces::list()
+                    .ok()
+                    .and_then(|all| all.into_iter().find(|f| Some(&f.name) == iface.as_ref()))
+                    .and_then(|f| Some((f.rx_bytes?, f.tx_bytes?)));
                 if let Some((rx, tx)) = counters {
                     let now = std::time::Instant::now();
                     if let Some((then, rx0, tx0)) = self.wifi.last_bytes {
                         let secs = now.duration_since(then).as_secs_f64().max(0.1);
-                        self.wifi.rates = Some((ifaces::delta(rx0, rx) as f64 * 8.0 / secs, ifaces::delta(tx0, tx) as f64 * 8.0 / secs));
+                        self.wifi.rates = Some((
+                            ifaces::delta(rx0, rx) as f64 * 8.0 / secs,
+                            ifaces::delta(tx0, tx) as f64 * 8.0 / secs,
+                        ));
                     }
                     self.wifi.last_bytes = Some((now, rx, tx));
                 }
@@ -500,8 +523,12 @@ impl App {
                         self.wifi.password.clear();
                         self.wifi.show_password = false;
                     }
-                    wpa::Security::Enterprise => self.wifi.said = format!("{} asks for a user name as well: not supported here yet.", b.ssid),
-                    wpa::Security::Wep => self.wifi.said = format!("{} uses WEP, which anyone nearby can break: not joined.", b.ssid),
+                    wpa::Security::Enterprise => {
+                        self.wifi.said = format!("{} asks for a user name as well: not supported here yet.", b.ssid)
+                    }
+                    wpa::Security::Wep => {
+                        self.wifi.said = format!("{} uses WEP, which anyone nearby can break: not joined.", b.ssid)
+                    }
                 }
             }
             WifiMsg::Password(p) => self.wifi.password = p.chars().take(64).collect(),
@@ -567,7 +594,9 @@ impl App {
         let setting_row = setting(
             "Wi-Fi",
             "When no cable is connected: on only while no network cable is plugged in.",
-            choice(names, Some(self.wifi_setting()), |i| Message::Wifi(WifiMsg::Setting(i))).width(Length::Fixed(230.0)).name("Wi-Fi"),
+            choice(names, Some(self.wifi_setting()), |i| Message::Wifi(WifiMsg::Setting(i)))
+                .width(Length::Fixed(230.0))
+                .name("Wi-Fi"),
         );
         if let Some((what, how)) = &w.problem {
             if w.iface.is_some() {
@@ -590,24 +619,46 @@ impl App {
             // "some of the connection statistics right up front"); the rest
             // stays in Advanced.
             let n = w.signal.as_ref().map_or(0, |s| wpa::bars(s.rssi));
-            let band = w.status.freq.and_then(wpa::band_channel).map(|(b, ch)| format!("In use. {b}, channel {ch}.")).unwrap_or_else(|| "In use.".into());
+            let band = w
+                .status
+                .freq
+                .and_then(wpa::band_channel)
+                .map(|(b, ch)| format!("In use. {b}, channel {ch}."))
+                .unwrap_or_else(|| "In use.".into());
             top.push(setting(&w.status.ssid.clone().unwrap_or_default(), &band, bars_colored(n)));
             let value = |t: String| label(t).dim();
             // Signal and Speed always there while connected (a dash until read),
             // so the rows never move under the pointer.
             let chart: Vec<i32> = w.history.iter().copied().collect();
-            let strength = w.signal.as_ref().map_or_else(|| "\u{2014}".to_string(), |g| format!("{} dBm, {}", g.rssi, signal_word(g.rssi)));
+            let strength = w
+                .signal
+                .as_ref()
+                .map_or_else(|| "\u{2014}".to_string(), |g| format!("{} dBm, {}", g.rssi, signal_word(g.rssi)));
             top.push(setting(
                 "Signal",
                 "The last two minutes.",
-                row(vec![signal_chart(chart), value(strength).width(Length::Fixed(130.0)).align(Align::End)]).spacing(12.0).align(Align::Center),
+                row(vec![signal_chart(chart), value(strength).width(Length::Fixed(130.0)).align(Align::End)])
+                    .spacing(12.0)
+                    .align(Align::Center),
             ));
-            let speed = w.signal.as_ref().and_then(|g| g.link_mbps).map_or_else(|| "\u{2014}".to_string(), |m| format!("{m} Mb/s"));
+            let speed = w
+                .signal
+                .as_ref()
+                .and_then(|g| g.link_mbps)
+                .map_or_else(|| "\u{2014}".to_string(), |m| format!("{m} Mb/s"));
             top.push(setting("Speed", "", value(speed)));
-            let v4 = w.link.as_ref().and_then(|f| f.addrs.iter().find(|(a, _)| a.is_ipv4())).map(|(a, _)| a.to_string()).or_else(|| w.status.ip.clone());
+            let v4 = w
+                .link
+                .as_ref()
+                .and_then(|f| f.addrs.iter().find(|(a, _)| a.is_ipv4()))
+                .map(|(a, _)| a.to_string())
+                .or_else(|| w.status.ip.clone());
             top.push(setting("Address", "", value(v4.unwrap_or_else(|| "Waiting for one".into()))));
             // Always there while connected, so the page never shifts under the pointer.
-            let traffic = w.rates.map_or_else(|| "Measuring\u{2026}".to_string(), |(rx, tx)| format!("in {}, out {}", rate_text(rx), rate_text(tx)));
+            let traffic = w.rates.map_or_else(
+                || "Measuring\u{2026}".to_string(),
+                |(rx, tx)| format!("in {}, out {}", rate_text(rx), rate_text(tx)),
+            );
             top.push(setting("Traffic", "Now, in and out.", value(traffic)));
         }
         items.push(self.group(None, top));
@@ -617,27 +668,42 @@ impl App {
         }
         // The password, asked in the page.
         if let Some(name) = &w.asking {
-            let mut f = field(&w.password, |p| Message::Wifi(WifiMsg::Password(p))).placeholder("Password").on_submit(Message::Wifi(WifiMsg::Join)).width(Length::Fixed(240.0)).name("Password").autofocus();
+            let mut f = field(&w.password, |p| Message::Wifi(WifiMsg::Password(p)))
+                .placeholder("Password")
+                .on_submit(Message::Wifi(WifiMsg::Join))
+                .width(Length::Fixed(240.0))
+                .name("Password")
+                .autofocus();
             if !w.show_password {
                 f = f.secret();
             }
             items.push(self.group(
                 Some(&format!("Join {}", wpa::ssid_text(name))),
                 vec![
-                    setting("Password", "", f),
-                    setting("Show the password", "", switch(w.show_password, |on| Message::Wifi(WifiMsg::ShowPassword(on))).name("Show the password")),
-                    panel(
-                        row(vec![
-                            space().width(Length::FILL),
-                            button(label("Cancel").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Wifi(WifiMsg::Cancel)),
-                            button(label("Join").size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(4.0, 14.0)).on_press(Message::Wifi(WifiMsg::Join)),
-                        ])
-                        .spacing(8.0)
+                        setting("Password", "", f),
+                        setting(
+                            "Show the password",
+                            "",
+                            switch(w.show_password, |on| Message::Wifi(WifiMsg::ShowPassword(on)))
+                                .name("Show the password"),
+                        ),
+                        panel(
+                            row(vec![
+                                space().width(Length::FILL),
+                                button(label("Cancel").size(12.0))
+                                    .padding(Padding::hv(4.0, 12.0))
+                                    .on_press(Message::Wifi(WifiMsg::Cancel)),
+                                button(label("Join").size(12.0))
+                                    .look(ButtonLook::Accent)
+                                    .padding(Padding::hv(4.0, 14.0))
+                                    .on_press(Message::Wifi(WifiMsg::Join)),
+                            ])
+                            .spacing(8.0)
+                            .width(Length::FILL),
+                        )
+                        .padding(Padding::hv(8.0, 12.0))
                         .width(Length::FILL),
-                    )
-                    .padding(Padding::hv(8.0, 12.0))
-                    .width(Length::FILL),
-                ],
+                    ],
             ));
         }
         if !w.said.is_empty() {
@@ -659,9 +725,16 @@ impl App {
                 let action: Element<Message> = if current {
                     label("Connected").dim()
                 } else {
-                    button(label("Join").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Wifi(WifiMsg::Pick(i))).name(&format!("Join {}", b.ssid))
+                    button(label("Join").size(12.0))
+                        .padding(Padding::hv(4.0, 12.0))
+                        .on_press(Message::Wifi(WifiMsg::Pick(i)))
+                        .name(&format!("Join {}", b.ssid))
                 };
-                rows.push(setting(&b.ssid, &detail, row(vec![bars_mark(wpa::bars(b.signal)), action]).spacing(10.0).align(Align::Center)));
+                rows.push(setting(
+                    &b.ssid,
+                    &detail,
+                    row(vec![bars_mark(wpa::bars(b.signal)), action]).spacing(10.0).align(Align::Center),
+                ));
             }
             if rows.is_empty() {
                 rows.push(setting("Looking for networks\u{2026}", "", space()));
@@ -689,8 +762,12 @@ impl App {
                         note,
                         row(vec![
                             label("Join automatically").size(12.0).dim(),
-                            switch(!k.manual, move |on| Message::Wifi(WifiMsg::Auto(id, on))).name(&format!("Join {} automatically", k.ssid)),
-                            button(label("Forget").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Wifi(WifiMsg::Forget(k.id))).name(&format!("Forget {}", k.ssid)),
+                            switch(!k.manual, move |on| Message::Wifi(WifiMsg::Auto(id, on)))
+                                .name(&format!("Join {} automatically", k.ssid)),
+                            button(label("Forget").size(12.0))
+                                .padding(Padding::hv(4.0, 12.0))
+                                .on_press(Message::Wifi(WifiMsg::Forget(k.id)))
+                                .name(&format!("Forget {}", k.ssid)),
                         ])
                         .spacing(8.0)
                         .align(Align::Center),
@@ -700,7 +777,12 @@ impl App {
             items.push(self.group(Some("Known networks"), rows));
         }
         // Advanced: the live detail.
-        let power_save = self.desktop.get("network").and_then(|n| n.get("wifi-power-save")).and_then(|v| v.as_bool()).unwrap_or(true);
+        let power_save = self
+            .desktop
+            .get("network")
+            .and_then(|n| n.get("wifi-power-save"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
         let mut adv = vec![
             setting(
                 "Power saving",
@@ -711,7 +793,11 @@ impl App {
             setting("State", &w.status.state, space()),
         ];
         if let Some(s) = &w.signal {
-            adv.push(setting("Signal", &format!("{} dBm{}", s.rssi, s.link_mbps.map(|m| format!(", {m} Mb/s")).unwrap_or_default()), space()));
+            adv.push(setting(
+                "Signal",
+                &format!("{} dBm{}", s.rssi, s.link_mbps.map(|m| format!(", {m} Mb/s")).unwrap_or_default()),
+                space(),
+            ));
         }
         if let Some((band, ch)) = w.status.freq.and_then(wpa::band_channel) {
             adv.push(setting("Channel", &format!("{ch} ({band}, {} MHz)", w.status.freq.unwrap_or(0)), space()));
@@ -721,7 +807,11 @@ impl App {
         }
         if let Some(link) = &w.link {
             let addrs: Vec<String> = link.addrs.iter().map(|(a, p)| format!("{a}/{p}")).collect();
-            adv.push(setting("Addresses", &if addrs.is_empty() { "None".to_string() } else { addrs.join(", ") }, space()));
+            adv.push(setting(
+                "Addresses",
+                &if addrs.is_empty() { "None".to_string() } else { addrs.join(", ") },
+                space(),
+            ));
             if let Some(m) = &link.mac {
                 adv.push(setting("Hardware address", m, space()));
             }
@@ -754,7 +844,15 @@ impl App {
     pub fn network_page(&self) -> Element<Message> {
         let w = &self.wifi;
         let about = "The computer's connections: network cables, a phone by USB, and Wi-Fi.";
-        let links: Vec<&ifaces::Iface> = w.all.iter().filter(|f| matches!(f.kind, ifaces::Kind::Wired | ifaces::Kind::Phone) && !ifaces::is_virtual(&f.name) && f.mac.is_some()).collect();
+        let links: Vec<&ifaces::Iface> = w
+            .all
+            .iter()
+            .filter(|f| {
+                matches!(f.kind, ifaces::Kind::Wired | ifaces::Kind::Phone)
+                    && !ifaces::is_virtual(&f.name)
+                    && f.mac.is_some()
+            })
+            .collect();
         let ethernets = links.iter().filter(|f| f.kind == ifaces::Kind::Wired).count();
         let mut items = Vec::new();
         for f in &links {
@@ -769,7 +867,8 @@ impl App {
             let addrs = shown_addrs(f);
             let speed = match (f.speed_mbps, f.full_duplex) {
                 (Some(sp), fd) => {
-                    let s = if sp >= 1000 && sp % 1000 == 0 { format!("{} Gb/s", sp / 1000) } else { format!("{sp} Mb/s") };
+                    let s =
+                        if sp >= 1000 && sp % 1000 == 0 { format!("{} Gb/s", sp / 1000) } else { format!("{sp} Mb/s") };
                     match fd {
                         Some(true) => format!("{s}, full duplex"),
                         Some(false) => format!("{s}, half duplex"),
@@ -783,7 +882,10 @@ impl App {
                 (true, _) if !addrs.is_empty() => ("Connected".to_string(), addrs),
                 (true, _) => ("Connected".to_string(), "Waiting for an address.".to_string()),
                 (false, false) => ("Cable not connected".to_string(), String::new()),
-                (false, true) => ("Not sharing its connection".to_string(), "On the iPhone: trust this computer, and turn on Personal Hotspot.".to_string()),
+                (false, true) => (
+                    "Not sharing its connection".to_string(),
+                    "On the iPhone: trust this computer, and turn on Personal Hotspot.".to_string(),
+                ),
             };
             let mut rows = vec![setting(&state, &detail, space())];
             // Its traffic while connected: always shown then (a dash until two
@@ -799,7 +901,9 @@ impl App {
                 rows.push(setting(
                     "Traffic",
                     "The last two minutes: in, and out (fainter).",
-                    row(vec![traffic_chart(rx, tx), label(now).dim().width(Length::Fixed(170.0)).align(Align::End)]).spacing(12.0).align(Align::Center),
+                    row(vec![traffic_chart(rx, tx), label(now).dim().width(Length::Fixed(170.0)).align(Align::End)])
+                        .spacing(12.0)
+                        .align(Align::Center),
                 ));
             }
             items.push(self.group(Some(&title), rows));
@@ -821,7 +925,14 @@ impl App {
         if self.has_wifi() {
             items.push(self.group(
                 Some("Wi-Fi"),
-                vec![setting(&wifi_line, "", button(label("Wi-Fi").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Go(Page::WiFi)).name("Open Wi-Fi"))],
+                vec![setting(
+                        &wifi_line,
+                        "",
+                        button(label("Wi-Fi").size(12.0))
+                            .padding(Padding::hv(4.0, 12.0))
+                            .on_press(Message::Go(Page::WiFi))
+                            .name("Open Wi-Fi"),
+                    )],
             ));
         }
         if !links.iter().any(|f| f.kind == ifaces::Kind::Phone) {

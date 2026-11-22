@@ -60,7 +60,11 @@ fn bar(s: &mut Scene, fonts: &mut Fonts, tabs: &[&str]) {
         let shown = i == tabs.len() - 1;
         // A tab: round at the top, square where it meets the pane (the bottom half is covered).
         s.push_clip(Rect::new(x, 6.0, width - 2.0, 30.0), 0.0);
-        s.fill_rounded(Rect::new(x, 6.0, width - 2.0, 44.0), 7.0, if shown { PANE } else { Color::rgba(255, 255, 255, 20) });
+        s.fill_rounded(
+            Rect::new(x, 6.0, width - 2.0, 44.0),
+            7.0,
+            if shown { PANE } else { Color::rgba(255, 255, 255, 20) },
+        );
         s.line(Point::new(x + 12.0, 17.0), Point::new(x + 20.0, 25.0), 1.25, TEXT);
         s.line(Point::new(x + 20.0, 17.0), Point::new(x + 12.0, 25.0), 1.25, TEXT);
         if let Some(ui) = ui {
@@ -95,7 +99,10 @@ fn term(fonts: &mut Fonts, w: f32, h: f32) -> (Scene, usize, f32) {
         let top = 40.0 + row as f32 * cell_h;
         for col in 0..cols {
             let v = rng.next();
-            let (bg, fg) = (Color::rgb(v as u8, (v >> 8) as u8, (v >> 16) as u8), Color::rgb((v >> 24) as u8, (v >> 32) as u8, (v >> 40) as u8));
+            let (bg, fg) = (
+                Color::rgb(v as u8, (v >> 8) as u8, (v >> 16) as u8),
+                Color::rgb((v >> 24) as u8, (v >> 32) as u8, (v >> 40) as u8),
+            );
             let left = 4.0 + col as f32 * cell_w;
             s.fill(Rect::new(left, top, cell_w, cell_h), bg);
             let c = glyphs[rng.below(glyphs.len() as u64) as usize];
@@ -112,7 +119,8 @@ fn shapes(fonts: &mut Fonts, w: f32, h: f32) -> Scene {
     let mut s = Scene::new(w, h);
     s.fill(Rect::new(0.0, 0.0, w, h), Color::rgb(24, 33, 41));
     bar(&mut s, fonts, &["Scene", "Text", "Renderer"]);
-    let palette = [Color::rgb(74, 155, 184), Color::rgb(224, 164, 58), Color::rgb(201, 77, 71), Color::rgb(120, 190, 120)];
+    let palette =
+        [Color::rgb(74, 155, 184), Color::rgb(224, 164, 58), Color::rgb(201, 77, 71), Color::rgb(120, 190, 120)];
     for (i, c) in palette.iter().enumerate() {
         let x = 24.0 + i as f32 * 110.0;
         s.fill_rounded(Rect::new(x, 60.0, 90.0, 60.0), i as f32 * 10.0, *c);
@@ -150,11 +158,13 @@ fn main() {
     let out = args.get(1).filter(|a| !a.starts_with("--")).cloned();
     let scale: f32 = option("--scale").and_then(|v| v.parse().ok()).unwrap_or(1.0);
     let cpu = option("--threads").and_then(|v| v.parse().ok()).map(Cpu::with_threads).unwrap_or_default();
-    let (w, h) = option("--size").and_then(|v| v.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)))).unwrap_or(match which {
-        "term" => (1264.0, 706.0),
-        "type" => (960.0, 600.0),
-        _ => (660.0, 440.0),
-    });
+    let (w, h) = option("--size")
+        .and_then(|v| v.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
+        .unwrap_or(match which {
+            "term" => (1264.0, 706.0),
+            "type" => (960.0, 600.0),
+            _ => (660.0, 440.0),
+        });
 
     let t = Instant::now();
     let mut fonts = Fonts::system();
@@ -172,8 +182,17 @@ fn main() {
     let built = t.elapsed();
     scene.validate().expect("the demonstration scene is valid");
     let bytes = scene.encode().expect("it encodes");
-    println!("{which}: {w} x {h} units, {} commands, {} bytes on the wire{}", scene.commands.len(), bytes.len(), if cells > 0 { format!(", {cells} cells") } else { String::new() });
-    println!("fonts indexed in {:.1} ms, scene built in {:.1} ms", indexed.as_secs_f64() * 1e3, built.as_secs_f64() * 1e3);
+    println!(
+        "{which}: {w} x {h} units, {} commands, {} bytes on the wire{}",
+        scene.commands.len(),
+        bytes.len(),
+        if cells > 0 { format!(", {cells} cells") } else { String::new() }
+    );
+    println!(
+        "fonts indexed in {:.1} ms, scene built in {:.1} ms",
+        indexed.as_secs_f64() * 1e3,
+        built.as_secs_f64() * 1e3
+    );
     if let Some(path) = option("--scene") {
         std::fs::write(&path, &bytes).expect("write the scene");
     }
@@ -187,11 +206,25 @@ fn main() {
     let mut pixmap = None;
     let first = ms(&mut || pixmap = Some(cpu.render(&scene, &mut fonts, scale, background).expect("it renders")));
     let mut pixmap = pixmap.expect("rendered");
-    let again = (0..5).map(|_| ms(&mut || pixmap = cpu.render(&scene, &mut fonts, scale, background).expect("it renders"))).fold(f64::MAX, f64::min);
-    println!("{} x {} pixels at scale {scale}, {} threads: first frame {first:.1} ms (glyphs rasterized: {}), then {again:.1} ms a frame", pixmap.width, pixmap.height, cpu.threads(), fonts.cached());
+    let again = (0..5)
+        .map(|_| ms(&mut || pixmap = cpu.render(&scene, &mut fonts, scale, background).expect("it renders")))
+        .fold(f64::MAX, f64::min);
+    println!(
+        "{} x {} pixels at scale {scale}, {} threads: first frame {first:.1} ms (glyphs rasterized: {}), then {again:.1} ms a frame",
+        pixmap.width,
+        pixmap.height,
+        cpu.threads(),
+        fonts.cached()
+    );
     // One line of text redrawn, as when a terminal row changes.
     let row = (pixmap.height / 2)..(pixmap.height / 2 + (cell_h * scale).ceil() as u32);
-    let line = (0..20).map(|_| ms(&mut || cpu.render_rows(&scene, &mut fonts, scale, background, &mut pixmap, row.clone()).expect("it renders"))).fold(f64::MAX, f64::min);
+    let line = (0..20)
+        .map(|_| {
+            ms(&mut || {
+                cpu.render_rows(&scene, &mut fonts, scale, background, &mut pixmap, row.clone()).expect("it renders")
+            })
+        })
+        .fold(f64::MAX, f64::min);
     println!("one row of text ({} pixel rows) redrawn in {line:.2} ms; picture {:016x}", row.len(), pixmap.hash());
 
     if args.iter().any(|a| a == "--gpu") {
@@ -204,16 +237,25 @@ fn main() {
                 match drawn.expect("ran") {
                     Err(e) => println!("GPU: {e}"),
                     Ok(picture) => {
-                        let draw = (0..10).map(|_| ms(&mut || gpu.draw(&scene, &mut fonts, scale, background).expect("it draws"))).fold(f64::MAX, f64::min);
-                        let read = (0..5).map(|_| ms(&mut || drop(gpu.render(&scene, &mut fonts, scale, background)))).fold(f64::MAX, f64::min);
+                        let draw = (0..10)
+                            .map(|_| ms(&mut || gpu.draw(&scene, &mut fonts, scale, background).expect("it draws")))
+                            .fold(f64::MAX, f64::min);
+                        let read = (0..5)
+                            .map(|_| ms(&mut || drop(gpu.render(&scene, &mut fonts, scale, background))))
+                            .fold(f64::MAX, f64::min);
                         let (mut worst, mut beyond) = (0u8, 0usize);
                         for (a, b) in picture.data.chunks_exact(4).zip(pixmap.data.chunks_exact(4)) {
                             let d = a.iter().zip(b).map(|(x, y)| x.abs_diff(*y)).max().unwrap_or(0);
                             worst = worst.max(d);
                             beyond += (d > 1) as usize;
                         }
-                        println!("GPU: first frame {first:.1} ms, then {draw:.2} ms a frame drawn ({read:.1} ms with the pixels read back)");
-                        println!("GPU against CPU: worst byte difference {worst}, {beyond} of {} pixels more than one step apart", pixmap.width as usize * pixmap.height as usize);
+                        println!(
+                            "GPU: first frame {first:.1} ms, then {draw:.2} ms a frame drawn ({read:.1} ms with the pixels read back)"
+                        );
+                        println!(
+                            "GPU against CPU: worst byte difference {worst}, {beyond} of {} pixels more than one step apart",
+                            pixmap.width as usize * pixmap.height as usize
+                        );
                         pixmap = picture;
                     }
                 }

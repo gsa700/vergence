@@ -20,7 +20,11 @@ fn list_mut<'a>(t: &'a mut Table, key: &str) -> &'a mut Vec<Value> {
 }
 
 pub fn size(desktop: &Table) -> f64 {
-    desktop.get("displays").and_then(|d| d.get("size")).and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64))).unwrap_or(1.0)
+    desktop
+        .get("displays")
+        .and_then(|d| d.get("size"))
+        .and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64)))
+        .unwrap_or(1.0)
 }
 
 /// "Windows the same size on every screen" (`[displays] same-size`), off by default.

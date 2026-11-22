@@ -186,13 +186,20 @@ pub fn siblings(file: &Path) -> Vec<PathBuf> {
                 .map(|e| e.path())
                 .filter(|p| {
                     let Some(name) = p.file_name().and_then(|n| n.to_str()) else { return false };
-                    (hidden_ok || !name.starts_with('.')) && vergence_types::of_name(name).is_some_and(|m| m.starts_with("image/")) && p.is_file()
+                    (hidden_ok || !name.starts_with('.'))
+                        && vergence_types::of_name(name).is_some_and(|m| m.starts_with("image/"))
+                        && p.is_file()
                 })
                 .take(20_000)
                 .collect()
         })
         .unwrap_or_default();
-    out.sort_by(|a, b| natural(&a.file_name().unwrap_or_default().to_string_lossy(), &b.file_name().unwrap_or_default().to_string_lossy()));
+    out.sort_by(|a, b| {
+        natural(
+            &a.file_name().unwrap_or_default().to_string_lossy(),
+            &b.file_name().unwrap_or_default().to_string_lossy(),
+        )
+    });
     if !out.iter().any(|p| p == file) {
         out.push(file.to_path_buf());
     }

@@ -23,7 +23,10 @@
 // restores or records: a nested test run does neither.
 
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, time::{Duration, Instant}};
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 use crate::Server;
 
@@ -60,7 +63,10 @@ pub struct Session {
 }
 
 fn path() -> Option<PathBuf> {
-    let state = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    let state = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
     Some(state.join("vergence/session.toml"))
 }
 
@@ -70,7 +76,10 @@ fn read() -> Record {
 
 /// Written beside and moved into place, readable by its owner only.
 fn write(record: &Record) -> std::io::Result<()> {
-    use std::{io::Write, os::unix::fs::{DirBuilderExt, OpenOptionsExt}};
+    use std::{
+        io::Write,
+        os::unix::fs::{DirBuilderExt, OpenOptionsExt},
+    };
     let Some(path) = path() else { return Ok(()) };
     if let Some(dir) = path.parent() {
         std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
@@ -137,7 +146,13 @@ impl Server {
             return;
         }
         // A session that has lasted is no longer held against restoring.
-        if self.resume.record.pending && self.resume.restored.as_ref().is_none_or(|(at, _)| at.elapsed().as_secs() >= vergence_shell::session::SOON) {
+        if self.resume.record.pending
+            && self
+                .resume
+                .restored
+                .as_ref()
+                .is_none_or(|(at, _)| at.elapsed().as_secs() >= vergence_shell::session::SOON)
+        {
             self.resume.record.pending = false;
             self.resume.record.strikes = 0;
             self.session_write();
@@ -165,7 +180,8 @@ impl Server {
         // Drives plugged in are mounted (vergence-media: udisks2 on Linux),
         // unless desktop.toml `[media] automount = false`.
         let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
-        let automount = text.parse::<toml::Table>().ok().and_then(|t| t.get("media")?.get("automount")?.as_bool()).unwrap_or(true);
+        let automount =
+            text.parse::<toml::Table>().ok().and_then(|t| t.get("media")?.get("automount")?.as_bool()).unwrap_or(true);
         if automount {
             std::thread::spawn(|| vergence_media::automount(|said| tracing::info!("{said}")));
         }
@@ -189,7 +205,11 @@ impl Server {
         };
         tracing::info!("session: {said}");
         let restored = self.resume.restored.is_some();
-        self.resume.record = Record { running: if restored { last.running } else { Vec::new() }, pending: restored, strikes: if restored { strikes } else { 0 } };
+        self.resume.record = Record {
+            running: if restored { last.running } else { Vec::new() },
+            pending: restored,
+            strikes: if restored { strikes } else { 0 },
+        };
         self.resume.said = said;
         self.session_write();
     }
@@ -203,6 +223,12 @@ impl Server {
     /// For `vctl session`.
     pub fn session_report(&self) -> String {
         let r = &self.resume.record;
-        format!("at start: {}\nrunning: {}\npending {} strikes {}", if self.resume.begun { self.resume.said.as_str() } else { "not yet" }, r.running.join(", "), r.pending, r.strikes)
+        format!(
+            "at start: {}\nrunning: {}\npending {} strikes {}",
+            if self.resume.begun { self.resume.said.as_str() } else { "not yet" },
+            r.running.join(", "),
+            r.pending,
+            r.strikes
+        )
     }
 }

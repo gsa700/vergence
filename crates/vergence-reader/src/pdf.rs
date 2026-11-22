@@ -268,7 +268,22 @@ pub struct Shared {
 
 impl Shared {
     fn new(waker: Option<Waker>) -> Shared {
-        Shared { wanted: Mutex::new(Vec::new()), ready: Condvar::new(), done: Mutex::new(HashMap::new()), tiles: Mutex::new(HashMap::new()), side: Mutex::new(Vec::new()), thumbs: Mutex::new(HashMap::new()), links: Mutex::new(HashMap::new()), outline: Mutex::new(None), meta: Mutex::new(None), texts: Mutex::new(HashMap::new()), search: Mutex::new(Search::default()), failed: Mutex::new(HashMap::new()), closed: AtomicBool::new(false), waker: Mutex::new(waker) }
+        Shared {
+            wanted: Mutex::new(Vec::new()),
+            ready: Condvar::new(),
+            done: Mutex::new(HashMap::new()),
+            tiles: Mutex::new(HashMap::new()),
+            side: Mutex::new(Vec::new()),
+            thumbs: Mutex::new(HashMap::new()),
+            links: Mutex::new(HashMap::new()),
+            outline: Mutex::new(None),
+            meta: Mutex::new(None),
+            texts: Mutex::new(HashMap::new()),
+            search: Mutex::new(Search::default()),
+            failed: Mutex::new(HashMap::new()),
+            closed: AtomicBool::new(false),
+            waker: Mutex::new(waker),
+        }
     }
 
     fn wake(&self) {
@@ -333,19 +348,29 @@ fn work(mut viewer: vergence_pdf::helper::Viewer, shared: Arc<Shared>) {
                 if have.is_some_and(|(s, l)| close_enough(s, scale) && l == look) {
                     continue;
                 }
-                (page, viewer.render(page, scale, None).map(|t| {
-                    let img = apply_look(Image { width: t.width, height: t.height, rgba: t.rgba }, look);
-                    shared.done.lock().unwrap_or_else(|e| e.into_inner()).insert(page, (scale, look, Arc::new(img)));
-                }))
+                (
+                    page,
+                    viewer.render(page, scale, None).map(|t| {
+                        let img = apply_look(Image { width: t.width, height: t.height, rgba: t.rgba }, look);
+                        shared
+                            .done
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .insert(page, (scale, look, Arc::new(img)));
+                    }),
+                )
             }
             Job::Thumb(page, scale, look) => {
                 if shared.thumbs.lock().unwrap_or_else(|e| e.into_inner()).get(&page).is_some_and(|t| t.0 == look) {
                     continue;
                 }
-                (page, viewer.render(page, scale, None).map(|t| {
-                    let img = apply_look(Image { width: t.width, height: t.height, rgba: t.rgba }, look);
-                    shared.thumbs.lock().unwrap_or_else(|e| e.into_inner()).insert(page, (look, Arc::new(img)));
-                }))
+                (
+                    page,
+                    viewer.render(page, scale, None).map(|t| {
+                        let img = apply_look(Image { width: t.width, height: t.height, rgba: t.rgba }, look);
+                        shared.thumbs.lock().unwrap_or_else(|e| e.into_inner()).insert(page, (look, Arc::new(img)));
+                    }),
+                )
             }
             Job::Text(page) => {
                 let t = viewer.text(page).unwrap_or_default();
@@ -383,9 +408,16 @@ fn work(mut viewer: vergence_pdf::helper::Viewer, shared: Arc<Shared>) {
                 if shared.tiles.lock().unwrap_or_else(|e| e.into_inner()).contains_key(&key) {
                     continue;
                 }
-                (page, viewer.render(page, scale, Some((tx * TILE, ty * TILE, TILE, TILE))).map(|t| {
-                    shared.tiles.lock().unwrap_or_else(|e| e.into_inner()).insert(key, Arc::new(Image { width: t.width, height: t.height, rgba: t.rgba }));
-                }))
+                (
+                    page,
+                    viewer.render(page, scale, Some((tx * TILE, ty * TILE, TILE, TILE))).map(|t| {
+                        shared
+                            .tiles
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .insert(key, Arc::new(Image { width: t.width, height: t.height, rgba: t.rgba }));
+                    }),
+                )
             }
         };
         match result {
@@ -477,11 +509,26 @@ pub fn start(viewer: vergence_pdf::helper::Viewer, waker: Option<Waker>) -> Resu
     if viewer.info.pages.is_empty() {
         return Err("This PDF has no pages.".into());
     }
-    let pages: Arc<Vec<(f32, f32)>> = Arc::new(viewer.info.pages.iter().map(|&(w, h)| (w.max(1.0), h.max(1.0))).collect());
+    let pages: Arc<Vec<(f32, f32)>> =
+        Arc::new(viewer.info.pages.iter().map(|&(w, h)| (w.max(1.0), h.max(1.0))).collect());
     let shared = Arc::new(Shared::new(waker));
     let s = shared.clone();
     std::thread::spawn(move || work(viewer, s));
-    Ok(Pdf(Layout { sizes: pages.clone(), pages, view: View::Continuous, turn: 0, night: false, shared, mode: Mode::Width, top: 0.0, pan_x: 0.0, restore: None, thumb_top: 0.0, selection: None, found: None }))
+    Ok(Pdf(Layout {
+        sizes: pages.clone(),
+        pages,
+        view: View::Continuous,
+        turn: 0,
+        night: false,
+        shared,
+        mode: Mode::Width,
+        top: 0.0,
+        pan_x: 0.0,
+        restore: None,
+        thumb_top: 0.0,
+        selection: None,
+        found: None,
+    }))
 }
 
 impl Layout {
@@ -489,7 +536,21 @@ impl Layout {
     #[cfg(test)]
     fn sized(pages: Vec<(f32, f32)>) -> Layout {
         let pages = Arc::new(pages);
-        Layout { sizes: pages.clone(), pages, view: View::Continuous, turn: 0, night: false, shared: Arc::new(Shared::new(None)), mode: Mode::Width, top: 0.0, pan_x: 0.0, restore: None, thumb_top: 0.0, selection: None, found: None }
+        Layout {
+            sizes: pages.clone(),
+            pages,
+            view: View::Continuous,
+            turn: 0,
+            night: false,
+            shared: Arc::new(Shared::new(None)),
+            mode: Mode::Width,
+            top: 0.0,
+            pan_x: 0.0,
+            restore: None,
+            thumb_top: 0.0,
+            selection: None,
+            found: None,
+        }
     }
 
     /// The pages in rows, as the view sets them out.
@@ -577,7 +638,8 @@ impl Layout {
         let current = self.current(r);
         self.turn = turn % 360;
         let t = self.turn;
-        self.pages = Arc::new(self.sizes.iter().map(|&(w, h)| if t == 90 || t == 270 { (h, w) } else { (w, h) }).collect());
+        self.pages =
+            Arc::new(self.sizes.iter().map(|&(w, h)| if t == 90 || t == 270 { (h, w) } else { (w, h) }).collect());
         self.go_to(current, r);
     }
 
@@ -751,7 +813,11 @@ impl Layout {
             t + h >= a.max(lo) && t <= b.min(hi)
         };
         let first = (0..self.pages.len()).find(|&p| shown(p)).unwrap_or(0);
-        let last = (first..self.pages.len()).take_while(|&p| shown(p) || spots[p].1 <= spots[first].1).last().unwrap_or(first).max(first);
+        let last = (first..self.pages.len())
+            .take_while(|&p| shown(p) || spots[p].1 <= spots[first].1)
+            .last()
+            .unwrap_or(first)
+            .max(first);
         (first, last)
     }
 
@@ -836,7 +902,12 @@ impl Layout {
     /// Where page `p` is drawn in the window, at zoom `z`.
     pub fn dest(&self, r: Rect, z: f32, spots: &[(f32, f32)], p: usize) -> Rect {
         let (pw, ph) = self.pages[p];
-        Rect::new(r.x + r.w / 2.0 + spots[p].0 * z + self.pan_x, r.y + MARGIN + (spots[p].1 - self.top) * z, pw * z, ph * z)
+        Rect::new(
+            r.x + r.w / 2.0 + spots[p].0 * z + self.pan_x,
+            r.y + MARGIN + (spots[p].1 - self.top) * z,
+            pw * z,
+            ph * z,
+        )
     }
 
     /// Draws the pages in `r` and asks the worker for what is missing.
@@ -882,7 +953,11 @@ impl Layout {
             // Search matches: yellow, the one shown orange.
             for (i, (mp, bs)) in search.matches.iter().enumerate() {
                 if *mp == p {
-                    let c = if self.found == Some(i) { Color::rgba(0xff, 0x8c, 0x00, 0x90) } else { Color::rgba(0xff, 0xd6, 0x00, 0x70) };
+                    let c = if self.found == Some(i) {
+                        Color::rgba(0xff, 0x8c, 0x00, 0x90)
+                    } else {
+                        Color::rgba(0xff, 0xd6, 0x00, 0x70)
+                    };
                     for b in bs {
                         scene.fill(to_window(b), c);
                     }
@@ -905,10 +980,16 @@ impl Layout {
             let deep = round3(z * scale);
             if look == Look::default() && deep > s * 1.02 && !failed.contains(&p) {
                 let k = deep / z; // pixels per window point
-                let vis = (dest.x.max(r.x), dest.y.max(r.y), (dest.x + dest.w).min(r.x + r.w), (dest.y + dest.h).min(r.y + r.h));
+                let vis = (
+                    dest.x.max(r.x),
+                    dest.y.max(r.y),
+                    (dest.x + dest.w).min(r.x + r.w),
+                    (dest.y + dest.h).min(r.y + r.h),
+                );
                 if vis.2 > vis.0 && vis.3 > vis.1 {
                     let t = TILE as f32;
-                    let (c0, r0) = (((vis.0 - dest.x) * k / t).floor() as u32, ((vis.1 - dest.y) * k / t).floor() as u32);
+                    let (c0, r0) =
+                        (((vis.0 - dest.x) * k / t).floor() as u32, ((vis.1 - dest.y) * k / t).floor() as u32);
                     let (c1, r1) = (((vis.2 - dest.x) * k / t).ceil() as u32, ((vis.3 - dest.y) * k / t).ceil() as u32);
                     if ((c1 - c0) * (r1 - r0)) as usize <= MAX_TILES {
                         for ty in r0..r1 {
@@ -917,7 +998,12 @@ impl Layout {
                                 match tiles.get(&key) {
                                     Some(img) => {
                                         let id = scene.image(img.clone());
-                                        let at = Rect::new(dest.x + tx as f32 * t / k, dest.y + ty as f32 * t / k, img.width as f32 / k, img.height as f32 / k);
+                                        let at = Rect::new(
+                                            dest.x + tx as f32 * t / k,
+                                            dest.y + ty as f32 * t / k,
+                                            img.width as f32 / k,
+                                            img.height as f32 / k,
+                                        );
                                         scene.draw_image(id, at, 1.0);
                                     }
                                     None => tile_jobs.push(Job::Tile(p, deep, tx, ty)),
@@ -935,7 +1021,12 @@ impl Layout {
             wanted.push(Job::Page(last + 1, page_scale(pw, ph, z * scale), look));
         }
         let page_of = |j: &Job| match j {
-            Job::Page(p, ..) | Job::Tile(p, ..) | Job::Thumb(p, ..) | Job::Links(p) | Job::Text(p) | Job::Search(p, _) => *p,
+            Job::Page(p, ..)
+            | Job::Tile(p, ..)
+            | Job::Thumb(p, ..)
+            | Job::Links(p)
+            | Job::Text(p)
+            | Job::Search(p, _) => *p,
         };
         wanted.sort_by_key(|j| (page_of(j) as isize - middle as isize).unsigned_abs());
         // Page pictures first (they cover the page soonest), then its tiles.
@@ -958,7 +1049,11 @@ impl Layout {
         }
         // Pages far from sight are forgotten.
         let keep = first.saturating_sub(3)..=last + 3;
-        self.shared.texts.lock().unwrap_or_else(|e| e.into_inner()).retain(|p, _| keep.contains(p) || self.selection.is_some_and(|s| s.on_page(*p, usize::MAX).is_some()));
+        self.shared
+            .texts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|p, _| keep.contains(p) || self.selection.is_some_and(|s| s.on_page(*p, usize::MAX).is_some()));
         self.shared.done.lock().unwrap_or_else(|e| e.into_inner()).retain(|p, _| keep.contains(p));
         // Tiles: only those of this zoom in sight.
         if tiles.len() > keep_tiles.len() {
@@ -1000,7 +1095,12 @@ impl Layout {
     pub fn link_at(&self, r: Rect, x: f32, y: f32) -> Option<Action> {
         let (p, px, py) = self.hit(r, x, y)?;
         let links = self.shared.links.lock().unwrap_or_else(|e| e.into_inner());
-        links.get(&p)?.iter().rev().find(|l| px >= l.rect[0] && px <= l.rect[2] && py >= l.rect[1] && py <= l.rect[3]).map(|l| l.action.clone())
+        links
+            .get(&p)?
+            .iter()
+            .rev()
+            .find(|l| px >= l.rect[0] && px <= l.rect[2] && py >= l.rect[1] && py <= l.rect[3])
+            .map(|l| l.action.clone())
     }
 
     /// The text under a window point: on a character (a little grown), its
@@ -1051,7 +1151,8 @@ impl Layout {
     pub fn start_search(&mut self, query: &str) {
         let mut se = self.shared.search.lock().unwrap_or_else(|e| e.into_inner());
         let generation = se.generation + 1;
-        *se = Search { query: query.trim().to_string(), generation, done: query.trim().is_empty(), ..Search::default() };
+        *se =
+            Search { query: query.trim().to_string(), generation, done: query.trim().is_empty(), ..Search::default() };
         drop(se);
         self.found = None;
         self.shared.ready.notify_all();
@@ -1140,14 +1241,25 @@ impl Layout {
     pub fn thumb_at(&self, r: Rect, y: f32) -> Option<usize> {
         let at = y - r.y + self.thumb_top;
         let tops = self.thumb_tops();
-        (0..self.pages.len()).find(|&p| at >= tops[p] - THUMB_GAP / 2.0 && at <= tops[p] + self.thumb_size(p).1 + THUMB_GAP / 2.0)
+        (0..self.pages.len())
+            .find(|&p| at >= tops[p] - THUMB_GAP / 2.0 && at <= tops[p] + self.thumb_size(p).1 + THUMB_GAP / 2.0)
     }
 
     /// The sidebar's thumbnails, the current page marked; asks for the
     /// ones in sight.
     #[allow(clippy::needless_range_loop)]
     #[allow(clippy::too_many_arguments)]
-    pub fn draw_thumbs(&self, scene: &mut Scene, r: Rect, scale: f32, current: usize, ground: Color, accent: Color, ink: Color, held: bool) {
+    pub fn draw_thumbs(
+        &self,
+        scene: &mut Scene,
+        r: Rect,
+        scale: f32,
+        current: usize,
+        ground: Color,
+        accent: Color,
+        ink: Color,
+        held: bool,
+    ) {
         scene.push_clip(r, 0.0);
         scene.fill(r, ground);
         let tops = self.thumb_tops();
@@ -1242,7 +1354,10 @@ pub mod places {
     const MOST: usize = 500;
 
     fn file() -> Option<PathBuf> {
-        let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+        let base = std::env::var_os("XDG_STATE_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
         let new = base.join("vergence/reader-places");
         let old = base.join("vergence/closeup-pdf-places");
         if !new.exists() && old.exists() {
@@ -1263,7 +1378,11 @@ pub mod places {
         match s {
             "width" => Some(Mode::Width),
             "page" => Some(Mode::Page),
-            z => z.parse::<f32>().ok().filter(|z| z.is_finite()).map(|z| Mode::Zoom(z.clamp(super::MIN_ZOOM, super::MAX_ZOOM))),
+            z => z
+                .parse::<f32>()
+                .ok()
+                .filter(|z| z.is_finite())
+                .map(|z| Mode::Zoom(z.clamp(super::MIN_ZOOM, super::MAX_ZOOM))),
         }
     }
 
@@ -1314,9 +1433,16 @@ pub mod places {
 
         #[test]
         fn lines_round_trip() {
-            let text = format!("12\t{}\t/a/b c.pdf\n3\t{}\t/x.pdf\nbad line\n", mode_text(Mode::Page), mode_text(Mode::Zoom(1.5)));
+            let text = format!(
+                "12\t{}\t/a/b c.pdf\n3\t{}\t/x.pdf\nbad line\n",
+                mode_text(Mode::Page),
+                mode_text(Mode::Zoom(1.5))
+            );
             let all = parse(&text);
-            assert_eq!(all, vec![(12, Mode::Page, "/a/b c.pdf".to_string()), (3, Mode::Zoom(1.5), "/x.pdf".to_string())]);
+            assert_eq!(
+                all,
+                vec![(12, Mode::Page, "/a/b c.pdf".to_string()), (3, Mode::Zoom(1.5), "/x.pdf".to_string())]
+            );
         }
     }
 }
@@ -1385,7 +1511,10 @@ mod tests {
         // Width fit at zoom 1: page 0 at x 16, y 16.
         assert_eq!(d.hit(r, 16.0 + 100.0, 16.0 + 50.0), Some((0, 100.0, 50.0)));
         assert_eq!(d.hit(r, 5.0, 50.0), None);
-        d.shared.links.lock().unwrap().insert(0, vec![Link { rect: [90.0, 40.0, 200.0, 60.0], action: Action::Uri("https://example.org/".into()) }]);
+        d.shared.links.lock().unwrap().insert(
+            0,
+            vec![Link { rect: [90.0, 40.0, 200.0, 60.0], action: Action::Uri("https://example.org/".into()) }],
+        );
         assert_eq!(d.link_at(r, 116.0, 66.0), Some(Action::Uri("https://example.org/".into())));
         assert_eq!(d.link_at(r, 116.0, 166.0), None);
         d.go_to_target(Target { page: 1, top: Some(100.0) }, r);
@@ -1467,7 +1596,11 @@ mod tests {
     #[test]
     fn a_match_with_the_words_around_it() {
         let text = "Early one morning in the spring the quick brown fox jumps over the lazy dog and keeps running far away from the farm";
-        let chars: Vec<Char> = text.chars().enumerate().map(|(i, c)| Char { text: c.to_string(), rect: [i as f32 * 5.0, 0.0, i as f32 * 5.0 + 5.0, 10.0] }).collect();
+        let chars: Vec<Char> = text
+            .chars()
+            .enumerate()
+            .map(|(i, c)| Char { text: c.to_string(), rect: [i as f32 * 5.0, 0.0, i as f32 * 5.0 + 5.0, 10.0] })
+            .collect();
         let at = text.find("lazy").unwrap();
         let s = snippet(&chars, at, at + 3);
         assert!(s.contains("lazy dog"), "{s}");

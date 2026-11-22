@@ -14,7 +14,13 @@ fn main() {
     let p = pages.get(page - 1).expect("no such page");
     let t = std::time::Instant::now();
     let c = vergence_pdf::render_page(&doc, p, scale).expect("drawn");
-    eprintln!("page {page} of {}: {} x {} px in {:.0} ms", pages.len(), c.width, c.height, t.elapsed().as_secs_f64() * 1000.0);
+    eprintln!(
+        "page {page} of {}: {} x {} px in {:.0} ms",
+        pages.len(),
+        c.width,
+        c.height,
+        t.elapsed().as_secs_f64() * 1000.0
+    );
     let mut ppm = format!("P6 {} {} 255\n", c.width, c.height).into_bytes();
     for y in 0..c.height {
         for x in 0..c.width {

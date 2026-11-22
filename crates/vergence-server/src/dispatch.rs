@@ -77,8 +77,19 @@ const DRAG: f64 = 6.0;
 
 /// A move or resize in progress.
 enum Running {
-    Move { window: Win, from: Point<f64, Logical>, loc: Point<i32, Logical>, unmaximize_on_drag: bool },
-    Resize { window: Win, edges: ResizeEdge, from: Point<f64, Logical>, initial: Rectangle<i32, Logical>, size: Size<i32, Logical> },
+    Move {
+        window: Win,
+        from: Point<f64, Logical>,
+        loc: Point<i32, Logical>,
+        unmaximize_on_drag: bool,
+    },
+    Resize {
+        window: Win,
+        edges: ResizeEdge,
+        from: Point<f64, Logical>,
+        initial: Rectangle<i32, Logical>,
+        size: Size<i32, Logical>,
+    },
 }
 
 /// A press on a tab (bar milestone 1, step 7): the window, the tab's place in
@@ -95,8 +106,18 @@ struct TabHold {
 /// What came in, for the outputs that pass it on as it came.
 pub enum Came {
     Motion,
-    Button { button: u32, state: ButtonState },
-    Axis { frame: AxisFrame, source: u8, dx: f64, dy: f64, v120x: i32, v120y: i32 },
+    Button {
+        button: u32,
+        state: ButtonState,
+    },
+    Axis {
+        frame: AxisFrame,
+        source: u8,
+        dx: f64,
+        dy: f64,
+        v120x: i32,
+        v120y: i32,
+    },
     /// Something the server decided by itself (a program's request, a window gone).
     Nothing,
 }
@@ -252,7 +273,18 @@ impl Server {
         }
         // Anything of a window a modal dialog blocks is the dialog's (dialogs.rs).
         let hit_window = match self.hit(pos) {
-            Hit::Surface(w, ..) | Hit::Native(w) | Hit::Title(w) | Hit::Close(w) | Hit::Maximize(w) | Hit::Minimize(w) | Hit::Edge(w, _) | Hit::Tab(w, _) | Hit::CloseTab(w, _) | Hit::Plus(w) | Hit::Tool(w, _) | Hit::AppMenu(w) => Some(w),
+            Hit::Surface(w, ..)
+            | Hit::Native(w)
+            | Hit::Title(w)
+            | Hit::Close(w)
+            | Hit::Maximize(w)
+            | Hit::Minimize(w)
+            | Hit::Edge(w, _)
+            | Hit::Tab(w, _)
+            | Hit::CloseTab(w, _)
+            | Hit::Plus(w)
+            | Hit::Tool(w, _)
+            | Hit::AppMenu(w) => Some(w),
             _ => None,
         };
         if let Some(modal) = hit_window.and_then(|w| self.modal_of(&w)) {
@@ -300,10 +332,16 @@ impl Server {
             Some(Target::Surface(..)) => return,
             Some(Target::Server(Part::Edge(_, e))) => crate::decor::edge_icon(e.into()),
             // Super+Shift+4: a crosshair for an area, the arrow for a window.
-            Some(Target::Server(Part::Capture)) if self.capture_pick.as_ref().is_some_and(|p| !p.window) => CursorIcon::Crosshair,
+            Some(Target::Server(Part::Capture)) if self.capture_pick.as_ref().is_some_and(|p| !p.window) => {
+                CursorIcon::Crosshair
+            }
             // The screenshot bar's grip: a hand (closed while dragging).
-            Some(Target::Server(Part::Capture)) if self.bar_cursor(pos).is_some() => self.bar_cursor(pos).unwrap_or(CursorIcon::Default),
-            Some(Target::Native(id)) => self.input.wins.get(&id).and_then(|w| w.native()).map(|n| n.cursor()).unwrap_or(CursorIcon::Default),
+            Some(Target::Server(Part::Capture)) if self.bar_cursor(pos).is_some() => {
+                self.bar_cursor(pos).unwrap_or(CursorIcon::Default)
+            }
+            Some(Target::Native(id)) => {
+                self.input.wins.get(&id).and_then(|w| w.native()).map(|n| n.cursor()).unwrap_or(CursorIcon::Default)
+            }
             _ => CursorIcon::Default,
         };
         self.pointer_image.status = CursorImageStatus::Named(icon);
@@ -345,7 +383,8 @@ impl Server {
 
     /// The pointer's picture, and Smithay's pointer where the pointer is.
     pub(crate) fn pointer_follow(&mut self, pos: Point<f64, Logical>, time: InputTime, under: Option<Target>) {
-        let (grab, held, focus) = (self.input.seat.grab(), self.input.seat.buttons_held(), self.input.seat.pointer_focus());
+        let (grab, held, focus) =
+            (self.input.seat.grab(), self.input.seat.buttons_held(), self.input.seat.pointer_focus());
         if grab.is_none() && !held {
             self.pointer_picture(under, pos);
         } else if let Some(icon) = self.bar_cursor(pos).filter(|i| *i == CursorIcon::Grabbing) {
@@ -379,14 +418,28 @@ impl Server {
             self.native_drag_drop(pos);
         }
         let under = self.target_at(pos);
-        let mods = self.seat.get_keyboard().map(|k| k.modifier_state()).map(|m| vergence_seat::keyboard::Mods { ctrl: m.ctrl, alt: m.alt, shift: m.shift, logo: m.logo }).unwrap_or_default();
+        let mods = self
+            .seat
+            .get_keyboard()
+            .map(|k| k.modifier_state())
+            .map(|m| vergence_seat::keyboard::Mods { ctrl: m.ctrl, alt: m.alt, shift: m.shift, logo: m.logo })
+            .unwrap_or_default();
         let now = self.start_time.elapsed().as_millis() as u64;
         let out = self.input.seat.button(button, state == ButtonState::Pressed, under, mods, now);
         self.apply(out, pos, time, &Came::Button { button, state });
     }
 
     /// A wheel or a touchpad's scroll.
-    pub fn pointer_axis(&mut self, frame: AxisFrame, source: u8, dx: f64, dy: f64, v120x: i32, v120y: i32, time: InputTime) {
+    pub fn pointer_axis(
+        &mut self,
+        frame: AxisFrame,
+        source: u8,
+        dx: f64,
+        dy: f64,
+        v120x: i32,
+        v120y: i32,
+        time: InputTime,
+    ) {
         self.dispatch_sync();
         let pos = self.pointer_location();
         let under = self.target_at(pos);
@@ -431,7 +484,11 @@ impl Server {
                 Out::Enter(t) | Out::Motion(t) => match t {
                     Target::Surface(_, sid) => {
                         let focus = self.input.surfaces.get(&sid).cloned();
-                        pointer.motion(self, focus, &MotionEvent { location: pos, serial: SERIAL_COUNTER.next_serial(), time });
+                        pointer.motion(
+                            self,
+                            focus,
+                            &MotionEvent { location: pos, serial: SERIAL_COUNTER.next_serial(), time },
+                        );
                         pointer.frame(self);
                     }
                     Target::Native(id) => {
@@ -447,7 +504,11 @@ impl Server {
                 },
                 Out::Leave(t) => match t {
                     Target::Surface(..) => {
-                        pointer.motion(self, None, &MotionEvent { location: pos, serial: SERIAL_COUNTER.next_serial(), time });
+                        pointer.motion(
+                            self,
+                            None,
+                            &MotionEvent { location: pos, serial: SERIAL_COUNTER.next_serial(), time },
+                        );
                         pointer.frame(self);
                     }
                     Target::Native(id) => {
@@ -546,7 +607,18 @@ impl Server {
         if pressed && self.aside.active() {
             let w = match &t {
                 Target::Native(id) | Target::Surface(id, _) => self.input.wins.get(id).cloned(),
-                Target::Server(Part::Title(id) | Part::Close(id) | Part::Maximize(id) | Part::Minimize(id) | Part::Edge(id, _) | Part::Tab(id, _) | Part::CloseTab(id, _) | Part::Plus(id) | Part::Tool(id, _) | Part::AppMenu(id)) => self.input.wins.get(id).cloned(),
+                Target::Server(
+                    Part::Title(id)
+                    | Part::Close(id)
+                    | Part::Maximize(id)
+                    | Part::Minimize(id)
+                    | Part::Edge(id, _)
+                    | Part::Tab(id, _)
+                    | Part::CloseTab(id, _)
+                    | Part::Plus(id)
+                    | Part::Tool(id, _)
+                    | Part::AppMenu(id),
+                ) => self.input.wins.get(id).cloned(),
                 _ => None,
             };
             if let Some(w) = w {
@@ -559,7 +631,10 @@ impl Server {
             self.picker_close();
         }
         // A press anywhere but the drawer, its card or the dock puts the drawer away (drawer.rs).
-        if pressed && self.tiles.drawer.is_some() && !matches!(t, Target::Server(Part::Drawer | Part::Card | Part::Dock)) {
+        if pressed
+            && self.tiles.drawer.is_some()
+            && !matches!(t, Target::Server(Part::Drawer | Part::Card | Part::Dock))
+        {
             self.drawer_close();
         }
         // A press on the desktop (its icons' window or the bare wallpaper)
@@ -578,7 +653,11 @@ impl Server {
             self.launcher_close();
         }
         // A tab held: the left button's release ends it, wherever the seat sends it.
-        if !pressed && button == vergence_seat::BTN_LEFT && self.input.tab_hold.is_some() && !matches!(t, Target::Server(Part::Tab(..))) {
+        if !pressed
+            && button == vergence_seat::BTN_LEFT
+            && self.input.tab_hold.is_some()
+            && !matches!(t, Target::Server(Part::Tab(..)))
+        {
             tracing::info!("tab: let go over {t:?}, not the tab's bar");
             self.tab_release(pos);
             return;
@@ -605,8 +684,12 @@ impl Server {
             Target::Server(Part::Note) if pressed => self.notify_press(pos),
             Target::Server(Part::Picker) if pressed && button == vergence_seat::BTN_LEFT => self.picker_press(pos),
             Target::Server(Part::Overview) if pressed && button == vergence_seat::BTN_LEFT => self.overview_press(pos),
-            Target::Server(Part::Capture) if pressed && button == vergence_seat::BTN_LEFT => self.capture_pick_press(pos),
-            Target::Server(Part::Capture) if !pressed && button == vergence_seat::BTN_LEFT => self.capture_pick_release(pos),
+            Target::Server(Part::Capture) if pressed && button == vergence_seat::BTN_LEFT => {
+                self.capture_pick_press(pos)
+            }
+            Target::Server(Part::Capture) if !pressed && button == vergence_seat::BTN_LEFT => {
+                self.capture_pick_release(pos)
+            }
             Target::Server(Part::Shot) if pressed && button == vergence_seat::BTN_LEFT => self.shot_press(pos),
             Target::Server(Part::Shot) if !pressed && button == vergence_seat::BTN_LEFT => self.shot_release(pos),
             // The bare wallpaper (no desktop icons): as the icons' ground (aside.rs).
@@ -615,17 +698,29 @@ impl Server {
             Target::Server(Part::Card) if !pressed => self.card_release(),
             Target::Server(Part::Drawer) if pressed && button == vergence_seat::BTN_LEFT => self.drawer_press(pos),
             Target::Server(Part::Drawer) if !pressed => self.drawer_release(pos),
-            Target::Server(Part::Session) if pressed && button == vergence_seat::BTN_LEFT && self.elevating() => self.elevate_press(pos),
-            Target::Server(Part::Session) if pressed && button == vergence_seat::BTN_LEFT && self.agents_asking() => self.agent_dialog_press(pos),
-            Target::Server(Part::Session) if pressed && button == vergence_seat::BTN_LEFT && self.portal_asking() => self.portal_ask_press(pos),
-            Target::Server(Part::Session) if pressed && button == vergence_seat::BTN_LEFT => self.session_dialog_press(pos),
+            Target::Server(Part::Session) if pressed && button == vergence_seat::BTN_LEFT && self.elevating() => {
+                self.elevate_press(pos)
+            }
+            Target::Server(Part::Session) if pressed && button == vergence_seat::BTN_LEFT && self.agents_asking() => {
+                self.agent_dialog_press(pos)
+            }
+            Target::Server(Part::Session) if pressed && button == vergence_seat::BTN_LEFT && self.portal_asking() => {
+                self.portal_ask_press(pos)
+            }
+            Target::Server(Part::Session) if pressed && button == vergence_seat::BTN_LEFT => {
+                self.session_dialog_press(pos)
+            }
             // The login screen's people and session line (greeter.rs).
-            Target::Server(Part::Lock) if pressed && button == vergence_seat::BTN_LEFT && crate::greeter() => self.greeter_press(pos),
+            Target::Server(Part::Lock) if pressed && button == vergence_seat::BTN_LEFT && crate::greeter() => {
+                self.greeter_press(pos)
+            }
             // The dock: a left press is a click or the start of a drag, let go where
             // it ends; a right press is an icon's menu.
             Target::Server(Part::Dock) if pressed && button == vergence_seat::BTN_LEFT => self.shelf_press(pos, button),
             Target::Server(Part::Dock) if pressed && button == vergence_seat::BTN_RIGHT => self.shelf_menu(pos),
-            Target::Server(Part::Dock) if !pressed && self.shelf.held.is_some_and(|(b, _)| b == button) => self.shelf_release(pos),
+            Target::Server(Part::Dock) if !pressed && self.shelf.held.is_some_and(|(b, _)| b == button) => {
+                self.shelf_release(pos)
+            }
             Target::Server(Part::Desktop) if pressed && button == vergence_seat::BTN_RIGHT => self.open_menu(pos),
             Target::Server(Part::Switcher) if pressed && button == vergence_seat::BTN_LEFT => self.switch_click(pos),
             // A program's own bar button (window styles milestone 1): the program hears it.
@@ -633,7 +728,10 @@ impl Server {
                 if let Some(Win::Native(n)) = self.input.wins.get(&id).cloned()
                     && let Some(tool) = self.bar_tool_id(&Win::Native(n.clone()), i as usize)
                 {
-                    self.bus_send(n.client, vergence_protocol::bus::ServerMsg::Window(WinEvent::BarButton { window: n.id, id: tool }));
+                    self.bus_send(
+                        n.client,
+                        vergence_protocol::bus::ServerMsg::Window(WinEvent::BarButton { window: n.id, id: tool }),
+                    );
                 }
             }
             Target::Server(Part::Blocked(id)) if pressed => {
@@ -645,7 +743,8 @@ impl Server {
             Target::Server(Part::Tab(id, i)) if pressed && button == vergence_seat::BTN_LEFT => {
                 self.tab_event(id, i, |window, tab| WinEvent::TabChosen { window, tab });
                 if let Some(w) = self.input.wins.get(&id).cloned() {
-                    self.input.tab_hold = Some(TabHold { window: w, index: i as usize, from: pos, drag: None, landing: None });
+                    self.input.tab_hold =
+                        Some(TabHold { window: w, index: i as usize, from: pos, drag: None, landing: None });
                 }
             }
             Target::Server(Part::Tab(_, _)) if !pressed && button == vergence_seat::BTN_LEFT => self.tab_release(pos),
@@ -654,15 +753,25 @@ impl Server {
                     && let (Some((bar, layout)), Some(tab)) = (self.bar_of(&w), self.tab_id(&w, i as usize))
                     && let Some(r) = layout.tabs.get(i as usize)
                 {
-                    let slot = Rectangle::new((bar.loc.x + r.x as i32, bar.loc.y + r.y as i32).into(), (r.w as i32, r.h as i32).into());
+                    let slot = Rectangle::new(
+                        (bar.loc.x + r.x as i32, bar.loc.y + r.y as i32).into(),
+                        (r.w as i32, r.h as i32).into(),
+                    );
                     self.open_tab_menu(&w, tab, slot);
                 }
             }
-            Target::Server(Part::Tab(id, i)) if pressed && button == vergence_seat::BTN_MIDDLE => self.tab_event(id, i, |window, tab| WinEvent::TabClose { window, tab }),
-            Target::Server(Part::CloseTab(id, i)) if pressed && button == vergence_seat::BTN_LEFT => self.tab_event(id, i, |window, tab| WinEvent::TabClose { window, tab }),
+            Target::Server(Part::Tab(id, i)) if pressed && button == vergence_seat::BTN_MIDDLE => {
+                self.tab_event(id, i, |window, tab| WinEvent::TabClose { window, tab })
+            }
+            Target::Server(Part::CloseTab(id, i)) if pressed && button == vergence_seat::BTN_LEFT => {
+                self.tab_event(id, i, |window, tab| WinEvent::TabClose { window, tab })
+            }
             Target::Server(Part::Plus(id)) if pressed && button == vergence_seat::BTN_LEFT => {
                 if let Some(Win::Native(n)) = self.input.wins.get(&id).cloned() {
-                    self.bus_send(n.client, vergence_protocol::bus::ServerMsg::Window(WinEvent::TabNew { window: n.id }));
+                    self.bus_send(
+                        n.client,
+                        vergence_protocol::bus::ServerMsg::Window(WinEvent::TabNew { window: n.id }),
+                    );
                 }
             }
             Target::Server(_) => {}
@@ -709,7 +818,11 @@ impl Server {
     fn tab_hold_check(&mut self) {
         if self.input.tab_hold.is_some() && !self.input.seat.buttons_held() {
             let hold = self.input.tab_hold.take().unwrap();
-            tracing::warn!("tab: a hold on tab {} ended with no release (dragged: {})", hold.index, hold.drag.is_some());
+            tracing::warn!(
+                "tab: a hold on tab {} ended with no release (dragged: {})",
+                hold.index,
+                hold.drag.is_some()
+            );
             self.pointer_image.status = CursorImageStatus::default_named();
             self.redraw_all();
         }
@@ -724,7 +837,9 @@ impl Server {
         if let Some(hold) = self.input.tab_hold.as_ref().filter(|h| h.drag.is_some()) {
             return match hold.landing? {
                 vergence_bar::Landing::At(to) => vergence_bar::gap_of(hold.index, to).map(|g| (hold.window.clone(), g)),
-                vergence_bar::Landing::Outside => self.join_target(&hold.window, pos, false).ok().map(|(w, _, to)| (w, to as usize)),
+                vergence_bar::Landing::Outside => {
+                    self.join_target(&hold.window, pos, false).ok().map(|(w, _, to)| (w, to as usize))
+                }
             };
         }
         let (w, _) = self.input.tab_move.as_ref()?;
@@ -770,7 +885,9 @@ impl Server {
         };
         let (client, window) = (n.client, n.id);
         let event = match hold.landing {
-            Some(vergence_bar::Landing::At(to)) if to != hold.index => WinEvent::TabMoved { window, tab, to: to as u32 },
+            Some(vergence_bar::Landing::At(to)) if to != hold.index => {
+                WinEvent::TabMoved { window, tab, to: to as u32 }
+            }
             Some(vergence_bar::Landing::At(_)) | None => {
                 tracing::info!("tab: dropped at {:.0},{:.0} in its own place", pos.x, pos.y);
                 return;
@@ -778,7 +895,11 @@ impl Server {
             Some(vergence_bar::Landing::Outside) => match self.join_target(&hold.window, pos, false) {
                 Ok((_, into, to)) => WinEvent::TabJoin { window, tab, into, to },
                 Err(why) => {
-                    tracing::info!("tab: dropped at {:.0},{:.0} out of its window, {why}: a window of its own", pos.x, pos.y);
+                    tracing::info!(
+                        "tab: dropped at {:.0},{:.0} out of its window, {why}: a window of its own",
+                        pos.x,
+                        pos.y
+                    );
                     WinEvent::TabOut { window, tab, place: self.drop_place(pos, n.size()) }
                 }
             },
@@ -809,8 +930,12 @@ impl Server {
             if on_bar.is_some() || self.space.element_geometry(w).is_some_and(|g| g.contains(at)) {
                 let what = match w {
                     _ if w == from => "its own window".to_string(),
-                    Win::Native(m) if m.client == n.client => format!("the content of native window {}, not its bar", m.id),
-                    Win::Native(m) => format!("a window of another program (native window {}, client {})", m.id, m.client),
+                    Win::Native(m) if m.client == n.client => {
+                        format!("the content of native window {}, not its bar", m.id)
+                    }
+                    Win::Native(m) => {
+                        format!("a window of another program (native window {}, client {})", m.id, m.client)
+                    }
                     _ => "a Wayland or X11 window".to_string(),
                 };
                 return Err(format!("over {what}"));
@@ -825,7 +950,8 @@ impl Server {
     /// partly off the monitor would be refused and the window centered.
     fn drop_place(&self, pos: Point<f64, Logical>, size: Size<i32, Logical>) -> vergence_protocol::window::Place {
         let at = pos.to_i32_round::<i32>();
-        let Some(out) = self.space.outputs().find(|o| self.space.output_geometry(o).is_some_and(|g| g.contains(at))) else {
+        let Some(out) = self.space.outputs().find(|o| self.space.output_geometry(o).is_some_and(|g| g.contains(at)))
+        else {
             return vergence_protocol::window::Place::Anywhere;
         };
         let (Some(id), Some(g)) = (crate::memory::monitor_id_of(out), self.space.output_geometry(out)) else {
@@ -848,8 +974,13 @@ impl Server {
             TabAct::CloseOthers => WinEvent::TabCloseOthers { window, tab },
             TabAct::NewWindow => {
                 // A little down and right of the window, on its monitor.
-                let at = self.space.element_location(w).map(|p| p.to_f64() + Point::from((60.0, 60.0))).unwrap_or_default();
-                WinEvent::TabOut { window, tab, place: self.drop_place(at + Point::from((120.0, -(crate::decor::TITLE_H as f64) / 2.0)), n.size()) }
+                let at =
+                    self.space.element_location(w).map(|p| p.to_f64() + Point::from((60.0, 60.0))).unwrap_or_default();
+                WinEvent::TabOut {
+                    window,
+                    tab,
+                    place: self.drop_place(at + Point::from((120.0, -(crate::decor::TITLE_H as f64) / 2.0)), n.size()),
+                }
             }
             TabAct::Program(entry) => WinEvent::TabMenu { window, tab, entry },
         };
@@ -876,7 +1007,9 @@ impl Server {
                 };
                 pointer.motion(self, focus, &MotionEvent { location: pos, serial, time });
             }
-            Came::Button { button, state } => pointer.button(self, &ButtonEvent { button: *button, state: *state, serial, time }),
+            Came::Button { button, state } => {
+                pointer.button(self, &ButtonEvent { button: *button, state: *state, serial, time })
+            }
             Came::Axis { frame, .. } => pointer.axis(self, frame.clone()),
             Came::Nothing => {}
         }
@@ -930,7 +1063,9 @@ impl Server {
                                 Some(old)
                             }
                             // Out of its part of the screen (snap.rs), as out of maximized.
-                            None => self.unsnap(&window).inspect(|old| self.set_window_rect(&window, Rectangle::new(old.loc, old.size), false)),
+                            None => self
+                                .unsnap(&window)
+                                .inspect(|old| self.set_window_rect(&window, Rectangle::new(old.loc, old.size), false)),
                         };
                         if let Some(old) = old {
                             // Out of maximized, its old size, under the pointer by its title bar.
@@ -1012,7 +1147,12 @@ impl Server {
                             tracing::info!("tab: {event:?}");
                             self.bus_send(n.client, vergence_protocol::bus::ServerMsg::Window(event));
                         }
-                        Err(why) => tracing::info!("tab: window {} moved by its only tab, let go at {:.0},{:.0} {why}: stays a window", n.id, pos.x, pos.y),
+                        Err(why) => tracing::info!(
+                            "tab: window {} moved by its only tab, let go at {:.0},{:.0} {why}: stays a window",
+                            n.id,
+                            pos.x,
+                            pos.y
+                        ),
                     }
                     self.redraw_all();
                 }
@@ -1036,7 +1176,10 @@ impl Server {
         // too (no surface hears it: Smithay's focus is none now).
         if let Some(pointer) = self.seat.get_pointer() {
             for button in std::mem::take(&mut self.input.smithay_held) {
-                pointer.button(self, &ButtonEvent { button, state: ButtonState::Released, serial: SERIAL_COUNTER.next_serial(), time });
+                pointer.button(
+                    self,
+                    &ButtonEvent { button, state: ButtonState::Released, serial: SERIAL_COUNTER.next_serial(), time },
+                );
             }
             pointer.frame(self);
         }
@@ -1069,7 +1212,8 @@ impl Server {
     /// The edges to resize from (Alt+right drag): the window's nearest third in each direction.
     fn nearest_edges(&self, window: &Win, at: Point<f64, Logical>) -> ResizeEdge {
         let Some(g) = self.space.element_geometry(window) else { return ResizeEdge::BOTTOM_RIGHT };
-        let (fx, fy) = ((at.x - g.loc.x as f64) / g.size.w.max(1) as f64, (at.y - g.loc.y as f64) / g.size.h.max(1) as f64);
+        let (fx, fy) =
+            ((at.x - g.loc.x as f64) / g.size.w.max(1) as f64, (at.y - g.loc.y as f64) / g.size.h.max(1) as f64);
         let mut e = ResizeEdge::empty();
         if fx < 1.0 / 3.0 {
             e |= ResizeEdge::LEFT;

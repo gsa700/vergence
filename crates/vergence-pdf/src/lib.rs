@@ -45,9 +45,9 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 pub use filter::Decoded;
-pub use render::{page_size, page_text, render_page, render_region};
 use lexer::Lexer;
 pub use object::{Dict, Object, Ref, Stream};
+pub use render::{page_size, page_text, render_page, render_region};
 use xref::Entry;
 
 /// How many references a lookup follows, how deep the page tree may go,
@@ -203,7 +203,13 @@ impl Document {
             for key in ["Title", "Author", "Subject", "Keywords", "Creator", "Producer", "CreationDate", "ModDate"] {
                 let Some(v) = info.get(key).map(|o| self.resolve(o)) else { continue };
                 let Some(bytes) = v.as_bytes() else { continue };
-                let mut text = outline::text_string(bytes).chars().filter(|c| !c.is_control()).take(500).collect::<String>().trim().to_string();
+                let mut text = outline::text_string(bytes)
+                    .chars()
+                    .filter(|c| !c.is_control())
+                    .take(500)
+                    .collect::<String>()
+                    .trim()
+                    .to_string();
                 if key.ends_with("Date") {
                     text = pdf_date(&text).unwrap_or(text);
                 }
@@ -216,7 +222,10 @@ impl Document {
             out.push(("Version".into(), v));
         }
         if self.encrypted() {
-            out.push(("Encrypted".into(), self.encryption_revision().map_or("yes".into(), |r| format!("yes (revision {r})"))));
+            out.push((
+                "Encrypted".into(),
+                self.encryption_revision().map_or("yes".into(), |r| format!("yes (revision {r})")),
+            ));
         }
         out
     }
@@ -224,7 +233,8 @@ impl Document {
     /// The version in the header ("1.7"), if readable.
     pub fn version(&self) -> Option<String> {
         let at = lexer::find(&self.data[..self.data.len().min(1024)], b"%PDF-")?;
-        let v: Vec<u8> = self.data[at + 5..].iter().take(4).take_while(|b| b.is_ascii_digit() || **b == b'.').copied().collect();
+        let v: Vec<u8> =
+            self.data[at + 5..].iter().take(4).take_while(|b| b.is_ascii_digit() || **b == b'.').copied().collect();
         String::from_utf8(v).ok().filter(|s| !s.is_empty())
     }
 
@@ -245,7 +255,9 @@ impl Document {
 
     fn read(&self, r: Ref) -> Object {
         match self.entries.get(&r.num).copied() {
-            Some(Entry::At { offset, .. }) => self.at(offset, r).or_else(|| self.by_scan(r)).map_or(Object::Null, |o| self.decrypted(o, r)),
+            Some(Entry::At { offset, .. }) => {
+                self.at(offset, r).or_else(|| self.by_scan(r)).map_or(Object::Null, |o| self.decrypted(o, r))
+            }
             Some(Entry::InStream { stm, idx }) => self.in_stream(stm, idx, r.num).unwrap_or(Object::Null),
             Some(Entry::Free) | None => self.by_scan(r).map_or(Object::Null, |o| self.decrypted(o, r)),
         }
@@ -323,7 +335,8 @@ impl Document {
     /// After a repair: objects inside object streams, which the scan cannot
     /// see, are entered from each /Type /ObjStm found.
     fn add_object_stream_members(&mut self) {
-        let candidates: Vec<u32> = self.entries.iter().filter_map(|(n, e)| matches!(e, Entry::At { .. }).then_some(*n)).collect();
+        let candidates: Vec<u32> =
+            self.entries.iter().filter_map(|(n, e)| matches!(e, Entry::At { .. }).then_some(*n)).collect();
         let mut add = Vec::new();
         for num in candidates {
             let Object::Stream(s) = self.get(Ref { num, generation: 0 }) else { continue };

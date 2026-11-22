@@ -53,7 +53,8 @@ pub struct Sizes {
 }
 
 pub const COMPACT: Sizes = Sizes { bar_h: 32.0, item_h: 26.0, button_w: 28.0, plus_w: 30.0, side: 4.0, gap: 2.0 };
-pub const STANDARD: Sizes = Sizes { bar_h: BAR_H, item_h: TAB_H, button_w: BUTTON_W, plus_w: PLUS_W, side: SIDE, gap: GAP };
+pub const STANDARD: Sizes =
+    Sizes { bar_h: BAR_H, item_h: TAB_H, button_w: BUTTON_W, plus_w: PLUS_W, side: SIDE, gap: GAP };
 pub const LARGE: Sizes = Sizes { bar_h: 44.0, item_h: 36.0, button_w: 38.0, plus_w: 40.0, side: 8.0, gap: 4.0 };
 
 impl Sizes {
@@ -132,7 +133,9 @@ pub const DEFAULT_LAYOUT: &str = "close,minimize,maximize:";
 pub fn desktop_layout() -> (Vec<WinButton>, Vec<WinButton>) {
     let text = settings_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
     // No app button where the toolkit draws its own bar: its menu is the server's.
-    without_app_menu(decoration_layout(&host_layout().or_else(|| layout_setting(&text)).unwrap_or_else(|| DEFAULT_LAYOUT.into())))
+    without_app_menu(decoration_layout(
+        &host_layout().or_else(|| layout_setting(&text)).unwrap_or_else(|| DEFAULT_LAYOUT.into()),
+    ))
 }
 
 /// Whether the desktop is in its light style: under GNOME, GNOME's own
@@ -217,7 +220,9 @@ pub fn host_layout() -> Option<String> {
 
 /// Vergence's settings file, which holds the button layout.
 pub fn settings_path() -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")));
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")));
     base.map(|b| b.join("vergence/settings.toml"))
 }
 
@@ -339,7 +344,16 @@ impl Layout {
             closes.push(close);
             x += tab_w + z.gap;
         }
-        Layout { buttons, tabs, closes, plus: Rect::new(x, top, z.plus_w, tab_h), title: None, tools: Vec::new(), controls_left, sizes: z }
+        Layout {
+            buttons,
+            tabs,
+            closes,
+            plus: Rect::new(x, top, z.plus_w, tab_h),
+            title: None,
+            tools: Vec::new(),
+            controls_left,
+            sizes: z,
+        }
     }
 
     /// The bar of a window without tabs: its buttons, and between them the
@@ -355,14 +369,30 @@ impl Layout {
         let top = ((z.bar_h - z.item_h) / 2.0).round();
         let (buttons, start, end) = Layout::buttons(width, left, right, &z, top);
         let title = Rect::new(start + 6.0, top, (end - start - 12.0).max(0.0), z.item_h);
-        Layout { buttons, tabs: Vec::new(), closes: Vec::new(), plus: Rect::new(end, top, 0.0, z.item_h), title: Some(title), tools: Vec::new(), controls_left: !left.is_empty(), sizes: z }
+        Layout {
+            buttons,
+            tabs: Vec::new(),
+            closes: Vec::new(),
+            plus: Rect::new(end, top, 0.0, z.item_h),
+            title: Some(title),
+            tools: Vec::new(),
+            controls_left: !left.is_empty(),
+            sizes: z,
+        }
     }
 
     /// The bar of a window with `count` buttons of its own (back and forward,
     /// say) and the title after them, both starting `from` points in (the
     /// width of a sidebar the content has on the left), or after the window's
     /// buttons if they reach further.
-    pub fn tools_sized(width: f32, left: &[WinButton], right: &[WinButton], z: Sizes, from: f32, tools: &[Option<f32>]) -> Layout {
+    pub fn tools_sized(
+        width: f32,
+        left: &[WinButton],
+        right: &[WinButton],
+        z: Sizes,
+        from: f32,
+        tools: &[Option<f32>],
+    ) -> Layout {
         // Centered, as in a plain bar. Icon buttons from `from` on, after
         // the window's buttons on the left; text buttons (their widths given)
         // at the far end, before the window's buttons on the right.
@@ -386,12 +416,27 @@ impl Layout {
             }
         }
         let title = Rect::new(x + 6.0, top, (end - x - 12.0).max(0.0), z.item_h);
-        Layout { buttons, tabs: Vec::new(), closes: Vec::new(), plus: Rect::new(end, top, 0.0, z.item_h), title: Some(title), tools: rects, controls_left: !left.is_empty(), sizes: z }
+        Layout {
+            buttons,
+            tabs: Vec::new(),
+            closes: Vec::new(),
+            plus: Rect::new(end, top, 0.0, z.item_h),
+            title: Some(title),
+            tools: rects,
+            controls_left: !left.is_empty(),
+            sizes: z,
+        }
     }
 
     /// The window's buttons on their sides, and where the room between them
     /// starts and ends.
-    fn buttons(width: f32, left: &[WinButton], right: &[WinButton], z: &Sizes, button_y: f32) -> (Vec<(WinButton, Rect)>, f32, f32) {
+    fn buttons(
+        width: f32,
+        left: &[WinButton],
+        right: &[WinButton],
+        z: &Sizes,
+        button_y: f32,
+    ) -> (Vec<(WinButton, Rect)>, f32, f32) {
         let mut buttons = Vec::new();
         let mut x = z.side;
         for b in left {
@@ -560,7 +605,12 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
         // their box. Shaded at rest only while the window has the keyboard;
         // under the pointer lighter (darker in light), the close button red
         // with a white mark.
-        let drawn = Rect::new(r.x + vergence_look::BUTTON_INSET_X, r.y + vergence_look::BUTTON_INSET_Y, r.w - 2.0 * vergence_look::BUTTON_INSET_X, r.h - 2.0 * vergence_look::BUTTON_INSET_Y);
+        let drawn = Rect::new(
+            r.x + vergence_look::BUTTON_INSET_X,
+            r.y + vergence_look::BUTTON_INSET_Y,
+            r.w - 2.0 * vergence_look::BUTTON_INSET_X,
+            r.h - 2.0 * vergence_look::BUTTON_INSET_Y,
+        );
         let hovered = look.hover == Some(part) || (*b == WinButton::AppMenu && look.menu_open);
         let fill = match (hovered, *b) {
             (true, WinButton::Close) => Some(CLOSE_HOVER),
@@ -593,7 +643,15 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
                     scene.push_clip(Rect::new(from, tab.y, to - from, tab.h), 0.0);
                     let m = fonts.metrics(face, look.font_size);
                     let baseline = tab.y + ((tab.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round() - 1.0;
-                    text(scene, fonts, face, look.font_size, Color::rgba(ink.r, ink.g, ink.b, FAINT), Point::new(from, baseline), title);
+                    text(
+                        scene,
+                        fonts,
+                        face,
+                        look.font_size,
+                        Color::rgba(ink.r, ink.g, ink.b, FAINT),
+                        Point::new(from, baseline),
+                        title,
+                    );
                     scene.pop_clip();
                 }
             }
@@ -602,8 +660,26 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
         let shown = i == look.shown;
         let hovered = matches!(look.hover, Some(Part::Tab(t) | Part::CloseTab(t)) if t == i);
         let alert = look.alerts.get(i).copied().unwrap_or(false);
-        let tab_ink = if alert { Color::rgb(255, 255, 255) } else if shown { look.pane_ink } else { ink };
-        tab_shape(scene, tab, if alert { color(l.alert) } else if shown { look.pane } else if hovered { shape_hover } else { tab_rest });
+        let tab_ink = if alert {
+            Color::rgb(255, 255, 255)
+        } else if shown {
+            look.pane_ink
+        } else {
+            ink
+        };
+        tab_shape(
+            scene,
+            tab,
+            if alert {
+                color(l.alert)
+            } else if shown {
+                look.pane
+            } else if hovered {
+                shape_hover
+            } else {
+                tab_rest
+            },
+        );
         if alert && hovered {
             tab_shape(scene, tab, shape_hover);
         }
@@ -646,7 +722,12 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
     for (i, r) in layout.tools.iter().enumerate() {
         let Some(&(what, enabled)) = look.tools.get(i) else { continue };
         if enabled && look.hover == Some(Part::Tool(i)) {
-            let drawn = Rect::new(r.x + vergence_look::BUTTON_INSET_X, r.y + vergence_look::BUTTON_INSET_Y, r.w - 2.0 * vergence_look::BUTTON_INSET_X, r.h - 2.0 * vergence_look::BUTTON_INSET_Y);
+            let drawn = Rect::new(
+                r.x + vergence_look::BUTTON_INSET_X,
+                r.y + vergence_look::BUTTON_INSET_Y,
+                r.w - 2.0 * vergence_look::BUTTON_INSET_X,
+                r.h - 2.0 * vergence_look::BUTTON_INSET_Y,
+            );
             scene.fill_rounded(drawn, RADIUS, shape_hover);
         }
         let mark = if enabled { ink } else { Color::rgba(ink.r, ink.g, ink.b, FAINT) };
@@ -655,7 +736,12 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
             if r.w <= 0.0 {
                 continue;
             }
-            let drawn = Rect::new(r.x + vergence_look::BUTTON_INSET_X, r.y + vergence_look::BUTTON_INSET_Y, r.w - 2.0 * vergence_look::BUTTON_INSET_X, r.h - 2.0 * vergence_look::BUTTON_INSET_Y);
+            let drawn = Rect::new(
+                r.x + vergence_look::BUTTON_INSET_X,
+                r.y + vergence_look::BUTTON_INSET_Y,
+                r.w - 2.0 * vergence_look::BUTTON_INSET_X,
+                r.h - 2.0 * vergence_look::BUTTON_INSET_Y,
+            );
             if look.focused && !(enabled && look.hover == Some(Part::Tool(i))) {
                 scene.fill_rounded(drawn, RADIUS, shape_rest);
             }
@@ -664,7 +750,15 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
                 let m = fonts.metrics(face, look.font_size);
                 let baseline = r.y + ((r.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round() - 1.0;
                 scene.push_clip(drawn, 0.0);
-                text(scene, fonts, face, look.font_size, mark, Point::new((r.x + (r.w - w) / 2.0).max(drawn.x + 4.0), baseline), name);
+                text(
+                    scene,
+                    fonts,
+                    face,
+                    look.font_size,
+                    mark,
+                    Point::new((r.x + (r.w - w) / 2.0).max(drawn.x + 4.0), baseline),
+                    name,
+                );
                 scene.pop_clip();
             }
             continue;
@@ -687,7 +781,10 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
         } else {
             ink
         };
-        scene.push_clip(if look.root { Rect::new(at, room.y, (room.x + room.w - at - 8.0).max(0.0), room.h) } else { *room }, 0.0);
+        scene.push_clip(
+            if look.root { Rect::new(at, room.y, (room.x + room.w - at - 8.0).max(0.0), room.h) } else { *room },
+            0.0,
+        );
         let m = fonts.metrics(face, look.font_size);
         let baseline = room.y + ((room.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round() - 1.0;
         text(scene, fonts, face, look.font_size, title_ink, Point::new(at, baseline), look.title);
@@ -729,7 +826,17 @@ pub fn gap_of(from: usize, to: usize) -> Option<usize> {
 /// The ghost of a dragged tab: the tab, `w` by `h`, in `fill` with its title
 /// in `ink`, for the server to draw under the pointer.
 #[allow(clippy::too_many_arguments)]
-pub fn draw_ghost(scene: &mut Scene, fonts: &mut Fonts, w: f32, h: f32, title: &str, font: Option<FaceId>, font_size: f32, fill: Color, ink: Color) {
+pub fn draw_ghost(
+    scene: &mut Scene,
+    fonts: &mut Fonts,
+    w: f32,
+    h: f32,
+    title: &str,
+    font: Option<FaceId>,
+    font_size: f32,
+    fill: Color,
+    ink: Color,
+) {
     scene.fill_rounded(Rect::new(0.0, 0.0, w, h), RADIUS, fill);
     if let Some(face) = font
         && w > 30.0
@@ -834,7 +941,11 @@ mod tests {
             assert_eq!(l.at(450.0, z.bar_h + 1.0), None);
         }
         let large = Layout::sized(900.0, 2, 0, &LEFT, &[], LARGE);
-        assert_eq!(large.at(large.tabs[0].x + 50.0, STANDARD.bar_h + 2.0), Some(Part::Tab(0)), "below a Standard bar's bottom, still a Large tab");
+        assert_eq!(
+            large.at(large.tabs[0].x + 50.0, STANDARD.bar_h + 2.0),
+            Some(Part::Tab(0)),
+            "below a Standard bar's bottom, still a Large tab"
+        );
         assert_eq!(Sizes::of(0), COMPACT);
         assert_eq!(Sizes::of(1), STANDARD);
         assert_eq!(Sizes::of(2), LARGE);
@@ -892,7 +1003,10 @@ mod tests {
     #[test]
     fn the_layout_string_says_which_side() {
         assert_eq!(decoration_layout("close,minimize:"), (vec![WinButton::Close, WinButton::Minimize], vec![]));
-        assert_eq!(decoration_layout(":minimize,maximize,close"), (vec![], vec![WinButton::Minimize, WinButton::Maximize, WinButton::Close]));
+        assert_eq!(
+            decoration_layout(":minimize,maximize,close"),
+            (vec![], vec![WinButton::Minimize, WinButton::Maximize, WinButton::Close])
+        );
         assert_eq!(decoration_layout("menu:close"), (vec![], vec![WinButton::Close]));
         assert_eq!(decoration_layout("close"), (vec![], vec![WinButton::Close]));
         assert_eq!(decoration_layout("appmenu:close"), (vec![WinButton::AppMenu], vec![WinButton::Close]));
@@ -902,8 +1016,14 @@ mod tests {
     fn the_app_button_goes_opposite_the_controls_unless_the_layout_places_it() {
         use WinButton::*;
         // Controls on the left: far right. On the right: far left (Windows 95's place).
-        assert_eq!(with_app_menu(decoration_layout("close,minimize,maximize:")), (vec![Close, Minimize, Maximize], vec![AppMenu]));
-        assert_eq!(with_app_menu(decoration_layout(":minimize,maximize,close")), (vec![AppMenu], vec![Minimize, Maximize, Close]));
+        assert_eq!(
+            with_app_menu(decoration_layout("close,minimize,maximize:")),
+            (vec![Close, Minimize, Maximize], vec![AppMenu])
+        );
+        assert_eq!(
+            with_app_menu(decoration_layout(":minimize,maximize,close")),
+            (vec![AppMenu], vec![Minimize, Maximize, Close])
+        );
         // Both sides, or none: far right.
         assert_eq!(with_app_menu(decoration_layout("close:minimize")), (vec![Close], vec![Minimize, AppMenu]));
         assert_eq!(with_app_menu((vec![], vec![])), (vec![], vec![AppMenu]));
@@ -918,7 +1038,10 @@ mod tests {
         assert_eq!(app.x + app.w, 800.0 - SIDE);
         assert_eq!(lay.at(app.x + 5.0, 20.0), Some(Part::Button(AppMenu)));
         assert_eq!(decoration_layout(""), (vec![], vec![]));
-        assert_eq!(layout_setting("[settings]\n\"Gtk/DecorationLayout\" = \"close,minimize:\"\n").as_deref(), Some("close,minimize:"));
+        assert_eq!(
+            layout_setting("[settings]\n\"Gtk/DecorationLayout\" = \"close,minimize:\"\n").as_deref(),
+            Some("close,minimize:")
+        );
         assert_eq!(layout_setting("[settings]\n\"Gtk/FontName\" = \"Sans 10\"\n"), None);
     }
 
@@ -929,7 +1052,11 @@ mod tests {
                 let l = Layout::new(width, count, 0, &LEFT, &[]);
                 assert_eq!(l.tabs.len(), count);
                 let narrow = l.tabs[0].w <= TAB_MIN;
-                assert!(narrow || l.plus.x + l.plus.w <= width - SIDE + 0.01, "{count} tabs in {width}: + ends at {}", l.plus.x + l.plus.w);
+                assert!(
+                    narrow || l.plus.x + l.plus.w <= width - SIDE + 0.01,
+                    "{count} tabs in {width}: + ends at {}",
+                    l.plus.x + l.plus.w
+                );
                 assert!(l.tabs.windows(2).all(|t| t[0].x + t[0].w <= t[1].x), "tabs do not overlap");
             }
         }
@@ -976,7 +1103,10 @@ mod tests {
         assert!(l.tabs.is_empty() && l.plus.w == 0.0);
         let title = l.title.unwrap();
         let first_button = l.buttons.iter().map(|(_, r)| r.x).fold(f32::MAX, f32::min);
-        assert!(title.x >= SIDE && title.x + title.w <= first_button, "the title's room ends before the buttons: {title:?}");
+        assert!(
+            title.x >= SIDE && title.x + title.w <= first_button,
+            "the title's room ends before the buttons: {title:?}"
+        );
         assert_eq!(l.at(title.x + 20.0, 20.0), Some(Part::Bar), "the title's room moves the window");
         assert_eq!(l.at(640.0 - SIDE - 5.0, 20.0), Some(Part::Button(WinButton::Close)));
         assert_eq!(l.at(300.0, BAR_H + 1.0), None);
@@ -994,7 +1124,27 @@ mod tests {
         for focused in [true, false] {
             for root in [true, false] {
                 let layout = Layout::plain(640.0, &[], &[WinButton::Close]);
-                let look = Look { bar: l, frosted: false, focused, pane: Color::rgb(0, 0, 0), pane_ink: Color::rgb(255, 255, 255), font: None, font_size: FONT_SIZE, titles: &[], alerts: &[], edited: &[], title: "sudo", shown: 0, hover: None, dragged: None, tools: &[], tool_names: &[], app_icon: None, menu_open: false, root };
+                let look = Look {
+                    bar: l,
+                    frosted: false,
+                    focused,
+                    pane: Color::rgb(0, 0, 0),
+                    pane_ink: Color::rgb(255, 255, 255),
+                    font: None,
+                    font_size: FONT_SIZE,
+                    titles: &[],
+                    alerts: &[],
+                    edited: &[],
+                    title: "sudo",
+                    shown: 0,
+                    hover: None,
+                    dragged: None,
+                    tools: &[],
+                    tool_names: &[],
+                    app_icon: None,
+                    menu_open: false,
+                    root,
+                };
                 let mut scene = Scene::new(640.0, 60.0);
                 draw(&mut scene, &mut fonts, &layout, &look);
                 let want = match (root, focused) {

@@ -290,7 +290,8 @@ impl WindowStore {
     /// profile from before sizes were kept, keyed by `base` alone), the most
     /// recently changed first; `except` is left out.
     pub fn variants(&self, base: &str, except: &str) -> Vec<&WindowProfile> {
-        let mut v: Vec<&WindowProfile> = self.profiles.iter().filter(|p| p.key != except && key_sizes(&p.key).0 == base).collect();
+        let mut v: Vec<&WindowProfile> =
+            self.profiles.iter().filter(|p| p.key != except && key_sizes(&p.key).0 == base).collect();
         v.sort_by(|a, b| b.updated.cmp(&a.updated));
         v
     }
@@ -384,12 +385,28 @@ mod tests {
         assert_eq!(key_sizes(&k).1[1], ("m2".to_string(), 1280, 720));
         assert_eq!(key_monitors("abc|m1=1920x1080").1[0].scale120, None);
         // A scale change keeps points, pulled inside a smaller monitor.
-        let w2 = WindowSetting { id: WindowId::default(), monitor: "m1".into(), x: 1500, y: 100, width: 420, height: 260, ..WindowSetting::default() };
+        let w2 = WindowSetting {
+            id: WindowId::default(),
+            monitor: "m1".into(),
+            x: 1500,
+            y: 100,
+            width: 420,
+            height: 260,
+            ..WindowSetting::default()
+        };
         let k2 = w2.kept((1280, 720));
         assert_eq!((k2.x, k2.y, k2.width, k2.height), (860, 100, 420, 260));
         let huge = WindowSetting { width: 3000, height: 2000, ..w2.clone() }.kept((1280, 720));
         assert_eq!((huge.x, huge.y, huge.width, huge.height), (0, 0, 1280, 720));
-        let w = WindowSetting { id: WindowId::default(), monitor: "m1".into(), x: 640, y: 360, width: 960, height: 540, ..WindowSetting::default() };
+        let w = WindowSetting {
+            id: WindowId::default(),
+            monitor: "m1".into(),
+            x: 640,
+            y: 360,
+            width: 960,
+            height: 540,
+            ..WindowSetting::default()
+        };
         let s = w.scaled((1920, 1080), (1280, 720));
         assert_eq!((s.x, s.y, s.width, s.height), (427, 240, 640, 360));
         assert_eq!(w.scaled((1920, 1080), (1920, 1080)), w);
@@ -404,7 +421,13 @@ mod tests {
 
     fn w(class: &str, index: u32, x: i32) -> WindowSetting {
         WindowSetting {
-            id: WindowId { instance: class.to_lowercase(), class: class.into(), role: String::new(), index, token: String::new() },
+            id: WindowId {
+                instance: class.to_lowercase(),
+                class: class.into(),
+                role: String::new(),
+                index,
+                token: String::new(),
+            },
             monitor: "m1".into(),
             x,
             y: 10,
@@ -476,7 +499,10 @@ mod tests {
         s.get_mut_or_new("desk").put(w("Firefox", 0, 5));
         let text = s.to_toml();
         assert!(text.contains("token = \"aa\"") && text.contains("seen = 100"), "{text}");
-        assert!(!text.contains("token = \"\"") && !text.contains("seen = 0"), "untokened windows write no token or seen: {text}");
+        assert!(
+            !text.contains("token = \"\"") && !text.contains("seen = 0"),
+            "untokened windows write no token or seen: {text}"
+        );
         assert_eq!(WindowStore::from_toml(&text).unwrap(), s);
         assert_eq!(s.forget_token("aa"), 2);
         assert_eq!(s.get("home").unwrap().windows.len(), 1);

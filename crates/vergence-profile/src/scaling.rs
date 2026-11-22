@@ -186,7 +186,7 @@ mod tests {
             ((1920, 1080), Some((160, 90))), // aspect ratio, not a size
             ((1920, 1080), Some((16, 9))),
             ((1920, 1080), Some((10000, 5600))), // 5 ppi
-            ((1920, 1080), Some((475, 475))), // wrong shape
+            ((1920, 1080), Some((475, 475))),    // wrong shape
         ] {
             let d = derive(px, mm, D, 1.0);
             assert_eq!(d.scale, 1.0, "{mm:?}");

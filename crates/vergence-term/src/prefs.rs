@@ -34,7 +34,8 @@ impl TermRows {
 /// every app (Dave, 2026-11-14: App default lets each app choose; Dark or
 /// Light is for all).
 pub fn forced_by_desktop(text: &str) -> Option<String> {
-    vergence_ui::desktop_pick(text).map(|light| format!("{} for every app: Settings > Appearance > Style", if light { "Light" } else { "Dark" }))
+    vergence_ui::desktop_pick(text)
+        .map(|light| format!("{} for every app: Settings > Appearance > Style", if light { "Light" } else { "Dark" }))
 }
 
 pub const FORGET: u32 = 1;
@@ -43,7 +44,10 @@ impl Rows for TermRows {
     fn parts(&self, text: &str) -> Vec<Part> {
         let settings = crate::Settings::from_text(&crate::config("settings.toml"));
         let (family, size) = (settings.mono_family.clone(), settings.mono_size);
-        let sizes: Vec<Choice> = [8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24].iter().map(|s| Choice::number(&s.to_string(), *s)).collect();
+        let sizes: Vec<Choice> = [8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24]
+            .iter()
+            .map(|s| Choice::number(&s.to_string(), *s))
+            .collect();
         let fonts: Vec<Choice> = self.monos.iter().map(|f| Choice::text(f, f)).collect();
         let desktop_colors = match vergence_ui::table_value(text, "[appearance]", "terminal-colors").as_deref() {
             Some(c) if c.eq_ignore_ascii_case("tango") => "Tango",
@@ -91,7 +95,9 @@ impl Rows for TermRows {
 
     fn button(&self, id: u32) {
         if id == FORGET
-            && let Err(e) = std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", "vergence-term"]).spawn()
+            && let Err(e) = std::process::Command::new("vergence-settings")
+                .args(["--page", "windows", "--forget", "vergence-term"])
+                .spawn()
         {
             eprintln!("vergence-term: vergence-settings: {e}");
         }

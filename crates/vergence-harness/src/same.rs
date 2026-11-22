@@ -86,7 +86,9 @@ fn compare(a: &Pic, b: &Pic, at: (i32, i32), corners: i32, top: i32, tolerance: 
 pub fn run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
     let usage = "same <a.png> <b.png> [--at X Y] [--corners R] [--top N] [--tolerance T]";
     let (Some(pa), Some(pb)) = (args.first(), args.get(1)) else { return Err(usage.into()) };
-    let num = |name: &str, k: usize| -> Option<i32> { args.iter().position(|a| a == name).and_then(|i| args.get(i + 1 + k)).and_then(|v| v.parse().ok()) };
+    let num = |name: &str, k: usize| -> Option<i32> {
+        args.iter().position(|a| a == name).and_then(|i| args.get(i + 1 + k)).and_then(|v| v.parse().ok())
+    };
     let at = (num("--at", 0).unwrap_or(0), num("--at", 1).unwrap_or(0));
     let corners = num("--corners", 0).unwrap_or(0);
     let top = num("--top", 0).unwrap_or(0);
@@ -100,7 +102,17 @@ pub fn run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
     let o = compare(&a, &b, at, corners, top, tolerance);
     let first = o.first.map_or(String::new(), |(x, y, pa, pb)| format!("; first at {x},{y}: {pa:?} against {pb:?}"));
     let ok = o.differ == 0 && o.compared > 0;
-    println!("{} {}x{} at {},{}: {} of {} pixels differ by more than {tolerance} (largest {}){first}", if ok { "PASS" } else { "FAIL" }, b.w, b.h, at.0, at.1, o.differ, o.compared, o.largest);
+    println!(
+        "{} {}x{} at {},{}: {} of {} pixels differ by more than {tolerance} (largest {}){first}",
+        if ok { "PASS" } else { "FAIL" },
+        b.w,
+        b.h,
+        at.0,
+        at.1,
+        o.differ,
+        o.compared,
+        o.largest
+    );
     Ok(ok)
 }
 
@@ -121,7 +133,13 @@ mod tests {
     #[test]
     fn a_picture_shown_one_for_one_is_the_same_and_one_pixel_off_is_not() {
         let window = pic(20, 10, |x, y| [(x * 10) as u8, (y * 20) as u8, 7, 255]);
-        let screen = pic(60, 40, |x, y| if (5..25).contains(&x) && (8..18).contains(&y) { [((x - 5) * 10) as u8, ((y - 8) * 20) as u8, 7, 255] } else { [1, 1, 1, 255] });
+        let screen = pic(60, 40, |x, y| {
+            if (5..25).contains(&x) && (8..18).contains(&y) {
+                [((x - 5) * 10) as u8, ((y - 8) * 20) as u8, 7, 255]
+            } else {
+                [1, 1, 1, 255]
+            }
+        });
         let o = compare(&screen, &window, (5, 8), 0, 0, 0);
         assert_eq!((o.differ, o.compared), (0, 200));
         let off = compare(&screen, &window, (6, 8), 0, 0, 0);
@@ -137,7 +155,8 @@ mod tests {
         assert!(in_corner(0, 0, 20, 10, 3) && in_corner(19, 9, 20, 10, 3));
         assert!(!in_corner(10, 0, 20, 10, 3) && !in_corner(0, 5, 20, 10, 3));
         let window = pic(20, 10, |_, _| [9, 9, 9, 255]);
-        let screen = pic(20, 10, |x, y| if y < 2 || in_corner(x, y, 20, 10, 3) { [200, 0, 0, 255] } else { [9, 9, 9, 255] });
+        let screen =
+            pic(20, 10, |x, y| if y < 2 || in_corner(x, y, 20, 10, 3) { [200, 0, 0, 255] } else { [9, 9, 9, 255] });
         assert_eq!(compare(&screen, &window, (0, 0), 3, 2, 0).differ, 0);
     }
 }

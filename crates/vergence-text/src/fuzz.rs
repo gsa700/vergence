@@ -52,8 +52,20 @@ fn read(bytes: &[u8]) {
 fn bases() -> Vec<Vec<u8>> {
     vec![
         font(&Spec::default()),
-        font(&Spec { family: "Example Mono", typographic: Some("Example"), weight: 700, italic: true, monospace: true, weight_axis: Some((100, 900)), ..Spec::default() }),
-        font(&Spec { ranges: &[(0x20, 0x7e), (0xa0, 0x17f), (0x2500, 0x257f)], wide: &[(0x20, 0x7e), (0x1f300, 0x1f64f)], ..Spec::default() }),
+        font(&Spec {
+            family: "Example Mono",
+            typographic: Some("Example"),
+            weight: 700,
+            italic: true,
+            monospace: true,
+            weight_axis: Some((100, 900)),
+            ..Spec::default()
+        }),
+        font(&Spec {
+            ranges: &[(0x20, 0x7e), (0xa0, 0x17f), (0x2500, 0x257f)],
+            wide: &[(0x20, 0x7e), (0x1f300, 0x1f64f)],
+            ..Spec::default()
+        }),
         collection(&[Spec::default(), Spec { family: "Second", wide: &[(0x4e00, 0x9fff)], ..Spec::default() }]),
     ]
 }
@@ -78,7 +90,8 @@ fn damaged_fonts_never_panic() {
                 2 => {
                     if b.len() >= 4 {
                         let at = rng.below(b.len() - 3);
-                        let v: u32 = [0, 1, 0xffff, 0x10000, u32::MAX, 0x7fff_ffff, b.len() as u32, b.len() as u32 - 1][rng.below(8)];
+                        let v: u32 = [0, 1, 0xffff, 0x10000, u32::MAX, 0x7fff_ffff, b.len() as u32, b.len() as u32 - 1]
+                            [rng.below(8)];
                         b[at..at + 4].copy_from_slice(&v.to_be_bytes());
                     }
                 }

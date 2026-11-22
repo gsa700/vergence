@@ -119,7 +119,9 @@ mod sys {
     use std::path::Path;
 
     fn read(dir: &Path, name: &str) -> Option<String> {
-        std::fs::read_to_string(dir.join(name)).ok().map(|s| s.trim().chars().filter(|c| !c.is_control()).take(64).collect())
+        std::fs::read_to_string(dir.join(name))
+            .ok()
+            .map(|s| s.trim().chars().filter(|c| !c.is_control()).take(64).collect())
     }
 
     fn num(dir: &Path, name: &str) -> Option<f64> {
@@ -148,8 +150,12 @@ mod sys {
                     };
                     let volts = num(&d, "voltage_now").map(|v| v / 1e6);
                     // Energy in µWh, or charge in µAh times the voltage.
-                    let wh = |e: &str, c: &str| num(&d, e).map(|v| v / 1e6).or_else(|| Some(num(&d, c)? / 1e6 * volts?));
-                    let watts = num(&d, "power_now").map(|v| v / 1e6).or_else(|| Some(num(&d, "current_now")? / 1e6 * volts?)).map(f64::abs);
+                    let wh =
+                        |e: &str, c: &str| num(&d, e).map(|v| v / 1e6).or_else(|| Some(num(&d, c)? / 1e6 * volts?));
+                    let watts = num(&d, "power_now")
+                        .map(|v| v / 1e6)
+                        .or_else(|| Some(num(&d, "current_now")? / 1e6 * volts?))
+                        .map(f64::abs);
                     let energy = wh("energy_now", "charge_now");
                     let full = wh("energy_full", "charge_full");
                     let mut b = Battery {
@@ -164,7 +170,13 @@ mod sys {
                         design_mah: num(&d, "charge_full_design").map(|v| v / 1e3),
                         volts,
                         cycles: num(&d, "cycle_count").map(|v| v as u32).filter(|c| *c > 0),
-                        model: [read(&d, "manufacturer"), read(&d, "model_name")].into_iter().flatten().collect::<Vec<_>>().join(" ").trim().to_string(),
+                        model: [read(&d, "manufacturer"), read(&d, "model_name")]
+                            .into_iter()
+                            .flatten()
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                            .trim()
+                            .to_string(),
                         technology: read(&d, "technology").unwrap_or_default(),
                         minutes: None,
                     };
@@ -188,18 +200,28 @@ mod sys {
         let mut dirs: Vec<_> = entries.flatten().map(|e| e.path()).collect();
         dirs.sort();
         for d in dirs {
-            let class = read(&d, "class").and_then(|c| u32::from_str_radix(c.trim_start_matches("0x"), 16).ok()).unwrap_or(0);
+            let class =
+                read(&d, "class").and_then(|c| u32::from_str_radix(c.trim_start_matches("0x"), 16).ok()).unwrap_or(0);
             if class >> 16 != 0x03 {
                 continue;
             }
-            let vendor = read(&d, "vendor").and_then(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).ok()).unwrap_or(0);
-            let driver = std::fs::read_link(d.join("driver")).ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_default();
+            let vendor =
+                read(&d, "vendor").and_then(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).ok()).unwrap_or(0);
+            let driver = std::fs::read_link(d.join("driver"))
+                .ok()
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .unwrap_or_default();
             let awake = match read(&d, "power/runtime_status").as_deref() {
                 Some("active") | Some("resuming") => Some(true),
                 Some("suspended") | Some("suspending") => Some(false),
                 _ => None,
             };
-            out.push(Gpu { slot: d.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), vendor: vendor_name(vendor), driver, awake });
+            out.push(Gpu {
+                slot: d.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                vendor: vendor_name(vendor),
+                driver,
+                awake,
+            });
         }
         out
     }
@@ -214,7 +236,13 @@ mod sys {
     use super::*;
 
     unsafe extern "C" {
-        fn sysctlbyname(name: *const std::ffi::c_char, old: *mut u8, oldlen: *mut usize, new: *const u8, newlen: usize) -> i32;
+        fn sysctlbyname(
+            name: *const std::ffi::c_char,
+            old: *mut u8,
+            oldlen: *mut usize,
+            new: *const u8,
+            newlen: usize,
+        ) -> i32;
     }
 
     fn int(name: &std::ffi::CStr) -> Option<i32> {
@@ -286,7 +314,11 @@ mod tests {
 
     fn fake_sys(files: &[(&str, &str)]) -> std::path::PathBuf {
         static N: AtomicU32 = AtomicU32::new(0);
-        let root = std::env::temp_dir().join(format!("vergence-power-test-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        let root = std::env::temp_dir().join(format!(
+            "vergence-power-test-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
         for (path, text) in files {
             let p = root.join(path);
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();

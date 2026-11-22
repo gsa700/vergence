@@ -39,12 +39,16 @@ struct Record {
 }
 
 fn path() -> Option<PathBuf> {
-    let state = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    let state = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
     Some(state.join("vergence/inputs.toml"))
 }
 
 fn read() -> Vec<InputKind> {
-    let record: Record = path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| toml::from_str(&t).ok()).unwrap_or_default();
+    let record: Record =
+        path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| toml::from_str(&t).ok()).unwrap_or_default();
     let mut seen = Vec::new();
     for k in record.seen.iter().filter_map(|n| InputKind::from_name(n)) {
         if !seen.contains(&k) {
@@ -56,7 +60,10 @@ fn read() -> Vec<InputKind> {
 
 /// Written beside and moved into place, readable by its owner only.
 fn write(seen: &[InputKind]) -> std::io::Result<()> {
-    use std::{io::Write, os::unix::fs::{DirBuilderExt, OpenOptionsExt}};
+    use std::{
+        io::Write,
+        os::unix::fs::{DirBuilderExt, OpenOptionsExt},
+    };
     let Some(path) = path() else { return Ok(()) };
     if let Some(dir) = path.parent() {
         std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
@@ -156,7 +163,11 @@ impl Server {
 
     pub fn bus_inputs(&mut self) -> ServerMsg {
         self.inputs_read();
-        ServerMsg::Inputs { serial: 0, devices: self.inputs.present.iter().map(|(_, i)| i.clone()).collect(), seen: self.inputs.seen.clone() }
+        ServerMsg::Inputs {
+            serial: 0,
+            devices: self.inputs.present.iter().map(|(_, i)| i.clone()).collect(),
+            seen: self.inputs.seen.clone(),
+        }
     }
 
     fn bus_inputs_changed(&mut self) {

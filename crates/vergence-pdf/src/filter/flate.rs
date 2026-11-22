@@ -89,17 +89,26 @@ impl Huffman {
     }
 }
 
-const LEN_BASE: [u16; 29] = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
+const LEN_BASE: [u16; 29] =
+    [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
 const LEN_EXTRA: [u8; 29] = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
-const DIST_BASE: [u16; 30] = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577];
-const DIST_EXTRA: [u8; 30] = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
+const DIST_BASE: [u16; 30] = [
+    1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145,
+    8193, 12289, 16385, 24577,
+];
+const DIST_EXTRA: [u8; 30] =
+    [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
 
 /// Decodes a zlib stream (or a bare DEFLATE one, if the zlib header is not
 /// there), at most `limit` bytes out. The bool: whether it ended cleanly.
 pub fn inflate(data: &[u8], limit: usize) -> (Vec<u8>, bool) {
     // A zlib header: CM 8, a check that divides by 31, no preset dictionary.
     let raw = match data {
-        [cmf, flg, ..] if cmf & 0x0f == 8 && ((*cmf as u16) << 8 | *flg as u16).is_multiple_of(31) && flg & 0x20 == 0 => &data[2..],
+        [cmf, flg, ..]
+            if cmf & 0x0f == 8 && ((*cmf as u16) << 8 | *flg as u16).is_multiple_of(31) && flg & 0x20 == 0 =>
+        {
+            &data[2..]
+        }
         _ => data,
     };
     let mut out = Vec::with_capacity(raw.len().saturating_mul(4).min(limit).min(64 << 20));
@@ -132,7 +141,10 @@ fn blocks(data: &[u8], out: &mut Vec<u8>, limit: usize) -> Option<()> {
 fn stored(b: &mut Bits, out: &mut Vec<u8>, limit: usize) -> Option<()> {
     b.align();
     let d = b.data;
-    let (len, nlen) = (u16::from_le_bytes([*d.get(b.pos)?, *d.get(b.pos + 1)?]), u16::from_le_bytes([*d.get(b.pos + 2)?, *d.get(b.pos + 3)?]));
+    let (len, nlen) = (
+        u16::from_le_bytes([*d.get(b.pos)?, *d.get(b.pos + 1)?]),
+        u16::from_le_bytes([*d.get(b.pos + 2)?, *d.get(b.pos + 3)?]),
+    );
     if len != !nlen {
         return None;
     }
@@ -237,7 +249,9 @@ mod tests {
     #[test]
     fn stored_fixed_and_dynamic_blocks() {
         // Python's zlib.compress(b"Hello, Hello, Hello, Hello!", 9): fixed Huffman, a back reference.
-        let z = [0x78, 0xda, 0xf3, 0x48, 0xcd, 0xc9, 0xc9, 0xd7, 0x51, 0xf0, 0xc0, 0xa4, 0x14, 0x01, 0x7d, 0x2c, 0x08, 0xd6];
+        let z = [
+            0x78, 0xda, 0xf3, 0x48, 0xcd, 0xc9, 0xc9, 0xd7, 0x51, 0xf0, 0xc0, 0xa4, 0x14, 0x01, 0x7d, 0x2c, 0x08, 0xd6,
+        ];
         let (out, ok) = inflate(&z, 1 << 20);
         assert!(ok);
         assert_eq!(out, b"Hello, Hello, Hello, Hello!");
@@ -252,7 +266,9 @@ mod tests {
 
     #[test]
     fn a_limit_stops_a_bomb() {
-        let z = [0x78, 0xda, 0xf3, 0x48, 0xcd, 0xc9, 0xc9, 0xd7, 0x51, 0xf0, 0xc0, 0xa4, 0x14, 0x01, 0x7d, 0x2c, 0x08, 0xd6];
+        let z = [
+            0x78, 0xda, 0xf3, 0x48, 0xcd, 0xc9, 0xc9, 0xd7, 0x51, 0xf0, 0xc0, 0xa4, 0x14, 0x01, 0x7d, 0x2c, 0x08, 0xd6,
+        ];
         let (out, ok) = inflate(&z, 10);
         assert!(!ok);
         assert!(out.len() <= 10);

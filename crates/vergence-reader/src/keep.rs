@@ -40,7 +40,10 @@ pub struct Snap {
 }
 
 fn path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
     Some(base.join("vergence/reader-session"))
 }
 
@@ -85,7 +88,9 @@ pub fn parse(text: &str) -> Vec<Snap> {
                 w.tabs.push(KeptTab { path: p.to_path_buf(), at: None });
                 took = true;
             }
-        } else if let (Some(a), true, Some(t)) = (line.strip_prefix("at "), after_tab, out.last_mut().and_then(|w| w.tabs.last_mut())) {
+        } else if let (Some(a), true, Some(t)) =
+            (line.strip_prefix("at "), after_tab, out.last_mut().and_then(|w| w.tabs.last_mut()))
+        {
             let f: Vec<&str> = a.split_whitespace().collect();
             if let [page, within, mode] = f[..]
                 && let (Ok(page), Ok(within)) = (page.parse::<usize>(), within.parse::<f32>())
@@ -111,10 +116,11 @@ pub fn save(windows: &[Snap]) {
         let _ = std::fs::create_dir_all(dir);
     }
     let tmp = p.with_extension("part");
-    let ok = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp).and_then(|mut f| {
-        use std::io::Write;
-        f.write_all(text(windows).as_bytes())
-    });
+    let ok =
+        std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp).and_then(|mut f| {
+            use std::io::Write;
+            f.write_all(text(windows).as_bytes())
+        });
     if ok.is_ok() {
         let _ = std::fs::rename(&tmp, &p);
     }
@@ -144,7 +150,14 @@ mod tests {
     #[test]
     fn windows_come_back_as_kept() {
         let all = vec![
-            Snap { token: "abc".into(), tabs: vec![tab("/home/d/a.pdf", Some((39, 212.5, "width"))), tab("/home/d/My Manual.pdf", Some((0, 0.0, "1.250")))], front: 1 },
+            Snap {
+                token: "abc".into(),
+                tabs: vec![
+                    tab("/home/d/a.pdf", Some((39, 212.5, "width"))),
+                    tab("/home/d/My Manual.pdf", Some((0, 0.0, "1.250"))),
+                ],
+                front: 1,
+            },
             Snap { token: "def".into(), tabs: vec![tab("/tmp/b.pdf", None)], front: 0 },
             Snap { token: "empty".into(), tabs: Vec::new(), front: 0 },
         ];
@@ -154,12 +167,25 @@ mod tests {
     #[test]
     fn a_session_from_before_places_still_reads() {
         let got = parse("window t\nfront 0\ntab /a.pdf\ntab /b.pdf\n");
-        assert_eq!(got, vec![Snap { token: "t".into(), tabs: vec![tab("/a.pdf", None), tab("/b.pdf", None)], front: 0 }]);
+        assert_eq!(
+            got,
+            vec![Snap { token: "t".into(), tabs: vec![tab("/a.pdf", None), tab("/b.pdf", None)], front: 0 }]
+        );
     }
 
     #[test]
     fn nonsense_is_left_out() {
-        let got = parse("tab /before/any/window.pdf\nat 3 0 width\nwindow t\nfront 9\ntab relative.pdf\nat 1 2 page\ntab /x.pdf\nat x 2 page\nat 4 -1 page\nat 4 NaN page\ntab /y.pdf\nat 2 5 page\ntab no/z.pdf\nat 7 0 page\n");
-        assert_eq!(got, vec![Snap { token: "t".into(), tabs: vec![tab("/x.pdf", None), tab("/y.pdf", Some((2, 5.0, "page")))], front: 1 }], "a place goes only with the document just before it");
+        let got = parse(
+            "tab /before/any/window.pdf\nat 3 0 width\nwindow t\nfront 9\ntab relative.pdf\nat 1 2 page\ntab /x.pdf\nat x 2 page\nat 4 -1 page\nat 4 NaN page\ntab /y.pdf\nat 2 5 page\ntab no/z.pdf\nat 7 0 page\n",
+        );
+        assert_eq!(
+            got,
+            vec![Snap {
+                token: "t".into(),
+                tabs: vec![tab("/x.pdf", None), tab("/y.pdf", Some((2, 5.0, "page")))],
+                front: 1
+            }],
+            "a place goes only with the document just before it"
+        );
     }
 }

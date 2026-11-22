@@ -97,9 +97,15 @@ pub fn trash(path: &Path) -> io::Result<String> {
     let name = path.file_name().ok_or_else(|| io::Error::other("no name"))?.to_string_lossy().into_owned();
     let path = std::path::absolute(path)?;
     for _ in 0..50 {
-        let n = free_name(&name, |n| files.join(n).symlink_metadata().is_ok() || info.join(format!("{n}.trashinfo")).exists());
+        let n = free_name(&name, |n| {
+            files.join(n).symlink_metadata().is_ok() || info.join(format!("{n}.trashinfo")).exists()
+        });
         let info_path = info.join(format!("{n}.trashinfo"));
-        let text = format!("[Trash Info]\nPath={}\nDeletionDate={}\n", escape(&path), vergence_widgets::files::local_stamp(std::time::SystemTime::now()));
+        let text = format!(
+            "[Trash Info]\nPath={}\nDeletionDate={}\n",
+            escape(&path),
+            vergence_widgets::files::local_stamp(std::time::SystemTime::now())
+        );
         let made = fs::OpenOptions::new().write(true).create_new(true).open(&info_path);
         let mut f = match made {
             Ok(f) => f,
@@ -111,7 +117,9 @@ pub fn trash(path: &Path) -> io::Result<String> {
         let dest = files.join(&n);
         let moved = match fs::rename(&path, &dest) {
             Ok(()) => Ok(()),
-            Err(e) if e.raw_os_error() == Some(18) => copy_tree(&path, &dest, &Progress::default()).and_then(|_| remove_tree(&path)),
+            Err(e) if e.raw_os_error() == Some(18) => {
+                copy_tree(&path, &dest, &Progress::default()).and_then(|_| remove_tree(&path))
+            }
             Err(e) => Err(e),
         };
         if let Err(e) = moved {
@@ -138,7 +146,11 @@ pub fn trashed_in(dir: &Path) -> Vec<Trashed> {
                     let name = file.strip_suffix(".trashinfo")?.to_string();
                     let text = fs::read_to_string(e.path()).ok()?;
                     let get = |k: &str| text.lines().find_map(|l| l.strip_prefix(k)).map(str::trim).map(str::to_string);
-                    Some(Trashed { name, from: unescape(&get("Path=")?), when: get("DeletionDate=").unwrap_or_default() })
+                    Some(Trashed {
+                        name,
+                        from: unescape(&get("Path=")?),
+                        when: get("DeletionDate=").unwrap_or_default(),
+                    })
                 })
                 .collect()
         })
@@ -299,7 +311,8 @@ pub fn plan_paste(sources: &[PathBuf], dir: &Path, cut: bool, clash: Clash) -> V
             match clash {
                 Clash::Skip => continue,
                 Clash::Replace => target,
-                Clash::KeepBoth => dir.join(free_name(&name, |n| dir.join(n).symlink_metadata().is_ok() || taken.contains(&dir.join(n)))),
+                Clash::KeepBoth => dir
+                    .join(free_name(&name, |n| dir.join(n).symlink_metadata().is_ok() || taken.contains(&dir.join(n)))),
             }
         } else {
             target
@@ -360,7 +373,11 @@ pub fn run_paste(plan: &[(PathBuf, PathBuf)], cut: bool, progress: &Arc<Progress
                 if !cut && to.symlink_metadata().is_ok() {
                     let _ = remove_tree(to);
                 }
-                error = Some(if e.kind() == io::ErrorKind::Interrupted { "Stopped.".into() } else { format!("“{}”: {e}", from.file_name().unwrap_or_default().to_string_lossy()) });
+                error = Some(if e.kind() == io::ErrorKind::Interrupted {
+                    "Stopped.".into()
+                } else {
+                    format!("“{}”: {e}", from.file_name().unwrap_or_default().to_string_lossy())
+                });
                 break;
             }
         }
@@ -465,7 +482,11 @@ mod tests {
         assert_eq!(clashes(&src, &b), vec!["x.txt"]);
         assert_eq!(plan_paste(&src, &b, false, Clash::KeepBoth), vec![(a.join("x.txt"), b.join("x 2.txt"))]);
         assert!(plan_paste(&src, &b, false, Clash::Skip).is_empty());
-        assert_eq!(plan_paste(&src, &a, false, Clash::Skip), vec![(a.join("x.txt"), a.join("x copy.txt"))], "a copy in its own folder");
+        assert_eq!(
+            plan_paste(&src, &a, false, Clash::Skip),
+            vec![(a.join("x.txt"), a.join("x copy.txt"))],
+            "a copy in its own folder"
+        );
         assert!(plan_paste(&src, &a, true, Clash::Skip).is_empty(), "a cut pasted where it is: nothing");
         let progress = Arc::new(Progress::default());
         let (done, err) = run_paste(&plan_paste(&src, &b, false, Clash::KeepBoth), false, &progress);
@@ -487,7 +508,11 @@ mod tests {
         let t = trashed();
         assert_eq!(t.len(), 1);
         assert_eq!((t[0].name.as_str(), t[0].from.as_path()), (name.as_str(), f.as_path()));
-        assert!(fs::read_to_string(data.join("Trash/info").join(format!("{name}.trashinfo"))).unwrap().starts_with("[Trash Info]\nPath=/"));
+        assert!(
+            fs::read_to_string(data.join("Trash/info").join(format!("{name}.trashinfo")))
+                .unwrap()
+                .starts_with("[Trash Info]\nPath=/")
+        );
         // A second file of the same name gets its own name in the Trash.
         fs::write(&f, "second").unwrap();
         let name2 = trash(&f).unwrap();

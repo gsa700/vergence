@@ -18,7 +18,11 @@ fn main() {
         for i in 0..5 {
             let a = -std::f64::consts::FRAC_PI_2 + i as f64 * 4.0 * std::f64::consts::PI / 5.0;
             let (x, y) = (cx + 60.0 * a.cos(), cy + 60.0 * a.sin());
-            if i == 0 { p.move_to(x, y) } else { p.line_to(x, y) };
+            if i == 0 {
+                p.move_to(x, y)
+            } else {
+                p.line_to(x, y)
+            };
         }
         p.close();
         p
@@ -35,14 +39,22 @@ fn main() {
     // A stretched pen: a circle stroked under a 3 x 1 scale.
     let mut small = Path::new();
     small.circle(0.0, 0.0, 15.0);
-    c.stroke(&small, &Transform::scale(3.0, 1.0).then(&Transform::translate(540.0, 90.0)), &Stroke { width: 4.0, ..Default::default() }, ink, None);
+    c.stroke(
+        &small,
+        &Transform::scale(3.0, 1.0).then(&Transform::translate(540.0, 90.0)),
+        &Stroke { width: 4.0, ..Default::default() },
+        ink,
+        None,
+    );
     // Joins and caps.
     let zig = |x: f64| {
         let mut p = Path::new();
         p.move_to(x, 330.0).line_to(x + 40.0, 220.0).line_to(x + 80.0, 330.0);
         p
     };
-    for (i, (join, cap)) in [(Join::Miter, Cap::Butt), (Join::Round, Cap::Round), (Join::Bevel, Cap::Square)].iter().enumerate() {
+    for (i, (join, cap)) in
+        [(Join::Miter, Cap::Butt), (Join::Round, Cap::Round), (Join::Bevel, Cap::Square)].iter().enumerate()
+    {
         let s = Stroke { width: 18.0, join: *join, cap: *cap, ..Default::default() };
         c.stroke(&zig(30.0 + i as f64 * 120.0), &id, &s, ink, None);
     }
@@ -55,7 +67,13 @@ fn main() {
     c.stroke(&hair, &id, &Stroke { width: 0.0, ..Default::default() }, ink, None);
     let mut dots = Path::new();
     dots.move_to(400.0, 330.0).line_to(620.0, 330.0);
-    c.stroke(&dots, &id, &Stroke { width: 10.0, cap: Cap::Round, dash: vec![0.0, 20.0], ..Default::default() }, [0.85, 0.2, 0.2, 1.0], None);
+    c.stroke(
+        &dots,
+        &id,
+        &Stroke { width: 10.0, cap: Cap::Round, dash: vec![0.0, 20.0], ..Default::default() },
+        [0.85, 0.2, 0.2, 1.0],
+        None,
+    );
     let mut ppm = format!("P6 {w} {h} 255\n").into_bytes();
     for y in 0..h {
         for x in 0..w {

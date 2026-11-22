@@ -25,6 +25,7 @@
 // stacked with its window (behind the windows above it).
 
 use crate::win::Win;
+use smithay::backend::allocator::Fourcc;
 use smithay::{
     backend::renderer::{
         element::{
@@ -40,14 +41,12 @@ use smithay::{
     output::Output,
     reexports::{
         wayland_protocols::xdg::{
-            decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode,
-            shell::server::xdg_toplevel,
+            decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode, shell::server::xdg_toplevel,
         },
         wayland_server::protocol::wl_surface::WlSurface,
     },
     utils::{IsAlive, Logical, Physical, Point, Rectangle, Transform},
 };
-use smithay::backend::allocator::Fourcc;
 
 use crate::{Server, dispatch::ResizeEdge};
 
@@ -60,7 +59,6 @@ pub const TITLE_H: i32 = vergence_bar::BAR_H as i32;
 pub const BORDER: i32 = vergence_look::RESIZE_BAND as i32;
 /// The border line around a window, in points.
 pub const EDGE: i32 = vergence_look::EDGE as i32;
-
 
 smithay::backend::renderer::element::render_elements! {
     pub SceneElement<=GlesRenderer>;
@@ -136,7 +134,17 @@ pub struct Decor {
 struct BarPicture {
     /// What it shows: title, width, focused, hover, button layout, tabs, the
     /// one in front, accent; then light, frosted, alerts, frosted front tab, rounded, edited tabs, root.
-    key: (String, i32, bool, Option<vergence_bar::Part>, String, Vec<String>, usize, Option<u32>, (bool, bool, Vec<bool>, bool, bool, Option<usize>, Vec<bool>, bool)),
+    key: (
+        String,
+        i32,
+        bool,
+        Option<vergence_bar::Part>,
+        String,
+        Vec<String>,
+        usize,
+        Option<u32>,
+        (bool, bool, Vec<bool>, bool, bool, Option<usize>, Vec<bool>, bool),
+    ),
     buffer: MemoryRenderBuffer,
     /// Its pixels' width and height (the scale's, not the bar's points).
     px: (i32, i32),
@@ -187,12 +195,22 @@ struct Frame {
 }
 
 impl Frame {
-    fn of(content: Rectangle<i32, Logical>, buttons: &(Vec<vergence_bar::WinButton>, Vec<vergence_bar::WinButton>), tabs: Option<Tabs>, tools: Option<(f32, Vec<Option<f32>>)>, z: vergence_bar::Sizes) -> Frame {
+    fn of(
+        content: Rectangle<i32, Logical>,
+        buttons: &(Vec<vergence_bar::WinButton>, Vec<vergence_bar::WinButton>),
+        tabs: Option<Tabs>,
+        tools: Option<(f32, Vec<Option<f32>>)>,
+        z: vergence_bar::Sizes,
+    ) -> Frame {
         let h = z.bar_h as i32;
         let title = Rectangle::new((content.loc.x, content.loc.y - h).into(), (content.size.w, h).into());
         let layout = match (&tabs, tools) {
-            (Some(t), _) => vergence_bar::Layout::sized(content.size.w as f32, t.titles.len(), t.shown, &buttons.0, &buttons.1, z),
-            (None, Some((from, widths))) => vergence_bar::Layout::tools_sized(content.size.w as f32, &buttons.0, &buttons.1, z, from, &widths),
+            (Some(t), _) => {
+                vergence_bar::Layout::sized(content.size.w as f32, t.titles.len(), t.shown, &buttons.0, &buttons.1, z)
+            }
+            (None, Some((from, widths))) => {
+                vergence_bar::Layout::tools_sized(content.size.w as f32, &buttons.0, &buttons.1, z, from, &widths)
+            }
             (None, None) => vergence_bar::Layout::plain_sized(content.size.w as f32, &buttons.0, &buttons.1, z),
         };
         Frame { content, title, layout, tabs }
@@ -236,9 +254,23 @@ fn corner_pictures(fonts: &mut vergence_text::Fonts, scale: f64, rgb: [u8; 3]) -
     for (right, bottom) in [(false, false), (true, false), (false, true), (true, true)] {
         let mut scene = vergence_scene::Scene::new(s, s);
         let at = |far: bool| if far { s - e / 2.0 - 2.0 * s } else { e / 2.0 };
-        scene.stroke(vergence_scene::Rect::new(at(right), at(bottom), 2.0 * s, 2.0 * s), vergence_look::RADIUS + e / 2.0, e, color);
-        let p = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0)).ok()?;
-        out.push(MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None));
+        scene.stroke(
+            vergence_scene::Rect::new(at(right), at(bottom), 2.0 * s, 2.0 * s),
+            vergence_look::RADIUS + e / 2.0,
+            e,
+            color,
+        );
+        let p = vergence_render::Cpu::new()
+            .render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0))
+            .ok()?;
+        out.push(MemoryRenderBuffer::from_slice(
+            &p.data,
+            Fourcc::Abgr8888,
+            (p.width as i32, p.height as i32),
+            1,
+            Transform::Normal,
+            None,
+        ));
     }
     out.try_into().ok()
 }
@@ -246,7 +278,15 @@ fn corner_pictures(fonts: &mut vergence_text::Fonts, scale: f64, rgb: [u8; 3]) -
 /// A native window's picture as a GPU texture, with its size in pixels and
 /// in points: imported the first time it is asked for, on whichever monitor
 /// that is. None for a picture in shared memory or one that failed to import.
-pub(crate) fn native_texture(renderer: &mut GlesRenderer, w: &Win) -> Option<(smithay::backend::renderer::element::texture::TextureBuffer<smithay::backend::renderer::gles::GlesTexture>, smithay::backend::renderer::gles::GlesTexture, smithay::utils::Size<i32, smithay::utils::Buffer>, smithay::utils::Size<i32, Logical>)> {
+pub(crate) fn native_texture(
+    renderer: &mut GlesRenderer,
+    w: &Win,
+) -> Option<(
+    smithay::backend::renderer::element::texture::TextureBuffer<smithay::backend::renderer::gles::GlesTexture>,
+    smithay::backend::renderer::gles::GlesTexture,
+    smithay::utils::Size<i32, smithay::utils::Buffer>,
+    smithay::utils::Size<i32, Logical>,
+)> {
     let n = w.native()?;
     let p = n.picture()?;
     let crate::native::Content::Gpu(g) = &p.content else { return None };
@@ -256,7 +296,13 @@ pub(crate) fn native_texture(renderer: &mut GlesRenderer, w: &Win) -> Option<(sm
         match renderer.import_dmabuf(&g.dmabuf, None) {
             Ok(t) => {
                 g.gles = Some(t.clone());
-                g.texture = Some(smithay::backend::renderer::element::texture::TextureBuffer::from_texture(renderer, t, 1, Transform::Normal, None));
+                g.texture = Some(smithay::backend::renderer::element::texture::TextureBuffer::from_texture(
+                    renderer,
+                    t,
+                    1,
+                    Transform::Normal,
+                    None,
+                ));
             }
             Err(e) => {
                 g.failed = true;
@@ -279,7 +325,11 @@ pub(crate) fn shown_px(px: (i32, i32), cover: smithay::utils::Size<i32, Physical
 /// The pixels a rectangle of points covers at `scale`, each edge rounded on
 /// its own, as Smithay places its elements: two rectangles that meet in
 /// points meet on the same pixel, wherever they are.
-pub(crate) fn edges_px(at: Point<i32, Logical>, size: smithay::utils::Size<i32, Logical>, scale: f64) -> Rectangle<i32, Physical> {
+pub(crate) fn edges_px(
+    at: Point<i32, Logical>,
+    size: smithay::utils::Size<i32, Logical>,
+    scale: f64,
+) -> Rectangle<i32, Physical> {
     let a = at.to_f64().to_physical(scale);
     let b = (at + size.to_point()).to_f64().to_physical(scale);
     Rectangle::from_extremities(a.to_i32_round(), b.to_i32_round())
@@ -287,14 +337,37 @@ pub(crate) fn edges_px(at: Point<i32, Logical>, size: smithay::utils::Size<i32, 
 
 /// A native window's own picture alone, at its pixels from the corner, for
 /// `vctl picture`: the elements and the size to draw them at scale 1.
-pub fn picture_elements(renderer: &mut GlesRenderer, w: &Win) -> Option<(Vec<SceneElement>, smithay::utils::Size<i32, Physical>)> {
+pub fn picture_elements(
+    renderer: &mut GlesRenderer,
+    w: &Win,
+) -> Option<(Vec<SceneElement>, smithay::utils::Size<i32, Physical>)> {
     let p = w.native()?.picture()?;
     let size = smithay::utils::Size::<i32, Physical>::from((p.px.w, p.px.h));
     let e = match &p.content {
-        crate::native::Content::Memory(buffer) => SceneElement::Memory(MemoryRenderBufferRenderElement::from_buffer(renderer, (0.0, 0.0), buffer, None, None, None, Kind::Unspecified).ok()?),
+        crate::native::Content::Memory(buffer) => SceneElement::Memory(
+            MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                (0.0, 0.0),
+                buffer,
+                None,
+                None,
+                None,
+                Kind::Unspecified,
+            )
+            .ok()?,
+        ),
         crate::native::Content::Gpu(_) => {
             let (t, _, _, _) = native_texture(renderer, w)?;
-            SceneElement::Texture(smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer((0.0, 0.0), &t, None, None, None, Kind::Unspecified))
+            SceneElement::Texture(
+                smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer(
+                    (0.0, 0.0),
+                    &t,
+                    None,
+                    None,
+                    None,
+                    Kind::Unspecified,
+                ),
+            )
         }
     };
     Some((vec![e], size))
@@ -323,7 +396,8 @@ impl Server {
         }
         w.toplevel().is_some_and(|t| {
             let check = |s: &smithay::wayland::shell::xdg::ToplevelState| {
-                s.decoration_mode == Some(DecorationMode::ServerSide) && !s.states.contains(xdg_toplevel::State::Fullscreen)
+                s.decoration_mode == Some(DecorationMode::ServerSide)
+                    && !s.states.contains(xdg_toplevel::State::Fullscreen)
             };
             // What the app has acknowledged; before its first commit, what we offered.
             t.with_committed_state(|c| c.map(check)).unwrap_or_else(|| t.with_pending_state(|p| check(p)))
@@ -335,10 +409,17 @@ impl Server {
         // A dialog or palette has close only, on the side the controls are on, and no tabs.
         if matches!(self.window_style(w).kind, crate::style::Kind::Dialog | crate::style::Kind::Palette) {
             let left = buttons.0.contains(&vergence_bar::WinButton::Close) || buttons.1.is_empty();
-            buttons = if left { (vec![vergence_bar::WinButton::Close], vec![]) } else { (vec![], vec![vergence_bar::WinButton::Close]) };
+            buttons = if left {
+                (vec![vergence_bar::WinButton::Close], vec![])
+            } else {
+                (vec![], vec![vergence_bar::WinButton::Close])
+            };
             let z = self.bar_sizes(w);
             // A dialog's own buttons too (preview milestone 1: a preview's "Open with").
-            return self.has_title(w).then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, None, tool_widths(w), z))).flatten();
+            return self
+                .has_title(w)
+                .then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, None, tool_widths(w), z)))
+                .flatten();
         }
         // Every other window has the app button (app settings milestone 1).
         buttons = vergence_bar::with_app_menu(buttons);
@@ -348,7 +429,9 @@ impl Server {
             buttons.1.retain(|b| *b != vergence_bar::WinButton::Maximize);
         }
         let z = self.bar_sizes(w);
-        self.has_title(w).then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, tabs_of(w), tool_widths(w), z))).flatten()
+        self.has_title(w)
+            .then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, tabs_of(w), tool_widths(w), z)))
+            .flatten()
     }
 
     /// The size of controls for a screen (look milestone 1, step 8): its own
@@ -358,7 +441,8 @@ impl Server {
     pub fn bar_sizes_on(&self, o: &smithay::output::Output) -> vergence_bar::Sizes {
         let mut z = self.bar_sizes_unsnapped(o);
         // A bar on whole pixels, as the windows under it (grid.rs).
-        z.bar_h = crate::grid::snap_len(z.bar_h as i32, crate::grid::step_of(o.current_scale().fractional_scale())) as f32;
+        z.bar_h =
+            crate::grid::snap_len(z.bar_h as i32, crate::grid::step_of(o.current_scale().fractional_scale())) as f32;
         z
     }
 
@@ -367,7 +451,9 @@ impl Server {
         let Some(id) = crate::memory::monitor_id_of(o) else { return vergence_bar::Sizes::of(desktop) };
         match self.settings.current.get(&(crate::settings::LOOK.to_string(), format!("size:{id}"))) {
             Some(vergence_protocol::bus::SettingValue::U32(step)) if *step <= 2 => vergence_bar::Sizes::of(*step),
-            _ if self.touch_panels.iter().any(|p| self.touch_screen_id(p).as_deref() == Some(id.as_str())) => vergence_bar::LARGE,
+            _ if self.touch_panels.iter().any(|p| self.touch_screen_id(p).as_deref() == Some(id.as_str())) => {
+                vergence_bar::LARGE
+            }
             _ => vergence_bar::Sizes::of(desktop),
         }
     }
@@ -375,7 +461,11 @@ impl Server {
     /// The size of controls for the screen a point is on (the first screen
     /// when it is on none).
     pub fn bar_sizes_at(&self, p: Point<i32, Logical>) -> vergence_bar::Sizes {
-        let on = self.space.outputs().find(|o| self.space.output_geometry(o).is_some_and(|g| g.contains(p))).or_else(|| self.space.outputs().next());
+        let on = self
+            .space
+            .outputs()
+            .find(|o| self.space.output_geometry(o).is_some_and(|g| g.contains(p)))
+            .or_else(|| self.space.outputs().next());
         on.map_or_else(|| vergence_bar::Sizes::of(self.look_setting("size")), |o| self.bar_sizes_on(o))
     }
 
@@ -395,7 +485,14 @@ impl Server {
             _ => return z,
         };
         let bar_h = crate::grid::snap_len((z.bar_h * k).round() as i32, self.grid_step_at(at)) as f32;
-        vergence_bar::Sizes { bar_h, item_h: (z.item_h * k).round(), button_w: (z.button_w * k).round(), plus_w: 0.0, side: z.side, gap: z.gap }
+        vergence_bar::Sizes {
+            bar_h,
+            item_h: (z.item_h * k).round(),
+            button_w: (z.button_w * k).round(),
+            plus_w: 0.0,
+            side: z.side,
+            gap: z.gap,
+        }
     }
 
     /// A window's bar height in points.
@@ -426,12 +523,24 @@ impl Server {
         let a = self.accent();
         let d = self.decor.entry(w).or_insert_with(Decor::new);
         let c = [unit(a.r), unit(a.g), unit(a.b), 1.0];
-        Some(SceneElement::Solid(SolidColorRenderElement::new(d.mark.clone(), physical(r, out.loc, scale), d.commit, c, Kind::Unspecified)))
+        Some(SceneElement::Solid(SolidColorRenderElement::new(
+            d.mark.clone(),
+            physical(r, out.loc, scale),
+            d.commit,
+            c,
+            Kind::Unspecified,
+        )))
     }
 
     /// The ghost of a tab being dragged, under the pointer where it was
     /// taken hold of: the tab in the bar's front color, a little see-through.
-    fn tab_ghost_element(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64, light: bool) -> Option<SceneElement> {
+    fn tab_ghost_element(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+        light: bool,
+    ) -> Option<SceneElement> {
         let (w, index, at) = self.tab_ghost()?;
         let (_, layout) = self.bar_of(&w)?;
         let tab = *layout.tabs.get(index)?;
@@ -448,10 +557,32 @@ impl Server {
             let face = fonts.face("sans-serif", 400, false);
             let mut scene = vergence_scene::Scene::new(tab.w, tab.h);
             let (f, i) = (style.front, style.ink);
-            vergence_bar::draw_ghost(&mut scene, fonts, tab.w, tab.h, &title, face, vergence_bar::FONT_SIZE, vergence_scene::Color::rgba(f.0, f.1, f.2, 215), vergence_scene::Color::rgb(i.0, i.1, i.2));
-            match vergence_render::Cpu::new().render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0)) {
+            vergence_bar::draw_ghost(
+                &mut scene,
+                fonts,
+                tab.w,
+                tab.h,
+                &title,
+                face,
+                vergence_bar::FONT_SIZE,
+                vergence_scene::Color::rgba(f.0, f.1, f.2, 215),
+                vergence_scene::Color::rgb(i.0, i.1, i.2),
+            );
+            match vergence_render::Cpu::new().render(
+                &scene,
+                fonts,
+                scale as f32,
+                vergence_scene::Color::rgba(0, 0, 0, 0),
+            ) {
                 Ok(p) => {
-                    let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+                    let buffer = MemoryRenderBuffer::from_slice(
+                        &p.data,
+                        Fourcc::Abgr8888,
+                        (p.width as i32, p.height as i32),
+                        1,
+                        Transform::Normal,
+                        None,
+                    );
                     d.ghost = Some((key, buffer, (p.width as i32, p.height as i32)));
                 }
                 Err(e) => {
@@ -463,9 +594,17 @@ impl Server {
         let (_, buffer, px) = d.ghost.as_ref()?;
         let whole = Rectangle::<f64, Logical>::from_size((px.0 as f64, px.1 as f64).into());
         let loc = (at - out.loc.to_f64()).to_physical(scale).to_i32_round::<i32>();
-        MemoryRenderBufferRenderElement::from_buffer(renderer, loc.to_f64(), buffer, None, Some(whole), Some((tab.w.round() as i32, tab.h.round() as i32).into()), Kind::Unspecified)
-            .ok()
-            .map(SceneElement::Memory)
+        MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            loc.to_f64(),
+            buffer,
+            None,
+            Some(whole),
+            Some((tab.w.round() as i32, tab.h.round() as i32).into()),
+            Kind::Unspecified,
+        )
+        .ok()
+        .map(SceneElement::Memory)
     }
 
     pub fn bar_of(&self, w: &Win) -> Option<(Rectangle<i32, Logical>, vergence_bar::Layout)> {
@@ -485,11 +624,18 @@ impl Server {
 
     /// The rounded corners' program, compiled on first use; None if it would
     /// not compile (windows are then square).
-    fn round_program(&mut self, renderer: &mut GlesRenderer) -> Option<smithay::backend::renderer::gles::GlesTexProgram> {
+    fn round_program(
+        &mut self,
+        renderer: &mut GlesRenderer,
+    ) -> Option<smithay::backend::renderer::gles::GlesTexProgram> {
         self.round
             .get_or_insert_with(|| {
                 use smithay::backend::renderer::gles::{UniformName, UniformType};
-                let uniforms = [UniformName::new("size", UniformType::_2f), UniformName::new("radius", UniformType::_1f), UniformName::new("top", UniformType::_1f)];
+                let uniforms = [
+                    UniformName::new("size", UniformType::_2f),
+                    UniformName::new("radius", UniformType::_1f),
+                    UniformName::new("top", UniformType::_1f),
+                ];
                 match renderer.compile_custom_texture_shader(vergence_render::round::ROUND_SHADER, &uniforms) {
                     Ok(p) => Some(p),
                     Err(e) => {
@@ -507,11 +653,16 @@ impl Server {
     /// shader that would not compile. Only windows that draw under their bar
     /// are frosted (their picture's top is what lies under it); the others
     /// keep a solid bar.
-    pub fn frost_program(&mut self, renderer: &mut GlesRenderer) -> Option<smithay::backend::renderer::gles::GlesTexProgram> {
+    pub fn frost_program(
+        &mut self,
+        renderer: &mut GlesRenderer,
+    ) -> Option<smithay::backend::renderer::gles::GlesTexProgram> {
         if self.reduce_transparency() {
             return None;
         }
-        let high_contrast = self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "contrast".to_string())) == Some(&vergence_protocol::bus::SettingValue::U32(1));
+        let high_contrast =
+            self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "contrast".to_string()))
+                == Some(&vergence_protocol::bus::SettingValue::U32(1));
         if high_contrast {
             return None;
         }
@@ -521,7 +672,11 @@ impl Server {
                 let name = renderer
                     .with_context(|gl| unsafe {
                         let p = gl.GetString(ffi::RENDERER);
-                        if p.is_null() { String::new() } else { std::ffi::CStr::from_ptr(p as *const std::ffi::c_char).to_string_lossy().into_owned() }
+                        if p.is_null() {
+                            String::new()
+                        } else {
+                            std::ffi::CStr::from_ptr(p as *const std::ffi::c_char).to_string_lossy().into_owned()
+                        }
                     })
                     .unwrap_or_default();
                 if name.contains("llvmpipe") || name.contains("softpipe") {
@@ -557,7 +712,8 @@ impl Server {
     /// Reduce transparency (Settings > Appearance; look milestone 1): bars,
     /// the dock and menus solid.
     pub fn reduce_transparency(&self) -> bool {
-        self.settings.current.get(&(crate::settings::LOOK.to_string(), "reduce-transparency".to_string())) == Some(&vergence_protocol::bus::SettingValue::Bool(true))
+        self.settings.current.get(&(crate::settings::LOOK.to_string(), "reduce-transparency".to_string()))
+            == Some(&vergence_protocol::bus::SettingValue::Bool(true))
     }
 
     /// A number of the desktop's own look (org.vergence.look), or 0.
@@ -565,7 +721,13 @@ impl Server {
         match self.settings.current.get(&(crate::settings::LOOK.to_string(), key.to_string())) {
             Some(vergence_protocol::bus::SettingValue::U32(v)) => *v,
             // Standard Frost and Standard size when unset.
-            _ => if key == "frost" || key == "size" { 1 } else { 0 },
+            _ => {
+                if key == "frost" || key == "size" {
+                    1
+                } else {
+                    0
+                }
+            }
         }
     }
 
@@ -582,7 +744,8 @@ impl Server {
     /// color-scheme 2, from desktop.toml's `color-scheme = "light"`), which
     /// the bars, borders and notification cards follow.
     pub fn light_style(&self) -> bool {
-        self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "color-scheme".to_string())) == Some(&vergence_protocol::bus::SettingValue::U32(2))
+        self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "color-scheme".to_string()))
+            == Some(&vergence_protocol::bus::SettingValue::U32(2))
     }
 
     /// The style a window's bar is drawn in (app settings milestone 1): the
@@ -597,21 +760,30 @@ impl Server {
             Some(_) => desktop_light,
             // An app not ours: its `[app."<id>"] bar-style`, while the desktop's
             // Style is App default (Dark or Light forces every app).
-            None if self.app_default_style() => self.foreign_app_key(w).and_then(|k| self.app_bars.get(&k).copied()).unwrap_or(desktop_light),
+            None if self.app_default_style() => {
+                self.foreign_app_key(w).and_then(|k| self.app_bars.get(&k).copied()).unwrap_or(desktop_light)
+            }
             None => desktop_light,
         }
     }
 
     /// The desktop's Style is "App default": each app as it chooses.
     fn app_default_style(&self) -> bool {
-        matches!(self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "color-scheme".to_string())), None | Some(vergence_protocol::bus::SettingValue::U32(0)))
+        matches!(
+            self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "color-scheme".to_string())),
+            None | Some(vergence_protocol::bus::SettingValue::U32(0))
+        )
     }
 
     /// The name an app not ours goes by in desktop.toml's `[app."<id>"]`:
     /// its windows' class (Wayland app id, X11 class), lower case.
     fn foreign_app_key(&self, w: &Win) -> Option<String> {
         let id = match (w.toplevel(), w.x11_surface()) {
-            (Some(t), _) => smithay::wayland::compositor::with_states(t.wl_surface(), |s| s.data_map.get::<smithay::wayland::shell::xdg::XdgToplevelSurfaceData>().and_then(|d| d.lock().ok()?.app_id.clone())),
+            (Some(t), _) => smithay::wayland::compositor::with_states(t.wl_surface(), |s| {
+                s.data_map
+                    .get::<smithay::wayland::shell::xdg::XdgToplevelSurfaceData>()
+                    .and_then(|d| d.lock().ok()?.app_id.clone())
+            }),
             (None, Some(x)) => Some(x.class()),
             _ => None,
         }?;
@@ -640,7 +812,9 @@ impl Server {
             if x.is_override_redirect() || x.is_fullscreen() {
                 return None;
             }
-        } else if w.toplevel().is_some_and(|t| t.with_committed_state(|c| c.is_some_and(|s| s.states.contains(xdg_toplevel::State::Fullscreen)))) {
+        } else if w.toplevel().is_some_and(|t| {
+            t.with_committed_state(|c| c.is_some_and(|s| s.states.contains(xdg_toplevel::State::Fullscreen)))
+        }) {
             return None;
         }
         let geo = self.space.element_geometry(w)?;
@@ -673,7 +847,10 @@ impl Server {
             // A window of a fixed size has no resize band (style.rs).
             if let Some(b) = self.border_of(w).filter(|_| self.resizable(w)) {
                 let whole = b.to_f64();
-                let outer = Rectangle::new((b.loc.x - BORDER, b.loc.y - BORDER).into(), (b.size.w + 2 * BORDER, b.size.h + 2 * BORDER).into());
+                let outer = Rectangle::new(
+                    (b.loc.x - BORDER, b.loc.y - BORDER).into(),
+                    (b.size.w + 2 * BORDER, b.size.h + 2 * BORDER).into(),
+                );
                 if outer.to_f64().contains(pos) && !whole.contains(pos) {
                     let mut e = ResizeEdge::empty();
                     if pos.x < whole.loc.x {
@@ -747,15 +924,25 @@ impl Server {
         // 2026-11-15). The floor still adds tint wherever the titles need it.
         let show_more = self.look_setting("under-bar") == 1;
         let strength = vergence_look::frost_strength(self.look_setting("frost")) * if show_more { 0.5 } else { 1.0 };
-        let frost_r = if show_more { vergence_look::frost_radius(self.look_setting("frost")).min(vergence_look::frost_radius(0)) } else { vergence_look::frost_radius(self.look_setting("frost")) };
-        let need_of = |light: bool, active: bool| if show_more { vergence_look::frost_need_more(active) } else { vergence_look::frost_need(light, active) };
+        let frost_r = if show_more {
+            vergence_look::frost_radius(self.look_setting("frost")).min(vergence_look::frost_radius(0))
+        } else {
+            vergence_look::frost_radius(self.look_setting("frost"))
+        };
+        let need_of = |light: bool, active: bool| {
+            if show_more { vergence_look::frost_need_more(active) } else { vergence_look::frost_need(light, active) }
+        };
         let front_frosted = self.look_setting("front-tab") == 1;
         self.decor.retain(|w, _| w.alive());
         // A window on its way back from the dock is put in its place when it arrives.
         self.shelf_motions_end();
         let windows: Vec<Win> = self.space.elements().rev().cloned().collect();
         // Each window's app icon, for its app button (app settings milestone 1): the dock's.
-        let icon_names: Vec<(Win, String)> = self.shelf_items().into_iter().flat_map(|(item, ws)| ws.into_iter().map(move |w| (w, item.icon.clone()))).collect();
+        let icon_names: Vec<(Win, String)> = self
+            .shelf_items()
+            .into_iter()
+            .flat_map(|(item, ws)| ws.into_iter().map(move |w| (w, item.icon.clone())))
+            .collect();
         let menu_win = self.app_menu_window().cloned();
         // A maximize button rested on opens its layouts (snap.rs).
         self.layouts_tick();
@@ -811,23 +998,48 @@ impl Server {
                 // A frame's whole already has its bar; a window without one
                 // (its bounding box) gets the bar added above it.
                 let top = if self.frame_of(&w).is_none() && self.has_title(&w) { self.bar_h(&w) } else { 0 };
-                let all = Rectangle::<f64, Logical>::new((r.loc.x as f64, (r.loc.y - top) as f64).into(), (r.size.w as f64, (r.size.h + top) as f64).into());
+                let all = Rectangle::<f64, Logical>::new(
+                    (r.loc.x as f64, (r.loc.y - top) as f64).into(),
+                    (r.size.w as f64, (r.size.h + top) as f64).into(),
+                );
                 let d = self.decor.entry(w.clone()).or_insert_with(Decor::new);
                 let shade = if light { [0.0, 0.0, 0.0, 0.18] } else { [0.0, 0.0, 0.0, 0.35] };
-                elements.push(SceneElement::Solid(SolidColorRenderElement::new(d.dim.clone(), physical(all, out.loc, scale), d.commit, shade, Kind::Unspecified)));
+                elements.push(SceneElement::Solid(SolidColorRenderElement::new(
+                    d.dim.clone(),
+                    physical(all, out.loc, scale),
+                    d.commit,
+                    shade,
+                    Kind::Unspecified,
+                )));
             }
             let frame = self.frame_of(&w);
-            let app_icon = icon_names.iter().find(|(iw, _)| *iw == w).map(|(_, n)| n.clone()).filter(|n| !n.is_empty()).and_then(|n| self.shelf_icon(&n, (20.0 * scale).round() as u32));
+            let app_icon = icon_names
+                .iter()
+                .find(|(iw, _)| *iw == w)
+                .map(|(_, n)| n.clone())
+                .filter(|n| !n.is_empty())
+                .and_then(|n| self.shelf_icon(&n, (20.0 * scale).round() as u32));
             let menu_open = menu_win.as_ref() == Some(&w);
             let border = self.border_of(&w);
-            let reach = border.map(|b| Rectangle::new((b.loc.x - EDGE, b.loc.y - EDGE).into(), (b.size.w + 2 * EDGE, b.size.h + 2 * EDGE).into())).or_else(|| self.space.element_bbox(&w));
+            let reach = border
+                .map(|b| {
+                    Rectangle::new(
+                        (b.loc.x - EDGE, b.loc.y - EDGE).into(),
+                        (b.size.w + 2 * EDGE, b.size.h + 2 * EDGE).into(),
+                    )
+                })
+                .or_else(|| self.space.element_bbox(&w));
             if !reach.is_some_and(|r| r.overlaps(out)) {
                 continue;
             }
             if frame.is_some() || border.is_some() {
                 // A sidebar window's bar carries no title: its page shows its own
                 // name (Dave, 2026-11-14: drop the heading over the page).
-                let title = if self.window_style(&w).kind == crate::style::Kind::Sidebar { String::new() } else { self.window_title(&w) };
+                let title = if self.window_style(&w).kind == crate::style::Kind::Sidebar {
+                    String::new()
+                } else {
+                    self.window_title(&w)
+                };
                 let active = focused.as_ref() == Some(&w);
                 let preview = self.tab_preview(&w);
                 let root = self.runs_as_root(&w);
@@ -840,7 +1052,10 @@ impl Server {
                 // Rounded corners (look milestone 1, step 7): a native window whose
                 // picture is on the GPU and that is not maximized; the others stay
                 // square until their pictures can be cut too.
-                let rounded = round.is_some() && frame.is_some() && !self.restore.contains_key(&w) && native_texture(renderer, &w).is_some();
+                let rounded = round.is_some()
+                    && frame.is_some()
+                    && !self.restore.contains_key(&w)
+                    && native_texture(renderer, &w).is_some();
                 // A modal dialog whose parent was pressed flashes its border in the accent (dialogs.rs).
                 let flash = self.flashing(&w).then(|| {
                     let a = self.accent();
@@ -848,7 +1063,13 @@ impl Server {
                 });
                 let d = self.decor.get_mut(&w).unwrap();
                 let solid = |i: usize, r: Rectangle<f64, Logical>, c: [f32; 4]| {
-                    SceneElement::Solid(SolidColorRenderElement::new(d.ids[i].clone(), physical(r, out.loc, scale), d.commit, c, Kind::Unspecified))
+                    SceneElement::Solid(SolidColorRenderElement::new(
+                        d.ids[i].clone(),
+                        physical(r, out.loc, scale),
+                        d.commit,
+                        c,
+                        Kind::Unspecified,
+                    ))
                 };
                 // The border line, just outside the window (ids 6-9).
                 if let Some(b) = border {
@@ -872,7 +1093,13 @@ impl Server {
                             Rectangle::new((fx + fw - k, fy + k).into(), (k, fh - 2.0 * k).into()),
                         ];
                         for (i, r) in sides.into_iter().enumerate() {
-                            elements.push(SceneElement::Solid(SolidColorRenderElement::new(d.flash[i].clone(), physical(r, out.loc, scale), d.commit, fc, Kind::Unspecified)));
+                            elements.push(SceneElement::Solid(SolidColorRenderElement::new(
+                                d.flash[i].clone(),
+                                physical(r, out.loc, scale),
+                                d.commit,
+                                fc,
+                                Kind::Unspecified,
+                            )));
                         }
                     }
                     elements.push(solid(6, Rectangle::new((ox + s, oy).into(), (ow - 2.0 * s, e).into()), c));
@@ -894,7 +1121,15 @@ impl Server {
                             let places = [(ox, oy), (ox + ow - s, oy), (ox, oy + oh - s), (ox + ow - s, oy + oh - s)];
                             for (buffer, (x, y)) in set.iter().zip(places) {
                                 let at = (Point::<f64, Logical>::from((x, y)) - out.loc.to_f64()).to_physical(scale);
-                                if let Ok(e) = MemoryRenderBufferRenderElement::from_buffer(renderer, at, buffer, None, Some(whole), Some((side, side).into()), Kind::Unspecified) {
+                                if let Ok(e) = MemoryRenderBufferRenderElement::from_buffer(
+                                    renderer,
+                                    at,
+                                    buffer,
+                                    None,
+                                    Some(whole),
+                                    Some((side, side).into()),
+                                    Kind::Unspecified,
+                                ) {
                                     elements.push(SceneElement::Memory(e));
                                 }
                             }
@@ -918,7 +1153,10 @@ impl Server {
                 // A native window that draws under its bar, with its picture on the
                 // GPU: the strip at the picture's top is frosted into the bar (not a
                 // frosted window's: its strip is clear, the frost behind shows).
-                let under = frost.as_ref().filter(|_| !ground_frosted && w.native().is_some_and(|n| n.inset() > 0)).and_then(|_| native_texture(renderer, &w));
+                let under = frost
+                    .as_ref()
+                    .filter(|_| !ground_frosted && w.native().is_some_and(|n| n.inset() > 0))
+                    .and_then(|_| native_texture(renderer, &w));
                 // A Wayland or X11 window's bar: frosted over what is behind it.
                 let behind = frost.is_some() && w.native().is_none();
                 if let Some(f) = frame {
@@ -926,7 +1164,8 @@ impl Server {
                     // The bar, vergence-bar's, drawn once per scale and again when what it shows changes.
                     let hover = hovered.as_ref().filter(|(hw, _)| *hw == w).map(|(_, p)| *p);
                     let width = f.title.size.w;
-                    let (titles, shown, accent) = f.tabs.as_ref().map(|t| (t.titles.clone(), t.shown, t.accent)).unwrap_or_default();
+                    let (titles, shown, accent) =
+                        f.tabs.as_ref().map(|t| (t.titles.clone(), t.shown, t.accent)).unwrap_or_default();
                     let alerts = f.tabs.as_ref().map(|t| t.alerts.clone()).unwrap_or_default();
                     let edited = f.tabs.as_ref().map(|t| t.edited.clone()).unwrap_or_default();
                     // A tab being dragged (dispatch.rs): left in its place, faint; its
@@ -935,15 +1174,41 @@ impl Server {
                     // row drawn with fewer titles than its layout had a blank tab.
                     let dragged = preview.map(|(from, _)| from).filter(|&i| i < titles.len());
                     // The program's own buttons (icons, pressable): part of what the picture shows.
-                    let tools: Vec<(vergence_bar::ToolIcon, bool)> = tools_of(&w).map(|(_, t)| t.iter().map(|(i, e, _, _)| (*i, *e)).collect()).unwrap_or_default();
-                    let tool_names: Vec<String> = tools_of(&w).map(|(_, t)| t.into_iter().map(|(_, _, _, n)| n).collect()).unwrap_or_default();
+                    let tools: Vec<(vergence_bar::ToolIcon, bool)> =
+                        tools_of(&w).map(|(_, t)| t.iter().map(|(i, e, _, _)| (*i, *e)).collect()).unwrap_or_default();
+                    let tool_names: Vec<String> =
+                        tools_of(&w).map(|(_, t)| t.into_iter().map(|(_, _, _, n)| n).collect()).unwrap_or_default();
                     // The bar's height is part of it too (Dave, 2026-11-16: with
                     // kepler's touch panel unplugged the bars got shorter but kept
                     // the touch size's wide buttons, the old picture squeezed).
-                    let key = (title.clone(), width, active, hover, format!("{layout_text}{tools:?}{tool_names:?}{menu_open}{} h{}", app_icon.is_some(), f.title.size.h), titles.clone(), shown, accent, (light, frosted, alerts.clone(), front_frosted, rounded, dragged, edited.clone(), root));
+                    let key = (
+                        title.clone(),
+                        width,
+                        active,
+                        hover,
+                        format!(
+                            "{layout_text}{tools:?}{tool_names:?}{menu_open}{} h{}",
+                            app_icon.is_some(),
+                            f.title.size.h
+                        ),
+                        titles.clone(),
+                        shown,
+                        accent,
+                        (light, frosted, alerts.clone(), front_frosted, rounded, dragged, edited.clone(), root),
+                    );
                     let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
                     let picture = d.bars.entry(scale.to_bits()).or_insert_with(|| BarPicture {
-                        key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, (false, false, Vec::new(), false, false, None, Vec::new(), false)),
+                        key: (
+                            String::new(),
+                            -1,
+                            false,
+                            None,
+                            String::new(),
+                            Vec::new(),
+                            0,
+                            None,
+                            (false, false, Vec::new(), false, false, None, Vec::new(), false),
+                        ),
                         buffer: MemoryRenderBuffer::new(Fourcc::Abgr8888, (1, 1), 1, Transform::Normal, None),
                         px: (1, 1),
                     });
@@ -963,7 +1228,10 @@ impl Server {
                         };
                         // Tab in front: Frosted (the setting) is a white veil on the bar, its ink the bar's.
                         let (pane, ink) = if front_frosted {
-                            (vergence_scene::Color::rgba(255, 255, 255, vergence_look::front_veil(light)), if active { style.ink } else { style.ink_off })
+                            (
+                                vergence_scene::Color::rgba(255, 255, 255, vergence_look::front_veil(light)),
+                                if active { style.ink } else { style.ink_off },
+                            )
                         } else {
                             (vergence_scene::Color::rgb(front.0, front.1, front.2), ink)
                         };
@@ -984,21 +1252,47 @@ impl Server {
                             dragged,
                             tools: &tools,
                             tool_names: &tool_names,
-                            app_icon: app_icon.as_ref().map(|i| std::sync::Arc::new(vergence_scene::Image { width: i.width, height: i.height, rgba: i.rgba.clone() })),
+                            app_icon: app_icon.as_ref().map(|i| {
+                                std::sync::Arc::new(vergence_scene::Image {
+                                    width: i.width,
+                                    height: i.height,
+                                    rgba: i.rgba.clone(),
+                                })
+                            }),
                             menu_open,
                             root,
                         };
                         // Rounded: the bar's top corners cut to the one radius (its bottom goes on into the window).
                         if rounded {
-                            scene.push_clip(vergence_scene::Rect::new(0.0, 0.0, width as f32, f.title.size.h as f32 + vergence_look::RADIUS), vergence_look::RADIUS);
+                            scene.push_clip(
+                                vergence_scene::Rect::new(
+                                    0.0,
+                                    0.0,
+                                    width as f32,
+                                    f.title.size.h as f32 + vergence_look::RADIUS,
+                                ),
+                                vergence_look::RADIUS,
+                            );
                         }
                         vergence_bar::draw(&mut scene, fonts, &f.layout, &look);
                         if rounded {
                             scene.pop_clip();
                         }
-                        match vergence_render::Cpu::new().render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0)) {
+                        match vergence_render::Cpu::new().render(
+                            &scene,
+                            fonts,
+                            scale as f32,
+                            vergence_scene::Color::rgba(0, 0, 0, 0),
+                        ) {
                             Ok(p) => {
-                                picture.buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+                                picture.buffer = MemoryRenderBuffer::from_slice(
+                                    &p.data,
+                                    Fourcc::Abgr8888,
+                                    (p.width as i32, p.height as i32),
+                                    1,
+                                    Transform::Normal,
+                                    None,
+                                );
                                 picture.px = (p.width as i32, p.height as i32);
                                 picture.key = key;
                             }
@@ -1015,7 +1309,15 @@ impl Server {
                     // drawn 1:1 (left out, it was taken as points and shown magnified at
                     // scale 2: kepler, 2026-11-12).
                     let whole = shown_px((picture.px.0, picture.px.1), bar_px.size);
-                    match MemoryRenderBufferRenderElement::from_buffer(renderer, at_f, &picture.buffer, None, Some(whole), Some(f.title.size), Kind::Unspecified) {
+                    match MemoryRenderBufferRenderElement::from_buffer(
+                        renderer,
+                        at_f,
+                        &picture.buffer,
+                        None,
+                        Some(whole),
+                        Some(f.title.size),
+                        Kind::Unspecified,
+                    ) {
                         Ok(e) => elements.push(SceneElement::Memory(e)),
                         Err(e) => tracing::warn!("title bar: {e:?}"),
                     }
@@ -1092,26 +1394,52 @@ impl Server {
                         let (gr, gg, gb) = unit(ground);
                         let (ir, ig, ib) = unit(ink);
                         let uniforms = vec![
-                            Uniform::new("texel", UniformValue::_2f(1.0 / px.w.max(1) as f32, 1.0 / px.h.max(1) as f32)),
+                            Uniform::new(
+                                "texel",
+                                UniformValue::_2f(1.0 / px.w.max(1) as f32, 1.0 / px.h.max(1) as f32),
+                            ),
                             Uniform::new("radius", UniformValue::_1f(frost_r * per_point as f32)),
                             Uniform::new("tint", UniformValue::_4f(gr, gg, gb, strength)),
                             Uniform::new("ink", UniformValue::_3f(ir, ig, ib)),
                             Uniform::new("need", UniformValue::_1f(need_of(light, active))),
-                            Uniform::new("corner", UniformValue::_1f(if rounded { vergence_look::RADIUS * per_point as f32 } else { 0.0 })),
+                            Uniform::new(
+                                "corner",
+                                UniformValue::_1f(if rounded { vergence_look::RADIUS * per_point as f32 } else { 0.0 }),
+                            ),
                             Uniform::new("bottom", UniformValue::_1f(0.0)),
                             // A bar of the other style than its window's ground (the
                             // terminal's page color): what shows through, inverted, so
                             // light text under a light bar is a dark shadow on it, not a
                             // pale smudge (Dave, 2026-11-14).
-                            Uniform::new("invert", UniformValue::_1f(if accent.is_some_and(|c| page_light(c) != light) { 1.0 } else { 0.0 })),
+                            Uniform::new(
+                                "invert",
+                                UniformValue::_1f(if accent.is_some_and(|c| page_light(c) != light) {
+                                    1.0
+                                } else {
+                                    0.0
+                                }),
+                            ),
                             // A sidebar window's sidebar ends where its bar's title would
                             // start: the frost does not blur across that edge.
-                            Uniform::new("split", UniformValue::_1f(tools_of(&w).map_or(0.0, |(from, _)| ((from as f64 - 1.0) * per_point / px.w.max(1) as f64) as f32))),
+                            Uniform::new(
+                                "split",
+                                UniformValue::_1f(tools_of(&w).map_or(0.0, |(from, _)| {
+                                    ((from as f64 - 1.0) * per_point / px.w.max(1) as f64) as f32
+                                })),
+                            ),
                             // A light bar is never washed out past its shade by a white
                             // page under it (Dave, 2026-11-21).
                             Uniform::new("cap", UniformValue::_1f(if light { 1.0 } else { 0.0 })),
                         ];
-                        elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(&mut d.frost, dst, strip, texture.clone(), native_serial(&w), program.clone(), uniforms)));
+                        elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(
+                            &mut d.frost,
+                            dst,
+                            strip,
+                            texture.clone(),
+                            native_serial(&w),
+                            program.clone(),
+                            uniforms,
+                        )));
                     }
                 }
             }
@@ -1135,10 +1463,22 @@ impl Server {
                     let body_px = edges_px(top - out.loc, p.logical, scale);
                     let px = alt.as_ref().map_or(p.px, |a| a.px);
                     // Drawn denser than the screen (magnified): all of it, into the body.
-                    let whole = if sharp > 1.0 && alt.is_some() { Rectangle::from_size((px.w as f64, px.h as f64).into()) } else { shown_px((px.w, px.h), body_px.size) };
+                    let whole = if sharp > 1.0 && alt.is_some() {
+                        Rectangle::from_size((px.w as f64, px.h as f64).into())
+                    } else {
+                        shown_px((px.w, px.h), body_px.size)
+                    };
                     match &p.content {
                         crate::native::Content::Memory(buffer) if alt.is_none() => {
-                            match MemoryRenderBufferRenderElement::from_buffer(renderer, at_f, buffer, None, Some(whole), Some(p.logical), Kind::Unspecified) {
+                            match MemoryRenderBufferRenderElement::from_buffer(
+                                renderer,
+                                at_f,
+                                buffer,
+                                None,
+                                Some(whole),
+                                Some(p.logical),
+                                Kind::Unspecified,
+                            ) {
                                 Ok(e) => elements.push(SceneElement::Memory(e)),
                                 Err(e) => tracing::warn!("native window picture: {e:?}"),
                             }
@@ -1150,20 +1490,42 @@ impl Server {
                             };
                             if let Some((t, gles, serial)) = picked {
                                 // Its bottom corners cut to the one radius, unless maximized.
-                                match round.as_ref().filter(|_| !self.restore.contains_key(&w) && self.frame_of(&w).is_some()) {
+                                match round
+                                    .as_ref()
+                                    .filter(|_| !self.restore.contains_key(&w) && self.frame_of(&w).is_some())
+                                {
                                     Some(program) => {
                                         use smithay::backend::renderer::gles::{Uniform, UniformValue};
                                         let per_point = whole.size.w as f32 / p.logical.w.max(1) as f32;
                                         let uniforms = vec![
-                                            Uniform::new("size", UniformValue::_2f(whole.size.w as f32, whole.size.h as f32)),
-                                            Uniform::new("radius", UniformValue::_1f(vergence_look::RADIUS * per_point)),
+                                            Uniform::new(
+                                                "size",
+                                                UniformValue::_2f(whole.size.w as f32, whole.size.h as f32),
+                                            ),
+                                            Uniform::new(
+                                                "radius",
+                                                UniformValue::_1f(vergence_look::RADIUS * per_point),
+                                            ),
                                             // Drawn under its bar: its own top corners are there too.
-                                            Uniform::new("top", UniformValue::_1f(if n.inset() > 0 { 1.0 } else { 0.0 })),
+                                            Uniform::new(
+                                                "top",
+                                                UniformValue::_1f(if n.inset() > 0 { 1.0 } else { 0.0 }),
+                                            ),
                                         ];
                                         let dst = body_px;
-                                        let src = Rectangle::<f64, smithay::utils::Buffer>::from_size((whole.size.w, whole.size.h).into());
+                                        let src = Rectangle::<f64, smithay::utils::Buffer>::from_size(
+                                            (whole.size.w, whole.size.h).into(),
+                                        );
                                         let slot = &mut self.decor.entry(w.clone()).or_insert_with(Decor::new).round;
-                                        elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(slot, dst, src, gles, serial, program.clone(), uniforms)));
+                                        elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(
+                                            slot,
+                                            dst,
+                                            src,
+                                            gles,
+                                            serial,
+                                            program.clone(),
+                                            uniforms,
+                                        )));
                                     }
                                     None => {
                                         let e = smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer(at_f, &t, None, Some(whole), Some(p.logical), Kind::Unspecified);
@@ -1183,13 +1545,22 @@ impl Server {
                         let d = self.decor.entry(w.clone()).or_insert_with(Decor::new);
                         match frost.clone() {
                             Some(program) => {
-                                if let Some(e) = crate::backdrop::element(renderer, &mut d.backdrop, dst, program, &look) {
+                                if let Some(e) =
+                                    crate::backdrop::element(renderer, &mut d.backdrop, dst, program, &look)
+                                {
                                     elements.push(SceneElement::Backdrop(e));
                                 }
                             }
                             None => {
-                                let c = [ground.0 as f32 / 255.0, ground.1 as f32 / 255.0, ground.2 as f32 / 255.0, 1.0];
-                                elements.push(SceneElement::Solid(SolidColorRenderElement::new(d.ids[10].clone(), dst, d.commit, c, Kind::Unspecified)));
+                                let c =
+                                    [ground.0 as f32 / 255.0, ground.1 as f32 / 255.0, ground.2 as f32 / 255.0, 1.0];
+                                elements.push(SceneElement::Solid(SolidColorRenderElement::new(
+                                    d.ids[10].clone(),
+                                    dst,
+                                    d.commit,
+                                    c,
+                                    Kind::Unspecified,
+                                )));
                             }
                         }
                     }
@@ -1197,7 +1568,8 @@ impl Server {
                 continue;
             }
             let render_loc = (loc - w.geometry().loc - out.loc).to_f64().to_physical(scale).to_i32_round();
-            let surfaces: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = w.render_elements(renderer, render_loc, scale.into(), 1.0);
+            let surfaces: Vec<WaylandSurfaceRenderElement<GlesRenderer>> =
+                w.render_elements(renderer, render_loc, scale.into(), 1.0);
             elements.extend(surfaces.into_iter().map(SceneElement::Surface));
         }
         for w in reinset {
@@ -1221,7 +1593,13 @@ impl Server {
         // front of the screen dimmed (overview.rs).
         if self.overview.is_some() {
             let windows_part = elements.split_off(loop_start);
-            let spans: Vec<(Win, usize, usize)> = spans.iter().enumerate().map(|(i, (w, a))| (w.clone(), a - loop_start, spans.get(i + 1).map_or(windows_part.len(), |n| n.1 - loop_start))).collect();
+            let spans: Vec<(Win, usize, usize)> = spans
+                .iter()
+                .enumerate()
+                .map(|(i, (w, a))| {
+                    (w.clone(), a - loop_start, spans.get(i + 1).map_or(windows_part.len(), |n| n.1 - loop_start))
+                })
+                .collect();
             let (placed, rest) = self.overview_place(windows_part, &spans, out, scale);
             elements.extend(placed);
             elements.extend(self.overview_dim(out, scale));
@@ -1447,7 +1825,16 @@ fn tools_of(w: &Win) -> Option<(f32, Vec<(vergence_bar::ToolIcon, bool, u32, Str
 /// Where the title starts and each own button's width for the layout: None
 /// an icon button's, a text button's from its name.
 fn tool_widths(w: &Win) -> Option<(f32, Vec<Option<f32>>)> {
-    tools_of(w).map(|(from, t)| (from, t.iter().map(|(icon, _, _, name)| (*icon == vergence_bar::ToolIcon::Label).then(|| vergence_bar::label_width(name))).collect()))
+    tools_of(w).map(|(from, t)| {
+        (
+            from,
+            t.iter()
+                .map(|(icon, _, _, name)| {
+                    (*icon == vergence_bar::ToolIcon::Label).then(|| vergence_bar::label_width(name))
+                })
+                .collect(),
+        )
+    })
 }
 
 impl Server {

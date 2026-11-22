@@ -159,7 +159,13 @@ pub fn try_header(data: &[u8], at: usize, info: &StreamInfo) -> Option<(u64, usi
 /// growing them when a frame is longer. Returns the frame's length in bytes
 /// and its block size. Indexed loops as in Hymie, so a fix carries over.
 #[allow(clippy::needless_range_loop)]
-pub fn decode_frame(data: &[u8], start: usize, end: usize, info: &StreamInfo, channels: &mut Vec<Vec<i64>>) -> Result<(usize, usize), Error> {
+pub fn decode_frame(
+    data: &[u8],
+    start: usize,
+    end: usize,
+    info: &StreamInfo,
+    channels: &mut Vec<Vec<i64>>,
+) -> Result<(usize, usize), Error> {
     let frame = &data[start..end];
     let mut r = BitReader::new(frame);
     if r.read(14)? != 0b11111111111110 || r.read(1)? != 0 {
@@ -281,7 +287,11 @@ fn subframe(r: &mut BitReader, s: &mut [i64], bits: u32) -> Result<(), Error> {
                     1 => s[i - 1],
                     2 => s[i - 1].wrapping_mul(2).wrapping_sub(s[i - 2]),
                     3 => s[i - 1].wrapping_mul(3).wrapping_sub(s[i - 2].wrapping_mul(3)).wrapping_add(s[i - 3]),
-                    _ => s[i - 1].wrapping_mul(4).wrapping_sub(s[i - 2].wrapping_mul(6)).wrapping_add(s[i - 3].wrapping_mul(4)).wrapping_sub(s[i - 4]),
+                    _ => s[i - 1]
+                        .wrapping_mul(4)
+                        .wrapping_sub(s[i - 2].wrapping_mul(6))
+                        .wrapping_add(s[i - 3].wrapping_mul(4))
+                        .wrapping_sub(s[i - 4]),
                 });
             }
         }
@@ -410,7 +420,11 @@ impl<'a> BitReader<'a> {
             return Ok(0);
         }
         // A side channel of 32-bit audio is 33 bits wide.
-        let v: i64 = if bits > 32 { (self.read(bits - 32)? as i64) << 32 | self.read(32)? as i64 } else { self.read(bits)? as i64 };
+        let v: i64 = if bits > 32 {
+            (self.read(bits - 32)? as i64) << 32 | self.read(32)? as i64
+        } else {
+            self.read(bits)? as i64
+        };
         Ok(if v & (1i64 << (bits - 1)) != 0 { v - (1i64 << bits) } else { v })
     }
 
@@ -507,7 +521,17 @@ impl FlacTrack {
         }
         let scale = 1.0 / (1u64 << (info.bits - 1)) as f32;
         let channels = vec![vec![0i64; info.max_block.max(1) as usize]; info.channels as usize];
-        Ok(FlacTrack { gain: ReplayGain::from_tags(&t.values), scale, at: frames_start, frames_start, channels, frame_len: 0, frame_off: 0, info, data })
+        Ok(FlacTrack {
+            gain: ReplayGain::from_tags(&t.values),
+            scale,
+            at: frames_start,
+            frames_start,
+            channels,
+            frame_len: 0,
+            frame_off: 0,
+            info,
+            data,
+        })
     }
 
     /// False at the end: what follows the last frame is not another frame
@@ -519,7 +543,10 @@ impl FlacTrack {
         }
         let code = (self.data[self.at + 3] >> 4) as u16;
         if (if code < 8 { code + 1 } else { 2 }) != self.info.channels {
-            return Err(damaged(format!("The frame at byte {} has a different number of channels from STREAMINFO.", self.at)));
+            return Err(damaged(format!(
+                "The frame at byte {} has a different number of channels from STREAMINFO.",
+                self.at
+            )));
         }
         let at = self.at;
         let (len, block) = decode_frame(&self.data, self.at, self.data.len(), &self.info, &mut self.channels)?;

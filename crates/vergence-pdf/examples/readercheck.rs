@@ -29,7 +29,12 @@ fn pdfs(dir: &Path, out: &mut Vec<PathBuf>) {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let max = args.iter().position(|a| a == "--max").and_then(|i| args.get(i + 1)).and_then(|v| v.parse().ok()).unwrap_or(usize::MAX);
+    let max = args
+        .iter()
+        .position(|a| a == "--max")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(usize::MAX);
     let folders: Vec<&String> = args.iter().filter(|a| !a.starts_with("--") && a.parse::<usize>().is_err()).collect();
     if folders.is_empty() {
         eprintln!("usage: readercheck FOLDER... [--max N]");
@@ -102,7 +107,12 @@ fn main() {
         }
     }
     slowest.sort_by(|a, b| b.0.cmp(&a.0));
-    println!("{} files in {:.0} s: {opened} opened and read, {locked} locked, {} with problems; {titled} with a title, {with_outline} with an outline", files.len(), started.elapsed().as_secs_f64(), problems.len());
+    println!(
+        "{} files in {:.0} s: {opened} opened and read, {locked} locked, {} with problems; {titled} with a title, {with_outline} with an outline",
+        files.len(),
+        started.elapsed().as_secs_f64(),
+        problems.len()
+    );
     let crashed = problems.iter().filter(|(_, w)| w.contains("the PDF reader stopped")).count();
     println!("helper crashes or hangs: {crashed}");
     for (p, w) in problems.iter().take(40) {

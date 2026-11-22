@@ -94,7 +94,11 @@ fn read(tx: channel::Sender<Found>, live: Live) {
             }
         }
         tick = tick.wrapping_add(1);
-        std::thread::sleep(if live.0.load(Ordering::Relaxed) { Duration::from_secs(1) } else { Duration::from_secs(2) });
+        std::thread::sleep(if live.0.load(Ordering::Relaxed) {
+            Duration::from_secs(1)
+        } else {
+            Duration::from_secs(2)
+        });
     }
 }
 
@@ -130,7 +134,9 @@ impl Server {
                 let result = if control == "volume" {
                     // Turning it up takes the mute off, as the volume keys do.
                     let v = value.round().clamp(0.0, 100.0) as u8;
-                    sound.set_volume(&out.id, v).and_then(|_| if out.muted && v > out.volume { sound.set_muted(&out.id, false) } else { Ok(()) })
+                    sound.set_volume(&out.id, v).and_then(|_| {
+                        if out.muted && v > out.volume { sound.set_muted(&out.id, false) } else { Ok(()) }
+                    })
                 } else {
                     sound.set_muted(&out.id, value >= 0.5)
                 };

@@ -8,9 +8,7 @@ use smithay::{
     },
     wayland::{
         buffer::BufferHandler,
-        compositor::{
-            CompositorClientState, CompositorHandler, CompositorState, get_parent, is_sync_subsurface,
-        },
+        compositor::{CompositorClientState, CompositorHandler, CompositorState, get_parent, is_sync_subsurface},
         shm::{ShmHandler, ShmState},
     },
 };

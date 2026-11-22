@@ -22,7 +22,11 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         renderer::{
-            element::{Id, Kind, memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement}, solid::SolidColorRenderElement},
+            element::{
+                Id, Kind,
+                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
+                solid::SolidColorRenderElement,
+            },
             gles::GlesRenderer,
             utils::CommitCounter,
         },
@@ -48,7 +52,9 @@ smithay::backend::renderer::element::render_elements! {
 }
 
 /// A window's element scaled into its place in the overview.
-pub type Placed = smithay::backend::renderer::element::utils::RelocateRenderElement<smithay::backend::renderer::element::utils::RescaleRenderElement<WinParts>>;
+pub type Placed = smithay::backend::renderer::element::utils::RelocateRenderElement<
+    smithay::backend::renderer::element::utils::RescaleRenderElement<WinParts>,
+>;
 
 /// Between windows, and from them to the edges: room for a title under each.
 const GAP: i32 = 44;
@@ -116,8 +122,16 @@ impl Server {
         let focused = self.keyboard_window();
         let mut entries: Vec<Entry> = Vec::new();
         // The windows in the order the keyboard last had them, as Alt+Tab.
-        let all: Vec<(Win, String)> = items.iter().flat_map(|(item, ws)| ws.iter().map(move |w| (w.clone(), item.name.clone()))).collect();
-        let mut order: Vec<Win> = self.input.seat.order_of_use().iter().filter_map(|&id| self.input.window(id)).filter(|w| all.iter().any(|(a, _)| a == w)).collect();
+        let all: Vec<(Win, String)> =
+            items.iter().flat_map(|(item, ws)| ws.iter().map(move |w| (w.clone(), item.name.clone()))).collect();
+        let mut order: Vec<Win> = self
+            .input
+            .seat
+            .order_of_use()
+            .iter()
+            .filter_map(|&id| self.input.window(id))
+            .filter(|w| all.iter().any(|(a, _)| a == w))
+            .collect();
         for (w, _) in &all {
             if !order.contains(w) {
                 order.push(w.clone());
@@ -135,7 +149,17 @@ impl Server {
         tracing::info!("overview: open ({} windows)", entries.len());
         let at = focused.and_then(|f| entries.iter().position(|e| e.win == f)).or(Some(0));
         let n = entries.len();
-        self.overview = Some(Overview { entries, at, hover: None, filter: String::new(), dim: Id::new(), outline: [Id::new(), Id::new(), Id::new(), Id::new()], commit: CommitCounter::default(), labels: (0..n).map(|_| None).collect(), field: None });
+        self.overview = Some(Overview {
+            entries,
+            at,
+            hover: None,
+            filter: String::new(),
+            dim: Id::new(),
+            outline: [Id::new(), Id::new(), Id::new(), Id::new()],
+            commit: CommitCounter::default(),
+            labels: (0..n).map(|_| None).collect(),
+            field: None,
+        });
         self.overview_arrange();
         self.redraw_all();
         // Live: drawn again while it is open.
@@ -154,7 +178,15 @@ impl Server {
         let Some(ov) = self.overview.as_ref() else { return "closed".into() };
         let mut out = vec![format!("open, {} windows, filter {:?}, chosen {:?}", ov.entries.len(), ov.filter, ov.at)];
         for (i, e) in ov.entries.iter().enumerate() {
-            out.push(format!("{i} {} {} {} {} {:?}{}", e.rect.loc.x, e.rect.loc.y, e.rect.size.w, e.rect.size.h, e.title, if e.minimized { " minimized" } else { "" }));
+            out.push(format!(
+                "{i} {} {} {} {} {:?}{}",
+                e.rect.loc.x,
+                e.rect.loc.y,
+                e.rect.size.w,
+                e.rect.size.h,
+                e.title,
+                if e.minimized { " minimized" } else { "" }
+            ));
         }
         out.join("\n")
     }
@@ -170,7 +202,8 @@ impl Server {
     /// area under the typing strip, the minimized ones in a row along the
     /// bottom of it (a fifth of its height) when there are any.
     fn overview_arrange(&mut self) {
-        let screens: Vec<Rectangle<i32, Logical>> = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).collect();
+        let screens: Vec<Rectangle<i32, Logical>> =
+            self.space.outputs().filter_map(|o| self.space.output_geometry(o)).collect();
         let Some(ov) = self.overview.as_ref() else { return };
         let words = ov.filter.to_lowercase();
         // Where each window is (a minimized one: where it goes back to).
@@ -182,27 +215,48 @@ impl Server {
                 None => self.space.element_geometry(&e.win),
             })
             .collect();
-        let wanted: Vec<bool> = ov.entries.iter().map(|e| words.is_empty() || e.title.to_lowercase().contains(&words) || e.app.to_lowercase().contains(&words)).collect();
+        let wanted: Vec<bool> = ov
+            .entries
+            .iter()
+            .map(|e| {
+                words.is_empty() || e.title.to_lowercase().contains(&words) || e.app.to_lowercase().contains(&words)
+            })
+            .collect();
         let minimized: Vec<bool> = ov.entries.iter().map(|e| e.minimized).collect();
         let mut rects = vec![Rectangle::<i32, Logical>::default(); ov.entries.len()];
         for screen in &screens {
             let on: Vec<usize> = (0..places.len())
                 .filter(|&i| wanted[i])
-                .filter(|&i| places[i].is_some_and(|p| screen.contains((p.loc.x + p.size.w / 2, p.loc.y + p.size.h / 2))) || (places[i].is_none() && Some(*screen) == screens.first().copied()))
+                .filter(|&i| {
+                    places[i].is_some_and(|p| screen.contains((p.loc.x + p.size.w / 2, p.loc.y + p.size.h / 2)))
+                        || (places[i].is_none() && Some(*screen) == screens.first().copied())
+                })
                 .collect();
             let work = self.work_area(*screen);
-            let area = Rectangle::<i32, Logical>::new((work.loc.x, work.loc.y + FIELD_H).into(), (work.size.w, work.size.h - FIELD_H).into());
+            let area = Rectangle::<i32, Logical>::new(
+                (work.loc.x, work.loc.y + FIELD_H).into(),
+                (work.size.w, work.size.h - FIELD_H).into(),
+            );
             let (open, gone): (Vec<usize>, Vec<usize>) = on.iter().partition(|&&i| !minimized[i]);
             let strip_h = if gone.is_empty() { 0 } else { area.size.h / 5 };
             let main = Rect::new(area.loc.x, area.loc.y, area.size.w, area.size.h - strip_h);
             let size = |i: usize| places[i].map_or(Rect::new(0, 0, 800, 600), r);
-            for (i, p) in open.iter().zip(overview::arrange(&open.iter().map(|&i| size(i)).collect::<Vec<_>>(), main, GAP)) {
+            for (i, p) in
+                open.iter().zip(overview::arrange(&open.iter().map(|&i| size(i)).collect::<Vec<_>>(), main, GAP))
+            {
                 rects[*i] = rect(p);
             }
             if strip_h > 0 {
                 let strip = Rect::new(area.loc.x, area.loc.y + area.size.h - strip_h, area.size.w, strip_h);
                 // In a row by their order, whatever their places.
-                let sizes: Vec<Rect> = gone.iter().enumerate().map(|(k, &i)| { let s = size(i); Rect::new(k as i32 * 10_000, 0, s.w, s.h) }).collect();
+                let sizes: Vec<Rect> = gone
+                    .iter()
+                    .enumerate()
+                    .map(|(k, &i)| {
+                        let s = size(i);
+                        Rect::new(k as i32 * 10_000, 0, s.w, s.h)
+                    })
+                    .collect();
                 for (i, p) in gone.iter().zip(overview::arrange(&sizes, strip, GAP / 2)) {
                     rects[*i] = rect(p);
                 }
@@ -294,7 +348,11 @@ impl Server {
             }
             key::KEY_BackSpace => {
                 if let Some(ov) = self.overview.as_mut() {
-                    if mods.ctrl { ov.filter.clear() } else { ov.filter.pop(); }
+                    if mods.ctrl {
+                        ov.filter.clear()
+                    } else {
+                        ov.filter.pop();
+                    }
                 }
                 self.overview_arrange();
                 self.redraw_all();
@@ -314,7 +372,12 @@ impl Server {
 
     /// The overview's elements on `out`: what is typed, the titles, the
     /// choice's outline, the pictures, the dimmed screen behind them.
-    pub fn overview_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
+    pub fn overview_elements(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Vec<SceneElement> {
         let Some(ov) = self.overview.as_ref() else { return Vec::new() };
         // A window gone meanwhile: arranged again without it.
         if ov.entries.iter().any(|e| !smithay::utils::IsAlive::alive(&e.win)) {
@@ -343,7 +406,11 @@ impl Server {
             let ov = self.overview.as_ref().unwrap();
             let text = if ov.filter.is_empty() { "Type to find a window".to_string() } else { ov.filter.clone() };
             let faint = ov.filter.is_empty();
-            let key = { let mut h = std::collections::hash_map::DefaultHasher::new(); (&text, faint, light, scale.to_bits()).hash(&mut h); h.finish() };
+            let key = {
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                (&text, faint, light, scale.to_bits()).hash(&mut h);
+                h.finish()
+            };
             if ov.field.as_ref().map(|(k, ..)| *k) != Some(key) {
                 let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
                 if let Some(face) = fonts.face("sans-serif", 400, false) {
@@ -356,20 +423,48 @@ impl Server {
                     scene.stroke(SceneRect::new(0.0, 0.0, w, h), h / 2.0, vergence_look::EDGE, ink(s.edge));
                     scene.push_clip(SceneRect::new(14.0, 0.0, w - 28.0, h), 0.0);
                     let x = ((w - tw) / 2.0).max(18.0);
-                    vergence_render::text(&mut scene, fonts, face, size, if faint { ink(s.menu_ink_off) } else { ink(s.menu_ink) }, ScenePoint::new(x, ((h - (m.ascent + m.descent)) / 2.0 + m.ascent).round()), &text);
+                    vergence_render::text(
+                        &mut scene,
+                        fonts,
+                        face,
+                        size,
+                        if faint { ink(s.menu_ink_off) } else { ink(s.menu_ink) },
+                        ScenePoint::new(x, ((h - (m.ascent + m.descent)) / 2.0 + m.ascent).round()),
+                        &text,
+                    );
                     scene.pop_clip();
-                    if let Ok(p) = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) {
-                        let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+                    if let Ok(p) =
+                        vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0))
+                    {
+                        let buffer = MemoryRenderBuffer::from_slice(
+                            &p.data,
+                            Fourcc::Abgr8888,
+                            (p.width as i32, p.height as i32),
+                            1,
+                            Transform::Normal,
+                            None,
+                        );
                         self.overview.as_mut().unwrap().field = Some((key, buffer, w as i32));
                     }
                 }
             }
             let work = self.work_area(out);
             if let Some((_, buffer, w)) = self.overview.as_ref().unwrap().field.as_ref() {
-                let area = Rectangle::<i32, Logical>::new((work.loc.x + (work.size.w - w) / 2, work.loc.y + (FIELD_H - 34) / 2 + 6).into(), (*w, 34).into());
+                let area = Rectangle::<i32, Logical>::new(
+                    (work.loc.x + (work.size.w - w) / 2, work.loc.y + (FIELD_H - 34) / 2 + 6).into(),
+                    (*w, 34).into(),
+                );
                 let p = px(area);
                 let src = Rectangle::<f64, Logical>::from_size((p.size.w as f64, p.size.h as f64).into());
-                if let Ok(e) = MemoryRenderBufferRenderElement::from_buffer(renderer, p.loc.to_f64(), buffer, None, Some(src), Some(area.size), Kind::Unspecified) {
+                if let Ok(e) = MemoryRenderBufferRenderElement::from_buffer(
+                    renderer,
+                    p.loc.to_f64(),
+                    buffer,
+                    None,
+                    Some(src),
+                    Some(area.size),
+                    Kind::Unspecified,
+                ) {
                     elements.push(SceneElement::Memory(e));
                 }
             }
@@ -386,10 +481,17 @@ impl Server {
                 continue;
             }
             let lw = (rc.size.w + GAP - 8).max(60);
-            let key = { let mut h = std::collections::hash_map::DefaultHasher::new(); (&title, minimized, chosen, lw, light, scale.to_bits()).hash(&mut h); h.finish() };
+            let key = {
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                (&title, minimized, chosen, lw, light, scale.to_bits()).hash(&mut h);
+                h.finish()
+            };
             if self.overview.as_ref().unwrap().labels.get(i).and_then(|l| l.as_ref()).map(|(k, ..)| *k) != Some(key) {
                 let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
-                if let Some(face) = fonts.face("sans-serif", if chosen { 600 } else { 400 }, false).or_else(|| fonts.face("sans-serif", 400, false)) {
+                if let Some(face) = fonts
+                    .face("sans-serif", if chosen { 600 } else { 400 }, false)
+                    .or_else(|| fonts.face("sans-serif", 400, false))
+                {
                     let size = 13.0;
                     let m = fonts.metrics(face, size);
                     let mut text = if title.is_empty() { "Untitled".to_string() } else { title.clone() };
@@ -403,11 +505,38 @@ impl Server {
                     let tw = fonts.layout(face, size, &text).1;
                     let (w, h) = ((tw + 16.0).ceil(), LABEL_H as f32);
                     let mut scene = Scene::new(w, h);
-                    scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), h / 2.0, if chosen { accent } else { Color { a: 200, ..ink(s.menu) } });
-                    let color = if chosen { Color::rgb(0xff, 0xff, 0xff) } else if minimized { ink(s.menu_ink_off) } else { ink(s.menu_ink) };
-                    vergence_render::text(&mut scene, fonts, face, size, color, ScenePoint::new(8.0, ((h - (m.ascent + m.descent)) / 2.0 + m.ascent).round()), &text);
-                    if let Ok(p) = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) {
-                        let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+                    scene.fill_rounded(
+                        SceneRect::new(0.0, 0.0, w, h),
+                        h / 2.0,
+                        if chosen { accent } else { Color { a: 200, ..ink(s.menu) } },
+                    );
+                    let color = if chosen {
+                        Color::rgb(0xff, 0xff, 0xff)
+                    } else if minimized {
+                        ink(s.menu_ink_off)
+                    } else {
+                        ink(s.menu_ink)
+                    };
+                    vergence_render::text(
+                        &mut scene,
+                        fonts,
+                        face,
+                        size,
+                        color,
+                        ScenePoint::new(8.0, ((h - (m.ascent + m.descent)) / 2.0 + m.ascent).round()),
+                        &text,
+                    );
+                    if let Ok(p) =
+                        vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0))
+                    {
+                        let buffer = MemoryRenderBuffer::from_slice(
+                            &p.data,
+                            Fourcc::Abgr8888,
+                            (p.width as i32, p.height as i32),
+                            1,
+                            Transform::Normal,
+                            None,
+                        );
                         if let Some(slot) = self.overview.as_mut().unwrap().labels.get_mut(i) {
                             *slot = Some((key, buffer, w as i32));
                         }
@@ -415,10 +544,21 @@ impl Server {
                 }
             }
             if let Some((_, buffer, w)) = self.overview.as_ref().unwrap().labels.get(i).and_then(|l| l.as_ref()) {
-                let area = Rectangle::<i32, Logical>::new((rc.loc.x + (rc.size.w - w) / 2, rc.loc.y + rc.size.h + 8).into(), (*w, LABEL_H).into());
+                let area = Rectangle::<i32, Logical>::new(
+                    (rc.loc.x + (rc.size.w - w) / 2, rc.loc.y + rc.size.h + 8).into(),
+                    (*w, LABEL_H).into(),
+                );
                 let p = px(area);
                 let src = Rectangle::<f64, Logical>::from_size((p.size.w as f64, p.size.h as f64).into());
-                if let Ok(e) = MemoryRenderBufferRenderElement::from_buffer(renderer, p.loc.to_f64(), buffer, None, Some(src), Some(area.size), Kind::Unspecified) {
+                if let Ok(e) = MemoryRenderBufferRenderElement::from_buffer(
+                    renderer,
+                    p.loc.to_f64(),
+                    buffer,
+                    None,
+                    Some(src),
+                    Some(area.size),
+                    Kind::Unspecified,
+                ) {
                     elements.push(SceneElement::Memory(e));
                 }
             }
@@ -426,7 +566,15 @@ impl Server {
         // The chosen window's outline, in the accent.
         let (chosen, outline, commit) = {
             let ov = self.overview.as_ref().unwrap();
-            (ov.hover.or(ov.at).and_then(|i| ov.entries.get(i)).map(|e| e.rect).filter(|rc| rc.size.w > 0 && rc.overlaps(out)), ov.outline.clone(), ov.commit)
+            (
+                ov.hover
+                    .or(ov.at)
+                    .and_then(|i| ov.entries.get(i))
+                    .map(|e| e.rect)
+                    .filter(|rc| rc.size.w > 0 && rc.overlaps(out)),
+                ov.outline.clone(),
+                ov.commit,
+            )
         };
         if let Some(rc) = chosen {
             let t = 3;
@@ -438,7 +586,13 @@ impl Server {
                 Rectangle::new((rc.loc.x + rc.size.w + 2, rc.loc.y - 2).into(), (t, rc.size.h + 4).into()),
             ];
             for (id, bar) in outline.iter().zip(bars) {
-                elements.push(SceneElement::Solid(SolidColorRenderElement::new(id.clone(), px(bar), commit, a, Kind::Unspecified)));
+                elements.push(SceneElement::Solid(SolidColorRenderElement::new(
+                    id.clone(),
+                    px(bar),
+                    commit,
+                    a,
+                    Kind::Unspecified,
+                )));
             }
         }
         // The pictures.
@@ -469,20 +623,33 @@ impl Server {
         let ov = self.overview.as_ref()?;
         let shade = if self.light_style() { [0.0, 0.0, 0.0, 0.45] } else { [0.0, 0.0, 0.0, 0.6] };
         let rect = Rectangle::<i32, Physical>::from_size(out.size.to_f64().to_physical(scale).to_i32_round());
-        Some(SceneElement::Solid(SolidColorRenderElement::new(ov.dim.clone(), rect, CommitCounter::default(), shade, Kind::Unspecified)))
+        Some(SceneElement::Solid(SolidColorRenderElement::new(
+            ov.dim.clone(),
+            rect,
+            CommitCounter::default(),
+            shade,
+            Kind::Unspecified,
+        )))
     }
 
     /// The windows' elements (front first, `spans` saying each window's)
     /// split: those of windows shown in the overview, each window's scaled
     /// whole into its place (its shape kept, centered), and the rest as they
     /// were (windows narrowed away by typing, the desktop's icons).
-    pub fn overview_place(&self, parts: Vec<SceneElement>, spans: &[(Win, usize, usize)], out: Rectangle<i32, Logical>, scale: f64) -> (Vec<SceneElement>, Vec<SceneElement>) {
+    pub fn overview_place(
+        &self,
+        parts: Vec<SceneElement>,
+        spans: &[(Win, usize, usize)],
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> (Vec<SceneElement>, Vec<SceneElement>) {
         use smithay::backend::renderer::element::{
             Element,
             utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
         };
         let Some(ov) = self.overview.as_ref() else { return (Vec::new(), parts) };
-        let target = |w: &Win| ov.entries.iter().find(|e| e.win == *w && !e.minimized && e.rect.size.w > 0).map(|e| e.rect);
+        let target =
+            |w: &Win| ov.entries.iter().find(|e| e.win == *w && !e.minimized && e.rect.size.w > 0).map(|e| e.rect);
         let mut slots: Vec<Option<SceneElement>> = parts.into_iter().map(Some).collect();
         let (mut placed, mut rest) = (Vec::new(), Vec::new());
         let k_out = smithay::utils::Scale::from(scale);
@@ -500,7 +667,10 @@ impl Server {
             let ts = rc.size.to_f64().to_physical(scale);
             let k = (ts.w / bx.size.w as f64).min(ts.h / bx.size.h as f64);
             let (sw, sh) = (bx.size.w as f64 * k, bx.size.h as f64 * k);
-            let to = Point::<i32, Physical>::from(((t0.x + (ts.w - sw) / 2.0).round() as i32, (t0.y + (ts.h - sh) / 2.0).round() as i32));
+            let to = Point::<i32, Physical>::from((
+                (t0.x + (ts.w - sw) / 2.0).round() as i32,
+                (t0.y + (ts.h - sh) / 2.0).round() as i32,
+            ));
             for e in mine {
                 let part = match e {
                     SceneElement::Surface(x) => WinParts::Surface(x),
@@ -511,7 +681,11 @@ impl Server {
                     SceneElement::Backdrop(x) => WinParts::Backdrop(x),
                     _ => continue,
                 };
-                placed.push(SceneElement::Placed(RelocateRenderElement::from_element(RescaleRenderElement::from_element(part, bx.loc, k), to - bx.loc, Relocate::Relative)));
+                placed.push(SceneElement::Placed(RelocateRenderElement::from_element(
+                    RescaleRenderElement::from_element(part, bx.loc, k),
+                    to - bx.loc,
+                    Relocate::Relative,
+                )));
             }
         }
         rest.extend(slots.into_iter().flatten());

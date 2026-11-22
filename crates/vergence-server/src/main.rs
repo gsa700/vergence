@@ -3,77 +3,77 @@
 
 mod capture;
 mod drives;
-mod portal_shot;
 mod handlers;
+mod portal_shot;
 
-mod dispatch;
-mod portal;
-mod drag;
-mod desktop;
-mod exit;
-mod keys;
-mod input;
-mod state;
-mod winit;
-mod drm;
+mod actions;
+mod agents;
+mod applets;
+mod appmenu;
+mod aside;
+mod backdrop;
+mod battery;
+mod bus;
+mod control;
 mod cursor;
-mod focus;
+mod dbus;
 mod decor;
-mod grid;
+mod desktop;
+mod dialogs;
+mod dispatch;
+mod displays;
+mod drag;
+mod drawer;
+mod drm;
+mod elevate;
+mod energy;
+mod exit;
+mod focus;
+mod forcequit;
+mod fullscreen;
 #[cfg(test)]
 mod geometry_tests;
-mod xsettings;
-mod zoom;
-mod control;
-mod text;
-mod place;
-mod memory;
-mod wallpaper;
-mod menu;
-mod appmenu;
-mod forcequit;
-mod backdrop;
-mod bus;
-mod dbus;
-mod settings;
-mod notify;
-mod displays;
-mod energy;
-mod shelf;
-mod tiles;
-mod lock;
-mod session_dialog;
+mod gpus;
 mod greeter;
-mod elevate;
-mod actions;
-mod drawer;
-mod applets;
+mod grid;
+mod input;
+mod inputs;
+mod keys;
+mod launcher;
+mod lock;
+mod meaning;
+mod memory;
+mod menu;
+mod monitors;
+mod native;
+mod network;
+mod notify;
+mod opened;
+mod overview;
+mod picker;
+mod place;
+mod pointer;
+mod portal;
 mod scenes;
 mod session;
-mod launcher;
-mod touch;
-mod pointer;
-mod win;
-mod native;
-mod meaning;
-mod agents;
-mod sound;
-mod switch;
-mod thumbs;
-mod picker;
-mod overview;
-mod aside;
-mod opened;
+mod session_dialog;
+mod settings;
+mod shelf;
 mod snap;
+mod sound;
+mod state;
 mod style;
-mod fullscreen;
-mod dialogs;
+mod switch;
+mod text;
+mod thumbs;
+mod tiles;
 mod tint;
-mod inputs;
-mod network;
-mod battery;
-mod gpus;
-mod monitors;
+mod touch;
+mod wallpaper;
+mod win;
+mod winit;
+mod xsettings;
+mod zoom;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 pub use state::Server;
@@ -292,10 +292,20 @@ fn spawn_client() {
 /// and closed to everyone else (mode 700 or tighter).
 fn check_runtime_dir() -> Result<(), String> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
-    let dir = std::env::var_os("XDG_RUNTIME_DIR").ok_or("XDG_RUNTIME_DIR is not set; start the session with `vergence`")?;
+    let dir =
+        std::env::var_os("XDG_RUNTIME_DIR").ok_or("XDG_RUNTIME_DIR is not set; start the session with `vergence`")?;
     let m = std::fs::symlink_metadata(&dir).map_err(|e| format!("runtime directory {}: {e}", dir.to_string_lossy()))?;
-    match runtime_dir_fault(m.file_type().is_symlink(), m.is_dir(), m.uid(), m.permissions().mode(), crate::control::our_uid()) {
-        Some(fault) => Err(format!("runtime directory {} {fault}; refusing to put the session's sockets there", dir.to_string_lossy())),
+    match runtime_dir_fault(
+        m.file_type().is_symlink(),
+        m.is_dir(),
+        m.uid(),
+        m.permissions().mode(),
+        crate::control::our_uid(),
+    ) {
+        Some(fault) => Err(format!(
+            "runtime directory {} {fault}; refusing to put the session's sockets there",
+            dir.to_string_lossy()
+        )),
         None => Ok(()),
     }
 }
@@ -309,8 +319,10 @@ fn check_runtime_dir() -> Result<(), String> {
 fn tighten_own_folders() {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else { return };
-    let config = std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).unwrap_or_else(|| home.join(".config"));
-    let state = std::env::var_os("XDG_STATE_HOME").map(std::path::PathBuf::from).unwrap_or_else(|| home.join(".local/state"));
+    let config =
+        std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).unwrap_or_else(|| home.join(".config"));
+    let state =
+        std::env::var_os("XDG_STATE_HOME").map(std::path::PathBuf::from).unwrap_or_else(|| home.join(".local/state"));
     let us = crate::control::our_uid();
     for dir in [config.join("vergence"), state.join("vergence")] {
         let Ok(m) = std::fs::symlink_metadata(&dir) else { continue };
@@ -334,7 +346,12 @@ fn tighten_own_folders() {
     if let Ok(m) = std::fs::metadata(&desktop)
         && (m.uid() != us || m.mode() & 0o022 != 0)
     {
-        tracing::warn!("{} can be changed by another user (owner {}, mode {:o}); its commands run in this session", desktop.display(), m.uid(), m.mode() & 0o777);
+        tracing::warn!(
+            "{} can be changed by another user (owner {}, mode {:o}); its commands run in this session",
+            desktop.display(),
+            m.uid(),
+            m.mode() & 0o777
+        );
     }
 }
 

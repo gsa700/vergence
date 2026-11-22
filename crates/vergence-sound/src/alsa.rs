@@ -185,7 +185,10 @@ impl Alsa {
     }
 
     fn parse(id: &str) -> io::Result<(u32, u32)> {
-        id.strip_prefix("hw:").and_then(|r| r.split_once(',')).and_then(|(c, d)| Some((c.parse().ok()?, d.parse().ok()?))).ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("no output {id}")))
+        id.strip_prefix("hw:")
+            .and_then(|r| r.split_once(','))
+            .and_then(|(c, d)| Some((c.parse().ok()?, d.parse().ok()?)))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("no output {id}")))
     }
 
     /// The default (card, device): ours from ~/.asoundrc, else ALSA's own, 0,0.
@@ -198,7 +201,11 @@ impl Alsa {
         if !pcm_name.contains("HDMI") && !pcm_name.contains("DP") {
             return None;
         }
-        let hdmi: Vec<u32> = playback_devices(card).into_iter().filter(|(_, n)| n.contains("HDMI") || n.contains("DP")).map(|(d, _)| d).collect();
+        let hdmi: Vec<u32> = playback_devices(card)
+            .into_iter()
+            .filter(|(_, n)| n.contains("HDMI") || n.contains("DP"))
+            .map(|(d, _)| d)
+            .collect();
         hdmi.iter().position(|d| *d == dev).map(|p| p as u32)
     }
 }
@@ -220,24 +227,42 @@ impl Sound for Alsa {
                 let hdmi = Self::hdmi_index(card, dev, &pcm_name);
                 let (name, volume, muted) = match hdmi {
                     Some(k) => {
-                        let muted = find(&cs, "IEC958 Playback Switch", k).and_then(|c| read(&f, c).ok()).is_some_and(|(_, _, v)| v == 0);
+                        let muted = find(&cs, "IEC958 Playback Switch", k)
+                            .and_then(|c| read(&f, c).ok())
+                            .is_some_and(|(_, _, v)| v == 0);
                         (format!("HDMI or DisplayPort {}", k + 1), 100, muted)
                     }
                     None => {
-                        let (speaker, phones) = (find(&cs, "Speaker Playback Volume", 0).is_some(), find(&cs, "Headphone Playback Volume", 0).is_some());
+                        let (speaker, phones) = (
+                            find(&cs, "Speaker Playback Volume", 0).is_some(),
+                            find(&cs, "Headphone Playback Volume", 0).is_some(),
+                        );
                         let name = match (speaker, phones) {
                             (true, true) => "Speakers and headphones".to_string(),
                             (true, false) => "Speakers".to_string(),
                             (false, true) => "Headphones".to_string(),
                             _ => pcm_name.clone(),
                         };
-                        let volume = find(&cs, "Master Playback Volume", 0).and_then(|c| read(&f, c).ok()).map(|(min, max, v)| crate::range_percent(min, max, v)).unwrap_or(100);
-                        let muted = find(&cs, "Master Playback Switch", 0).and_then(|c| read(&f, c).ok()).is_some_and(|(_, _, v)| v == 0);
+                        let volume = find(&cs, "Master Playback Volume", 0)
+                            .and_then(|c| read(&f, c).ok())
+                            .map(|(min, max, v)| crate::range_percent(min, max, v))
+                            .unwrap_or(100);
+                        let muted = find(&cs, "Master Playback Switch", 0)
+                            .and_then(|c| read(&f, c).ok())
+                            .is_some_and(|(_, _, v)| v == 0);
                         (name, volume, muted)
                     }
                 };
                 let adjustable = hdmi.is_none() && find(&cs, "Master Playback Volume", 0).is_some();
-                out.push(Output { id: format!("hw:{card},{dev}"), name, detail: format!("{card_name}: {pcm_name}"), volume, adjustable, muted, default: (card, dev) == default });
+                out.push(Output {
+                    id: format!("hw:{card},{dev}"),
+                    name,
+                    detail: format!("{card_name}: {pcm_name}"),
+                    volume,
+                    adjustable,
+                    muted,
+                    default: (card, dev) == default,
+                });
             }
         }
         Ok(out)
@@ -247,10 +272,14 @@ impl Sound for Alsa {
         let (card, dev) = Self::parse(id)?;
         let pcm_name = playback_devices(card).into_iter().find(|(d, _)| *d == dev).map(|(_, n)| n).unwrap_or_default();
         if Self::hdmi_index(card, dev, &pcm_name).is_some() {
-            return Err(io::Error::new(io::ErrorKind::Unsupported, format!("{id} has no volume of its own (HDMI: the monitor sets it)")));
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                format!("{id} has no volume of its own (HDMI: the monitor sets it)"),
+            ));
         }
         let (f, cs) = controls(card)?;
-        let c = find(&cs, "Master Playback Volume", 0).ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no Master volume on this card"))?;
+        let c = find(&cs, "Master Playback Volume", 0)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no Master volume on this card"))?;
         let (min, max, _) = read(&f, c)?;
         write(&f, c, crate::percent_range(min, max, volume))
     }
@@ -274,14 +303,25 @@ impl Sound for Alsa {
         if let Ok(old) = fs::read_to_string(&path)
             && !old.starts_with(MARK)
         {
-            return Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("{} is your own; not changed (add defaults.pcm.card {card} and defaults.pcm.device {dev} yourself)", path.display())));
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!(
+                    "{} is your own; not changed (add defaults.pcm.card {card} and defaults.pcm.device {dev} yourself)",
+                    path.display()
+                ),
+            ));
         }
-        fs::write(&path, format!("{MARK}\ndefaults.pcm.card {card}\ndefaults.pcm.device {dev}\ndefaults.ctl.card {card}\n"))
+        fs::write(
+            &path,
+            format!("{MARK}\ndefaults.pcm.card {card}\ndefaults.pcm.device {dev}\ndefaults.ctl.card {card}\n"),
+        )
     }
 
     fn tone(&mut self, id: &str, channels: u32, on: &[u32]) -> io::Result<String> {
         let (card, dev) = Self::parse(id)?;
-        let f = pcm(card, dev, channels, RATE).map_err(|e| io::Error::new(e.kind(), format!("{id} would not take {channels} channels of 16-bit at {RATE} Hz: {e}")))?;
+        let f = pcm(card, dev, channels, RATE).map_err(|e| {
+            io::Error::new(e.kind(), format!("{id} would not take {channels} channels of 16-bit at {RATE} Hz: {e}"))
+        })?;
         let samples = crate::tone_samples(channels, on, RATE);
         let frames = samples.len() / channels as usize;
         let mut done = 0usize;

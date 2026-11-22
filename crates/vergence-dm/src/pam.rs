@@ -161,7 +161,16 @@ extern "C" fn converse(num: c_int, msgs: *mut *const Message, resp: *mut *mut Re
             continue;
         }
         // SAFETY: a message PAM made, with a NUL-terminated text (or null).
-        let (style, text) = unsafe { ((*m).style, if (*m).msg.is_null() { String::new() } else { CStr::from_ptr((*m).msg).to_string_lossy().into_owned() }) };
+        let (style, text) = unsafe {
+            (
+                (*m).style,
+                if (*m).msg.is_null() {
+                    String::new()
+                } else {
+                    CStr::from_ptr((*m).msg).to_string_lossy().into_owned()
+                },
+            )
+        };
         match style {
             PROMPT_ECHO_OFF | PROMPT_ECHO_ON => {
                 let Some(answer) = state.conv.prompt(style == PROMPT_ECHO_ON, &text) else {
@@ -314,7 +323,13 @@ pub struct Options {
 /// As [`authenticate`]; on a yes, `then` runs with the transaction still
 /// open (a login opens its session there and runs it to its end), before
 /// pam_end.
-pub fn authenticate_then(service: &str, user: &str, conv: &mut dyn Conversation, opts: &Options, then: &mut dyn FnMut(&Handle)) -> Outcome {
+pub fn authenticate_then(
+    service: &str,
+    user: &str,
+    conv: &mut dyn Conversation,
+    opts: &Options,
+    then: &mut dyn FnMut(&Handle),
+) -> Outcome {
     let wanted = user.to_string();
     let (Ok(service), Ok(user)) = (CString::new(service), CString::new(user)) else { return Outcome::Broken };
     let mut state = State { conv, gave_up: false };
@@ -372,7 +387,12 @@ pub fn authenticate_then(service: &str, user: &str, conv: &mut dyn Conversation,
 /// Prompts are refused. With `check_account` (automatic login: security
 /// review 2026-11-16, finding 8), pam_acct_mgmt first: an account that is
 /// locked, expired, or shut out by nologin is refused. Ok when `then` ran.
-pub fn session_only(service: &str, user: &str, check_account: bool, then: &mut dyn FnMut(&Handle)) -> Result<(), String> {
+pub fn session_only(
+    service: &str,
+    user: &str,
+    check_account: bool,
+    then: &mut dyn FnMut(&Handle),
+) -> Result<(), String> {
     struct Silent;
     impl Conversation for Silent {
         fn prompt(&mut self, _echo: bool, _text: &str) -> Option<Secret> {
@@ -381,7 +401,9 @@ pub fn session_only(service: &str, user: &str, check_account: bool, then: &mut d
         fn info(&mut self, _text: &str) {}
         fn error(&mut self, _text: &str) {}
     }
-    let (Ok(service), Ok(user)) = (CString::new(service), CString::new(user)) else { return Err("a name with a NUL".into()) };
+    let (Ok(service), Ok(user)) = (CString::new(service), CString::new(user)) else {
+        return Err("a name with a NUL".into());
+    };
     let mut silent = Silent;
     let mut state = State { conv: &mut silent, gave_up: false };
     let c = Conv { conv: converse, appdata: (&mut state as *mut State).cast() };

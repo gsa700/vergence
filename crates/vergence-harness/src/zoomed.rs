@@ -27,7 +27,13 @@ fn flat(p: &Pic, x: i32, y: i32) -> Option<[u8; 4]> {
 }
 
 /// (compared, differ, first difference).
-pub fn compare(plain: &Pic, zoomed: &Pic, p: (f64, f64), level: f64, tolerance: u8) -> (usize, usize, Option<(i32, i32)>) {
+pub fn compare(
+    plain: &Pic,
+    zoomed: &Pic,
+    p: (f64, f64),
+    level: f64,
+    tolerance: u8,
+) -> (usize, usize, Option<(i32, i32)>) {
     let (mut compared, mut differ, mut first) = (0, 0, None);
     for y in 0..zoomed.h {
         for x in 0..zoomed.w {
@@ -48,9 +54,16 @@ pub fn compare(plain: &Pic, zoomed: &Pic, p: (f64, f64), level: f64, tolerance: 
 pub fn run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
     let usage = "zoomed <plain.png> <zoomed.png> <px> <py> <level> [--tolerance T]";
     let (Some(pa), Some(pb)) = (args.first(), args.get(1)) else { return Err(usage.into()) };
-    let num = |i: usize| -> Result<f64, Box<dyn std::error::Error>> { Ok(args.get(i).ok_or(usage)?.parse::<f64>().map_err(|_| usage)?) };
+    let num = |i: usize| -> Result<f64, Box<dyn std::error::Error>> {
+        Ok(args.get(i).ok_or(usage)?.parse::<f64>().map_err(|_| usage)?)
+    };
     let (px, py, level) = (num(2)?, num(3)?, num(4)?);
-    let tolerance = args.iter().position(|a| a == "--tolerance").and_then(|i| args.get(i + 1)).and_then(|v| v.parse().ok()).unwrap_or(10u8);
+    let tolerance = args
+        .iter()
+        .position(|a| a == "--tolerance")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10u8);
     let (plain, zoomed) = (load(pa)?, load(pb)?);
     if plain.w != zoomed.w || plain.h != zoomed.h || level <= 1.0 {
         println!("FAIL the shots differ in size, or the level is not above 1");
@@ -59,7 +72,10 @@ pub fn run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
     let (compared, differ, first) = compare(&plain, &zoomed, (px, py), level, tolerance);
     let ok = compared >= 10_000 && (differ as f64) <= compared as f64 * 0.005;
     let first = first.map_or(String::new(), |(x, y)| format!("; first at {x},{y}"));
-    println!("{} zoomed {level} about {px},{py}: {differ} of {compared} flat pixels differ by more than {tolerance}{first}", if ok { "PASS" } else { "FAIL" });
+    println!(
+        "{} zoomed {level} about {px},{py}: {differ} of {compared} flat pixels differ by more than {tolerance}{first}",
+        if ok { "PASS" } else { "FAIL" }
+    );
     Ok(ok)
 }
 

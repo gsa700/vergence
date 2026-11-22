@@ -35,7 +35,11 @@ pub fn places() -> bool {
 
 /// `[session] settings-keep`, in minutes (0 never, -1 until the next session).
 pub fn settings_keep() -> i64 {
-    desktop_text().and_then(|t| value(&t, "session", "settings-keep")).and_then(|v| v.parse().ok()).filter(|m: &i64| *m >= UNTIL_NEXT_SESSION).unwrap_or(SETTINGS_KEEP)
+    desktop_text()
+        .and_then(|t| value(&t, "session", "settings-keep"))
+        .and_then(|v| v.parse().ok())
+        .filter(|m: &i64| *m >= UNTIL_NEXT_SESSION)
+        .unwrap_or(SETTINGS_KEEP)
 }
 
 /// Whether a window told the session is ending (Program::session_ending,
@@ -63,7 +67,10 @@ pub fn still_kept(kept_at: u64, kept_in: &str, now: u64, session: &str, minutes:
 
 /// ~/.local/state/vergence (XDG_STATE_HOME's vergence).
 pub fn state_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
     Some(base.join("vergence"))
 }
 

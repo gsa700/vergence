@@ -16,7 +16,10 @@ use vergence_calc::dec::{CalcError, DIGITS, Dec};
 use vergence_calc::expr::{Context, eval};
 use vergence_ui::{AppCommand as C, BarStyle, Role};
 use vergence_widgets::prefs::{Choice, Control, Part, Prefs, Row, Rows};
-use vergence_widgets::{Align, ButtonLook, Element, Input, Length, Padding, Program, Theme, Waker, Window, button, column, label, panel, row, space};
+use vergence_widgets::{
+    Align, ButtonLook, Element, Input, Length, Padding, Program, Theme, Waker, Window, button, column, label, panel,
+    row, space,
+};
 
 const SECTION: &str = "[calculator]";
 const APP_ID: &str = "vergence-calc";
@@ -63,7 +66,9 @@ struct Calc {
 /// ~/.config/vergence/desktop.toml.
 fn desktop_text() -> (String, Option<SystemTime>) {
     match vergence_widgets::prefs::desktop_path() {
-        Some(p) => (std::fs::read_to_string(&p).unwrap_or_default(), std::fs::metadata(&p).and_then(|m| m.modified()).ok()),
+        Some(p) => {
+            (std::fs::read_to_string(&p).unwrap_or_default(), std::fs::metadata(&p).and_then(|m| m.modified()).ok())
+        }
         None => (String::new(), None),
     }
 }
@@ -72,7 +77,18 @@ impl Calc {
     fn new() -> Calc {
         let (desktop, stamp) = desktop_text();
         let scientific = vergence_ui::table_value(&desktop, SECTION, "scientific").as_deref() == Some("true");
-        Calc { expr: String::new(), shown: Shown::Typing, ans: None, tape: Vec::new(), scientific, desktop, stamp, prefs_open: Rc::new(Cell::new(false)), waker: None, size: (0.0, 0.0) }
+        Calc {
+            expr: String::new(),
+            shown: Shown::Typing,
+            ans: None,
+            tape: Vec::new(),
+            scientific,
+            desktop,
+            stamp,
+            prefs_open: Rc::new(Cell::new(false)),
+            waker: None,
+            size: (0.0, 0.0),
+        }
     }
 
     fn degrees(&self) -> bool {
@@ -100,7 +116,11 @@ impl Calc {
             Some(n) if n <= 12 => v.show_fixed(n),
             _ => v.show(16),
         };
-        if vergence_ui::table_value(&self.desktop, SECTION, "separators").as_deref() == Some("false") { s } else { group(&s) }
+        if vergence_ui::table_value(&self.desktop, SECTION, "separators").as_deref() == Some("false") {
+            s
+        } else {
+            group(&s)
+        }
     }
 
     #[cfg(test)]
@@ -164,11 +184,12 @@ impl Calc {
             return;
         }
         let waker = self.waker.clone();
-        let prefs = Prefs::new("Calculator", APP_ID, SECTION, false, Box::new(CalcRows), self.prefs_open.clone()).on_write(move || {
-            if let Some(w) = &waker {
-                w.wake();
-            }
-        });
+        let prefs = Prefs::new("Calculator", APP_ID, SECTION, false, Box::new(CalcRows), self.prefs_open.clone())
+            .on_write(move || {
+                if let Some(w) = &waker {
+                    w.wake();
+                }
+            });
         window.open_window(vergence_widgets::window(prefs));
     }
 
@@ -275,7 +296,13 @@ impl Calc {
             "√" => "square root",
             other => other,
         };
-        button(label(words).size(18.0).align(Align::Center).width(Length::FILL)).look(look).padding(Padding::hv(4.0, 4.0)).on_press(m).width(Length::FILL).height(Length::FILL).name(name)
+        button(label(words).size(18.0).align(Align::Center).width(Length::FILL))
+            .look(look)
+            .padding(Padding::hv(4.0, 4.0))
+            .on_press(m)
+            .width(Length::FILL)
+            .height(Length::FILL)
+            .name(name)
     }
 }
 
@@ -358,17 +385,29 @@ impl Program for Calc {
                 _ => (if self.expr.is_empty() { "0".into() } else { " ".into() }, true),
             },
         };
-        let big = label(big).size(if matches!(self.shown, Shown::Error(_)) { 20.0 } else { 34.0 }).weight(500).align(Align::End).width(Length::FILL);
+        let big = label(big)
+            .size(if matches!(self.shown, Shown::Error(_)) { 20.0 } else { 34.0 })
+            .weight(500)
+            .align(Align::End)
+            .width(Length::FILL);
         // The answer in green once = is pressed (Dave, 2026-11-14: "a little
         // color"), plain again as soon as more is typed; a green that keeps
         // 4.5:1 on the light card and on the dark one.
-        let green = if !t.dark { vergence_scene::Color::rgb(0x1a, 0x7f, 0x37) } else { vergence_scene::Color::rgb(0x56, 0xd3, 0x64) };
+        let green = if !t.dark {
+            vergence_scene::Color::rgb(0x1a, 0x7f, 0x37)
+        } else {
+            vergence_scene::Color::rgb(0x56, 0xd3, 0x64)
+        };
         lines.push(match (&self.shown, dim) {
             (Shown::Answer(_), _) => big.color(green),
             (_, true) => big.dim(),
             _ => big,
         });
-        let display = panel(column(lines).spacing(2.0).width(Length::FILL)).color(t.card).radius(10.0).padding(Padding::hv(10.0, 14.0)).width(Length::FILL);
+        let display = panel(column(lines).spacing(2.0).width(Length::FILL))
+            .color(t.card)
+            .radius(10.0)
+            .padding(Padding::hv(10.0, 14.0))
+            .width(Length::FILL);
 
         let n = ButtonLook::Normal;
         let k = |w: &'static str| self.key_button(w, Msg::Put(w), n);
@@ -377,7 +416,12 @@ impl Program for Calc {
             vec![k("7"), k("8"), k("9"), k("×")],
             vec![k("4"), k("5"), k("6"), k("−")],
             vec![k("1"), k("2"), k("3"), k("+")],
-            vec![self.key_button("±", Msg::Sign, n), k("0"), k("."), self.key_button("=", Msg::Equals, ButtonLook::Accent)],
+            vec![
+                self.key_button("±", Msg::Sign, n),
+                k("0"),
+                k("."),
+                self.key_button("=", Msg::Equals, ButtonLook::Accent),
+            ],
         ];
         let angle = if self.degrees() { "Deg" } else { "Rad" };
         let mut rows: Vec<Element<Msg>> = Vec::new();
@@ -386,11 +430,36 @@ impl Program for Calc {
             // The scientific keys, on the left, a little apart.
             if self.scientific {
                 let row_sci: Vec<Element<Msg>> = match i {
-                    0 => vec![self.key_button("sin", Msg::Put("sin("), n), self.key_button("cos", Msg::Put("cos("), n), self.key_button("tan", Msg::Put("tan("), n), self.key_button(angle, Msg::Angle, n)],
-                    1 => vec![self.key_button("asin", Msg::Put("asin("), n), self.key_button("acos", Msg::Put("acos("), n), self.key_button("atan", Msg::Put("atan("), n), self.key_button("π", Msg::Put("π"), n)],
-                    2 => vec![self.key_button("ln", Msg::Put("ln("), n), self.key_button("log", Msg::Put("log("), n), self.key_button("√", Msg::Put("√"), n), self.key_button("e", Msg::Put("e"), n)],
-                    3 => vec![self.key_button("x²", Msg::Put("^2"), n), self.key_button("xʸ", Msg::Put("^"), n), self.key_button("(", Msg::Put("("), n), self.key_button(")", Msg::Put(")"), n)],
-                    _ => vec![self.key_button("n!", Msg::Put("!"), n), self.key_button("1/x", Msg::Put("^−1"), n), self.key_button("Ans", Msg::Put("Ans"), n), space().width(Length::FILL).height(Length::FILL)],
+                    0 => vec![
+                        self.key_button("sin", Msg::Put("sin("), n),
+                        self.key_button("cos", Msg::Put("cos("), n),
+                        self.key_button("tan", Msg::Put("tan("), n),
+                        self.key_button(angle, Msg::Angle, n),
+                    ],
+                    1 => vec![
+                        self.key_button("asin", Msg::Put("asin("), n),
+                        self.key_button("acos", Msg::Put("acos("), n),
+                        self.key_button("atan", Msg::Put("atan("), n),
+                        self.key_button("π", Msg::Put("π"), n),
+                    ],
+                    2 => vec![
+                        self.key_button("ln", Msg::Put("ln("), n),
+                        self.key_button("log", Msg::Put("log("), n),
+                        self.key_button("√", Msg::Put("√"), n),
+                        self.key_button("e", Msg::Put("e"), n),
+                    ],
+                    3 => vec![
+                        self.key_button("x²", Msg::Put("^2"), n),
+                        self.key_button("xʸ", Msg::Put("^"), n),
+                        self.key_button("(", Msg::Put("("), n),
+                        self.key_button(")", Msg::Put(")"), n),
+                    ],
+                    _ => vec![
+                        self.key_button("n!", Msg::Put("!"), n),
+                        self.key_button("1/x", Msg::Put("^−1"), n),
+                        self.key_button("Ans", Msg::Put("Ans"), n),
+                        space().width(Length::FILL).height(Length::FILL),
+                    ],
                 };
                 all.extend(row_sci);
                 all.push(space().width(Length::Fixed(6.0)));
@@ -398,12 +467,17 @@ impl Program for Calc {
             all.extend(keys);
             rows.push(row(all).spacing(6.0).width(Length::FILL).height(Length::FILL));
         }
-        panel(column(vec![display, column(rows).spacing(6.0).width(Length::FILL).height(Length::FILL)]).spacing(10.0).width(Length::FILL).height(Length::FILL))
-            .padding(Padding { top: 12.0 + t.top, bottom: 12.0, left: 12.0, right: 12.0 })
-            .radius(0.0)
-            .width(Length::FILL)
-            .height(Length::FILL)
-            .into()
+        panel(
+            column(vec![display, column(rows).spacing(6.0).width(Length::FILL).height(Length::FILL)])
+                .spacing(10.0)
+                .width(Length::FILL)
+                .height(Length::FILL),
+        )
+        .padding(Padding { top: 12.0 + t.top, bottom: 12.0, left: 12.0, right: 12.0 })
+        .radius(0.0)
+        .width(Length::FILL)
+        .height(Length::FILL)
+        .into()
     }
 
     fn update(&mut self, m: Msg, window: &mut Window) {
@@ -494,7 +568,13 @@ impl Program for Calc {
             cmd::CLEAR => self.clear(),
             cmd::SETTINGS => self.open_settings(window),
             cmd::ABOUT => {
-                let about = vergence_widgets::about::About::new(APP_ID, "Calculator", env!("CARGO_PKG_VERSION"), "A calculator with exact decimal arithmetic to 34 digits, so 0.1 + 0.2 is 0.3; a scientific mode with angles in degrees or radians.", self.theme());
+                let about = vergence_widgets::about::About::new(
+                    APP_ID,
+                    "Calculator",
+                    env!("CARGO_PKG_VERSION"),
+                    "A calculator with exact decimal arithmetic to 34 digits, so 0.1 + 0.2 is 0.3; a scientific mode with angles in degrees or radians.",
+                    self.theme(),
+                );
                 window.open_window(vergence_widgets::window(about));
             }
             _ => {}
@@ -546,25 +626,81 @@ impl Rows for CalcRows {
         let mut places = vec![Choice::text("As many as needed", "auto")];
         places.extend((0..=10).map(|n| Choice::number(&n.to_string(), n)));
         let opacity = vergence_ui::opacity_setting(text, "[appearance]");
-        let locked = vergence_ui::desktop_pick(text).map(|light| format!("{} for every app: Settings > Appearance > Style", if light { "Light" } else { "Dark" }));
+        let locked = vergence_ui::desktop_pick(text).map(|light| {
+            format!("{} for every app: Settings > Appearance > Style", if light { "Light" } else { "Dark" })
+        });
         let styles = vec![Choice::text("Dark", "dark"), Choice::text("Light", "light")];
         vec![
             Part {
                 title: "Calculator".into(),
                 rows: vec![
-                    Row::new("angle", "Angles", "For sin, cos and tan and their inverses.", Control::Choose { choices: vec![Choice::text("Degrees", "degrees"), Choice::text("Radians", "radians")], desktop: None, app_default: 0 }),
-                    Row::new("places", "Decimal places", "How many digits after the point an answer shows.", Control::Choose { choices: places, desktop: None, app_default: 0 }),
-                    Row::new("separators", "Group thousands", "1,234,567 rather than 1234567.", Control::Switch { default: true }),
-                    Row::new("scientific", "Scientific keys", "Also View › Scientific in its menu.", Control::Switch { default: false }),
+                    Row::new(
+                        "angle",
+                        "Angles",
+                        "For sin, cos and tan and their inverses.",
+                        Control::Choose {
+                            choices: vec![Choice::text("Degrees", "degrees"), Choice::text("Radians", "radians")],
+                            desktop: None,
+                            app_default: 0,
+                        },
+                    ),
+                    Row::new(
+                        "places",
+                        "Decimal places",
+                        "How many digits after the point an answer shows.",
+                        Control::Choose { choices: places, desktop: None, app_default: 0 },
+                    ),
+                    Row::new(
+                        "separators",
+                        "Group thousands",
+                        "1,234,567 rather than 1234567.",
+                        Control::Switch { default: true },
+                    ),
+                    Row::new(
+                        "scientific",
+                        "Scientific keys",
+                        "Also View › Scientific in its menu.",
+                        Control::Switch { default: false },
+                    ),
                 ],
             },
             Part {
                 title: "On this desktop".into(),
                 rows: vec![
-                    Row::new("style", "Style", "While the desktop's Style is App default.", Control::Choose { choices: styles.clone(), desktop: Some("Built-in (Light)".into()), app_default: 0 }).locked(locked.clone()),
-                    Row::new("bar-style", "Title bar", "", Control::Choose { choices: styles, desktop: Some("Built-in (Light)".into()), app_default: 0 }).locked(locked),
-                    Row::new("opacity", "Opacity", "30 to 100: how much of the window's ground shows; the text stays as it is.", Control::Percent { min: 30, desktop: format!("Desktop default ({:.0})", opacity * 100.0), now: (opacity * 100.0).round() as u32 }),
-                    Row::new("", "Window places", "Where the desktop puts the calculator's windows, for each set of screens.", Control::Button { label: "Forget…".into(), id: 1 }),
+                    Row::new(
+                        "style",
+                        "Style",
+                        "While the desktop's Style is App default.",
+                        Control::Choose {
+                            choices: styles.clone(),
+                            desktop: Some("Built-in (Light)".into()),
+                            app_default: 0,
+                        },
+                    )
+                    .locked(locked.clone()),
+                    Row::new(
+                        "bar-style",
+                        "Title bar",
+                        "",
+                        Control::Choose { choices: styles, desktop: Some("Built-in (Light)".into()), app_default: 0 },
+                    )
+                    .locked(locked),
+                    Row::new(
+                        "opacity",
+                        "Opacity",
+                        "30 to 100: how much of the window's ground shows; the text stays as it is.",
+                        Control::Percent {
+                            min: 30,
+                            desktop: format!("Desktop default ({:.0})", opacity * 100.0),
+                            now: (opacity * 100.0).round() as u32,
+                        },
+                    ),
+                    Row::new(
+                        "",
+                        "Window places",
+                        "Where the desktop puts the calculator's windows, for each set of screens.",
+                        Control::Button { label: "Forget…".into(), id: 1 },
+                    ),
                 ],
             },
         ]
@@ -572,7 +708,8 @@ impl Rows for CalcRows {
 
     fn button(&self, id: u32) {
         if id == 1 {
-            let _ = std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", APP_ID]).spawn();
+            let _ =
+                std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", APP_ID]).spawn();
         }
     }
 }
@@ -605,7 +742,18 @@ mod tests {
 
     #[test]
     fn typing_after_an_answer_goes_on_or_starts_afresh() {
-        let mut c = Calc { expr: String::new(), shown: Shown::Typing, ans: None, tape: Vec::new(), scientific: false, desktop: String::new(), stamp: None, prefs_open: Rc::new(Cell::new(false)), waker: None, size: (0.0, 0.0) };
+        let mut c = Calc {
+            expr: String::new(),
+            shown: Shown::Typing,
+            ans: None,
+            tape: Vec::new(),
+            scientific: false,
+            desktop: String::new(),
+            stamp: None,
+            prefs_open: Rc::new(Cell::new(false)),
+            waker: None,
+            size: (0.0, 0.0),
+        };
         for t in ["2", "+", "3"] {
             c.put(t);
         }

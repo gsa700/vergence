@@ -64,7 +64,12 @@ impl WifiSetting {
 fn country() -> Option<String> {
     let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
     let table = text.parse::<toml::Table>().unwrap_or_default();
-    table.get("network").and_then(|n| n.get("country")).and_then(|v| v.as_str()).map(|c| c.trim().to_ascii_uppercase()).filter(|c| wpa::country_ok(c))
+    table
+        .get("network")
+        .and_then(|n| n.get("country"))
+        .and_then(|v| v.as_str())
+        .map(|c| c.trim().to_ascii_uppercase())
+        .filter(|c| wpa::country_ok(c))
 }
 
 /// desktop.toml `[network] wifi-power-save` (default on, the driver's own).
@@ -85,20 +90,34 @@ fn apply_power_save(c: &wpa::Client, name: &str, on: bool) {
 fn setting() -> WifiSetting {
     let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
     let table = text.parse::<toml::Table>().unwrap_or_default();
-    table.get("network").and_then(|n| n.get("wifi")).and_then(|v| v.as_str()).map_or(WifiSetting::Auto, WifiSetting::from_word)
+    table
+        .get("network")
+        .and_then(|n| n.get("wifi"))
+        .and_then(|v| v.as_str())
+        .map_or(WifiSetting::Auto, WifiSetting::from_word)
 }
 
 fn state_path() -> Option<PathBuf> {
-    let state = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    let state = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
     Some(state.join("vergence/network.toml"))
 }
 
 fn note_shown() -> bool {
-    state_path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| t.parse::<toml::Table>().ok()).and_then(|t| t.get("no-cable-note-shown")?.as_bool()).unwrap_or(false)
+    state_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|t| t.parse::<toml::Table>().ok())
+        .and_then(|t| t.get("no-cable-note-shown")?.as_bool())
+        .unwrap_or(false)
 }
 
 fn mark_note_shown() {
-    use std::{io::Write, os::unix::fs::{DirBuilderExt, OpenOptionsExt}};
+    use std::{
+        io::Write,
+        os::unix::fs::{DirBuilderExt, OpenOptionsExt},
+    };
     let Some(path) = state_path() else { return };
     if let Some(dir) = path.parent() {
         let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir);
@@ -197,7 +216,11 @@ fn watch(tx: Sender<Said>) {
                         Ok(())
                     });
                     match done {
-                        Ok(()) => tracing::info!("network: Wi-Fi {} on {name} ({set:?}, cable {})", if want { "on" } else { "off" }, if cable { "connected" } else { "not connected" }),
+                        Ok(()) => tracing::info!(
+                            "network: Wi-Fi {} on {name} ({set:?}, cable {})",
+                            if want { "on" } else { "off" },
+                            if cable { "connected" } else { "not connected" }
+                        ),
                         Err(e) => {
                             ok = false;
                             tracing::warn!("network: Wi-Fi on {name}: {e}");
@@ -206,7 +229,8 @@ fn watch(tx: Sender<Said>) {
                 }
                 if ok {
                     // Wi-Fi came on because the cable went (not by being set On).
-                    let for_want_of_cable = want && set == WifiSetting::Auto && applied.as_ref().is_none_or(|(w, _)| !w);
+                    let for_want_of_cable =
+                        want && set == WifiSetting::Auto && applied.as_ref().is_none_or(|(w, _)| !w);
                     if for_want_of_cable && none_known && !note_shown() {
                         mark_note_shown();
                         told = true;
@@ -242,7 +266,10 @@ fn watch(tx: Sender<Said>) {
                 Ok(())
             }) {
                 Ok(()) => {
-                    tracing::info!("network: wpa_supplicant for {name}: WPA3 handshakes on, country {}", want_country.as_deref().unwrap_or("the system's"));
+                    tracing::info!(
+                        "network: wpa_supplicant for {name}: WPA3 handshakes on, country {}",
+                        want_country.as_deref().unwrap_or("the system's")
+                    );
                     tuned.retain(|(n, _, _)| n != name);
                     tuned.push((name.clone(), want_country.clone(), want_ps));
                     upgraded_at = None;
@@ -279,7 +306,12 @@ fn watch(tx: Sender<Said>) {
                     if !nets.is_empty() {
                         told = true;
                         let known = c.networks().unwrap_or_default();
-                        let manual: Vec<String> = nets.iter().filter(|b| known.iter().any(|k| k.manual && k.ssid_raw == b.ssid_raw)).map(|b| b.ssid.clone()).take(3).collect();
+                        let manual: Vec<String> = nets
+                            .iter()
+                            .filter(|b| known.iter().any(|k| k.manual && k.ssid_raw == b.ssid_raw))
+                            .map(|b| b.ssid.clone())
+                            .take(3)
+                            .collect();
                         let words = available_words(&manual, nets.len() - manual.len());
                         if tx.send(Said::Available(words)).is_err() {
                             return;
@@ -312,12 +344,10 @@ impl Server {
             return;
         }
         let (tx, rx) = channel::<Said>();
-        let _ = self.loop_handle.insert_source(rx, |event, _, state| {
-            match event {
-                Event::Msg(Said::NoCable) => state.network_no_cable_note(),
-                Event::Msg(Said::Available(words)) => state.network_available_note(words),
-                _ => {}
-            }
+        let _ = self.loop_handle.insert_source(rx, |event, _, state| match event {
+            Event::Msg(Said::NoCable) => state.network_no_cable_note(),
+            Event::Msg(Said::Available(words)) => state.network_available_note(words),
+            _ => {}
         });
         if let Err(e) = std::thread::Builder::new().name("network".into()).spawn(move || watch(tx)) {
             tracing::warn!("network: can't start the watch: {e}");

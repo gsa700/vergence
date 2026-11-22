@@ -21,7 +21,10 @@
 
 use std::{
     io::{BufRead, BufReader, Write},
-    os::unix::{fs::PermissionsExt, net::{UnixListener, UnixStream}},
+    os::unix::{
+        fs::PermissionsExt,
+        net::{UnixListener, UnixStream},
+    },
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -40,7 +43,9 @@ const MAX_TABS: usize = 64;
 const MAX_PATH: usize = 4096;
 
 pub fn state_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
     Some(base.join("vergence/terminal-windows"))
 }
 
@@ -70,7 +75,9 @@ pub fn parse(text: &str) -> Vec<WindowState> {
 }
 
 pub fn render(windows: &[WindowState]) -> String {
-    let mut out = String::from("# vergence-term's windows: each one's persistence token (the server remembers\n# where it was by it) and its tabs' working directories. No titles or text.\n");
+    let mut out = String::from(
+        "# vergence-term's windows: each one's persistence token (the server remembers\n# where it was by it) and its tabs' working directories. No titles or text.\n",
+    );
     for w in windows {
         out += &format!("window {}\n", w.token);
         for dir in w.tabs.iter().filter(|d| !d.contains('\n')) {
@@ -133,7 +140,8 @@ impl Program {
     }
 
     fn write(&mut self) {
-        let now: Vec<WindowState> = self.windows.iter().map(|(_, w)| w.clone()).filter(|w| !w.token.is_empty()).collect();
+        let now: Vec<WindowState> =
+            self.windows.iter().map(|(_, w)| w.clone()).filter(|w| !w.token.is_empty()).collect();
         if now != self.written {
             // Tests keep to themselves: no file of the user's is written.
             #[cfg(not(test))]
@@ -239,7 +247,11 @@ pub fn name_of(pid: u32) -> Option<String> {
     let name = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
     #[cfg(not(target_os = "linux"))]
     let name = {
-        let out = std::process::Command::new("ps").args(["-o", "comm=", "-p", &pid.to_string()]).stderr(std::process::Stdio::null()).output().ok()?;
+        let out = std::process::Command::new("ps")
+            .args(["-o", "comm=", "-p", &pid.to_string()])
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()?;
         String::from_utf8_lossy(&out.stdout).into_owned()
     };
     let name = name.trim();
@@ -266,7 +278,13 @@ pub fn group_has_root(group: u32) -> bool {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let Ok(out) = std::process::Command::new("ps").args(["-ax", "-o", "pgid=", "-o", "uid="]).stderr(std::process::Stdio::null()).output() else { return false };
+        let Ok(out) = std::process::Command::new("ps")
+            .args(["-ax", "-o", "pgid=", "-o", "uid="])
+            .stderr(std::process::Stdio::null())
+            .output()
+        else {
+            return false;
+        };
         String::from_utf8_lossy(&out.stdout).lines().any(|l| {
             let mut f = l.split_whitespace();
             f.next().and_then(|g| g.parse::<u32>().ok()) == Some(group) && f.next() == Some("0")
@@ -300,7 +318,10 @@ mod tests {
 
     #[test]
     fn the_state_file_round_trips_and_a_bad_one_opens_nothing() {
-        let w = vec![WindowState { token: "a".repeat(32), tabs: vec!["/home/d".into(), "/tmp".into()] }, WindowState { token: "b".repeat(32), tabs: vec![] }];
+        let w = vec![
+            WindowState { token: "a".repeat(32), tabs: vec!["/home/d".into(), "/tmp".into()] },
+            WindowState { token: "b".repeat(32), tabs: vec![] },
+        ];
         assert_eq!(parse(&render(&w)), w);
         assert!(parse("not this format\n[[[").is_empty());
         assert!(parse("tab /x\nwindow \n").is_empty(), "a tab with no window, a window with no token: skipped");

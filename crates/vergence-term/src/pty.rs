@@ -93,7 +93,8 @@ impl Pty {
         if let Some(dir) = cwd.filter(|d| std::path::Path::new(d).is_dir()) {
             cmd.current_dir(dir);
         }
-        cmd.args(args).stdin(Stdio::from(slave.try_clone()?))
+        cmd.args(args)
+            .stdin(Stdio::from(slave.try_clone()?))
             .stdout(Stdio::from(slave.try_clone()?))
             .stderr(Stdio::from(slave))
             .env("TERM", "xterm-256color")
@@ -227,7 +228,14 @@ mod tests {
         // on kepler (2026-11-12). Shells and real programs live longer than
         // their first output; a one-line `-e` command's window closes as it
         // exits anyway.
-        let p = super::Pty::spawn("/bin/sh", &["-c".into(), "echo ran-$((40+2)) \"$0\"; sleep 0.5".into(), "two words".into()], 80, 24, None).unwrap();
+        let p = super::Pty::spawn(
+            "/bin/sh",
+            &["-c".into(), "echo ran-$((40+2)) \"$0\"; sleep 0.5".into(), "two words".into()],
+            80,
+            24,
+            None,
+        )
+        .unwrap();
         let r = p.reader().unwrap();
         let mut all = Vec::new();
         super::read_loop(r, |b| {

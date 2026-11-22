@@ -26,11 +26,7 @@ use smithay::{
     },
 };
 
-use crate::{
-    Server,
-    focus::KeyboardFocus,
-    dispatch::ResizeEdge,
-};
+use crate::{Server, dispatch::ResizeEdge, focus::KeyboardFocus};
 
 impl XWaylandShellHandler for Server {
     fn xwayland_shell_state(&mut self) -> &mut XWaylandShellState {
@@ -148,7 +144,8 @@ impl XwmHandler for Server {
         // if the window then lies wholly on a monitor. Later moves are the server's.
         // On that monitor it gets back the size it asked for when it opened (fitted
         // to the monitor under the pointer then), capped to the new monitor.
-        let fresh = self.mapped_at.get(&mapped).copied().filter(|(t, _)| t.elapsed() < std::time::Duration::from_millis(1500));
+        let fresh =
+            self.mapped_at.get(&mapped).copied().filter(|(t, _)| t.elapsed() < std::time::Duration::from_millis(1500));
         if let Some((_, asked_size)) = fresh
             && (x.is_some() || y.is_some())
         {
@@ -166,7 +163,13 @@ impl XwmHandler for Server {
         let _ = window.configure(geo);
     }
 
-    fn configure_notify(&mut self, _xwm: XwmId, window: X11Surface, geometry: Rectangle<i32, Logical>, _above: Option<u32>) {
+    fn configure_notify(
+        &mut self,
+        _xwm: XwmId,
+        window: X11Surface,
+        geometry: Rectangle<i32, Logical>,
+        _above: Option<u32>,
+    ) {
         if let Some(w) = self.window_for_x11(&window) {
             self.space.map_element(w.clone(), geometry.loc, false);
             // Its place now, unless a drag is still going (recorded when it ends).
@@ -259,7 +262,9 @@ impl XwmHandler for Server {
         let native = match current_data_device_selection_userdata(&self.seat).as_deref() {
             Some(crate::native::ClipOwner::Native(c)) => Some(*c),
             Some(crate::native::ClipOwner::Server(text)) => return crate::native::write_clip_text(text.clone(), fd),
-            Some(crate::native::ClipOwner::Picture(png)) => return crate::native::write_clip_picture(png.clone(), &mime_type, fd),
+            Some(crate::native::ClipOwner::Picture(png)) => {
+                return crate::native::write_clip_picture(png.clone(), &mime_type, fd);
+            }
             _ => None,
         };
         if let Some(c) = native {
@@ -271,14 +276,20 @@ impl XwmHandler for Server {
 
     fn new_selection(&mut self, _xwm: XwmId, selection: SelectionTarget, mime_types: Vec<String>) {
         if selection == SelectionTarget::Clipboard {
-            set_data_device_selection(&self.display_handle, &self.seat, mime_types.clone(), crate::native::ClipOwner::X11);
+            set_data_device_selection(
+                &self.display_handle,
+                &self.seat,
+                mime_types.clone(),
+                crate::native::ClipOwner::X11,
+            );
             self.native_clipboard_offer(mime_types);
         }
     }
 
     fn cleared_selection(&mut self, _xwm: XwmId, selection: SelectionTarget) {
         // Only X11's own: a native client's clipboard stays when X11 lets go of its copy.
-        let x11 = current_data_device_selection_userdata(&self.seat).is_some_and(|o| *o == crate::native::ClipOwner::X11);
+        let x11 =
+            current_data_device_selection_userdata(&self.seat).is_some_and(|o| *o == crate::native::ClipOwner::X11);
         if selection == SelectionTarget::Clipboard && x11 {
             clear_data_device_selection(&self.display_handle, &self.seat);
             self.native_clipboard_offer(Vec::new());

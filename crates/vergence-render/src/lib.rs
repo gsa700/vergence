@@ -23,10 +23,10 @@
 
 pub mod blur;
 pub mod cpu;
-pub mod round;
-pub mod textlook;
 mod gl;
 pub mod gpu;
+pub mod round;
+pub mod textlook;
 
 use std::fmt;
 
@@ -100,11 +100,20 @@ pub fn cost(scene: &Scene, scale: f32) -> u64 {
         use vergence_scene::Command as C;
         let work = match c {
             C::Fill { rect, .. } => clip(rect),
-            C::Stroke { rect, width, .. } => clip(rect).min(2.0 * ((rect.w + rect.h).abs() as f64) * (*width as f64).abs().max(1.0) * s * s),
-            C::Line { from, to, width, .. } => (((to.x - from.x) as f64).hypot((to.y - from.y) as f64) * (*width as f64).abs().max(1.0) * s * s).min(whole),
+            C::Stroke { rect, width, .. } => {
+                clip(rect).min(2.0 * ((rect.w + rect.h).abs() as f64) * (*width as f64).abs().max(1.0) * s * s)
+            }
+            C::Line { from, to, width, .. } => {
+                (((to.x - from.x) as f64).hypot((to.y - from.y) as f64) * (*width as f64).abs().max(1.0) * s * s)
+                    .min(whole)
+            }
             C::Glyphs { size, glyphs, .. } => glyphs.len() as f64 * ((*size as f64).abs() * s).powi(2).min(whole),
-            C::Image { image, rect, .. } => clip(rect) + scene.images.get(*image as usize).map_or(0.0, |i| i.width as f64 * i.height as f64 / 4.0),
-            C::Cells { cell_w, cell_h, cells, .. } => cells.len() as f64 * ((*cell_w as f64).abs() * (*cell_h as f64).abs() * s * s).min(whole),
+            C::Image { image, rect, .. } => {
+                clip(rect) + scene.images.get(*image as usize).map_or(0.0, |i| i.width as f64 * i.height as f64 / 4.0)
+            }
+            C::Cells { cell_w, cell_h, cells, .. } => {
+                cells.len() as f64 * ((*cell_w as f64).abs() * (*cell_h as f64).abs() * s * s).min(whole)
+            }
             _ => 0.0,
         };
         // Each glyph and cell is capped at the window's area above; a whole
@@ -176,7 +185,15 @@ impl Pixmap {
 /// Adds one line of text to a scene: laid out by `fonts` in `face` at `size`
 /// (reference units to the em), its first baseline origin at `origin`, one
 /// glyph run per font the line needs. Returns the line's width.
-pub fn text(scene: &mut Scene, fonts: &mut Fonts, face: FaceId, size: f32, color: Color, origin: Point, text: &str) -> f32 {
+pub fn text(
+    scene: &mut Scene,
+    fonts: &mut Fonts,
+    face: FaceId,
+    size: f32,
+    color: Color,
+    origin: Point,
+    text: &str,
+) -> f32 {
     let (runs, width) = fonts.layout(face, size, text);
     for run in runs {
         let name = fonts.name(run.face);
@@ -198,21 +215,36 @@ mod cost_tests {
 
     #[test]
     fn a_window_costs_about_its_pixels() {
-        let fill = Command::Fill { rect: Rect { x: 0.0, y: 0.0, w: 400.0, h: 300.0 }, radius: 0.0, color: Color::rgb(1, 2, 3) };
+        let fill = Command::Fill {
+            rect: Rect { x: 0.0, y: 0.0, w: 400.0, h: 300.0 },
+            radius: 0.0,
+            color: Color::rgb(1, 2, 3),
+        };
         assert_eq!(cost(&scene(vec![fill.clone()]), 1.0), 120_000 + 32);
         assert_eq!(cost(&scene(vec![fill.clone()]), 2.0), 480_000 + 32);
         // Off the window costs nothing but the command.
-        let off = Command::Fill { rect: Rect { x: 1000.0, y: 1000.0, w: 1e6, h: 1e6 }, radius: 0.0, color: Color::rgb(1, 2, 3) };
+        let off = Command::Fill {
+            rect: Rect { x: 1000.0, y: 1000.0, w: 1e6, h: 1e6 },
+            radius: 0.0,
+            color: Color::rgb(1, 2, 3),
+        };
         assert_eq!(cost(&scene(vec![off]), 1.0), 32);
         // A huge rectangle costs the window, no more.
-        let huge = Command::Fill { rect: Rect { x: -1e6, y: -1e6, w: 2e6, h: 2e6 }, radius: 0.0, color: Color::rgb(1, 2, 3) };
+        let huge =
+            Command::Fill { rect: Rect { x: -1e6, y: -1e6, w: 2e6, h: 2e6 }, radius: 0.0, color: Color::rgb(1, 2, 3) };
         assert_eq!(cost(&scene(vec![huge]), 1.0), 120_000 + 32);
     }
 
     #[test]
     fn a_flood_of_large_glyphs_is_costly() {
         let glyphs: Vec<Glyph> = (0..60_000).map(|i| Glyph { id: 36, x: (i % 400) as f32, y: 100.0 }).collect();
-        let run = Command::Glyphs { font: 0, size: 4000.0, color: Color::rgb(0, 0, 0), origin: Point { x: 0.0, y: 0.0 }, glyphs };
+        let run = Command::Glyphs {
+            font: 0,
+            size: 4000.0,
+            color: Color::rgb(0, 0, 0),
+            origin: Point { x: 0.0, y: 0.0 },
+            glyphs,
+        };
         let s = scene(vec![run; 20]);
         assert!(cost(&s, 2.0) > 400_000_000, "{}", cost(&s, 2.0));
     }
@@ -220,7 +252,18 @@ mod cost_tests {
     #[test]
     fn never_panics_on_odd_numbers() {
         for scale in [0.0, -1.0, f32::NAN, f32::INFINITY, 1e30, 1e-30, 1.0] {
-            let s = Scene { width: f32::MAX, height: f32::MAX, fonts: Vec::new(), images: Vec::new(), commands: vec![Command::Line { from: Point { x: f32::MIN, y: 0.0 }, to: Point { x: f32::MAX, y: 0.0 }, width: f32::MAX, color: Color::rgb(0, 0, 0) }] };
+            let s = Scene {
+                width: f32::MAX,
+                height: f32::MAX,
+                fonts: Vec::new(),
+                images: Vec::new(),
+                commands: vec![Command::Line {
+                    from: Point { x: f32::MIN, y: 0.0 },
+                    to: Point { x: f32::MAX, y: 0.0 },
+                    width: f32::MAX,
+                    color: Color::rgb(0, 0, 0),
+                }],
+            };
             let _ = cost(&s, scale);
         }
     }

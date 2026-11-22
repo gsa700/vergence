@@ -156,7 +156,10 @@ pub(crate) mod tests {
         s.write("user/applications/gone.desktop", "[Desktop Entry]\nHidden=true\n");
         let found = installed_in(&[s.0.join("user"), s.0.join("system"), s.0.join("not-there")]);
         let names: Vec<(&str, &str)> = found.iter().map(|e| (e.id.as_str(), e.name.as_str())).collect();
-        assert_eq!(names, [("htop", "Htop"), ("kde-konsole", "Konsole"), ("firefox", "My Firefox"), ("quiet", "Quiet")]);
+        assert_eq!(
+            names,
+            [("htop", "Htop"), ("kde-konsole", "Konsole"), ("firefox", "My Firefox"), ("quiet", "Quiet")]
+        );
         assert!(found.iter().find(|e| e.id == "htop").unwrap().terminal);
         assert!(found.iter().find(|e| e.id == "quiet").unwrap().no_display);
     }

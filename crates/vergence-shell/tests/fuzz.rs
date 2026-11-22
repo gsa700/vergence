@@ -30,9 +30,34 @@ fn iters() -> usize {
 
 /// Pieces an entry is made of, and pieces that break one.
 const PIECES: [&str; 28] = [
-    "[Desktop Entry]\n", "Type=Application\n", "Type=Link\n", "Name=App\n", "Name=\n", "Exec=app %u\n", "Exec=\"app\n", "Exec=\n", "Exec=\"a b\" \\\"c\\\" %% %\n",
-    "Icon=app\n", "Terminal=true\n", "NoDisplay=true\n", "Hidden=true\n", "Keywords=a;b;;c\n", "TryExec=/bin/sh\n", "[Desktop Action x]\n", "[", "]", "=", "\\", "\"",
-    "%", "\n", " ", "\u{e9}", "\u{1f600}", "\0", "Name[de]=Anwendung\n",
+    "[Desktop Entry]\n",
+    "Type=Application\n",
+    "Type=Link\n",
+    "Name=App\n",
+    "Name=\n",
+    "Exec=app %u\n",
+    "Exec=\"app\n",
+    "Exec=\n",
+    "Exec=\"a b\" \\\"c\\\" %% %\n",
+    "Icon=app\n",
+    "Terminal=true\n",
+    "NoDisplay=true\n",
+    "Hidden=true\n",
+    "Keywords=a;b;;c\n",
+    "TryExec=/bin/sh\n",
+    "[Desktop Action x]\n",
+    "[",
+    "]",
+    "=",
+    "\\",
+    "\"",
+    "%",
+    "\n",
+    " ",
+    "\u{e9}",
+    "\u{1f600}",
+    "\0",
+    "Name[de]=Anwendung\n",
 ];
 
 #[test]
@@ -48,7 +73,10 @@ fn entries_of_random_pieces_never_panic() {
             read += 1;
             // What is given back is what was promised.
             assert_eq!(e.id, "id");
-            assert!(e.hidden || (!e.name.trim().is_empty() && !e.exec.is_empty() && !e.exec[0].is_empty()), "{text:?} gave {e:?}");
+            assert!(
+                e.hidden || (!e.name.trim().is_empty() && !e.exec.is_empty() && !e.exec[0].is_empty()),
+                "{text:?} gave {e:?}"
+            );
         }
     }
     assert!(read > 0, "some of them were entries");

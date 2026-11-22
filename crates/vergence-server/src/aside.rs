@@ -56,8 +56,10 @@ impl Server {
         if !self.snap.config.desktop_aside {
             return;
         }
-        let screens: Vec<smithay::utils::Rectangle<i32, Logical>> = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).collect();
-        let windows: Vec<Win> = self.space.elements().filter(|w| self.ordinary_window(w) && !self.is_minimized(w)).cloned().collect();
+        let screens: Vec<smithay::utils::Rectangle<i32, Logical>> =
+            self.space.outputs().filter_map(|o| self.space.output_geometry(o)).collect();
+        let windows: Vec<Win> =
+            self.space.elements().filter(|w| self.ordinary_window(w) && !self.is_minimized(w)).cloned().collect();
         let mut moved = Vec::new();
         // Windows near the middle (a twentieth of the screen either way) go
         // to the sides by turns, so they spread instead of piling on one.
@@ -128,9 +130,13 @@ impl Server {
     /// Each window `k` of the way out (0 where it was, 1 aside); at 0 on the
     /// way back, the list is let go.
     fn aside_step_to(&mut self, k: f64, out: bool) {
-        let moved: Vec<(Win, Point<i32, Logical>, Point<i32, Logical>)> = self.aside.moved.iter().filter(|(w, ..)| smithay::utils::IsAlive::alive(w)).cloned().collect();
+        let moved: Vec<(Win, Point<i32, Logical>, Point<i32, Logical>)> =
+            self.aside.moved.iter().filter(|(w, ..)| smithay::utils::IsAlive::alive(w)).cloned().collect();
         for (w, from, to) in &moved {
-            let at = Point::from(((from.x as f64 + (to.x - from.x) as f64 * k).round() as i32, (from.y as f64 + (to.y - from.y) as f64 * k).round() as i32));
+            let at = Point::from((
+                (from.x as f64 + (to.x - from.x) as f64 * k).round() as i32,
+                (from.y as f64 + (to.y - from.y) as f64 * k).round() as i32,
+            ));
             // Moved where it is in the stack, not raised.
             self.space.relocate_element(w, at);
         }

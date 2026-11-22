@@ -11,7 +11,9 @@ use std::time::SystemTime;
 
 use vergence_scene::{Color, Rect};
 
-use crate::{Align, ButtonLook, Element, Length, Padding, Theme, button, column, drawing, label, panel, row, scroll, space};
+use crate::{
+    Align, ButtonLook, Element, Length, Padding, Theme, button, column, drawing, label, panel, row, scroll, space,
+};
 
 /// The most rows listed (a folder of more is narrowed by typing).
 pub const MAX_ROWS: usize = 2000;
@@ -87,7 +89,8 @@ impl RowSize {
 }
 
 /// The list's columns after the name, in order.
-pub const COLUMNS: [(&str, SortBy); 3] = [("Date Changed", SortBy::Changed), ("Size", SortBy::Size), ("Kind", SortBy::Kind)];
+pub const COLUMNS: [(&str, SortBy); 3] =
+    [("Date Changed", SortBy::Changed), ("Size", SortBy::Size), ("Kind", SortBy::Kind)];
 /// Their widths unless changed, and the narrowest and widest they may be.
 pub const COLUMN_WIDTHS: [f32; 3] = [140.0, 80.0, 150.0];
 pub const COLUMN_MIN: f32 = 50.0;
@@ -155,7 +158,9 @@ pub fn group_key(e: &Entry, by: GroupBy, now: SystemTime) -> (i64, String) {
         GroupBy::Date => {
             let secs = |t: SystemTime| t.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
             let Some(t) = e.changed else { return (9_999, "Some time".into()) };
-            let (Some(at), Some(today)) = (local(secs(t)), local(secs(now))) else { return (9_999, "Some time".into()) };
+            let (Some(at), Some(today)) = (local(secs(t)), local(secs(now))) else {
+                return (9_999, "Some time".into());
+            };
             if (at.year, at.yday) == (today.year, today.yday) {
                 return (0, "Today".into());
             }
@@ -264,7 +269,14 @@ impl Entry {
         let dir = m.as_ref().is_some_and(|m| m.is_dir());
         let file = m.as_ref().is_some_and(|m| m.is_file());
         let mime = kind_of(dir, &name).or_else(|| (look && file).then(|| vergence_types::of_file(&path)));
-        Some(Entry { mime, dir, size: m.as_ref().map_or(0, |m| m.len()), changed: m.and_then(|m| m.modified().ok()), name, path })
+        Some(Entry {
+            mime,
+            dir,
+            size: m.as_ref().map_or(0, |m| m.len()),
+            changed: m.and_then(|m| m.modified().ok()),
+            name,
+            path,
+        })
     }
 
     pub fn kind(&self) -> Kind {
@@ -311,7 +323,11 @@ pub fn recent() -> Vec<Entry> {
 pub fn sort(v: &mut [&Entry], by: SortBy, up: bool, keep: bool, group: GroupBy) {
     let now = SystemTime::now();
     v.sort_by(|a, b| {
-        let first = if group != GroupBy::None { group_key(a, group, now).0.cmp(&group_key(b, group, now).0).then(b.dir.cmp(&a.dir)) } else { b.dir.cmp(&a.dir) };
+        let first = if group != GroupBy::None {
+            group_key(a, group, now).0.cmp(&group_key(b, group, now).0).then(b.dir.cmp(&a.dir))
+        } else {
+            b.dir.cmp(&a.dir)
+        };
         if first != std::cmp::Ordering::Equal {
             return first;
         }
@@ -320,7 +336,9 @@ pub fn sort(v: &mut [&Entry], by: SortBy, up: bool, keep: bool, group: GroupBy) 
             SortBy::Name => natural(&a.name, &b.name),
             SortBy::Size => a.size.cmp(&b.size),
             SortBy::Changed => a.changed.cmp(&b.changed),
-            SortBy::Kind => kind_words(a).to_lowercase().cmp(&kind_words(b).to_lowercase()).then_with(|| natural(&a.name, &b.name)),
+            SortBy::Kind => {
+                kind_words(a).to_lowercase().cmp(&kind_words(b).to_lowercase()).then_with(|| natural(&a.name, &b.name))
+            }
         };
         if up { o } else { o.reverse() }
     });
@@ -353,13 +371,20 @@ pub fn user_dirs() -> Vec<(String, PathBuf)> {
         // "$HOME" alone means the folder is not wanted.
         (p != h).then_some(p)
     };
-    [("Desktop", "DESKTOP"), ("Documents", "DOCUMENTS"), ("Downloads", "DOWNLOAD"), ("Pictures", "PICTURES"), ("Music", "MUSIC"), ("Videos", "VIDEOS")]
-        .into_iter()
-        .filter_map(|(name, key)| {
-            let p = said(key).unwrap_or_else(|| h.join(name));
-            p.is_dir().then(|| (name.to_string(), p))
-        })
-        .collect()
+    [
+        ("Desktop", "DESKTOP"),
+        ("Documents", "DOCUMENTS"),
+        ("Downloads", "DOWNLOAD"),
+        ("Pictures", "PICTURES"),
+        ("Music", "MUSIC"),
+        ("Videos", "VIDEOS"),
+    ]
+    .into_iter()
+    .filter_map(|(name, key)| {
+        let p = said(key).unwrap_or_else(|| h.join(name));
+        p.is_dir().then(|| (name.to_string(), p))
+    })
+    .collect()
 }
 
 /// The places: Home, the user's folders, Recent, the computer, mounted
@@ -372,7 +397,8 @@ pub fn places() -> Vec<Place> {
     }
     out.push(Place { name: "Recent".into(), path: None, network: false });
     out.push(Place { name: "Computer".into(), path: Some(PathBuf::from("/")), network: false });
-    let name_of = |m: &Path| m.file_name().map_or_else(|| m.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
+    let name_of =
+        |m: &Path| m.file_name().map_or_else(|| m.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
     for m in mounted_disks() {
         out.push(Place { name: name_of(&m), path: Some(m), network: false });
     }
@@ -399,14 +425,21 @@ pub fn place_icon(p: &Place) -> (&'static str, &'static str) {
         ("Music", _) => ("places", "music"),
         ("Videos", _) => ("places", "videos"),
         ("Computer", _) => ("places", "disk"),
-        ("Trash", Some(t)) => ("places", if fs::read_dir(t).is_ok_and(|mut d| d.next().is_some()) { "trash-full" } else { "trash" }),
+        ("Trash", Some(t)) => {
+            ("places", if fs::read_dir(t).is_ok_and(|mut d| d.next().is_some()) { "trash-full" } else { "trash" })
+        }
         _ => ("places", "usb"),
     }
 }
 
 /// The places sidebar: each a button, the one shown chosen. `here`: the
 /// folder shown (None for Recent).
-pub fn sidebar<M: Clone + 'static>(places: &[Place], here: Option<&Path>, go: impl Fn(&Place) -> M, t: &Theme) -> Element<M> {
+pub fn sidebar<M: Clone + 'static>(
+    places: &[Place],
+    here: Option<&Path>,
+    go: impl Fn(&Place) -> M,
+    t: &Theme,
+) -> Element<M> {
     let mut items: Vec<Element<M>> = Vec::new();
     let mut headed = false;
     for p in places {
@@ -428,10 +461,25 @@ pub fn sidebar<M: Clone + 'static>(places: &[Place], here: Option<&Path>, go: im
         })
         .width(Length::Fixed(16.0))
         .height(Length::Fixed(16.0));
-        let line = row(vec![mark, label(p.name.clone()).size(12.0).width(Length::FILL)]).spacing(7.0).align(Align::Center).width(Length::FILL);
-        items.push(button(line).look(if chosen { ButtonLook::Chosen } else { ButtonLook::Plain }).padding(Padding::hv(5.0, 8.0)).on_press(go(p)).width(Length::FILL).name(p.name.clone()));
+        let line = row(vec![mark, label(p.name.clone()).size(12.0).width(Length::FILL)])
+            .spacing(7.0)
+            .align(Align::Center)
+            .width(Length::FILL);
+        items.push(
+            button(line)
+                .look(if chosen { ButtonLook::Chosen } else { ButtonLook::Plain })
+                .padding(Padding::hv(5.0, 8.0))
+                .on_press(go(p))
+                .width(Length::FILL)
+                .name(p.name.clone()),
+        );
     }
-    panel(scroll(column(items).spacing(1.0).width(Length::FILL))).color(t.card).radius(8.0).padding(6.0).width(Length::Fixed(160.0)).height(Length::FILL)
+    panel(scroll(column(items).spacing(1.0).width(Length::FILL)))
+        .color(t.card)
+        .radius(8.0)
+        .padding(6.0)
+        .width(Length::Fixed(160.0))
+        .height(Length::FILL)
 }
 
 /// A folder's size once counted, for the list's Size column.
@@ -492,7 +540,12 @@ impl<M: Clone + 'static> Rename<M> {
     /// new widget (and takes the keyboard) where the name stood.
     fn field(&self, size: f32, width: Length) -> Element<M> {
         let _ = size;
-        crate::field(self.text.clone(), self.typed).on_submit(self.done.clone()).autofocus().key(0x7265_6e61_6d65).width(width).name("New name")
+        crate::field(self.text.clone(), self.typed)
+            .on_submit(self.done.clone())
+            .autofocus()
+            .key(0x7265_6e61_6d65)
+            .width(width)
+            .name("New name")
     }
 }
 
@@ -500,13 +553,28 @@ impl<M: Clone + 'static> Rename<M> {
 /// change the columns' widths, then a row per entry: its mark, name, when it
 /// changed, its size and its kind; striped, grouped under headings if the
 /// look says.
-pub fn list<M: Clone + 'static>(v: &View<M>, sort: (SortBy, bool), by: impl Fn(SortBy) -> M) -> (Element<M>, Vec<Element<M>>) {
+pub fn list<M: Clone + 'static>(
+    v: &View<M>,
+    sort: (SortBy, bool),
+    by: impl Fn(SortBy) -> M,
+) -> (Element<M>, Vec<Element<M>>) {
     let look = v.look;
     let rs = look.rows;
     let shown: Vec<usize> = (0..COLUMNS.len()).filter(|&c| COLUMNS[c].1 != SortBy::Kind || look.kind).collect();
     let heading = |text: &str, s: SortBy, w: Length, end: bool| -> Element<M> {
         let mark = if sort.0 == s { if sort.1 { " ▲" } else { " ▼" } } else { "" };
-        button(label(format!("{text}{mark}")).size(11.0).dim().align(if end { Align::End } else { Align::Start }).width(Length::FILL)).look(ButtonLook::Plain).padding(Padding::hv(2.0, 0.0)).on_press(by(s)).width(w).name(format!("Sort by {text}"))
+        button(
+            label(format!("{text}{mark}"))
+                .size(11.0)
+                .dim()
+                .align(if end { Align::End } else { Align::Start })
+                .width(Length::FILL),
+        )
+        .look(ButtonLook::Plain)
+        .padding(Padding::hv(2.0, 0.0))
+        .on_press(by(s))
+        .width(w)
+        .name(format!("Sort by {text}"))
     };
     // Headings and rows are built alike, so each column's words sit under its
     // heading: the mark's room, the name, then for each column an edge's room
@@ -514,14 +582,17 @@ pub fn list<M: Clone + 'static>(v: &View<M>, sort: (SortBy, bool), by: impl Fn(S
     const GAP: f32 = 14.0;
     const PAD: f32 = 6.0;
     let icon_w = 20.0 * rs.mark() + 6.0;
-    let mut head_items: Vec<Element<M>> = vec![space().width(Length::Fixed(icon_w)), heading("Name", SortBy::Name, Length::FILL, false)];
+    let mut head_items: Vec<Element<M>> =
+        vec![space().width(Length::Fixed(icon_w)), heading("Name", SortBy::Name, Length::FILL, false)];
     for &c in &shown {
         let (text, s) = COLUMNS[c];
         let text = if s == SortBy::Changed { v.changed_heading.unwrap_or(text) } else { text };
         // The edge before the column: pulled, the column grows or shrinks.
         let mut g = drawing(|scene, _, r: Rect, t: &Theme| {
             scene.fill(Rect::new(r.x + r.w / 2.0 - 0.5, r.y + 4.0, 1.0, (r.h - 8.0).max(0.0)), t.line);
-        }).width(Length::Fixed(GAP)).height(Length::Fixed(20.0));
+        })
+        .width(Length::Fixed(GAP))
+        .height(Length::Fixed(20.0));
         if let Some(grip) = v.grip {
             let f = move |t: crate::Touch| grip(c, t);
             g = g.on_touch(f).cursor(vergence_ui::Cursor::ColResize).name(format!("Width of {text}"));
@@ -532,7 +603,9 @@ pub fn list<M: Clone + 'static>(v: &View<M>, sort: (SortBy, bool), by: impl Fn(S
     if let Some((_, w)) = v.trailing {
         head_items.push(space().width(Length::Fixed(GAP + w)));
     }
-    let head = panel(row(head_items).spacing(0.0).align(Align::Center).width(Length::FILL)).padding(Padding::hv(0.0, PAD)).width(Length::FILL);
+    let head = panel(row(head_items).spacing(0.0).align(Align::Center).width(Length::FILL))
+        .padding(Padding::hv(0.0, PAD))
+        .width(Length::FILL);
     // A gray that darkens a light ground and lightens a dark one alike.
     const STRIPE: Color = Color { r: 128, g: 128, b: 128, a: 18 };
     let mut rows = Vec::with_capacity(v.entries.len() + 8);
@@ -546,7 +619,11 @@ pub fn list<M: Clone + 'static>(v: &View<M>, sort: (SortBy, bool), by: impl Fn(S
             if group != Some(g) {
                 group = Some(g);
                 odd = false;
-                rows.push(panel(label(name).size(11.0).weight(600).dim()).padding(Padding { top: if k == 0 { 2.0 } else { 12.0 }, bottom: 4.0, left: 10.0, right: 0.0 }).width(Length::FILL));
+                rows.push(
+                    panel(label(name).size(11.0).weight(600).dim())
+                        .padding(Padding { top: if k == 0 { 2.0 } else { 12.0 }, bottom: 4.0, left: 10.0, right: 0.0 })
+                        .width(Length::FILL),
+                );
             }
         }
         let name_el = match &v.rename {
@@ -574,7 +651,11 @@ pub fn list<M: Clone + 'static>(v: &View<M>, sort: (SortBy, bool), by: impl Fn(S
             cells.push(match COLUMNS[c].1 {
                 SortBy::Changed => label(e.changed.map(when).unwrap_or_default()).size(small).dim().elide().width(w),
                 SortBy::Size => {
-                    let words = if e.dir { v.folder_size.and_then(|f| f(e)).map_or_else(|| "—".to_string(), size_words) } else { size_words(e.size) };
+                    let words = if e.dir {
+                        v.folder_size.and_then(|f| f(e)).map_or_else(|| "—".to_string(), size_words)
+                    } else {
+                        size_words(e.size)
+                    };
                     label(words).size(small).dim().align(Align::End).width(w)
                 }
                 _ => label(kind_words(e)).size(small).dim().elide().width(w),
@@ -689,7 +770,11 @@ impl Kind {
             "audio-x-generic" => Kind::Sound,
             "video-x-generic" => Kind::Video,
             "package-x-generic" | "media-optical" | "drive-harddisk" => Kind::Archive,
-            "x-office-document" | "x-office-spreadsheet" | "x-office-presentation" | "x-office-calendar" | "x-office-address-book" => Kind::Document,
+            "x-office-document"
+            | "x-office-spreadsheet"
+            | "x-office-presentation"
+            | "x-office-calendar"
+            | "x-office-address-book" => Kind::Document,
             "application-x-executable" if m != vergence_types::BINARY => Kind::Program,
             _ => Kind::Other,
         }
@@ -760,15 +845,18 @@ fn special_folder(path: &Path) -> Option<(&'static str, &'static str)> {
         static DIRS: Vec<(String, PathBuf)> = user_dirs();
     }
     let name = DIRS.with(|d| d.iter().find(|(_, p)| p == path).map(|(n, _)| n.clone()))?;
-    Some(("places", match name.as_str() {
-        "Desktop" => "desktop",
-        "Documents" => "documents",
-        "Downloads" => "downloads",
-        "Pictures" => "pictures",
-        "Music" => "music",
-        "Videos" => "videos",
-        _ => return None,
-    }))
+    Some((
+        "places",
+        match name.as_str() {
+            "Desktop" => "desktop",
+            "Documents" => "documents",
+            "Downloads" => "downloads",
+            "Pictures" => "pictures",
+            "Music" => "music",
+            "Videos" => "videos",
+            _ => return None,
+        },
+    ))
 }
 
 thread_local! {
@@ -841,7 +929,9 @@ fn themed_icon(theme: &str, group: &str, name: &str, size: u32) -> Option<std::s
             .and_then(|p| vergence_decode::decode_file(&p, Some((size, size))).ok())
             .and_then(|p| {
                 let f = p.frames.into_iter().next()?;
-                (p.width > 0 && p.height > 0 && p.width <= 1024 && p.height <= 1024).then(|| std::sync::Arc::new(vergence_scene::Image { width: p.width, height: p.height, rgba: f.rgba }))
+                (p.width > 0 && p.height > 0 && p.width <= 1024 && p.height <= 1024).then(|| {
+                    std::sync::Arc::new(vergence_scene::Image { width: p.width, height: p.height, rgba: f.rgba })
+                })
             });
         let mut all = THEMED.lock().unwrap_or_else(|e| e.into_inner());
         all.1.remove(&key);
@@ -871,7 +961,8 @@ fn vergence_own_icon(group: &str, name: &str, size: u32) -> Option<std::sync::Ar
         }
         let w = u32::from_le_bytes([b[4], b[5], b[6], b[7]]);
         let h = u32::from_le_bytes([b[8], b[9], b[10], b[11]]);
-        (b.len() == 12 + (w * h * 4) as usize && w > 0 && h > 0).then(|| std::sync::Arc::new(vergence_scene::Image { width: w, height: h, rgba: b[12..].to_vec() }))
+        (b.len() == 12 + (w * h * 4) as usize && w > 0 && h > 0)
+            .then(|| std::sync::Arc::new(vergence_scene::Image { width: w, height: h, rgba: b[12..].to_vec() }))
     });
     OWN_ICONS.with(|c| c.borrow_mut().insert(key, img.clone()));
     img
@@ -1025,7 +1116,9 @@ pub fn when(t: SystemTime) -> String {
     let day = |d: &Local| (d.year, d.yday);
     if day(&at) == day(&now) {
         format!("Today {:02}:{:02}", at.hour, at.min)
-    } else if (at.year == now.year && at.yday + 1 == now.yday) || local(secs(SystemTime::now()) - 86_400).is_some_and(|y| day(&y) == day(&at)) {
+    } else if (at.year == now.year && at.yday + 1 == now.yday)
+        || local(secs(SystemTime::now()) - 86_400).is_some_and(|y| day(&y) == day(&at))
+    {
         format!("Yesterday {:02}:{:02}", at.hour, at.min)
     } else if at.year == now.year {
         format!("{} {}", MONTHS[at.month.min(11) as usize], at.mday)
@@ -1074,10 +1167,30 @@ pub fn local(secs: i64) -> Option<Local> {
     unsafe extern "C" {
         fn localtime_r(t: *const i64, out: *mut Tm) -> *mut Tm;
     }
-    let mut tm = Tm { sec: 0, min: 0, hour: 0, mday: 0, mon: 0, year: 0, wday: 0, yday: 0, isdst: 0, gmtoff: 0, zone: std::ptr::null() };
+    let mut tm = Tm {
+        sec: 0,
+        min: 0,
+        hour: 0,
+        mday: 0,
+        mon: 0,
+        year: 0,
+        wday: 0,
+        yday: 0,
+        isdst: 0,
+        gmtoff: 0,
+        zone: std::ptr::null(),
+    };
     // SAFETY: localtime_r reads the time and fills the struct we own.
     let r = unsafe { localtime_r(&secs, &mut tm) };
-    (!r.is_null()).then_some(Local { year: tm.year + 1900, month: tm.mon, mday: tm.mday, yday: tm.yday, hour: tm.hour, min: tm.min, sec: tm.sec })
+    (!r.is_null()).then_some(Local {
+        year: tm.year + 1900,
+        month: tm.mon,
+        mday: tm.mday,
+        yday: tm.yday,
+        hour: tm.hour,
+        min: tm.min,
+        sec: tm.sec,
+    })
 }
 
 /// The start of a file, if it is text.
@@ -1107,7 +1220,8 @@ pub use vergence_protocol::bus::{DriveInfo, DriveKind};
 /// The drive list the server keeps (bus topic Drives), followed by a
 /// thread of this process's own from the first ask; None until it has come,
 /// and outside a Vergence session.
-static DRIVES: std::sync::OnceLock<std::sync::Arc<std::sync::Mutex<Option<Vec<DriveInfo>>>>> = std::sync::OnceLock::new();
+static DRIVES: std::sync::OnceLock<std::sync::Arc<std::sync::Mutex<Option<Vec<DriveInfo>>>>> =
+    std::sync::OnceLock::new();
 /// Bumped each time the server's list comes: windows that show drives look again.
 static DRIVES_SEEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -1259,7 +1373,10 @@ pub fn plain(e: &std::io::Error) -> String {
 // --- What is remembered ---
 
 fn state_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| home().map(|h| h.join(".local/state")))?;
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| home().map(|h| h.join(".local/state")))?;
     Some(base.join("vergence/file-dialog"))
 }
 
@@ -1304,12 +1421,17 @@ pub fn remember(app: &str, dir: &Path, file: &Path) {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let tmp = path.with_extension("new");
-    let written = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp).and_then(|mut f| f.write_all(text.as_bytes()));
+    let written = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&tmp)
+        .and_then(|mut f| f.write_all(text.as_bytes()));
     if written.is_ok() {
         let _ = fs::rename(&tmp, &path);
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1318,8 +1440,13 @@ mod tests {
         let linux = "/dev/sda1 / ext4 rw 0 0\n/dev/sdb1 /run/media/u/My\\040Disk vfat rw 0 0\nhost:/srv /mnt/srv nfs4 rw 0 0\nu@box:/home /home/u/box fuse.sshfs rw 0 0\n//nas/share /mnt/nas cifs rw 0 0\n";
         let t = super::parse_mounts(linux);
         assert_eq!(t[1].at, std::path::PathBuf::from("/run/media/u/My Disk"));
-        assert_eq!(super::disks_of(&t), vec![std::path::PathBuf::from("/run/media/u/My Disk")], "the network's mounts under /mnt are not disks");
-        let net: Vec<_> = t.iter().filter(|m| super::network_kind(&m.kind)).map(|m| m.at.to_string_lossy().into_owned()).collect();
+        assert_eq!(
+            super::disks_of(&t),
+            vec![std::path::PathBuf::from("/run/media/u/My Disk")],
+            "the network's mounts under /mnt are not disks"
+        );
+        let net: Vec<_> =
+            t.iter().filter(|m| super::network_kind(&m.kind)).map(|m| m.at.to_string_lossy().into_owned()).collect();
         assert_eq!(net, vec!["/mnt/srv", "/home/u/box", "/mnt/nas"]);
         // FreeBSD's mount -p.
         let bsd = "zroot/ROOT/default\t/\tzfs\trw\t0 0\nbox:/home\t/mnt/box\tfusefs.sshfs\trw\t0 0\n/dev/da0s1\t/media/usb\tmsdosfs\trw\t0 0\n";
@@ -1327,7 +1454,10 @@ mod tests {
         assert_eq!(super::disks_of(&t), vec![std::path::PathBuf::from("/media/usb")]);
         assert!(super::network_kind(&t[1].kind));
         let auto = super::parse_mounts("map -vergence_media\t/media\t\t\tautofs\trw\t\t0 0\n");
-        assert_eq!((auto[0].what.as_str(), auto[0].at.to_str(), auto[0].kind.as_str()), ("map -vergence_media", Some("/media"), "autofs"));
+        assert_eq!(
+            (auto[0].what.as_str(), auto[0].at.to_str(), auto[0].kind.as_str()),
+            ("map -vergence_media", Some("/media"), "autofs")
+        );
     }
 
     use super::*;
@@ -1364,13 +1494,24 @@ mod tests {
 
     #[test]
     fn entries_sort_folders_first_then_as_asked() {
-        let e = |name: &str, dir: bool, size: u64| Entry { name: name.into(), path: PathBuf::from(format!("/x/{name}")), dir, mime: kind_of(dir, name), size, changed: None };
+        let e = |name: &str, dir: bool, size: u64| Entry {
+            name: name.into(),
+            path: PathBuf::from(format!("/x/{name}")),
+            dir,
+            mime: kind_of(dir, name),
+            size,
+            changed: None,
+        };
         let all = [e("b10.txt", false, 5), e("b2.txt", false, 50), e("zeta", true, 0), e("Alpha", true, 0)];
         let mut v: Vec<&Entry> = all.iter().collect();
         sort(&mut v, SortBy::Name, true, false, GroupBy::None);
         assert_eq!(v.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), vec!["Alpha", "zeta", "b2.txt", "b10.txt"]);
         sort(&mut v, SortBy::Size, false, false, GroupBy::None);
-        assert_eq!(v.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), vec!["Alpha", "zeta", "b2.txt", "b10.txt"], "folders stay first; biggest first");
+        assert_eq!(
+            v.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            vec!["Alpha", "zeta", "b2.txt", "b10.txt"],
+            "folders stay first; biggest first"
+        );
         assert_eq!(all[2].kind(), Kind::Folder);
         assert_eq!(all[0].kind(), Kind::Text);
     }
@@ -1379,7 +1520,14 @@ mod tests {
     fn groups_by_date_and_size_as_finder() {
         let now = SystemTime::now();
         let ago = |days: u64| Some(now - std::time::Duration::from_secs(days * 86_400 + 60));
-        let e = |name: &str, dir: bool, size: u64, changed| Entry { name: name.into(), path: PathBuf::from(format!("/x/{name}")), dir, mime: kind_of(dir, name), size, changed };
+        let e = |name: &str, dir: bool, size: u64, changed| Entry {
+            name: name.into(),
+            path: PathBuf::from(format!("/x/{name}")),
+            dir,
+            mime: kind_of(dir, name),
+            size,
+            changed,
+        };
         let g = |x: &Entry, by| group_key(x, by, now).1;
         assert_eq!(g(&e("a", false, 0, Some(now)), GroupBy::Date), "Today");
         assert_eq!(g(&e("a", false, 0, ago(3)), GroupBy::Date), "Previous 7 Days");
@@ -1402,8 +1550,16 @@ mod tests {
 
     #[test]
     fn details_sort_by_kind_group_and_keep_their_widths() {
-        let e = |name: &str, dir: bool| Entry { name: name.into(), path: PathBuf::from(format!("/x/{name}")), dir, mime: kind_of(dir, name), size: 0, changed: None };
-        let all = [e("notes.txt", false), e("photo.png", false), e("Music", true), e("a.png", false), e("letter.odt", false)];
+        let e = |name: &str, dir: bool| Entry {
+            name: name.into(),
+            path: PathBuf::from(format!("/x/{name}")),
+            dir,
+            mime: kind_of(dir, name),
+            size: 0,
+            changed: None,
+        };
+        let all =
+            [e("notes.txt", false), e("photo.png", false), e("Music", true), e("a.png", false), e("letter.odt", false)];
         let mut v: Vec<&Entry> = all.iter().collect();
         // By kind: folders first, then by what the type is called, then by name.
         sort(&mut v, SortBy::Kind, true, false, GroupBy::None);
@@ -1416,7 +1572,10 @@ mod tests {
         assert_eq!(pngs, ["a.png", "photo.png"], "the same kind by name");
         // Grouped: Folders, Documents, Text, Pictures, each by name.
         sort(&mut v, SortBy::Name, true, false, GroupBy::Kind);
-        assert_eq!(v.iter().map(|e| group_of(e).1).collect::<Vec<_>>(), ["Folders", "Documents", "Text", "Pictures", "Pictures"]);
+        assert_eq!(
+            v.iter().map(|e| group_of(e).1).collect::<Vec<_>>(),
+            ["Folders", "Documents", "Text", "Pictures", "Pictures"]
+        );
         assert_eq!(kind_words(&all[2]), "Folder");
         // Widths from a setting, kept in bounds; the usual for what is missing.
         assert_eq!(parse_widths("\"200,90,160\""), [200.0, 90.0, 160.0]);

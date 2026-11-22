@@ -146,12 +146,15 @@ fn family_name(t: &[u8]) -> Option<String> {
     let mut best: Option<(u32, String)> = None;
     for i in 0..count {
         let r = 6 + i * 12;
-        let (platform, encoding, language, id) = (u16_at(t, r)?, u16_at(t, r + 2)?, u16_at(t, r + 4)?, u16_at(t, r + 6)?);
+        let (platform, encoding, language, id) =
+            (u16_at(t, r)?, u16_at(t, r + 2)?, u16_at(t, r + 4)?, u16_at(t, r + 6)?);
         if id != 16 && id != 1 {
             continue;
         }
         let (len, off) = (u16_at(t, r + 8)? as usize, u16_at(t, r + 10)? as usize);
-        let Some(bytes) = t.get(strings.checked_add(off)?..strings.checked_add(off)?.checked_add(len)?) else { continue };
+        let Some(bytes) = t.get(strings.checked_add(off)?..strings.checked_add(off)?.checked_add(len)?) else {
+            continue;
+        };
         let text = match platform {
             // Unicode and Windows: UTF-16, big-endian.
             0 | 3 => {
@@ -162,7 +165,10 @@ fn family_name(t: &[u8]) -> Option<String> {
             1 if encoding == 0 => bytes.iter().all(u8::is_ascii).then(|| String::from_utf8_lossy(bytes).into_owned()),
             _ => None,
         };
-        let Some(text) = text.map(|s| s.trim().to_string()).filter(|s| !s.is_empty() && s.len() <= 256 && !s.chars().any(char::is_control)) else {
+        let Some(text) = text
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty() && s.len() <= 256 && !s.chars().any(char::is_control))
+        else {
             continue;
         };
         // Higher is better: name 16 over name 1, then Windows English, Windows, Unicode, Mac.
@@ -237,7 +243,9 @@ pub fn coverage(t: &[u8]) -> Coverage {
     let mut best: Option<(u8, usize)> = None;
     for i in 0..(n as usize).min(64) {
         let r = 4 + i * 8;
-        let (Some(platform), Some(encoding), Some(off)) = (u16_at(t, r), u16_at(t, r + 2), u32_at(t, r + 4)) else { break };
+        let (Some(platform), Some(encoding), Some(off)) = (u16_at(t, r), u16_at(t, r + 2), u32_at(t, r + 4)) else {
+            break;
+        };
         let off = off as usize;
         let Some(format) = u16_at(t, off) else { continue };
         let rank = match (platform, encoding, format) {
@@ -311,7 +319,18 @@ pub mod testfont {
 
     impl Default for Spec<'_> {
         fn default() -> Self {
-            Spec { family: "Test Sans", typographic: None, weight: 400, width: 5, italic: false, monospace: false, panose_mono: false, weight_axis: None, ranges: &[(0x20, 0x7e)], wide: &[] }
+            Spec {
+                family: "Test Sans",
+                typographic: None,
+                weight: 400,
+                width: 5,
+                italic: false,
+                monospace: false,
+                panose_mono: false,
+                weight_axis: None,
+                ranges: &[(0x20, 0x7e)],
+                wide: &[],
+            }
         }
     }
 
@@ -394,7 +413,13 @@ pub mod testfont {
         }
         let mut post = vec![0u8; 32];
         post[12..16].copy_from_slice(&(spec.monospace as u32).to_be_bytes());
-        let mut out = vec![(*b"OS/2", os2), (*b"cmap", cmap_table(spec)), (*b"head", vec![0u8; 54]), (*b"name", name_table(spec)), (*b"post", post)];
+        let mut out = vec![
+            (*b"OS/2", os2),
+            (*b"cmap", cmap_table(spec)),
+            (*b"head", vec![0u8; 54]),
+            (*b"name", name_table(spec)),
+            (*b"post", post),
+        ];
         if let Some((min, max)) = spec.weight_axis {
             let mut fvar = vec![0u8; 16 + 20];
             fvar[0..2].copy_from_slice(&1u16.to_be_bytes());
@@ -462,10 +487,14 @@ mod tests {
 
     #[test]
     fn a_face_says_who_it_is() {
-        let bytes = font(&Spec { family: "Example Mono", weight: 700, italic: true, monospace: true, ..Spec::default() });
+        let bytes =
+            font(&Spec { family: "Example Mono", weight: 700, italic: true, monospace: true, ..Spec::default() });
         let f = faces(&mut &bytes[..]);
         assert_eq!(f.len(), 1);
-        assert_eq!((f[0].family.as_str(), f[0].weight, f[0].italic, f[0].monospace, f[0].index), ("Example Mono", 700, true, true, 0));
+        assert_eq!(
+            (f[0].family.as_str(), f[0].weight, f[0].italic, f[0].monospace, f[0].index),
+            ("Example Mono", 700, true, true, 0)
+        );
         assert_eq!(f[0].weight_axis, None);
     }
 
@@ -478,7 +507,12 @@ mod tests {
 
     #[test]
     fn the_typographic_family_wins() {
-        let bytes = font(&Spec { family: "Example Sans Light", typographic: Some("Example Sans"), weight: 300, ..Spec::default() });
+        let bytes = font(&Spec {
+            family: "Example Sans Light",
+            typographic: Some("Example Sans"),
+            weight: 300,
+            ..Spec::default()
+        });
         assert_eq!(faces(&mut &bytes[..])[0].family, "Example Sans");
     }
 
@@ -490,9 +524,15 @@ mod tests {
 
     #[test]
     fn a_collection_has_every_face() {
-        let bytes = collection(&[Spec { family: "One", ..Spec::default() }, Spec { family: "Two", weight: 700, ..Spec::default() }]);
+        let bytes = collection(&[
+            Spec { family: "One", ..Spec::default() },
+            Spec { family: "Two", weight: 700, ..Spec::default() },
+        ]);
         let f = faces(&mut &bytes[..]);
-        assert_eq!(f.iter().map(|f| (f.family.as_str(), f.index, f.weight)).collect::<Vec<_>>(), [("One", 0, 400), ("Two", 1, 700)]);
+        assert_eq!(
+            f.iter().map(|f| (f.family.as_str(), f.index, f.weight)).collect::<Vec<_>>(),
+            [("One", 0, 400), ("Two", 1, 700)]
+        );
     }
 
     #[test]
@@ -521,7 +561,10 @@ mod tests {
 
     #[test]
     fn cut_short_anywhere_is_not_a_panic() {
-        let bytes = collection(&[Spec::default(), Spec { weight_axis: Some((100, 900)), wide: &[(0x20, 0x7e)], ..Spec::default() }]);
+        let bytes = collection(&[
+            Spec::default(),
+            Spec { weight_axis: Some((100, 900)), wide: &[(0x20, 0x7e)], ..Spec::default() },
+        ]);
         for n in 0..bytes.len() {
             let cut = &bytes[..n];
             for f in faces(&mut &cut[..]) {

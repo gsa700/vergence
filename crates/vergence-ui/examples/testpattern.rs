@@ -63,7 +63,15 @@ fn rich(s: &mut Scene, fonts: &mut Fonts, w: f32, h: f32) {
     s.fill_rounded(Rect::new(12.0, 12.0, w - 24.0, h - 24.0), 10.0, Color::rgb(40, 44, 58));
     if let Some(face) = fonts.face("sans-serif", 400, false) {
         text(s, fonts, face, 22.0, ink, Point::new(24.0, 44.0), "Vergence pattern Ag 0123");
-        text(s, fonts, face, 13.0, Color::rgb(180, 190, 210), Point::new(24.0, 66.0), "Small text: the quick brown fox jumps over the lazy dog.");
+        text(
+            s,
+            fonts,
+            face,
+            13.0,
+            Color::rgb(180, 190, 210),
+            Point::new(24.0, 66.0),
+            "Small text: the quick brown fox jumps over the lazy dog.",
+        );
     }
     if let Some(face) = fonts.face("monospace", 400, false) {
         text(s, fonts, face, 12.0, Color::rgb(120, 220, 160), Point::new(24.0, 86.0), "fn main() { 1 + 1 == 2 }");
@@ -87,7 +95,12 @@ fn main() {
         .and_then(|i| Some((args.get(i + 1)?.parse().ok()?, args.get(i + 2)?.parse().ok()?)))
         .unwrap_or((580, 420));
     let rich = args.iter().any(|a| a == "--rich");
-    let title = args.iter().position(|a| a == "--title").and_then(|i| args.get(i + 1)).cloned().unwrap_or_else(|| "Test pattern".into());
+    let title = args
+        .iter()
+        .position(|a| a == "--title")
+        .and_then(|i| args.get(i + 1))
+        .cloned()
+        .unwrap_or_else(|| "Test pattern".into());
     if let Err(e) = vergence_ui::run(&mut Pattern { rich, title }, size) {
         eprintln!("testpattern: {e}");
         std::process::exit(1);

@@ -91,18 +91,32 @@ impl Server {
         let paths: Vec<PathBuf> = match &req.dest {
             // One picture to the clipboard (every screen: the first).
             Dest::Clipboard | Dest::Portal(_) => vec![PathBuf::new()],
-            Dest::Path(p) => screens.iter().map(|s| if s.is_empty() || screens.len() == 1 { p.clone() } else { with_suffix(p, s) }).collect(),
+            Dest::Path(p) => screens
+                .iter()
+                .map(|s| if s.is_empty() || screens.len() == 1 { p.clone() } else { with_suffix(p, s) })
+                .collect(),
             Dest::Folder => {
-                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs() as i64);
                 let (l, _) = vergence_shell::tiles::now_at(now).ok_or("no local time")?;
                 let dir = folder(&l);
-                let stem = format!("Screenshot {:04}-{:02}-{:02} at {:02}.{:02}.{:02}", l.year, l.month + 1, l.mday, l.hour, l.min, l.sec);
+                let stem = format!(
+                    "Screenshot {:04}-{:02}-{:02} at {:02}.{:02}.{:02}",
+                    l.year,
+                    l.month + 1,
+                    l.mday,
+                    l.hour,
+                    l.min,
+                    l.sec
+                );
                 // Names given lately count as taken: their files may still be
                 // being written.
                 screens
                     .iter()
                     .map(|s| {
-                        let stem = if s.is_empty() || screens.len() == 1 { stem.clone() } else { format!("{stem} ({s})") };
+                        let stem =
+                            if s.is_empty() || screens.len() == 1 { stem.clone() } else { format!("{stem} ({s})") };
                         let p = free_name(&dir, &stem, &self.capture_given);
                         self.capture_given.push(p.clone());
                         p
@@ -141,12 +155,21 @@ impl Default for Config {
 
 pub fn config_from(text: &str) -> Config {
     let mut c = Config::default();
-    let Some(t) = text.parse::<toml::Table>().ok().and_then(|t| t.get("screenshots").and_then(|s| s.as_table()).cloned()) else { return c };
+    let Some(t) =
+        text.parse::<toml::Table>().ok().and_then(|t| t.get("screenshots").and_then(|s| s.as_table()).cloned())
+    else {
+        return c;
+    };
     let flag = |k: &str, d: bool| t.get(k).and_then(|v| v.as_bool()).unwrap_or(d);
     c.every_screen = flag("every-screen", c.every_screen);
     c.per_day = flag("per-day", c.per_day);
     c.thumbnail = flag("thumbnail", c.thumbnail);
-    if let Some(f) = t.get("folder").and_then(|v| v.as_str()).map(str::trim).filter(|f| !f.is_empty() && (f.starts_with('/') || f.starts_with("~/"))) {
+    if let Some(f) = t
+        .get("folder")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|f| !f.is_empty() && (f.starts_with('/') || f.starts_with("~/")))
+    {
         c.folder = f.to_string();
     }
     c
@@ -346,7 +369,8 @@ mod tests {
 
     #[test]
     fn links_come_back_as_their_paths() {
-        let p = std::path::Path::new("/home/d/Pictures/Screenshots/2026-11-20/Screenshot 2026-11-20 at 23.07.44 (2).png");
+        let p =
+            std::path::Path::new("/home/d/Pictures/Screenshots/2026-11-20/Screenshot 2026-11-20 at 23.07.44 (2).png");
         let link = file_link(p);
         assert!(!link.contains(' '));
         assert_eq!(vergence_types::path_of_link(&link).as_deref(), Some(p));
@@ -377,7 +401,9 @@ mod tests {
     fn the_folder_is_the_day() {
         let l = vergence_shell::tiles::Local { year: 2026, month: 10, mday: 20, wday: 5, hour: 23, min: 1, sec: 19 };
         assert!(folder_in(&Config::default(), &l).ends_with("Pictures/Screenshots/2026-11-20"));
-        let c = config_from("[screenshots]\nfolder = \"~/Desktop\"\nper-day = false\nevery-screen = true\nthumbnail = false\n");
+        let c = config_from(
+            "[screenshots]\nfolder = \"~/Desktop\"\nper-day = false\nevery-screen = true\nthumbnail = false\n",
+        );
         assert_eq!(c, Config { every_screen: true, folder: "~/Desktop".into(), per_day: false, thumbnail: false });
         assert!(folder_in(&c, &l).ends_with("Desktop"));
         // A folder that is neither absolute nor in the home folder is ignored.
@@ -478,7 +504,8 @@ impl Server {
     }
 
     fn capture_now(&mut self, what: What, clip: bool) {
-        let req = Request { what, dest: if clip { Dest::Clipboard } else { Dest::Folder }, pointer: false, shadow: true };
+        let req =
+            Request { what, dest: if clip { Dest::Clipboard } else { Dest::Folder }, pointer: false, shadow: true };
         if let Err(e) = self.capture_ask(req) {
             tracing::info!("screenshot: {e}");
         }
@@ -520,10 +547,20 @@ impl Server {
     pub fn capture_pick_window(&self) -> Option<Win> {
         let p = self.capture_pick.as_ref()?;
         // Front first; its bar counts as the window.
-        self.space.elements().rev().find(|w| !self.is_desktop(w) && !self.is_minimized(w) && self.space.element_geometry(w).is_some_and(|g| {
-            let bar = if w.native().is_some_and(|n| n.inset() > 0) { 0 } else { self.bar_h(w) };
-            Rectangle::new((g.loc.x, g.loc.y - bar).into(), (g.size.w, g.size.h + bar).into()).to_f64().contains(p.now)
-        })).cloned()
+        self.space
+            .elements()
+            .rev()
+            .find(|w| {
+                !self.is_desktop(w)
+                    && !self.is_minimized(w)
+                    && self.space.element_geometry(w).is_some_and(|g| {
+                        let bar = if w.native().is_some_and(|n| n.inset() > 0) { 0 } else { self.bar_h(w) };
+                        Rectangle::new((g.loc.x, g.loc.y - bar).into(), (g.size.w, g.size.h + bar).into())
+                            .to_f64()
+                            .contains(p.now)
+                    })
+            })
+            .cloned()
     }
 
     pub fn capture_pick_press(&mut self, pos: smithay::utils::Point<f64, Logical>) {
@@ -589,7 +626,12 @@ impl Server {
 
     /// The picker's overlay on screen `out`: the area being dragged out with
     /// its size, or the window a click would take, lit.
-    pub fn capture_pick_element(&mut self, renderer: &mut smithay::backend::renderer::gles::GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Option<crate::decor::SceneElement> {
+    pub fn capture_pick_element(
+        &mut self,
+        renderer: &mut smithay::backend::renderer::gles::GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Option<crate::decor::SceneElement> {
         use smithay::backend::renderer::element::{
             Kind,
             memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
@@ -611,7 +653,18 @@ impl Server {
         let key = {
             use std::hash::{Hash, Hasher};
             let mut h = std::collections::hash_map::DefaultHasher::new();
-            (clipped.loc.x, clipped.loc.y, clipped.size.w, clipped.size.h, r.size.w, r.size.h, scale.to_bits(), p.window, (a.r, a.g, a.b)).hash(&mut h);
+            (
+                clipped.loc.x,
+                clipped.loc.y,
+                clipped.size.w,
+                clipped.size.h,
+                r.size.w,
+                r.size.h,
+                scale.to_bits(),
+                p.window,
+                (a.r, a.g, a.b),
+            )
+                .hash(&mut h);
             h.finish()
         };
         let (w, h) = (clipped.size.w as f32, clipped.size.h as f32);
@@ -634,22 +687,52 @@ impl Server {
                 if cw + 4.0 < w && ch + 4.0 < h {
                     let card = vergence_scene::Rect::new((w - cw - 4.0).round(), (h - ch - 4.0).round(), cw, ch);
                     scene.fill_rounded(card, 4.0, vergence_scene::Color::rgba(0, 0, 0, 160));
-                    vergence_render::text(&mut scene, fonts, face, size, vergence_scene::Color::rgb(255, 255, 255), vergence_scene::Point::new(card.x + 6.0, (card.y + 3.0 + m.ascent).round()), &label);
+                    vergence_render::text(
+                        &mut scene,
+                        fonts,
+                        face,
+                        size,
+                        vergence_scene::Color::rgb(255, 255, 255),
+                        vergence_scene::Point::new(card.x + 6.0, (card.y + 3.0 + m.ascent).round()),
+                        &label,
+                    );
                 }
             }
-            let pic = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0)).ok()?;
-            let buffer = MemoryRenderBuffer::from_slice(&pic.data, smithay::backend::allocator::Fourcc::Abgr8888, (pic.width as i32, pic.height as i32), 1, smithay::utils::Transform::Normal, None);
+            let pic = vergence_render::Cpu::new()
+                .render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0))
+                .ok()?;
+            let buffer = MemoryRenderBuffer::from_slice(
+                &pic.data,
+                smithay::backend::allocator::Fourcc::Abgr8888,
+                (pic.width as i32, pic.height as i32),
+                1,
+                smithay::utils::Transform::Normal,
+                None,
+            );
             self.capture_pick.as_mut()?.picture = Some((key, buffer, (pic.width as i32, pic.height as i32)));
         }
         let (_, buffer, px) = self.capture_pick.as_ref()?.picture.as_ref()?;
         let whole = Rectangle::<f64, Logical>::from_size((px.0 as f64, px.1 as f64).into());
         let loc = (clipped.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
-        MemoryRenderBufferRenderElement::from_buffer(renderer, loc.to_f64(), buffer, None, Some(whole), Some(clipped.size), Kind::Unspecified).ok().map(crate::decor::SceneElement::Memory)
+        MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            loc.to_f64(),
+            buffer,
+            None,
+            Some(whole),
+            Some(clipped.size),
+            Kind::Unspecified,
+        )
+        .ok()
+        .map(crate::decor::SceneElement::Memory)
     }
 }
 
 /// The rectangle between two corners, in whole points.
-fn drag_rect(a: smithay::utils::Point<f64, Logical>, b: smithay::utils::Point<f64, Logical>) -> Rectangle<i32, Logical> {
+fn drag_rect(
+    a: smithay::utils::Point<f64, Logical>,
+    b: smithay::utils::Point<f64, Logical>,
+) -> Rectangle<i32, Logical> {
     let (x0, y0) = (a.x.min(b.x).round() as i32, a.y.min(b.y).round() as i32);
     let (x1, y1) = (a.x.max(b.x).round() as i32, a.y.max(b.y).round() as i32);
     Rectangle::new((x0, y0).into(), (x1 - x0, y1 - y0).into())
@@ -761,8 +844,13 @@ fn shrink(w: usize, h: usize, rgba: &[u8], tw: usize, th: usize) -> Vec<u8> {
 impl Server {
     /// The main screen and its scale, for the thumbnail.
     pub fn shot_screen(&self) -> Option<(Rectangle<i32, Logical>, f64)> {
-        let geo = self.shelf_screen().or_else(|| self.space.outputs().next().and_then(|o| self.space.output_geometry(o)))?;
-        let scale = self.space.outputs().find(|o| self.space.output_geometry(o) == Some(geo)).map_or(1.0, |o| o.current_scale().fractional_scale());
+        let geo =
+            self.shelf_screen().or_else(|| self.space.outputs().next().and_then(|o| self.space.output_geometry(o)))?;
+        let scale = self
+            .space
+            .outputs()
+            .find(|o| self.space.output_geometry(o) == Some(geo))
+            .map_or(1.0, |o| o.current_scale().fractional_scale());
         Some((geo, scale))
     }
 
@@ -780,8 +868,23 @@ impl Server {
         let shadow = (SHOT_SHADOW).round() as i32;
         let x = area.loc.x + area.size.w - pw - SHOT_MARGIN + shadow;
         let y = area.loc.y + area.size.h - ph - SHOT_MARGIN + shadow;
-        let buffer = MemoryRenderBuffer::from_slice(&rgba, smithay::backend::allocator::Fourcc::Abgr8888, (w as i32, h as i32), 1, smithay::utils::Transform::Normal, None);
-        self.capture_shot = Some(Shot { path, buffer, px: (w as i32, h as i32), rect: Rectangle::new((x, y).into(), (pw, ph).into()), until: std::time::Instant::now() + SHOT_TIME, hovered: false, press: None });
+        let buffer = MemoryRenderBuffer::from_slice(
+            &rgba,
+            smithay::backend::allocator::Fourcc::Abgr8888,
+            (w as i32, h as i32),
+            1,
+            smithay::utils::Transform::Normal,
+            None,
+        );
+        self.capture_shot = Some(Shot {
+            path,
+            buffer,
+            px: (w as i32, h as i32),
+            rect: Rectangle::new((x, y).into(), (pw, ph).into()),
+            until: std::time::Instant::now() + SHOT_TIME,
+            hovered: false,
+            press: None,
+        });
         self.shot_timer();
         self.redraw_all();
     }
@@ -789,22 +892,25 @@ impl Server {
     /// Looks again when it is due to go; kept while hovered or held.
     fn shot_timer(&mut self) {
         use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
-        let _ = self.loop_handle.insert_source(Timer::from_duration(SHOT_TIME + std::time::Duration::from_millis(50)), |_, _, st| {
-            let now = std::time::Instant::now();
-            match st.capture_shot.as_mut() {
-                Some(s) if s.hovered || s.press.is_some() => {
-                    s.until = now + std::time::Duration::from_secs(2);
-                    return TimeoutAction::ToDuration(std::time::Duration::from_secs(2));
+        let _ = self.loop_handle.insert_source(
+            Timer::from_duration(SHOT_TIME + std::time::Duration::from_millis(50)),
+            |_, _, st| {
+                let now = std::time::Instant::now();
+                match st.capture_shot.as_mut() {
+                    Some(s) if s.hovered || s.press.is_some() => {
+                        s.until = now + std::time::Duration::from_secs(2);
+                        return TimeoutAction::ToDuration(std::time::Duration::from_secs(2));
+                    }
+                    Some(s) if s.until > now => return TimeoutAction::ToDuration(s.until - now),
+                    Some(_) => {
+                        st.capture_shot = None;
+                        st.redraw_all();
+                    }
+                    None => {}
                 }
-                Some(s) if s.until > now => return TimeoutAction::ToDuration(s.until - now),
-                Some(_) => {
-                    st.capture_shot = None;
-                    st.redraw_all();
-                }
-                None => {}
-            }
-            TimeoutAction::Drop
-        });
+                TimeoutAction::Drop
+            },
+        );
     }
 
     pub fn shot_at(&self, pos: smithay::utils::Point<f64, Logical>) -> bool {
@@ -830,7 +936,10 @@ impl Server {
                 let uri = format!("{}\r\n", file_link(&p));
                 let label = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                 let plain = p.to_string_lossy().into_owned().into_bytes();
-                self.server_drag_start(label, vec![("text/uri-list".into(), uri.into_bytes()), ("text/plain".into(), plain)]);
+                self.server_drag_start(
+                    label,
+                    vec![("text/uri-list".into(), uri.into_bytes()), ("text/plain".into(), plain)],
+                );
                 self.redraw_all();
             }
         }
@@ -858,7 +967,12 @@ impl Server {
     }
 
     /// The thumbnail on screen `out` (the main screen's).
-    pub fn shot_element(&mut self, renderer: &mut smithay::backend::renderer::gles::GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Option<crate::decor::SceneElement> {
+    pub fn shot_element(
+        &mut self,
+        renderer: &mut smithay::backend::renderer::gles::GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Option<crate::decor::SceneElement> {
         use smithay::backend::renderer::element::{Kind, memory::MemoryRenderBufferRenderElement};
         let s = self.capture_shot.as_ref()?;
         if !s.rect.overlaps(out) {
@@ -866,7 +980,17 @@ impl Server {
         }
         let whole = Rectangle::<f64, Logical>::from_size((s.px.0 as f64, s.px.1 as f64).into());
         let loc = (s.rect.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
-        MemoryRenderBufferRenderElement::from_buffer(renderer, loc.to_f64(), &s.buffer, None, Some(whole), Some(s.rect.size), Kind::Unspecified).ok().map(crate::decor::SceneElement::Memory)
+        MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            loc.to_f64(),
+            &s.buffer,
+            None,
+            Some(whole),
+            Some(s.rect.size),
+            Kind::Unspecified,
+        )
+        .ok()
+        .map(crate::decor::SceneElement::Memory)
     }
 }
 
@@ -918,7 +1042,10 @@ impl Default for Choices {
 }
 
 fn choices_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
     Some(base.join("vergence/screenshots"))
 }
 
@@ -931,15 +1058,22 @@ pub fn parse_choices(text: &str) -> Choices {
             ("mode", "screens") => c.mode = Mode::Screens,
             ("mode", "window") => c.mode = Mode::Window,
             ("mode", "area") => c.mode = Mode::Area,
-            ("timer", t) => c.timer = match t.parse::<u8>() {
-                Ok(5) => 5,
-                Ok(10) => 10,
-                _ => 0,
-            },
+            ("timer", t) => {
+                c.timer = match t.parse::<u8>() {
+                    Ok(5) => 5,
+                    Ok(10) => 10,
+                    _ => 0,
+                }
+            }
             ("to", t) => c.clip = t == "clipboard",
             ("pointer", t) => c.pointer = t == "true",
             ("place", t) => {
-                c.place = t.split_once(',').and_then(|(x, y)| Some((x.trim().parse::<i32>().ok()?.clamp(0, 100_000), y.trim().parse::<i32>().ok()?.clamp(0, 100_000))));
+                c.place = t.split_once(',').and_then(|(x, y)| {
+                    Some((
+                        x.trim().parse::<i32>().ok()?.clamp(0, 100_000),
+                        y.trim().parse::<i32>().ok()?.clamp(0, 100_000),
+                    ))
+                });
             }
             _ => {}
         }
@@ -959,7 +1093,12 @@ fn write_choices(c: &Choices) {
         Mode::Window => "window",
         Mode::Area => "area",
     };
-    let mut text = format!("mode = {mode}\ntimer = {}\nto = {}\npointer = {}\n", c.timer, if c.clip { "clipboard" } else { "file" }, c.pointer);
+    let mut text = format!(
+        "mode = {mode}\ntimer = {}\nto = {}\npointer = {}\n",
+        c.timer,
+        if c.clip { "clipboard" } else { "file" },
+        c.pointer
+    );
     if let Some((x, y)) = c.place {
         text.push_str(&format!("place = {x},{y}\n"));
     }
@@ -990,7 +1129,8 @@ const BAR_H: i32 = 44;
 const GRIP_W: i32 = 18;
 /// The line of keys under the bar.
 const HINT_H: i32 = 26;
-const HINT: &str = "Super+Shift+3 the screen  \u{00b7}  Super+Shift+4 an area (Space: a window)  \u{00b7}  add Ctrl for the clipboard";
+const HINT: &str =
+    "Super+Shift+3 the screen  \u{00b7}  Super+Shift+4 an area (Space: a window)  \u{00b7}  add Ctrl for the clipboard";
 const BAR_PAD: i32 = 6;
 
 fn label(b: Btn, c: &Choices, secs_left: Option<u64>) -> String {
@@ -1003,8 +1143,20 @@ fn label(b: Btn, c: &Choices, secs_left: Option<u64>) -> String {
             0 => "No timer".into(),
             t => format!("{t} s timer"),
         },
-        Btn::Dest => if c.clip { "To clipboard".into() } else { "To file".into() },
-        Btn::Pointer => if c.pointer { "With pointer".into() } else { "No pointer".into() },
+        Btn::Dest => {
+            if c.clip {
+                "To clipboard".into()
+            } else {
+                "To file".into()
+            }
+        }
+        Btn::Pointer => {
+            if c.pointer {
+                "With pointer".into()
+            } else {
+                "No pointer".into()
+            }
+        }
         Btn::Capture => match secs_left {
             Some(s) => format!("{s}\u{2026}"),
             None => "Capture".into(),
@@ -1019,12 +1171,22 @@ impl Server {
         if self.lock.on || crate::greeter() {
             return;
         }
-        let mut choices = choices_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| parse_choices(&t)).unwrap_or_default();
+        let mut choices =
+            choices_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| parse_choices(&t)).unwrap_or_default();
         if clip {
             choices.clip = true;
         }
         let Some(screen) = self.output_at_pointer() else { return };
-        self.capture_bar = Some(Bar { choices, screen, rect: Rectangle::default(), buttons: Vec::new(), hover: None, countdown: None, grab: None, picture: None });
+        self.capture_bar = Some(Bar {
+            choices,
+            screen,
+            rect: Rectangle::default(),
+            buttons: Vec::new(),
+            hover: None,
+            countdown: None,
+            grab: None,
+            picture: None,
+        });
         self.bar_layout();
         self.redraw_all();
     }
@@ -1034,13 +1196,40 @@ impl Server {
         let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
         let face = fonts.face("sans-serif", 500, false);
         let measured: std::collections::HashMap<String, f32> = {
-            let all = ["Screen", "All screens", "Window", "Area", "No timer", "5 s timer", "10 s timer", "To file", "To clipboard", "No pointer", "With pointer", "Capture", "10\u{2026}", "\u{2715}"];
-            all.iter().map(|t| (t.to_string(), face.map_or(t.chars().count() as f32 * 7.5, |f| fonts.layout(f, 13.0, t).1))).collect()
+            let all = [
+                "Screen",
+                "All screens",
+                "Window",
+                "Area",
+                "No timer",
+                "5 s timer",
+                "10 s timer",
+                "To file",
+                "To clipboard",
+                "No pointer",
+                "With pointer",
+                "Capture",
+                "10\u{2026}",
+                "\u{2715}",
+            ];
+            all.iter()
+                .map(|t| (t.to_string(), face.map_or(t.chars().count() as f32 * 7.5, |f| fonts.layout(f, 13.0, t).1)))
+                .collect()
         };
         let width = |s: &str| measured.get(s).copied().unwrap_or(s.chars().count() as f32 * 7.5);
         let Some(bar) = self.capture_bar.as_ref() else { return };
         let c = bar.choices;
-        let order = [Btn::Close, Btn::Mode(Mode::Screen), Btn::Mode(Mode::Screens), Btn::Mode(Mode::Window), Btn::Mode(Mode::Area), Btn::Timer, Btn::Dest, Btn::Pointer, Btn::Capture];
+        let order = [
+            Btn::Close,
+            Btn::Mode(Mode::Screen),
+            Btn::Mode(Mode::Screens),
+            Btn::Mode(Mode::Window),
+            Btn::Mode(Mode::Area),
+            Btn::Timer,
+            Btn::Dest,
+            Btn::Pointer,
+            Btn::Capture,
+        ];
         // The widest each button's labels get, so it doesn't jump as they change.
         let widest = |b: Btn| -> i32 {
             let all: Vec<Choices> = match b {
@@ -1153,7 +1342,13 @@ impl Server {
         let c = &mut b.choices;
         match btn {
             Btn::Mode(m) => c.mode = m,
-            Btn::Timer => c.timer = match c.timer { 0 => 5, 5 => 10, _ => 0 },
+            Btn::Timer => {
+                c.timer = match c.timer {
+                    0 => 5,
+                    5 => 10,
+                    _ => 0,
+                }
+            }
             Btn::Dest => c.clip = !c.clip,
             Btn::Pointer => c.pointer = !c.pointer,
             Btn::Capture => return self.bar_capture(),
@@ -1199,7 +1394,14 @@ impl Server {
             Mode::Window | Mode::Area => {
                 self.capture_bar = None;
                 let now = self.pointer_location();
-                self.capture_pick = Some(Pick { clip: c.clip, window: c.mode == Mode::Window, color: false, start: None, now, picture: None });
+                self.capture_pick = Some(Pick {
+                    clip: c.clip,
+                    window: c.mode == Mode::Window,
+                    color: false,
+                    start: None,
+                    now,
+                    picture: None,
+                });
                 self.redraw_all();
             }
             Mode::Screen | Mode::Screens if c.timer > 0 => {
@@ -1210,20 +1412,23 @@ impl Server {
                     b.picture = None;
                 }
                 self.redraw_all();
-                let _ = self.loop_handle.insert_source(Timer::from_duration(std::time::Duration::from_millis(250)), move |_, _, st| {
-                    let Some(b) = st.capture_bar.as_mut() else { return TimeoutAction::Drop };
-                    if b.countdown != Some(at) {
-                        return TimeoutAction::Drop;
-                    }
-                    if std::time::Instant::now() >= at {
-                        st.capture_bar = None;
-                        st.bar_shoot(c);
-                        return TimeoutAction::Drop;
-                    }
-                    b.picture = None;
-                    st.redraw_all();
-                    TimeoutAction::ToDuration(std::time::Duration::from_millis(250))
-                });
+                let _ = self.loop_handle.insert_source(
+                    Timer::from_duration(std::time::Duration::from_millis(250)),
+                    move |_, _, st| {
+                        let Some(b) = st.capture_bar.as_mut() else { return TimeoutAction::Drop };
+                        if b.countdown != Some(at) {
+                            return TimeoutAction::Drop;
+                        }
+                        if std::time::Instant::now() >= at {
+                            st.capture_bar = None;
+                            st.bar_shoot(c);
+                            return TimeoutAction::Drop;
+                        }
+                        b.picture = None;
+                        st.redraw_all();
+                        TimeoutAction::ToDuration(std::time::Duration::from_millis(250))
+                    },
+                );
             }
             _ => {
                 self.capture_bar = None;
@@ -1234,7 +1439,12 @@ impl Server {
 
     fn bar_shoot(&mut self, c: Choices) {
         let what = if c.mode == Mode::Screens { What::Screens } else { What::Screen(None) };
-        let req = Request { what, dest: if c.clip { Dest::Clipboard } else { Dest::Folder }, pointer: c.pointer, shadow: true };
+        let req = Request {
+            what,
+            dest: if c.clip { Dest::Clipboard } else { Dest::Folder },
+            pointer: c.pointer,
+            shadow: true,
+        };
         if let Err(e) = self.capture_ask(req) {
             tracing::info!("screenshot: {e}");
         }
@@ -1243,7 +1453,12 @@ impl Server {
 
     /// The bar on screen `out` (left out of what it takes: it closes first,
     /// and a countdown's bar is not drawn into captures).
-    pub fn bar_element(&mut self, renderer: &mut smithay::backend::renderer::gles::GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Option<crate::decor::SceneElement> {
+    pub fn bar_element(
+        &mut self,
+        renderer: &mut smithay::backend::renderer::gles::GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Option<crate::decor::SceneElement> {
         use smithay::backend::renderer::element::{
             Kind,
             memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
@@ -1263,15 +1478,25 @@ impl Server {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             // Not its place: a drag moves the same picture.
             let c = Choices { place: None, ..b.choices };
-            (format!("{c:?}{:?}{left:?}", b.hover), scale.to_bits(), light, (accent.r, accent.g, accent.b)).hash(&mut h);
+            (format!("{c:?}{:?}{left:?}", b.hover), scale.to_bits(), light, (accent.r, accent.g, accent.b))
+                .hash(&mut h);
             h.finish()
         };
         if b.picture.as_ref().is_none_or(|(k, ..)| *k != key) {
             let (rw, rh) = (b.rect.size.w as f32, b.rect.size.h as f32);
             let mut scene = vergence_scene::Scene::new(rw, rh + HINT_H as f32);
             let s = vergence_look::shelf_look(light);
-            scene.fill_rounded(vergence_scene::Rect::new(0.0, 0.0, rw, rh), 10.0, vergence_scene::Color::rgba(s.menu.0, s.menu.1, s.menu.2, 240));
-            scene.stroke(vergence_scene::Rect::new(0.0, 0.0, rw, rh), 10.0, 1.0, vergence_scene::Color::rgba(128, 128, 128, 90));
+            scene.fill_rounded(
+                vergence_scene::Rect::new(0.0, 0.0, rw, rh),
+                10.0,
+                vergence_scene::Color::rgba(s.menu.0, s.menu.1, s.menu.2, 240),
+            );
+            scene.stroke(
+                vergence_scene::Rect::new(0.0, 0.0, rw, rh),
+                10.0,
+                1.0,
+                vergence_scene::Color::rgba(128, 128, 128, 90),
+            );
             let ink = vergence_scene::Color::rgb(s.menu_ink.0, s.menu_ink.1, s.menu_ink.2);
             // The grip: two columns of three dots.
             let dot = vergence_scene::Color::rgba(s.menu_ink.0, s.menu_ink.1, s.menu_ink.2, 110);
@@ -1282,10 +1507,23 @@ impl Server {
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
             let face = fonts.face("sans-serif", 500, false);
             for (btn, r) in &b.buttons {
-                let rr = vergence_scene::Rect::new((r.loc.x - b.rect.loc.x) as f32, (r.loc.y - b.rect.loc.y) as f32, r.size.w as f32, r.size.h as f32);
+                let rr = vergence_scene::Rect::new(
+                    (r.loc.x - b.rect.loc.x) as f32,
+                    (r.loc.y - b.rect.loc.y) as f32,
+                    r.size.w as f32,
+                    r.size.h as f32,
+                );
                 let chosen = matches!(btn, Btn::Mode(m) if *m == b.choices.mode);
                 let (bg, fg) = if *btn == Btn::Capture || chosen {
-                    (Some(vergence_scene::Color::rgba(accent.r, accent.g, accent.b, if *btn == Btn::Capture { 255 } else { 90 })), if *btn == Btn::Capture { vergence_scene::Color::rgb(255, 255, 255) } else { ink })
+                    (
+                        Some(vergence_scene::Color::rgba(
+                            accent.r,
+                            accent.g,
+                            accent.b,
+                            if *btn == Btn::Capture { 255 } else { 90 },
+                        )),
+                        if *btn == Btn::Capture { vergence_scene::Color::rgb(255, 255, 255) } else { ink },
+                    )
                 } else if b.hover == Some(*btn) {
                     (Some(vergence_scene::Color::rgba(128, 128, 128, 50)), ink)
                 } else {
@@ -1299,7 +1537,10 @@ impl Server {
                     let size = 13.0;
                     let (_, tw) = fonts.layout(face, size, &t);
                     let m = fonts.metrics(face, size);
-                    let at = vergence_scene::Point::new((rr.x + (rr.w - tw) / 2.0).round(), (rr.y + (rr.h - m.ascent - m.descent) / 2.0 + m.ascent).round());
+                    let at = vergence_scene::Point::new(
+                        (rr.x + (rr.w - tw) / 2.0).round(),
+                        (rr.y + (rr.h - m.ascent - m.descent) / 2.0 + m.ascent).round(),
+                    );
                     vergence_render::text(&mut scene, fonts, face, size, fg, at, &t);
                 }
             }
@@ -1311,10 +1552,27 @@ impl Server {
                 let (pw, ph) = ((tw + 20.0).min(rw), m.ascent + m.descent + 8.0);
                 let pill = vergence_scene::Rect::new(((rw - pw) / 2.0).round(), rh + 6.0, pw, ph);
                 scene.fill_rounded(pill, ph / 2.0, vergence_scene::Color::rgba(s.menu.0, s.menu.1, s.menu.2, 220));
-                vergence_render::text(&mut scene, fonts, face, size, vergence_scene::Color::rgba(s.menu_ink.0, s.menu_ink.1, s.menu_ink.2, 200), vergence_scene::Point::new(pill.x + 10.0, (pill.y + 4.0 + m.ascent).round()), HINT);
+                vergence_render::text(
+                    &mut scene,
+                    fonts,
+                    face,
+                    size,
+                    vergence_scene::Color::rgba(s.menu_ink.0, s.menu_ink.1, s.menu_ink.2, 200),
+                    vergence_scene::Point::new(pill.x + 10.0, (pill.y + 4.0 + m.ascent).round()),
+                    HINT,
+                );
             }
-            let pic = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0)).ok()?;
-            let buffer = MemoryRenderBuffer::from_slice(&pic.data, smithay::backend::allocator::Fourcc::Abgr8888, (pic.width as i32, pic.height as i32), 1, smithay::utils::Transform::Normal, None);
+            let pic = vergence_render::Cpu::new()
+                .render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0))
+                .ok()?;
+            let buffer = MemoryRenderBuffer::from_slice(
+                &pic.data,
+                smithay::backend::allocator::Fourcc::Abgr8888,
+                (pic.width as i32, pic.height as i32),
+                1,
+                smithay::utils::Transform::Normal,
+                None,
+            );
             self.capture_bar.as_mut()?.picture = Some((key, buffer, (pic.width as i32, pic.height as i32)));
         }
         let b = self.capture_bar.as_ref()?;
@@ -1322,6 +1580,16 @@ impl Server {
         let whole = Rectangle::<f64, Logical>::from_size((px.0 as f64, px.1 as f64).into());
         let loc = (b.rect.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let size = smithay::utils::Size::<i32, Logical>::from((b.rect.size.w, b.rect.size.h + HINT_H));
-        MemoryRenderBufferRenderElement::from_buffer(renderer, loc.to_f64(), buffer, None, Some(whole), Some(size), Kind::Unspecified).ok().map(crate::decor::SceneElement::Memory)
+        MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            loc.to_f64(),
+            buffer,
+            None,
+            Some(whole),
+            Some(size),
+            Kind::Unspecified,
+        )
+        .ok()
+        .map(crate::decor::SceneElement::Memory)
     }
 }

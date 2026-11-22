@@ -47,8 +47,11 @@ use vergence_scene::{Image, Rect};
 use vergence_ui::{AppCommand as C, Bar, BarStyle, BarTab, MenuLine, Modifiers, Role, TabEvent};
 use vergence_widgets::files::{self, Entry, GroupBy, Kind, ListLook, Place, RowSize, SortBy};
 use vergence_widgets::prefs::{Choice, Control, Part, Prefs, Row, Rows};
-use vergence_widgets::toolbar::{Icon, flexible, group, tool, toggle, toolbar};
-use vergence_widgets::{Align, ButtonLook, Element, Input, Length, Padding, Program, Theme, Waker, Window, button, column, drawing, field, label, panel, row, rule, scroll, space, stack};
+use vergence_widgets::toolbar::{Icon, flexible, group, toggle, tool, toolbar};
+use vergence_widgets::{
+    Align, ButtonLook, Element, Input, Length, Padding, Program, Theme, Waker, Window, button, column, drawing, field,
+    label, panel, row, rule, scroll, space, stack,
+};
 
 const APP_ID: &str = "vergence-files";
 /// The Trash window's (Dave, 2026-11-18): a process of its own, so the dock
@@ -137,7 +140,12 @@ mod cmd {
 #[derive(Clone, Debug)]
 enum Ask {
     /// A paste would replace these names.
-    Clash { sources: Vec<PathBuf>, dir: PathBuf, cut: bool, names: Vec<String> },
+    Clash {
+        sources: Vec<PathBuf>,
+        dir: PathBuf,
+        cut: bool,
+        names: Vec<String>,
+    },
     /// Delete these for good.
     Forever(Vec<PathBuf>),
     EmptyTrash,
@@ -203,7 +211,23 @@ struct Tab {
 
 impl Tab {
     fn new(id: u32, showing: Showing, sizes: Sizes) -> Tab {
-        let mut t = Tab { id, showing, back: Vec::new(), forward: Vec::new(), entries: Vec::new(), problem: None, stamp: None, chosen: Vec::new(), cursor: None, turn: 0, sizes, from: Default::default(), scroll: 0.0, want: None, places: Default::default() };
+        let mut t = Tab {
+            id,
+            showing,
+            back: Vec::new(),
+            forward: Vec::new(),
+            entries: Vec::new(),
+            problem: None,
+            stamp: None,
+            chosen: Vec::new(),
+            cursor: None,
+            turn: 0,
+            sizes,
+            from: Default::default(),
+            scroll: 0.0,
+            want: None,
+            places: Default::default(),
+        };
         t.read();
         t
     }
@@ -249,7 +273,9 @@ impl Tab {
             Showing::Folder(p) if Some(p.as_path()) == files::home().as_deref() => "Home".into(),
             Showing::Folder(p) if ops::trash_dir().is_some_and(|t| t.join("files") == *p) => "Trash".into(),
             Showing::Folder(p) if p.as_os_str() == "/" => "Computer".into(),
-            Showing::Folder(p) => p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string()),
+            Showing::Folder(p) => {
+                p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string())
+            }
         }
     }
 
@@ -300,7 +326,8 @@ impl Tab {
 /// where it came from, returned by its path in the Trash.
 fn as_trashed(entries: &mut [Entry], trash: &Path) -> std::collections::HashMap<PathBuf, PathBuf> {
     let info = Some(trash.join("info"));
-    let all: std::collections::HashMap<String, ops::Trashed> = ops::trashed_in(trash).into_iter().map(|t| (t.name.clone(), t)).collect();
+    let all: std::collections::HashMap<String, ops::Trashed> =
+        ops::trashed_in(trash).into_iter().map(|t| (t.name.clone(), t)).collect();
     let mut from = std::collections::HashMap::new();
     for e in entries.iter_mut() {
         let Some(t) = all.get(&e.name) else { continue };
@@ -346,7 +373,18 @@ struct Shared {
 
 impl Shared {
     fn new() -> Shared {
-        Shared { inbox: Arc::default(), next_tab: 0, clip: None, undo: Vec::new(), windows: Vec::new(), transfers: Vec::new(), opens: Vec::new(), last_used: None, snaps: Vec::new(), kept: Vec::new() }
+        Shared {
+            inbox: Arc::default(),
+            next_tab: 0,
+            clip: None,
+            undo: Vec::new(),
+            windows: Vec::new(),
+            transfers: Vec::new(),
+            opens: Vec::new(),
+            last_used: None,
+            snaps: Vec::new(),
+            kept: Vec::new(),
+        }
     }
 }
 
@@ -525,7 +563,10 @@ fn count_tree(p: &Path, dev: u64, budget: &mut u32) -> Option<u64> {
 
 /// The worker that counts folders' sizes, one at a time, waking the window
 /// with each.
-fn size_worker(sizes: Sizes, wake: Arc<Mutex<Option<Waker>>>) -> std::sync::mpsc::Sender<(PathBuf, Option<SystemTime>)> {
+fn size_worker(
+    sizes: Sizes,
+    wake: Arc<Mutex<Option<Waker>>>,
+) -> std::sync::mpsc::Sender<(PathBuf, Option<SystemTime>)> {
     use std::os::unix::fs::MetadataExt;
     let (tx, rx) = std::sync::mpsc::channel::<(PathBuf, Option<SystemTime>)>();
     let _ = std::thread::Builder::new().name("folder-sizes".into()).spawn(move || {
@@ -590,18 +631,29 @@ enum Msg {
 /// desktop.toml's text.
 fn desktop_text() -> (String, Option<SystemTime>) {
     match vergence_widgets::prefs::desktop_path() {
-        Some(p) => (std::fs::read_to_string(&p).unwrap_or_default(), std::fs::metadata(&p).and_then(|m| m.modified()).ok()),
+        Some(p) => {
+            (std::fs::read_to_string(&p).unwrap_or_default(), std::fs::metadata(&p).and_then(|m| m.modified()).ok())
+        }
         None => (String::new(), None),
     }
 }
-
 
 /// A notification card (the session's, over the bus), as File Viewer.
 /// Outside a Vergence session it is only logged.
 pub(crate) fn notify(summary: &str, body: &str) {
     if std::env::var_os(vergence_protocol::BUS_ENV).is_some()
         && let Ok(mut bus) = vergence_protocol::Client::connect(APP_ID)
-        && bus.request(|serial| vergence_protocol::bus::ClientMsg::Notify { serial, replaces: 0, summary: summary.into(), body: body.into(), urgency: 1, timeout_ms: -1, actions: Vec::new() }).is_ok()
+        && bus
+            .request(|serial| vergence_protocol::bus::ClientMsg::Notify {
+                serial,
+                replaces: 0,
+                summary: summary.into(),
+                body: body.into(),
+                urgency: 1,
+                timeout_ms: -1,
+                actions: Vec::new(),
+            })
+            .is_ok()
     {
         return;
     }
@@ -631,14 +683,20 @@ pub(crate) fn open_files_with(paths: &[PathBuf], app: Option<&str>) -> Result<()
     if std::env::var_os(vergence_protocol::BUS_ENV).is_some()
         && let Ok(mut bus) = vergence_protocol::Client::connect(APP_ID)
     {
-        return match bus.request(|serial| vergence_protocol::bus::ClientMsg::Open { serial, items: items.clone(), app: app.unwrap_or_default().to_string() }) {
+        return match bus.request(|serial| vergence_protocol::bus::ClientMsg::Open {
+            serial,
+            items: items.clone(),
+            app: app.unwrap_or_default().to_string(),
+        }) {
             Ok(vergence_protocol::bus::ServerMsg::Done { .. }) => Ok(()),
-            Err(vergence_protocol::ClientError::Refused(_, m)) | Ok(vergence_protocol::bus::ServerMsg::Error { message: m, .. }) => Err(m),
+            Err(vergence_protocol::ClientError::Refused(_, m))
+            | Ok(vergence_protocol::bus::ServerMsg::Error { message: m, .. }) => Err(m),
             other => Err(format!("{other:?}")),
         };
     }
     let parsed: Vec<vergence_shell::open::Item> = items.iter().map(|i| vergence_shell::open::item(i)).collect();
-    let (groups, failed) = vergence_shell::open::plan(&parsed, app, &vergence_shell::apps::installed(), &vergence_types::lists());
+    let (groups, failed) =
+        vergence_shell::open::plan(&parsed, app, &vergence_shell::apps::installed(), &vergence_types::lists());
     for (entry, files) in groups {
         for argv in vergence_shell::open::commands(&entry, &files) {
             if let Some((p, rest)) = argv.split_first() {
@@ -652,7 +710,11 @@ pub(crate) fn open_files_with(paths: &[PathBuf], app: Option<&str>) -> Result<()
 impl Viewer {
     fn new(shared: SharedRef) -> Viewer {
         let (desktop, stamp) = desktop_text();
-        let view = if vergence_ui::table_value(&desktop, SECTION, "view").as_deref() == Some("icons") { ViewKind::Icons } else { ViewKind::List };
+        let view = if vergence_ui::table_value(&desktop, SECTION, "view").as_deref() == Some("icons") {
+            ViewKind::Icons
+        } else {
+            ViewKind::List
+        };
         let pane = vergence_ui::table_value(&desktop, SECTION, "preview-pane").as_deref() == Some("true");
         let hidden = vergence_ui::table_value(&desktop, SECTION, "hidden").as_deref() == Some("true");
         let desktop_now = desktop.clone();
@@ -675,7 +737,10 @@ impl Viewer {
             path_edit: None,
             side_rect: Rc::new(Cell::new(Rect::new(0.0, 0.0, 0.0, 0.0))),
             side_scroll: 0.0,
-            side_w: vergence_ui::table_value(&desktop_now, SECTION, "sidebar-width").and_then(|v| v.trim().parse::<f32>().ok()).filter(|w| w.is_finite()).map_or(SIDE_W, |w| w.clamp(SIDE_MIN, SIDE_MAX)),
+            side_w: vergence_ui::table_value(&desktop_now, SECTION, "sidebar-width")
+                .and_then(|v| v.trim().parse::<f32>().ok())
+                .filter(|w| w.is_finite())
+                .map_or(SIDE_W, |w| w.clamp(SIDE_MIN, SIDE_MAX)),
             drives_seen: 0,
             drives_last: Vec::new(),
             divider_rect: Rc::new(Cell::new(Rect::new(0.0, 0.0, 0.0, 0.0))),
@@ -714,7 +779,8 @@ impl Viewer {
             menu_at: (0.0, 0.0),
             open_with: Vec::new(),
             pending: Vec::new(),
-            widths: vergence_ui::table_value(&desktop_now, SECTION, "columns").map_or(files::COLUMN_WIDTHS, |v| files::parse_widths(&v)),
+            widths: vergence_ui::table_value(&desktop_now, SECTION, "columns")
+                .map_or(files::COLUMN_WIDTHS, |v| files::parse_widths(&v)),
             pulling: None,
             trash_window: false,
             sizes,
@@ -880,7 +946,8 @@ impl Viewer {
 
     /// The sidebar's Locations: the computer, its disks, the Trash, the network's places.
     fn locations(&self) -> Vec<Place> {
-        let mine: Vec<PathBuf> = files::home().into_iter().chain(files::user_dirs().into_iter().map(|(_, p)| p)).collect();
+        let mine: Vec<PathBuf> =
+            files::home().into_iter().chain(files::user_dirs().into_iter().map(|(_, p)| p)).collect();
         self.places().into_iter().filter(|p| p.path.as_ref().is_some_and(|x| !mine.contains(x))).collect()
     }
 
@@ -980,20 +1047,29 @@ impl Viewer {
         let recent_here = self.front_tab().is_some_and(|t| t.showing == Showing::Recent);
         let folded = self.side_setup().folded;
         // The disks that can be let go of (read once for the whole sidebar).
-        let ejectable: Vec<PathBuf> = self.locations().into_iter().filter_map(|p| p.path).filter(|p| files::ejectable(p)).collect();
+        let ejectable: Vec<PathBuf> =
+            self.locations().into_iter().filter_map(|p| p.path).filter(|p| files::ejectable(p)).collect();
         let mut rows: Vec<Element<Msg>> = Vec::new();
         for (i, line) in self.side_lines().into_iter().enumerate() {
             match line {
                 Line::Head(sec) => {
                     let open = !folded.contains(&sec);
-                    let head = button(row(vec![label(sec.name()).size(11.0).dim().weight(600), space().width(Length::FILL), fold_mark(open)]).align(Align::Center).width(Length::FILL))
-                        .look(ButtonLook::Plain)
-                        .padding(Padding { top: 6.0, bottom: 2.0, left: 10.0, right: 6.0 })
-                        .height(Length::Fixed(sidebar::HEAD_H))
-                        .width(Length::FILL)
-                        .on_press(Msg::SideFold(sec))
-                        .on_menu(Msg::SideMenu(i))
-                        .name(format!("{} ({})", sec.name(), if open { "open" } else { "folded" }));
+                    let head = button(
+                        row(vec![
+                            label(sec.name()).size(11.0).dim().weight(600),
+                            space().width(Length::FILL),
+                            fold_mark(open),
+                        ])
+                        .align(Align::Center)
+                        .width(Length::FILL),
+                    )
+                    .look(ButtonLook::Plain)
+                    .padding(Padding { top: 6.0, bottom: 2.0, left: 10.0, right: 6.0 })
+                    .height(Length::Fixed(sidebar::HEAD_H))
+                    .width(Length::FILL)
+                    .on_press(Msg::SideFold(sec))
+                    .on_menu(Msg::SideMenu(i))
+                    .name(format!("{} ({})", sec.name(), if open { "open" } else { "folded" }));
                     rows.push(head);
                 }
                 Line::Item(sec, item) => {
@@ -1003,7 +1079,11 @@ impl Viewer {
                     };
                     let icon = match &item.place {
                         Some(p) => files::place_icon(p),
-                        None => item.path.clone().and_then(Entry::of).map_or(("mimes", "text"), |e| files::own_icon_name(e.kind())),
+                        None => item
+                            .path
+                            .clone()
+                            .and_then(Entry::of)
+                            .map_or(("mimes", "text"), |e| files::own_icon_name(e.kind())),
                     };
                     let mark = drawing(move |scene, _, r: Rect, _t: &Theme| {
                         let side = r.w.min(r.h);
@@ -1016,7 +1096,9 @@ impl Viewer {
                     .height(Length::Fixed(18.0));
                     let mut cells = vec![mark, label(item.name.clone()).size(13.0).elide().width(Length::FILL)];
                     // A drive or a disk image: its eject button at the row's end, as Finder's.
-                    if sec == Section::Locations && item.path.as_deref().is_some_and(|p| ejectable.contains(&p.to_path_buf())) {
+                    if sec == Section::Locations
+                        && item.path.as_deref().is_some_and(|p| ejectable.contains(&p.to_path_buf()))
+                    {
                         cells.push(
                             button(vergence_widgets::toolbar::icon(Icon::Eject, 13.0, false))
                                 .look(ButtonLook::Plain)
@@ -1048,7 +1130,11 @@ impl Viewer {
         // On the folder's own ground, as Explorer's (Dave, 2026-11-21: "the
         // left pane the same color as the main window"), a line between them.
         let _ = t;
-        let list = panel(scroll(column(rows).width(Length::FILL)).name("Sidebar")).radius(0.0).padding(sidebar::PAD).width(Length::FILL).height(Length::FILL);
+        let list = panel(scroll(column(rows).width(Length::FILL)).name("Sidebar"))
+            .radius(0.0)
+            .padding(sidebar::PAD)
+            .width(Length::FILL)
+            .height(Length::FILL);
         stack(vec![place, list]).width(Length::Fixed(self.side_w)).height(Length::FILL)
     }
 
@@ -1139,7 +1225,11 @@ impl Viewer {
         let source = if self.search.is_some() { &self.search_entries } else { &t.entries };
         // What is in the Trash is all shown: a hidden file thrown away is still there.
         let all = self.hidden || self.in_trash();
-        let mut v: Vec<&Entry> = source.iter().filter(|e| all || !e.name.starts_with('.')).filter(|e| n.is_empty() || e.name.to_lowercase().contains(&n)).collect();
+        let mut v: Vec<&Entry> = source
+            .iter()
+            .filter(|e| all || !e.name.starts_with('.'))
+            .filter(|e| n.is_empty() || e.name.to_lowercase().contains(&n))
+            .collect();
         let group = if self.shown_view() == ViewKind::List { self.list_look().group } else { GroupBy::None };
         files::sort(&mut v, self.sort.0, self.sort.1, t.showing == Showing::Recent && self.search.is_none(), group);
         v.truncate(files::MAX_ROWS);
@@ -1400,7 +1490,9 @@ impl Viewer {
         if !self.size_asked.borrow_mut().insert((e.path.clone(), e.changed)) {
             return None;
         }
-        let skip = self.in_trash() || ["/proc", "/sys", "/dev", "/run"].iter().any(|r| e.path.starts_with(r)) || files::network_mounts().iter().any(|m| e.path.starts_with(m));
+        let skip = self.in_trash()
+            || ["/proc", "/sys", "/dev", "/run"].iter().any(|r| e.path.starts_with(r))
+            || files::network_mounts().iter().any(|m| e.path.starts_with(m));
         if !skip {
             let _ = self.size_queue.send((e.path.clone(), e.changed));
         }
@@ -1412,11 +1504,12 @@ impl Viewer {
             return;
         }
         let waker = self.waker.clone();
-        let prefs = Prefs::new("FileView", APP_ID, SECTION, false, Box::new(FilesRows), self.prefs_open.clone()).on_write(move || {
-            if let Some(w) = &waker {
-                w.wake();
-            }
-        });
+        let prefs = Prefs::new("FileView", APP_ID, SECTION, false, Box::new(FilesRows), self.prefs_open.clone())
+            .on_write(move || {
+                if let Some(w) = &waker {
+                    w.wake();
+                }
+            });
         window.open_window(vergence_widgets::window(prefs));
     }
 
@@ -1522,7 +1615,11 @@ impl Viewer {
             }
             cmd::RESTORE => {
                 self.notice = None;
-                let names: Vec<(String, String)> = self.chosen_paths().iter().filter_map(|p| p.file_name().map(|n| (n.to_string_lossy().into_owned(), self.shown_name(p)))).collect();
+                let names: Vec<(String, String)> = self
+                    .chosen_paths()
+                    .iter()
+                    .filter_map(|p| p.file_name().map(|n| (n.to_string_lossy().into_owned(), self.shown_name(p))))
+                    .collect();
                 // Only what went wrong is said (Dave, 2026-11-18).
                 for (n, shown) in &names {
                     if let Err(e) = ops::restore(n) {
@@ -1567,7 +1664,11 @@ impl Viewer {
                     some => some,
                 };
                 for p in paths.into_iter().take(8) {
-                    window.open_window(vergence_widgets::window(props::Properties::new(p, self.shared.clone(), self.theme())));
+                    window.open_window(vergence_widgets::window(props::Properties::new(
+                        p,
+                        self.shared.clone(),
+                        self.theme(),
+                    )));
                 }
             }
             cmd::COPY_PATH => {
@@ -1646,7 +1747,8 @@ impl Viewer {
                             }
                         }
                         (cmd::SIDE_REMOVE, Some(p)) => {
-                            let favs: Vec<PathBuf> = sidebar::favorites(&self.side_setup()).into_iter().filter(|f| *f != p).collect();
+                            let favs: Vec<PathBuf> =
+                                sidebar::favorites(&self.side_setup()).into_iter().filter(|f| *f != p).collect();
                             self.set_favorites(&favs);
                         }
                         _ => {}
@@ -1689,7 +1791,13 @@ impl Viewer {
             }
             cmd::SETTINGS => self.open_settings(window),
             cmd::ABOUT => {
-                let about = vergence_widgets::about::About::new(APP_ID, "FileView", env!("CARGO_PKG_VERSION"), "Vergence's file manager: your folders as a list or icons, Preview on the space bar, files opened with the apps chosen for them.", self.theme());
+                let about = vergence_widgets::about::About::new(
+                    APP_ID,
+                    "FileView",
+                    env!("CARGO_PKG_VERSION"),
+                    "Vergence's file manager: your folders as a list or icons, Preview on the space bar, files opened with the apps chosen for them.",
+                    self.theme(),
+                );
                 window.open_window(vergence_widgets::window(about));
             }
             _ => {}
@@ -1709,7 +1817,8 @@ impl Viewer {
         let results = self.search.is_some() || self.front_tab().is_some_and(|t| t.showing == Showing::Recent);
         let mut lines = vec![MenuLine::item(cmd::OPEN, "Open", "Enter")];
         // A disk image: mounted, as a drive plugged in (step 7).
-        let image = one && !trash && self.visible().iter().any(|e| Some(&e.path) == chosen.first() && files::is_disk_image(e));
+        let image =
+            one && !trash && self.visible().iter().any(|e| Some(&e.path) == chosen.first() && files::is_disk_image(e));
         if image {
             lines.push(MenuLine::item(cmd::MOUNT_IMAGE, "Mount Disk Image", ""));
         }
@@ -1722,12 +1831,24 @@ impl Viewer {
             let ids = vergence_shell::open::apps_for(&mimes[0], &entries, &vergence_types::lists());
             let mut subs = Vec::new();
             for id in ids.into_iter().take(cmd::MAX_OPEN_WITH) {
-                let name = entries.iter().find(|e| vergence_shell::open::desktop_id(&e.id) == id).map(|e| e.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| id.trim_end_matches(".desktop").to_string());
-                subs.push(MenuLine::item(cmd::OPEN_WITH + self.open_with.len() as u32, &name.chars().take(60).collect::<String>(), ""));
+                let name = entries
+                    .iter()
+                    .find(|e| vergence_shell::open::desktop_id(&e.id) == id)
+                    .map(|e| e.name.clone())
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or_else(|| id.trim_end_matches(".desktop").to_string());
+                subs.push(MenuLine::item(
+                    cmd::OPEN_WITH + self.open_with.len() as u32,
+                    &name.chars().take(60).collect::<String>(),
+                    "",
+                ));
                 self.open_with.push(id);
             }
             if subs.is_empty() {
-                subs.push(MenuLine::item(cmd::OPEN_WITH + cmd::MAX_OPEN_WITH as u32, "No applications for this type", "").enabled(false));
+                subs.push(
+                    MenuLine::item(cmd::OPEN_WITH + cmd::MAX_OPEN_WITH as u32, "No applications for this type", "")
+                        .enabled(false),
+                );
             }
             lines.push(MenuLine::Sub { label: "Open With".into(), lines: subs });
         }
@@ -1804,7 +1925,9 @@ impl Viewer {
         let chosen = self.chosen_paths();
         let [one] = chosen.as_slice() else { return };
         let (Some(dir), Some(name)) = (one.parent(), one.file_name()) else { return };
-        let to = dir.join(ops::free_name(&format!("{} link", name.to_string_lossy()), |x| dir.join(x).symlink_metadata().is_ok()));
+        let to = dir.join(ops::free_name(&format!("{} link", name.to_string_lossy()), |x| {
+            dir.join(x).symlink_metadata().is_ok()
+        }));
         match std::os::unix::fs::symlink(one, &to) {
             Ok(()) => {
                 self.shared.borrow_mut().undo.push(ops::Done::Made(to.clone()));
@@ -1831,10 +1954,18 @@ impl Viewer {
         };
         let name = ops::free_name(&format!("{base}.tar.gz"), |x| dir.join(x).symlink_metadata().is_ok());
         let to = dir.join(&name);
-        let names: Vec<std::ffi::OsString> = chosen.iter().filter_map(|p| p.file_name().map(|n| n.to_os_string())).collect();
+        let names: Vec<std::ffi::OsString> =
+            chosen.iter().filter_map(|p| p.file_name().map(|n| n.to_os_string())).collect();
         std::thread::spawn(move || {
             // "--" so a name starting with "-" is a name, not an option.
-            let out = std::process::Command::new("tar").arg("-czf").arg(&to).arg("-C").arg(&dir).arg("--").args(&names).output();
+            let out = std::process::Command::new("tar")
+                .arg("-czf")
+                .arg(&to)
+                .arg("-C")
+                .arg(&dir)
+                .arg("--")
+                .args(&names)
+                .output();
             match out {
                 Ok(o) if o.status.success() => {}
                 Ok(o) => {
@@ -1902,7 +2033,10 @@ impl Viewer {
 
     /// The name an item is shown by: in the Trash, the name it had.
     fn shown_name(&self, p: &Path) -> String {
-        self.front_tab().and_then(|t| t.entries.iter().find(|e| e.path == p)).map(|e| e.name.clone()).unwrap_or_else(|| p.file_name().unwrap_or_default().to_string_lossy().into_owned())
+        self.front_tab()
+            .and_then(|t| t.entries.iter().find(|e| e.path == p))
+            .map(|e| e.name.clone())
+            .unwrap_or_else(|| p.file_name().unwrap_or_default().to_string_lossy().into_owned())
     }
 
     /// Whether the folder shown is the Trash's.
@@ -1943,7 +2077,12 @@ impl Viewer {
             // A cut is used once.
             self.shared.borrow_mut().clip = None;
         }
-        let words = format!("{} {} item{}", if cut { "Moving" } else { "Copying" }, plan.len(), if plan.len() == 1 { "" } else { "s" });
+        let words = format!(
+            "{} {} item{}",
+            if cut { "Moving" } else { "Copying" },
+            plan.len(),
+            if plan.len() == 1 { "" } else { "s" }
+        );
         let progress = Arc::new(ops::Progress::default());
         let result: Arc<Mutex<Option<(ops::Done, Option<String>)>>> = Arc::default();
         let (p, r, waker) = (progress.clone(), result.clone(), self.waker.clone());
@@ -1973,7 +2112,8 @@ impl Viewer {
     fn job_ended(&mut self) -> bool {
         let Some(job) = &self.job else { return false };
         let Some((done, error)) = job.result.lock().unwrap_or_else(|e| e.into_inner()).take() else { return true };
-        let made = !matches!(&done, ops::Done::Copied(v) if v.is_empty()) && !matches!(&done, ops::Done::Moved(v) if v.is_empty());
+        let made = !matches!(&done, ops::Done::Copied(v) if v.is_empty())
+            && !matches!(&done, ops::Done::Moved(v) if v.is_empty());
         if made {
             self.shared.borrow_mut().undo.push(done);
         }
@@ -2002,7 +2142,10 @@ impl Viewer {
             match ops::trash(p) {
                 Ok(name) => done.push((p.clone(), name)),
                 Err(e) => {
-                    self.notice = Some(format!("“{}” could not be moved to the Trash: {e}", p.file_name().unwrap_or_default().to_string_lossy()));
+                    self.notice = Some(format!(
+                        "“{}” could not be moved to the Trash: {e}",
+                        p.file_name().unwrap_or_default().to_string_lossy()
+                    ));
                     break;
                 }
             }
@@ -2043,7 +2186,11 @@ impl Viewer {
                 let Some(dir) = self.here() else { return };
                 let to = dir.join(ops::free_name(&name, |x| dir.join(x).symlink_metadata().is_ok()));
                 if n.file {
-                    std::fs::OpenOptions::new().write(true).create_new(true).open(&to).map(|_| (ops::Done::Made(to.clone()), to))
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&to)
+                        .map(|_| (ops::Done::Made(to.clone()), to))
                 } else {
                     std::fs::create_dir(&to).map(|_| (ops::Done::NewFolder(to.clone()), to))
                 }
@@ -2084,17 +2231,36 @@ impl Viewer {
             [one] => one.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
             many => format!("{} items", many.len()),
         };
-        window.start_drag(&label, vec![("text/uri-list".into(), uris.into_bytes()), ("text/plain".into(), plain.into_bytes())]);
+        window.start_drag(
+            &label,
+            vec![("text/uri-list".into(), uris.into_bytes()), ("text/plain".into(), plain.into_bytes())],
+        );
     }
 
     /// The strips above the folder: a question, a name being typed, a job's progress.
     fn strips(&self, t: &Theme) -> Vec<Element<Msg>> {
-        let strip = |items: Vec<Element<Msg>>| -> Element<Msg> { panel(row(items).spacing(8.0).align(Align::Center).width(Length::FILL)).color(t.card).radius(8.0).padding(Padding::hv(6.0, 10.0)).width(Length::FILL) };
-        let b = |text: &str, m: Msg, accent: bool| -> Element<Msg> { button(label(text).size(12.0)).look(if accent { ButtonLook::Accent } else { ButtonLook::Plain }).padding(Padding::hv(3.0, 10.0)).on_press(m).name(text) };
+        let strip = |items: Vec<Element<Msg>>| -> Element<Msg> {
+            panel(row(items).spacing(8.0).align(Align::Center).width(Length::FILL))
+                .color(t.card)
+                .radius(8.0)
+                .padding(Padding::hv(6.0, 10.0))
+                .width(Length::FILL)
+        };
+        let b = |text: &str, m: Msg, accent: bool| -> Element<Msg> {
+            button(label(text).size(12.0))
+                .look(if accent { ButtonLook::Accent } else { ButtonLook::Plain })
+                .padding(Padding::hv(3.0, 10.0))
+                .on_press(m)
+                .name(text)
+        };
         let mut out = Vec::new();
         match &self.ask {
             Some(Ask::Clash { names, .. }) => {
-                let what = if names.len() == 1 { format!("“{}” is already here.", names[0]) } else { format!("{} items of these names are already here.", names.len()) };
+                let what = if names.len() == 1 {
+                    format!("“{}” is already here.", names[0])
+                } else {
+                    format!("{} items of these names are already here.", names.len())
+                };
                 out.push(strip(vec![
                     label(what).size(12.0).weight(600).wrap().width(Length::FILL),
                     b("Cancel", Msg::Answer(None), false),
@@ -2104,18 +2270,45 @@ impl Viewer {
                 ]));
             }
             Some(Ask::Forever(paths)) => {
-                let what = if paths.len() == 1 { format!("Delete “{}” for good? It cannot be undone.", self.shown_name(&paths[0])) } else { format!("Delete {} items for good? They cannot be undone.", paths.len()) };
-                out.push(strip(vec![label(what).size(12.0).weight(600).wrap().width(Length::FILL), b("Cancel", Msg::Confirm(false), false), b("Delete", Msg::Confirm(true), true)]));
+                let what = if paths.len() == 1 {
+                    format!("Delete “{}” for good? It cannot be undone.", self.shown_name(&paths[0]))
+                } else {
+                    format!("Delete {} items for good? They cannot be undone.", paths.len())
+                };
+                out.push(strip(vec![
+                    label(what).size(12.0).weight(600).wrap().width(Length::FILL),
+                    b("Cancel", Msg::Confirm(false), false),
+                    b("Delete", Msg::Confirm(true), true),
+                ]));
             }
             Some(Ask::EmptyTrash) => {
-                out.push(strip(vec![label("Empty the Trash? What is in it cannot be got back.").size(12.0).weight(600).wrap().width(Length::FILL), b("Cancel", Msg::Confirm(false), false), b("Empty Trash", Msg::Confirm(true), true)]));
+                out.push(strip(vec![
+                    label("Empty the Trash? What is in it cannot be got back.")
+                        .size(12.0)
+                        .weight(600)
+                        .wrap()
+                        .width(Length::FILL),
+                    b("Cancel", Msg::Confirm(false), false),
+                    b("Empty Trash", Msg::Confirm(true), true),
+                ]));
             }
             None => {}
         }
         if let Some(n) = self.naming.as_ref().filter(|n| n.rename.is_none() || self.renaming_row().is_none()) {
             out.push(strip(vec![
-                label(if n.rename.is_some() { "New name" } else if n.file { "New file" } else { "New folder" }).size(12.0),
-                field(n.text.clone(), Msg::NameTyped).on_submit(Msg::NameDone).autofocus().width(Length::FILL).name("Name"),
+                label(if n.rename.is_some() {
+                    "New name"
+                } else if n.file {
+                    "New file"
+                } else {
+                    "New folder"
+                })
+                .size(12.0),
+                field(n.text.clone(), Msg::NameTyped)
+                    .on_submit(Msg::NameDone)
+                    .autofocus()
+                    .width(Length::FILL)
+                    .name("Name"),
                 b("Cancel", Msg::NameCancel, false),
                 b(if n.rename.is_some() { "Rename" } else { "Make" }, Msg::NameDone, true),
             ]));
@@ -2133,7 +2326,14 @@ impl Viewer {
             .width(Length::Fixed(160.0))
             .height(Length::Fixed(16.0));
             out.push(strip(vec![
-                label(format!("{} · {:.0}% · {} of {}", job.words, part * 100.0, files::size_words(done), files::size_words(total))).size(12.0),
+                label(format!(
+                    "{} · {:.0}% · {} of {}",
+                    job.words,
+                    part * 100.0,
+                    files::size_words(done),
+                    files::size_words(total)
+                ))
+                .size(12.0),
                 bar,
                 label(now).size(11.0).dim().elide().width(Length::FILL),
                 b("Stop", Msg::StopJob, false),
@@ -2169,7 +2369,14 @@ impl Viewer {
             match &self.path_edit {
                 // A key of its own: the box stood in its place, and a field
                 // taken for the same widget would not take the keyboard.
-                Some(text) => items.push(field(text.clone(), Msg::PathTyped).on_submit(Msg::PathGo).autofocus().key(0x7061_7468).width(Length::FILL).name("Path")),
+                Some(text) => items.push(
+                    field(text.clone(), Msg::PathTyped)
+                        .on_submit(Msg::PathGo)
+                        .autofocus()
+                        .key(0x7061_7468)
+                        .width(Length::FILL)
+                        .name("Path"),
+                ),
                 None => {
                     let shown = match tab.map(|t| &t.showing) {
                         Some(Showing::Folder(dir)) => dir.display().to_string(),
@@ -2177,12 +2384,20 @@ impl Viewer {
                     };
                     let edge = if t.high_contrast { t.text } else { t.line };
                     items.push(
-                        button(panel(label(shown).elide().width(Length::FILL)).color(t.page).edge(edge, 1.0).padding(Padding::hv(0.0, 8.0)).align(Align::Center).width(Length::FILL).height(Length::Fixed(26.0)))
-                            .look(ButtonLook::Plain)
-                            .padding(Padding::all(0.0))
-                            .width(Length::FILL)
-                            .on_press(Msg::PathEdit)
-                            .name("Path"),
+                        button(
+                            panel(label(shown).elide().width(Length::FILL))
+                                .color(t.page)
+                                .edge(edge, 1.0)
+                                .padding(Padding::hv(0.0, 8.0))
+                                .align(Align::Center)
+                                .width(Length::FILL)
+                                .height(Length::Fixed(26.0)),
+                        )
+                        .look(ButtonLook::Plain)
+                        .padding(Padding::all(0.0))
+                        .width(Length::FILL)
+                        .on_press(Msg::PathEdit)
+                        .name("Path"),
                     );
                 }
             }
@@ -2210,9 +2425,24 @@ impl Viewer {
             // The chosen ones put back or deleted; the whole Trash emptied
             // (Dave, 2026-11-18: right click and each row have them too).
             let full = tab.is_some_and(|t| !t.entries.is_empty());
-            items.push(button(label("Put Back").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press_if(any, Msg::Run(cmd::RESTORE)).name("Put Back"));
-            items.push(button(label("Delete Forever…").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press_if(any, Msg::Run(cmd::DELETE)).name("Delete Forever"));
-            items.push(button(label("Empty Trash…").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press_if(full, Msg::Run(cmd::EMPTY_TRASH)).name("Empty Trash"));
+            items.push(
+                button(label("Put Back").size(12.0))
+                    .padding(Padding::hv(3.0, 10.0))
+                    .on_press_if(any, Msg::Run(cmd::RESTORE))
+                    .name("Put Back"),
+            );
+            items.push(
+                button(label("Delete Forever…").size(12.0))
+                    .padding(Padding::hv(3.0, 10.0))
+                    .on_press_if(any, Msg::Run(cmd::DELETE))
+                    .name("Delete Forever"),
+            );
+            items.push(
+                button(label("Empty Trash…").size(12.0))
+                    .padding(Padding::hv(3.0, 10.0))
+                    .on_press_if(full, Msg::Run(cmd::EMPTY_TRASH))
+                    .name("Empty Trash"),
+            );
         } else {
             items.push(group(vec![
                 tool(Icon::NewFolder, "New folder", self.here().is_some().then_some(Msg::Run(cmd::NEW_FOLDER))),
@@ -2222,9 +2452,20 @@ impl Viewer {
         // With words typed: search the folders below too.
         if !self.narrow.trim().is_empty() && self.here().is_some() {
             let on = self.search.is_some();
-            items.push(button(label("In subfolders").size(11.5)).look(if on { ButtonLook::Chosen } else { ButtonLook::Plain }).padding(Padding::hv(4.0, 8.0)).on_press(Msg::SearchBelow).name("Search in subfolders"));
+            items.push(
+                button(label("In subfolders").size(11.5))
+                    .look(if on { ButtonLook::Chosen } else { ButtonLook::Plain })
+                    .padding(Padding::hv(4.0, 8.0))
+                    .on_press(Msg::SearchBelow)
+                    .name("Search in subfolders"),
+            );
         }
-        items.push(field(self.narrow.clone(), Msg::Narrow).placeholder(if trash { "Narrow the Trash" } else { "Narrow this folder" }).width(Length::Fixed(200.0)).name("Narrow"));
+        items.push(
+            field(self.narrow.clone(), Msg::Narrow)
+                .placeholder(if trash { "Narrow the Trash" } else { "Narrow this folder" })
+                .width(Length::Fixed(200.0))
+                .name("Narrow"),
+        );
         toolbar(items, t)
     }
 
@@ -2243,7 +2484,11 @@ impl Viewer {
         let visible = self.visible();
         let chosen = |_: usize, e: &Entry| tab.chosen.contains(&e.path);
         let click = |k: usize| Msg::Click(k);
-        let in_view = tab.cursor.as_ref().and_then(|c| visible.iter().position(|e| &e.path == c)).map(|k| (k, tab.turn << 32 | k as u64));
+        let in_view = tab
+            .cursor
+            .as_ref()
+            .and_then(|c| visible.iter().position(|e| &e.path == c))
+            .map(|k| (k, tab.turn << 32 | k as u64));
         let drag = |k: usize| Msg::DragRow(k);
         let menu = |k: usize| Msg::RowMenu(k);
         let look = self.list_look();
@@ -2264,8 +2509,21 @@ impl Viewer {
         let trash = self.in_trash();
         let under = |e: &Entry| tab.from.get(&e.path).and_then(|p| p.parent()).map(files::tilde);
         let row_tools = |k: usize, e: &Entry| -> Element<Msg> {
-            let small = |which: Icon, name: &str, m: Msg| button(vergence_widgets::toolbar::icon(which, 14.0, false)).look(ButtonLook::Plain).padding(Padding::all(0.0)).width(Length::Fixed(ROW_TOOL)).height(Length::Fixed(ROW_TOOL)).on_press(m).name(name);
-            let tools = row(vec![small(Icon::PutBack, "Put Back", Msg::RowPutBack(k)), small(Icon::Remove, "Delete Forever", Msg::RowForever(k))]).spacing(4.0).align(Align::Center);
+            let small = |which: Icon, name: &str, m: Msg| {
+                button(vergence_widgets::toolbar::icon(which, 14.0, false))
+                    .look(ButtonLook::Plain)
+                    .padding(Padding::all(0.0))
+                    .width(Length::Fixed(ROW_TOOL))
+                    .height(Length::Fixed(ROW_TOOL))
+                    .on_press(m)
+                    .name(name)
+            };
+            let tools = row(vec![
+                small(Icon::PutBack, "Put Back", Msg::RowPutBack(k)),
+                small(Icon::Remove, "Delete Forever", Msg::RowForever(k)),
+            ])
+            .spacing(4.0)
+            .align(Align::Center);
             if tab.chosen.contains(&e.path) { tools } else { tools.shown_on_hover() }
         };
         let v = files::View {
@@ -2283,14 +2541,33 @@ impl Viewer {
             under: if trash { Some(&under) } else { None },
             changed_heading: trash.then_some("Deleted"),
             trailing: if trash { Some((&row_tools, 2.0 * ROW_TOOL + 4.0)) } else { None },
-            rename: self.renaming_row().and_then(|row| self.naming.as_ref().map(|n| files::Rename { row, text: n.text.clone(), typed: Msg::NameTyped, done: Msg::NameDone })),
+            rename: self.renaming_row().and_then(|row| {
+                self.naming.as_ref().map(|n| files::Rename {
+                    row,
+                    text: n.text.clone(),
+                    typed: Msg::NameTyped,
+                    done: Msg::NameDone,
+                })
+            }),
         };
         let mut body: Vec<Element<Msg>> = Vec::new();
         if let Some(p) = &tab.problem {
             body.push(label(p.clone()).size(12.0).wrap().width(Length::FILL));
         }
         if visible.is_empty() && tab.problem.is_none() {
-            let why = if self.search.is_some() && !self.search_done { "Searching…" } else if self.search.is_some() { "Nothing here or below has that in its name." } else if !self.narrow.is_empty() { "Nothing here has that in its name." } else if tab.showing == Showing::Recent { "Nothing opened or saved yet." } else if trash { "The Trash is empty." } else { "This folder is empty." };
+            let why = if self.search.is_some() && !self.search_done {
+                "Searching…"
+            } else if self.search.is_some() {
+                "Nothing here or below has that in its name."
+            } else if !self.narrow.is_empty() {
+                "Nothing here has that in its name."
+            } else if tab.showing == Showing::Recent {
+                "Nothing opened or saved yet."
+            } else if trash {
+                "The Trash is empty."
+            } else {
+                "This folder is empty."
+            };
             body.push(panel(label(why).size(12.0).dim()).padding(12.0));
         }
         let list = match self.shown_view() {
@@ -2326,8 +2603,13 @@ impl Viewer {
 
     /// What a file is, in a few lines: name, kind, size, when it changed.
     fn facts(e: &Entry) -> Vec<Element<Msg>> {
-        let kind = if e.dir { "Folder".to_string() } else { vergence_types::describe(e.mime.unwrap_or(vergence_types::of_file(&e.path))) };
-        let mut lines = vec![label(e.name.clone()).size(13.0).weight(600).wrap().width(Length::FILL), label(kind).size(11.0).dim()];
+        let kind = if e.dir {
+            "Folder".to_string()
+        } else {
+            vergence_types::describe(e.mime.unwrap_or(vergence_types::of_file(&e.path)))
+        };
+        let mut lines =
+            vec![label(e.name.clone()).size(13.0).weight(600).wrap().width(Length::FILL), label(kind).size(11.0).dim()];
         if !e.dir {
             lines.push(label(files::size_words(e.size)).size(11.0).dim());
         } else {
@@ -2352,10 +2634,35 @@ impl Viewer {
             && e.kind() == Kind::Text
             && let Some(text) = files::text_start(&e.path)
         {
-            let lines: Vec<Element<Msg>> = text.lines().take(if big { 60 } else { 24 }).map(|l| label(if l.is_empty() { " ".to_string() } else { l.replace('\t', "    ").chars().take(120).collect() }).size(if big { 12.0 } else { 10.0 }).color(t.dim)).collect();
-            return panel(column(lines).spacing(1.0).width(Length::FILL)).color(t.card).radius(6.0).padding(8.0).width(Length::FILL).height(Length::FILL);
+            let lines: Vec<Element<Msg>> = text
+                .lines()
+                .take(if big { 60 } else { 24 })
+                .map(|l| {
+                    label(if l.is_empty() {
+                        " ".to_string()
+                    } else {
+                        l.replace('\t', "    ").chars().take(120).collect()
+                    })
+                    .size(if big { 12.0 } else { 10.0 })
+                    .color(t.dim)
+                })
+                .collect();
+            return panel(column(lines).spacing(1.0).width(Length::FILL))
+                .color(t.card)
+                .radius(6.0)
+                .padding(8.0)
+                .width(Length::FILL)
+                .height(Length::FILL);
         }
-        panel(files::entry_icon_sized(e, if big { 8.0 } else { 5.0 }).width(Length::FILL).height(Length::Fixed(if big { 150.0 } else { 90.0 }))).width(Length::FILL).height(Length::FILL)
+        panel(
+            files::entry_icon_sized(e, if big { 8.0 } else { 5.0 }).width(Length::FILL).height(Length::Fixed(if big {
+                150.0
+            } else {
+                90.0
+            })),
+        )
+        .width(Length::FILL)
+        .height(Length::FILL)
     }
 
     fn pane_view(&self, t: &Theme) -> Element<Msg> {
@@ -2366,9 +2673,20 @@ impl Viewer {
                 parts.extend(Viewer::facts(&e));
                 if !e.dir {
                     parts.push(space().height(Length::Fixed(6.0)));
-                    parts.push(button(label("Open").size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(4.0, 12.0)).on_press(Msg::OpenChosen).name("Open"));
+                    parts.push(
+                        button(label("Open").size(12.0))
+                            .look(ButtonLook::Accent)
+                            .padding(Padding::hv(4.0, 12.0))
+                            .on_press(Msg::OpenChosen)
+                            .name("Open"),
+                    );
                     if matches!(e.kind(), Kind::Picture | Kind::Text) || e.mime == Some("application/pdf") {
-                        parts.push(button(label("Open in Close-Up").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Msg::OpenInCloseUp).name("Open in Close-Up"));
+                        parts.push(
+                            button(label("Open in Close-Up").size(12.0))
+                                .padding(Padding::hv(4.0, 12.0))
+                                .on_press(Msg::OpenInCloseUp)
+                                .name("Open in Close-Up"),
+                        );
                     }
                 }
             }
@@ -2378,7 +2696,12 @@ impl Viewer {
                 parts.push(label(format!("{n} item{}", if n == 1 { "" } else { "s" })).size(11.0).dim());
             }
         }
-        panel(scroll(column(parts).spacing(4.0).width(Length::FILL))).color(t.card).radius(8.0).padding(10.0).width(Length::Fixed(PANE_W)).height(Length::FILL)
+        panel(scroll(column(parts).spacing(4.0).width(Length::FILL)))
+            .color(t.card)
+            .radius(8.0)
+            .padding(10.0)
+            .width(Length::Fixed(PANE_W))
+            .height(Length::FILL)
     }
 
     fn peek_open(&self) -> bool {
@@ -2457,8 +2780,18 @@ impl Program for Viewer {
         if self.trash_window {
             return Some(Bar::Plain);
         }
-        let tabs = self.tabs.iter().map(|t| BarTab { id: t.id, title: t.name(), closable: true, alert: false, edited: false }).collect();
-        Some(Bar::Tabs { tabs, front: self.front_tab().map_or(0, |t| t.id), plus: true, accent: None, menu: Vec::new() })
+        let tabs = self
+            .tabs
+            .iter()
+            .map(|t| BarTab { id: t.id, title: t.name(), closable: true, alert: false, edited: false })
+            .collect();
+        Some(Bar::Tabs {
+            tabs,
+            front: self.front_tab().map_or(0, |t| t.id),
+            plus: true,
+            accent: None,
+            menu: Vec::new(),
+        })
     }
 
     fn tab(&mut self, event: TabEvent, window: &mut Window) {
@@ -2572,7 +2905,18 @@ impl Program for Viewer {
             .height(Length::FILL)
             .name("Sidebar width");
             let edge = if t.high_contrast { t.text } else { t.line };
-            vec![panel(row(vec![self.sidebar_view(t), divider, self.folder_view(t)]).width(Length::FILL).height(Length::FILL)).color(t.page).radius(8.0).edge(edge, 1.0).width(Length::FILL).height(Length::FILL)]
+            vec![
+                panel(
+                    row(vec![self.sidebar_view(t), divider, self.folder_view(t)])
+                        .width(Length::FILL)
+                        .height(Length::FILL),
+                )
+                .color(t.page)
+                .radius(8.0)
+                .edge(edge, 1.0)
+                .width(Length::FILL)
+                .height(Length::FILL),
+            ]
         };
         if self.pane && !self.trash_window {
             middle.push(self.pane_view(t));
@@ -2581,29 +2925,67 @@ impl Program for Viewer {
         let mut all = vec![self.tool_strip(t)];
         if let Some(n) = &self.notice {
             all.push(
-                panel(row(vec![label(n.clone()).size(12.0).wrap().width(Length::FILL), button(label("OK").size(12.0)).padding(Padding::hv(2.0, 10.0)).on_press(Msg::DismissNotice).name("OK")]).spacing(8.0).align(Align::Center).width(Length::FILL))
-                    .padding(Padding::hv(6.0, 12.0))
+                panel(
+                    row(vec![
+                        label(n.clone()).size(12.0).wrap().width(Length::FILL),
+                        button(label("OK").size(12.0))
+                            .padding(Padding::hv(2.0, 10.0))
+                            .on_press(Msg::DismissNotice)
+                            .name("OK"),
+                    ])
+                    .spacing(8.0)
+                    .align(Align::Center)
                     .width(Length::FILL),
+                )
+                .padding(Padding::hv(6.0, 12.0))
+                .width(Length::FILL),
             );
         }
         let strips = self.strips(t);
         if !strips.is_empty() {
-            all.push(panel(column(strips).spacing(4.0).width(Length::FILL)).padding(Padding { top: 8.0, bottom: 0.0, left: 8.0, right: 8.0 }).radius(0.0).width(Length::FILL));
+            all.push(
+                panel(column(strips).spacing(4.0).width(Length::FILL))
+                    .padding(Padding { top: 8.0, bottom: 0.0, left: 8.0, right: 8.0 })
+                    .radius(0.0)
+                    .width(Length::FILL),
+            );
         }
-        all.push(panel(middle).padding(Padding { top: 8.0, bottom: 8.0, left: 8.0, right: 8.0 }).radius(0.0).width(Length::FILL).height(Length::FILL));
+        all.push(
+            panel(middle)
+                .padding(Padding { top: 8.0, bottom: 8.0, left: 8.0, right: 8.0 })
+                .radius(0.0)
+                .width(Length::FILL)
+                .height(Length::FILL),
+        );
         // The foot: how many, how many chosen.
         let n = self.visible().len();
         let chosen = self.front_tab().map_or(0, |t| t.chosen.len());
-        let mut foot = if chosen > 1 { format!("{chosen} of {n} chosen") } else { format!("{n} item{}", if n == 1 { "" } else { "s" }) };
+        let mut foot = if chosen > 1 {
+            format!("{chosen} of {n} chosen")
+        } else {
+            format!("{n} item{}", if n == 1 { "" } else { "s" })
+        };
         if self.search.is_some() {
-            foot = format!("{foot} {} subfolders{}", if self.search_done { "found in" } else { "found so far in" }, if self.search_entries.len() >= search::MAX { " (the first 5000)" } else { "" });
+            foot = format!(
+                "{foot} {} subfolders{}",
+                if self.search_done { "found in" } else { "found so far in" },
+                if self.search_entries.len() >= search::MAX { " (the first 5000)" } else { "" }
+            );
         }
         all.push(rule());
         // How many and what is chosen at the left; the disk's free space at
         // the right (files milestone 3, step 2).
         let free = if self.trash_window { None } else { self.free_here() };
         let free = free.map(|n| format!("{} free", files::size_words(n))).unwrap_or_default();
-        all.push(panel(row(vec![label(foot).size(12.0).dim(), space().width(Length::FILL), label(free).size(12.0).dim()]).width(Length::FILL)).radius(0.0).padding(Padding { top: 3.0, bottom: 3.0, left: 12.0, right: 12.0 }).width(Length::FILL));
+        all.push(
+            panel(
+                row(vec![label(foot).size(12.0).dim(), space().width(Length::FILL), label(free).size(12.0).dim()])
+                    .width(Length::FILL),
+            )
+            .radius(0.0)
+            .padding(Padding { top: 3.0, bottom: 3.0, left: 12.0, right: 12.0 })
+            .width(Length::FILL),
+        );
         column(all).width(Length::FILL).height(Length::FILL)
     }
 
@@ -2623,10 +3005,16 @@ impl Program for Viewer {
         if let Msg::Click(k) = &m {
             // The one chosen item clicked again, with no keys held: renamed after a pause.
             let p = self.visible().get(*k).map(|e| e.path.clone());
-            let alone = p.is_some() && self.front_tab().is_some_and(|t| t.chosen.len() == 1 && t.chosen.first() == p.as_ref());
+            let alone =
+                p.is_some() && self.front_tab().is_some_and(|t| t.chosen.len() == 1 && t.chosen.first() == p.as_ref());
             let plain = !self.mods.ctrl && !self.mods.shift;
             self.rename_after = None;
-            if alone && plain && !self.trash_window && !self.in_trash() && self.front_tab().is_some_and(|t| t.dir().is_some()) {
+            if alone
+                && plain
+                && !self.trash_window
+                && !self.in_trash()
+                && self.front_tab().is_some_and(|t| t.dir().is_some())
+            {
                 self.rename_after = p.map(|p| (p, Instant::now()));
                 window.wake_after(RENAME_TIMER, self.double_gap() + std::time::Duration::from_millis(60));
             }
@@ -2636,7 +3024,10 @@ impl Program for Viewer {
         }
         match m {
             Msg::Run(c) => return self.run(c, window),
-            Msg::PathEdit => self.path_edit = Some(self.front_tab().and_then(|t| t.dir()).map(|d| d.display().to_string()).unwrap_or_default()),
+            Msg::PathEdit => {
+                self.path_edit =
+                    Some(self.front_tab().and_then(|t| t.dir()).map(|d| d.display().to_string()).unwrap_or_default())
+            }
             Msg::PathTyped(s) => self.path_edit = Some(s),
             Msg::PathGo => self.path_go(),
             Msg::SideGo(i) => self.side_go(i),
@@ -2688,7 +3079,10 @@ impl Program for Viewer {
                 if let Some(sidebar::Line::Item(sidebar::Section::Favorites, item)) = self.side_lines().get(i)
                     && let Some(p) = &item.path
                 {
-                    window.start_drag(&item.name, vec![(SIDEBAR_KIND.into(), p.to_string_lossy().into_owned().into_bytes())]);
+                    window.start_drag(
+                        &item.name,
+                        vec![(SIDEBAR_KIND.into(), p.to_string_lossy().into_owned().into_bytes())],
+                    );
                 }
             }
             Msg::Click(k) => self.click(k),
@@ -2747,7 +3141,10 @@ impl Program for Viewer {
                     }
                     // Let go: the widths kept.
                     Touch::Release { .. } | Touch::Leave if self.pulling.take().is_some() => {
-                        let words = format!("\"{}\"", self.widths.iter().map(|w| format!("{w:.0}")).collect::<Vec<_>>().join(","));
+                        let words = format!(
+                            "\"{}\"",
+                            self.widths.iter().map(|w| format!("{w:.0}")).collect::<Vec<_>>().join(",")
+                        );
                         self.write_key("columns", Some(&words));
                     }
                     _ => {}
@@ -2763,14 +3160,17 @@ impl Program for Viewer {
                 Some(Ask::Forever(paths)) if yes => {
                     for p in &paths {
                         if let Err(e) = ops::remove_tree(p) {
-                            self.notice = Some(format!("“{}” could not be deleted: {}", self.shown_name(p), files::plain(&e)));
+                            self.notice =
+                                Some(format!("“{}” could not be deleted: {}", self.shown_name(p), files::plain(&e)));
                             break;
                         }
                         // Deleted out of the Trash: its info goes too.
                         if self.in_trash()
                             && let (Some(dir), Some(n)) = (ops::trash_dir(), p.file_name())
                         {
-                            let _ = std::fs::remove_file(dir.join("info").join(format!("{}.trashinfo", n.to_string_lossy())));
+                            let _ = std::fs::remove_file(
+                                dir.join("info").join(format!("{}.trashinfo", n.to_string_lossy())),
+                            );
                         }
                     }
                     self.read_all();
@@ -2804,7 +3204,8 @@ impl Program for Viewer {
 
     fn saw(&mut self, input: &Input) {
         // The window last used takes the folders handed over.
-        if matches!(input, Input::Button { pressed: true, .. } | Input::Key { pressed: true, .. }) && self.me.is_some() {
+        if matches!(input, Input::Button { pressed: true, .. } | Input::Key { pressed: true, .. }) && self.me.is_some()
+        {
             self.shared.borrow_mut().last_used = self.me;
         }
         if let Input::Button { pressed: true, modifiers, button, x, y } = input {
@@ -2852,7 +3253,8 @@ impl Program for Viewer {
         let typing = !self.narrow.is_empty();
         match *sym {
             s if m.ctrl && (s == 0x6c || s == 0x4c) && !self.trash_window => {
-                self.path_edit = Some(self.front_tab().and_then(|t| t.dir()).map(|d| d.display().to_string()).unwrap_or_default());
+                self.path_edit =
+                    Some(self.front_tab().and_then(|t| t.dir()).map(|d| d.display().to_string()).unwrap_or_default());
             }
             ESCAPE if self.ask.is_some() => self.ask = None,
             DELETE if m.shift && !typing => self.run(cmd::DELETE, window),
@@ -2914,9 +3316,16 @@ impl Program for Viewer {
     fn drag_over(&mut self, x: f32, y: f32, kinds: &[String], ctrl: bool) -> u8 {
         // Over the sidebar's favorites: a shortcut made, or a favorite moved;
         // nothing on the disk changes (a copy, so the source keeps its files).
-        if !self.trash_window && self.side_rect.get().w > 0.0 && { let r = self.side_rect.get(); x >= r.x && x < r.x + r.w } {
+        if !self.trash_window && self.side_rect.get().w > 0.0 && {
+            let r = self.side_rect.get();
+            x >= r.x && x < r.x + r.w
+        } {
             let ours = kinds.iter().any(|k| k == SIDEBAR_KIND || k == "text/uri-list");
-            return if ours && self.side_drop_index(x, y).is_some() { vergence_ui::DROP_COPY } else { vergence_ui::DROP_NONE };
+            return if ours && self.side_drop_index(x, y).is_some() {
+                vergence_ui::DROP_COPY
+            } else {
+                vergence_ui::DROP_NONE
+            };
         }
         if !kinds.iter().any(|k| k == "text/uri-list") || self.here().is_none() || self.job.is_some() {
             return vergence_ui::DROP_NONE;
@@ -2930,11 +3339,23 @@ impl Program for Viewer {
 
     fn dropped(&mut self, x: f32, y: f32, action: u8, items: &[(String, Vec<u8>)], window: &mut Window) {
         // On the sidebar: into the favorites at the place dropped.
-        if !self.trash_window && { let r = self.side_rect.get(); r.w > 0.0 && x >= r.x && x < r.x + r.w } {
+        if !self.trash_window && {
+            let r = self.side_rect.get();
+            r.w > 0.0 && x >= r.x && x < r.x + r.w
+        } {
             if let Some(at) = self.side_drop_index(x, y) {
                 let moved: Vec<PathBuf> = match items.iter().find(|(k, _)| k == SIDEBAR_KIND) {
                     Some((_, v)) => vec![PathBuf::from(String::from_utf8_lossy(v).into_owned())],
-                    None => items.iter().find(|(k, _)| k == "text/uri-list").map(|(_, v)| String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()).unwrap_or_default(),
+                    None => items
+                        .iter()
+                        .find(|(k, _)| k == "text/uri-list")
+                        .map(|(_, v)| {
+                            String::from_utf8_lossy(v)
+                                .lines()
+                                .filter_map(|l| vergence_types::path_of_link(l.trim()))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
                 };
                 let moved: Vec<PathBuf> = moved.into_iter().filter(|p| p.is_absolute() && p.exists()).collect();
                 if !moved.is_empty() {
@@ -2946,7 +3367,13 @@ impl Program for Viewer {
             return;
         }
         let Some(dir) = self.here() else { return };
-        let paths: Vec<PathBuf> = items.iter().find(|(k, _)| k == "text/uri-list").map(|(_, v)| String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()).unwrap_or_default();
+        let paths: Vec<PathBuf> = items
+            .iter()
+            .find(|(k, _)| k == "text/uri-list")
+            .map(|(_, v)| {
+                String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()
+            })
+            .unwrap_or_default();
         if paths.is_empty() {
             return;
         }
@@ -2955,7 +3382,10 @@ impl Program for Viewer {
             let trash = ops::trash_dir();
             for p in paths.iter().filter(|p| !trash.as_ref().is_some_and(|t| p.starts_with(t))) {
                 if let Err(e) = ops::trash(p) {
-                    self.notice = Some(format!("“{}” could not be moved to the Trash: {e}", p.file_name().unwrap_or_default().to_string_lossy()));
+                    self.notice = Some(format!(
+                        "“{}” could not be moved to the Trash: {e}",
+                        p.file_name().unwrap_or_default().to_string_lossy()
+                    ));
                     break;
                 }
             }
@@ -3001,8 +3431,12 @@ impl Program for Viewer {
     /// BTN_EXTRA) move through the tab's history, as in a browser.
     fn input(&mut self, input: &Input, window: &mut Window) -> bool {
         match input {
-            Input::Button { pressed: true, button: vergence_ui::Button::Other(0x113), .. } => self.run(cmd::BACK, window),
-            Input::Button { pressed: true, button: vergence_ui::Button::Other(0x114), .. } => self.run(cmd::FORWARD, window),
+            Input::Button { pressed: true, button: vergence_ui::Button::Other(0x113), .. } => {
+                self.run(cmd::BACK, window)
+            }
+            Input::Button { pressed: true, button: vergence_ui::Button::Other(0x114), .. } => {
+                self.run(cmd::FORWARD, window)
+            }
             _ => return false,
         }
         true
@@ -3036,7 +3470,14 @@ impl Program for Viewer {
         if let Some(l) = self.peek.clone() {
             let keys = std::mem::take(&mut l.borrow_mut().keys);
             for sym in keys {
-                let key = Input::Key { sym, text: None, pressed: true, repeat: false, composing: false, modifiers: Modifiers::default() };
+                let key = Input::Key {
+                    sym,
+                    text: None,
+                    pressed: true,
+                    repeat: false,
+                    composing: false,
+                    modifiers: Modifiers::default(),
+                };
                 changed |= self.key_first(&key, window).is_some();
             }
             if !l.borrow().open && self.peek.as_ref().is_some_and(|p| Rc::ptr_eq(p, &l)) {
@@ -3077,7 +3518,8 @@ impl Program for Viewer {
         for snap in kept {
             window.open_window(vergence_widgets::window(Viewer::from_snap(self.shared.clone(), &snap)));
         }
-        let asked: Vec<Vec<PathBuf>> = std::mem::take(&mut *self.shared.borrow().inbox.lock().unwrap_or_else(|e| e.into_inner()));
+        let asked: Vec<Vec<PathBuf>> =
+            std::mem::take(&mut *self.shared.borrow().inbox.lock().unwrap_or_else(|e| e.into_inner()));
         for paths in asked {
             // The Trash window started again: only forward.
             if self.trash_window {
@@ -3087,7 +3529,9 @@ impl Program for Viewer {
             // For the window last used, if it is another one: it is woken to take them.
             let other = {
                 let s = self.shared.borrow();
-                s.last_used.filter(|u| Some(*u) != self.me).and_then(|u| s.windows.iter().find(|(id, _)| *id == u).map(|(id, w)| (*id, w.clone())))
+                s.last_used
+                    .filter(|u| Some(*u) != self.me)
+                    .and_then(|u| s.windows.iter().find(|(id, _)| *id == u).map(|(id, w)| (*id, w.clone())))
             };
             match other {
                 Some((id, w)) => {
@@ -3105,9 +3549,11 @@ impl Program for Viewer {
         // Folders handed over for this window, and tabs dropped on it.
         let (opens, moved) = {
             let mut s = self.shared.borrow_mut();
-            let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut s.opens).into_iter().partition(|(id, _)| Some(*id) == self.me);
+            let (mine, rest): (Vec<_>, Vec<_>) =
+                std::mem::take(&mut s.opens).into_iter().partition(|(id, _)| Some(*id) == self.me);
             s.opens = rest;
-            let (tabs, others): (Vec<_>, Vec<_>) = std::mem::take(&mut s.transfers).into_iter().partition(|(into, _, _)| Some(*into) == self.me);
+            let (tabs, others): (Vec<_>, Vec<_>) =
+                std::mem::take(&mut s.transfers).into_iter().partition(|(into, _, _)| Some(*into) == self.me);
             s.transfers = others;
             (mine, tabs)
         };
@@ -3130,7 +3576,10 @@ impl Program for Viewer {
             window.open_window(vergence_widgets::window(w));
         }
         // A disk image mounted: in a tab of its own; or why not.
-        let answered = self.mounting.as_ref().and_then(|(n, a)| a.lock().unwrap_or_else(|e| e.into_inner()).take().map(|r| (n.clone(), r)));
+        let answered = self
+            .mounting
+            .as_ref()
+            .and_then(|(n, a)| a.lock().unwrap_or_else(|e| e.into_inner()).take().map(|r| (n.clone(), r)));
         if let Some((name, r)) = answered {
             self.mounting = None;
             match r {
@@ -3193,7 +3642,8 @@ impl Program for Viewer {
         // mount it (an ejected stick came back that way). Not sent home: a
         // stick just clicked is mounting, and the server sees it at its next
         // look (Dave, 2026-11-21: clicking the stick "dumped" him at Home).
-        let mounted: Vec<PathBuf> = files::drive_list().into_iter().filter(|d| d.mounted).map(|d| PathBuf::from(d.path)).collect();
+        let mounted: Vec<PathBuf> =
+            files::drive_list().into_iter().filter(|d| d.mounted).map(|d| PathBuf::from(d.path)).collect();
         let off = |d: &Path| d.starts_with("/media/") && !mounted.iter().any(|m| d.starts_with(m));
         // The folder changed on disk: read again.
         let Some(t) = self.front_mut() else { return false };
@@ -3222,7 +3672,8 @@ impl Program for Viewer {
                     C::own(cmd::INFO, "File", "Properties", "Ctrl+I"),
                     C::role(cmd::SELECT_ALL, Role::SelectAll),
                     C::own(cmd::ROWS_SMALL, "View", "Small rows", "").checked(self.list_look().rows == RowSize::Small),
-                    C::own(cmd::ROWS_MEDIUM, "View", "Medium rows", "").checked(self.list_look().rows == RowSize::Medium),
+                    C::own(cmd::ROWS_MEDIUM, "View", "Medium rows", "")
+                        .checked(self.list_look().rows == RowSize::Medium),
                     C::own(cmd::ROWS_LARGE, "View", "Large rows", "").checked(self.list_look().rows == RowSize::Large),
                     C::own(cmd::RELOAD, "View", "Read again", "Ctrl+R"),
                     C::role(cmd::SETTINGS, Role::Settings),
@@ -3290,28 +3741,116 @@ struct FilesRows;
 impl Rows for FilesRows {
     fn parts(&self, text: &str) -> Vec<Part> {
         let opacity = vergence_ui::opacity_setting(text, "[appearance]");
-        let locked = vergence_ui::desktop_pick(text).map(|light| format!("{} for every app: Settings > Appearance > Style", if light { "Light" } else { "Dark" }));
+        let locked = vergence_ui::desktop_pick(text).map(|light| {
+            format!("{} for every app: Settings > Appearance > Style", if light { "Light" } else { "Dark" })
+        });
         let styles = vec![Choice::text("Dark", "dark"), Choice::text("Light", "light")];
         vec![
             Part {
                 title: "FileView".into(),
                 rows: vec![
-                    Row::new("view", "New windows show", "A folder as a list or as icons.", Control::Choose { choices: vec![Choice::text("A list", "list"), Choice::text("Icons", "icons")], desktop: None, app_default: 0 }),
-                    Row::new("preview-pane", "Preview pane", "The chosen file at the window's right.", Control::Switch { default: false }),
-                    Row::new("preview-autoplay", "Play sounds in the preview", "Space on a sound file plays it at once.", Control::Switch { default: true }),
-                    Row::new("hidden", "Hidden files", "Names that start with a dot.", Control::Switch { default: false }),
-                    Row::new("row-size", "Row size", "How tall the list's rows are.", Control::Choose { choices: vec![Choice::text("Small", "small"), Choice::text("Medium", "medium"), Choice::text("Large", "large")], desktop: None, app_default: 1 }),
-                    Row::new("group-by", "Group by", "The list under headings: by kind (Folders, Documents, Pictures…), by date (Today, Yesterday…), by size, or none.", Control::Choose { choices: vec![Choice::text("Kind", "kind"), Choice::text("Date", "date"), Choice::text("Size", "size"), Choice::text("None", "none")], desktop: None, app_default: 0 }),
-                    Row::new("recent", "Recent in the sidebar", "The files opened most lately, under the sidebar's Locations.", Control::Switch { default: true }),
+                    Row::new(
+                        "view",
+                        "New windows show",
+                        "A folder as a list or as icons.",
+                        Control::Choose {
+                            choices: vec![Choice::text("A list", "list"), Choice::text("Icons", "icons")],
+                            desktop: None,
+                            app_default: 0,
+                        },
+                    ),
+                    Row::new(
+                        "preview-pane",
+                        "Preview pane",
+                        "The chosen file at the window's right.",
+                        Control::Switch { default: false },
+                    ),
+                    Row::new(
+                        "preview-autoplay",
+                        "Play sounds in the preview",
+                        "Space on a sound file plays it at once.",
+                        Control::Switch { default: true },
+                    ),
+                    Row::new(
+                        "hidden",
+                        "Hidden files",
+                        "Names that start with a dot.",
+                        Control::Switch { default: false },
+                    ),
+                    Row::new(
+                        "row-size",
+                        "Row size",
+                        "How tall the list's rows are.",
+                        Control::Choose {
+                            choices: vec![
+                                Choice::text("Small", "small"),
+                                Choice::text("Medium", "medium"),
+                                Choice::text("Large", "large"),
+                            ],
+                            desktop: None,
+                            app_default: 1,
+                        },
+                    ),
+                    Row::new(
+                        "group-by",
+                        "Group by",
+                        "The list under headings: by kind (Folders, Documents, Pictures…), by date (Today, Yesterday…), by size, or none.",
+                        Control::Choose {
+                            choices: vec![
+                                Choice::text("Kind", "kind"),
+                                Choice::text("Date", "date"),
+                                Choice::text("Size", "size"),
+                                Choice::text("None", "none"),
+                            ],
+                            desktop: None,
+                            app_default: 0,
+                        },
+                    ),
+                    Row::new(
+                        "recent",
+                        "Recent in the sidebar",
+                        "The files opened most lately, under the sidebar's Locations.",
+                        Control::Switch { default: true },
+                    ),
                 ],
             },
             Part {
                 title: "On this desktop".into(),
                 rows: vec![
-                    Row::new("style", "Style", "While the desktop's Style is App default.", Control::Choose { choices: styles.clone(), desktop: Some("Built-in (Light)".into()), app_default: 0 }).locked(locked.clone()),
-                    Row::new("bar-style", "Title bar", "", Control::Choose { choices: styles, desktop: Some("Built-in (Light)".into()), app_default: 0 }).locked(locked),
-                    Row::new("opacity", "Opacity", "30 to 100: how much of the window's ground shows.", Control::Percent { min: 30, desktop: format!("Desktop default ({:.0})", opacity * 100.0), now: (opacity * 100.0).round() as u32 }),
-                    Row::new("", "Window places", "Where the desktop puts FileView's windows, for each set of screens.", Control::Button { label: "Forget…".into(), id: 1 }),
+                    Row::new(
+                        "style",
+                        "Style",
+                        "While the desktop's Style is App default.",
+                        Control::Choose {
+                            choices: styles.clone(),
+                            desktop: Some("Built-in (Light)".into()),
+                            app_default: 0,
+                        },
+                    )
+                    .locked(locked.clone()),
+                    Row::new(
+                        "bar-style",
+                        "Title bar",
+                        "",
+                        Control::Choose { choices: styles, desktop: Some("Built-in (Light)".into()), app_default: 0 },
+                    )
+                    .locked(locked),
+                    Row::new(
+                        "opacity",
+                        "Opacity",
+                        "30 to 100: how much of the window's ground shows.",
+                        Control::Percent {
+                            min: 30,
+                            desktop: format!("Desktop default ({:.0})", opacity * 100.0),
+                            now: (opacity * 100.0).round() as u32,
+                        },
+                    ),
+                    Row::new(
+                        "",
+                        "Window places",
+                        "Where the desktop puts FileView's windows, for each set of screens.",
+                        Control::Button { label: "Forget…".into(), id: 1 },
+                    ),
                 ],
             },
         ]
@@ -3319,7 +3858,9 @@ impl Rows for FilesRows {
 
     fn button(&self, id: u32) {
         if id == 1 {
-            let _ = crate::start(std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", APP_ID]));
+            let _ = crate::start(
+                std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", APP_ID]),
+            );
         }
     }
 }
@@ -3351,7 +3892,12 @@ fn main() {
         }
         return;
     }
-    let paths: Vec<PathBuf> = args.iter().filter(|a| !a.starts_with("--")).map(|a| vergence_types::path_of_link(a).unwrap_or_else(|| PathBuf::from(a))).map(|p| std::path::absolute(&p).unwrap_or(p)).collect();
+    let paths: Vec<PathBuf> = args
+        .iter()
+        .filter(|a| !a.starts_with("--"))
+        .map(|a| vergence_types::path_of_link(a).unwrap_or_else(|| PathBuf::from(a)))
+        .map(|p| std::path::absolute(&p).unwrap_or(p))
+        .collect();
     if hand::hand_over(APP_ID, &paths) {
         return;
     }
@@ -3399,8 +3945,16 @@ mod tests {
         // Two notes.txt thrown away: the second has a name of its own in the Trash.
         std::fs::write(files_dir.join("notes.txt"), "one").unwrap();
         std::fs::write(files_dir.join("notes 2.txt"), "two").unwrap();
-        std::fs::write(info.join("notes.txt.trashinfo"), "[Trash Info]\nPath=/home/u/Documents/notes.txt\nDeletionDate=2026-11-17T10:00:00\n").unwrap();
-        std::fs::write(info.join("notes 2.txt.trashinfo"), "[Trash Info]\nPath=/home/u/src/notes.txt\nDeletionDate=2026-11-18T10:00:00\n").unwrap();
+        std::fs::write(
+            info.join("notes.txt.trashinfo"),
+            "[Trash Info]\nPath=/home/u/Documents/notes.txt\nDeletionDate=2026-11-17T10:00:00\n",
+        )
+        .unwrap();
+        std::fs::write(
+            info.join("notes 2.txt.trashinfo"),
+            "[Trash Info]\nPath=/home/u/src/notes.txt\nDeletionDate=2026-11-18T10:00:00\n",
+        )
+        .unwrap();
         // One with no info (put there by hand) keeps its own name.
         std::fs::write(files_dir.join("stray"), "").unwrap();
         let mut v = files::read_folder(&files_dir).unwrap();
@@ -3408,8 +3962,15 @@ mod tests {
         let by = |p: &str| v.iter().find(|e| e.path == files_dir.join(p)).unwrap();
         assert_eq!(by("notes.txt").name, "notes.txt");
         assert_eq!(by("notes 2.txt").name, "notes.txt", "shown by the name it had");
-        assert_eq!(from.get(&files_dir.join("notes 2.txt")).map(PathBuf::as_path), Some(Path::new("/home/u/src/notes.txt")));
-        assert_eq!(by("notes 2.txt").changed, std::fs::metadata(info.join("notes 2.txt.trashinfo")).and_then(|m| m.modified()).ok(), "deleted when its info was written");
+        assert_eq!(
+            from.get(&files_dir.join("notes 2.txt")).map(PathBuf::as_path),
+            Some(Path::new("/home/u/src/notes.txt"))
+        );
+        assert_eq!(
+            by("notes 2.txt").changed,
+            std::fs::metadata(info.join("notes 2.txt.trashinfo")).and_then(|m| m.modified()).ok(),
+            "deleted when its info was written"
+        );
         assert_eq!(by("stray").name, "stray");
         assert!(!from.contains_key(&files_dir.join("stray")));
         std::fs::remove_dir_all(&d).unwrap();
@@ -3423,7 +3984,11 @@ mod tests {
         std::fs::write(dir.join("a.txt"), "x").unwrap();
         let mut v = Viewer::new(shared());
         v.open_paths(std::slice::from_ref(&dir));
-        assert_eq!(v.visible().iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), vec!["sub", "a.txt"], "folders first");
+        assert_eq!(
+            v.visible().iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            vec!["sub", "a.txt"],
+            "folders first"
+        );
         v.go(Showing::Folder(sub.clone()));
         v.up();
         let t = v.front_tab().unwrap();

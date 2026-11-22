@@ -49,7 +49,9 @@ impl Server {
 
     /// The modal dialog that blocks `parent`, if any.
     pub fn modal_of(&self, parent: &Win) -> Option<Win> {
-        self.children_of(parent).into_iter().find(|c| self.window_style(c).modal && self.space.element_geometry(c).is_some())
+        self.children_of(parent)
+            .into_iter()
+            .find(|c| self.window_style(c).modal && self.space.element_geometry(c).is_some())
     }
 
     /// A dialog or palette with a parent is the parent's, not a window of its own.
@@ -67,9 +69,12 @@ impl Server {
         }
         let (Some(p), Some(geo)) = (s.parent, self.space.element_geometry(w)) else { return };
         let Some(pg) = self.space.element_geometry(&p) else { return };
-        let mut at: Point<i32, Logical> = (pg.loc.x + (pg.size.w - geo.size.w) / 2, pg.loc.y + (pg.size.h - geo.size.h) / 2).into();
+        let mut at: Point<i32, Logical> =
+            (pg.loc.x + (pg.size.w - geo.size.w) / 2, pg.loc.y + (pg.size.h - geo.size.h) / 2).into();
         let mid = (pg.loc.x + pg.size.w / 2, pg.loc.y + pg.size.h / 2);
-        if let Some(screen) = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).find(|o| o.contains(mid)) {
+        if let Some(screen) =
+            self.space.outputs().filter_map(|o| self.space.output_geometry(o)).find(|o| o.contains(mid))
+        {
             let area = self.work_area(screen);
             let top = if self.has_title(w) { self.bar_h(w) } else { 0 };
             at.x = at.x.min(area.loc.x + area.size.w - geo.size.w).max(area.loc.x);
@@ -93,7 +98,9 @@ impl Server {
         self.dialogs.follow.retain(|w, f| w.alive() && f.parent.alive());
         let follows: Vec<(Win, Follow)> = self.dialogs.follow.iter().map(|(w, f)| (w.clone(), f.clone())).collect();
         for (w, mut f) in follows {
-            let (Some(pg), Some(g)) = (self.space.element_geometry(&f.parent), self.space.element_geometry(&w)) else { continue };
+            let (Some(pg), Some(g)) = (self.space.element_geometry(&f.parent), self.space.element_geometry(&w)) else {
+                continue;
+            };
             if pg.loc != f.parent_at {
                 let to = g.loc + (pg.loc - f.parent_at);
                 self.move_window(&w, to);
@@ -112,7 +119,8 @@ impl Server {
     /// off the screen, kept with their place; this one's come back on top.
     pub fn palettes_follow_focus(&mut self, focused: Option<&Win>) {
         self.dialogs.hidden.retain(|(w, _)| w.alive());
-        let palettes: Vec<Win> = self.space.elements().filter(|w| self.window_style(w).kind == Kind::Palette).cloned().collect();
+        let palettes: Vec<Win> =
+            self.space.elements().filter(|w| self.window_style(w).kind == Kind::Palette).cloned().collect();
         // The application in front: the focused window's (a palette's own parent's app counts too).
         let front = focused.cloned();
         let same = |s: &mut Server, p: &Win| match (&front, s.window_style(p).parent) {
@@ -138,12 +146,18 @@ impl Server {
         // In front of every window of their application, but behind its dialogs
         // (a dialog, modal above all, is what is being answered).
         if front.is_some() {
-            let shown: Vec<Win> = self.space.elements().filter(|w| self.window_style(w).kind == Kind::Palette).cloned().collect();
+            let shown: Vec<Win> =
+                self.space.elements().filter(|w| self.window_style(w).kind == Kind::Palette).cloned().collect();
             for p in shown {
                 self.space.raise_element(&p, false);
             }
             // A lone dialog (no parent: a Properties window) is a window of its own and stays where it is.
-            let dialogs: Vec<Win> = self.space.elements().filter(|w| self.belongs_to_parent(w) && self.window_style(w).kind == Kind::Dialog).cloned().collect();
+            let dialogs: Vec<Win> = self
+                .space
+                .elements()
+                .filter(|w| self.belongs_to_parent(w) && self.window_style(w).kind == Kind::Dialog)
+                .cloned()
+                .collect();
             for d in dialogs {
                 self.space.raise_element(&d, false);
             }

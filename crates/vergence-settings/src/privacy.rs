@@ -8,7 +8,15 @@
 use super::*;
 
 /// The lengths a timed grant can have, with their names.
-const TIMED_CHOICES: [(&str, i64); 7] = [("15 minutes", 15), ("30 minutes", 30), ("An hour", 60), ("2 hours", 120), ("4 hours", 240), ("8 hours", 480), ("A day", 1440)];
+const TIMED_CHOICES: [(&str, i64); 7] = [
+    ("15 minutes", 15),
+    ("30 minutes", 30),
+    ("An hour", 60),
+    ("2 hours", 120),
+    ("4 hours", 240),
+    ("8 hours", 480),
+    ("A day", 1440),
+];
 
 /// desktop.toml's [agents]: on, and the timed length in minutes.
 pub fn agents_settings(d: &toml::Table) -> (bool, i64) {
@@ -32,7 +40,12 @@ pub fn fetch(mail: Mail) {
 fn revoke(mail: Mail, agent: String, program: String, app: String) {
     std::thread::spawn(move || {
         let Ok(mut bus) = vergence_protocol::Client::connect("vergence-settings") else { return };
-        let _ = bus.request(|serial| ClientMsg::RevokeGrants { serial, agent: agent.clone(), program: program.clone(), app: app.clone() });
+        let _ = bus.request(|serial| ClientMsg::RevokeGrants {
+            serial,
+            agent: agent.clone(),
+            program: program.clone(),
+            app: app.clone(),
+        });
         if let Ok(ServerMsg::Grants { grants, .. }) = bus.request(|serial| ClientMsg::ListGrants { serial }) {
             mail.send(Message::Privacy(PrivacyMsg::List(grants)));
         }
@@ -81,21 +94,40 @@ impl App {
         let at = TIMED_CHOICES.iter().position(|(_, m)| *m == minutes);
         let grants_group = match &self.grants {
             None => self.group(Some("What agents may use"), vec![setting("Reading the list...", "", space())]),
-            Some(list) if list.is_empty() => self.group(Some("What agents may use"), vec![setting("Nothing yet", "An agent asks the first time it wants to use an app; what you answer is kept here.", space())]),
+            Some(list) if list.is_empty() => self.group(
+                Some("What agents may use"),
+                vec![setting(
+                    "Nothing yet",
+                    "An agent asks the first time it wants to use an app; what you answer is kept here.",
+                    space(),
+                )],
+            ),
             Some(list) => {
                 let mut rows: Vec<Element<Message>> = list
                     .iter()
                     .map(|g| {
                         let title = format!("\u{201c}{}\u{201d} and {}", g.agent, g.shown);
-                        let control = button(label("Take back")).on_press(Message::Privacy(PrivacyMsg::Revoke(g.agent.clone(), g.program.clone(), g.app.clone()))).name(format!("Take back {}'s use of {}", g.agent, g.shown));
-                        let detail = format!("{} Program: {}.", span_words(g), if g.program.is_empty() { "not known" } else { &g.program });
+                        let control = button(label("Take back"))
+                            .on_press(Message::Privacy(PrivacyMsg::Revoke(
+                                g.agent.clone(),
+                                g.program.clone(),
+                                g.app.clone(),
+                            )))
+                            .name(format!("Take back {}'s use of {}", g.agent, g.shown));
+                        let detail = format!(
+                            "{} Program: {}.",
+                            span_words(g),
+                            if g.program.is_empty() { "not known" } else { &g.program }
+                        );
                         setting(&title, &detail, control)
                     })
                     .collect();
                 rows.push(setting(
                     "Every agent",
                     "Each asks again the next time it wants an app.",
-                    button(label("Take back all")).on_press(Message::Privacy(PrivacyMsg::Revoke(String::new(), String::new(), String::new()))).name("Take back every agent's use of every app"),
+                    button(label("Take back all"))
+                        .on_press(Message::Privacy(PrivacyMsg::Revoke(String::new(), String::new(), String::new())))
+                        .name("Take back every agent's use of every app"),
                 ));
                 self.group(Some("What agents may use"), rows)
             }

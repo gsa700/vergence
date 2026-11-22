@@ -139,7 +139,20 @@ pub const PROSE_SPACING: f32 = 1.5;
 
 impl Default for AreaOptions {
     fn default() -> Self {
-        AreaOptions { font: "monospace".into(), size: None, line_numbers: true, wrap: true, tab_width: 4, spaces: true, current_line: true, editable: true, complete: true, spell: true, commands: Vec::new(), line_spacing: None }
+        AreaOptions {
+            font: "monospace".into(),
+            size: None,
+            line_numbers: true,
+            wrap: true,
+            tab_width: 4,
+            spaces: true,
+            current_line: true,
+            editable: true,
+            complete: true,
+            spell: true,
+            commands: Vec::new(),
+            line_spacing: None,
+        }
     }
 }
 
@@ -594,7 +607,17 @@ impl Doc {
         let keep = self.list.as_ref().and_then(|l| l.words.get(l.chosen).cloned());
         let chosen = keep.and_then(|k| words.iter().position(|w| *w == k)).unwrap_or(0);
         let actions = vec![Action::Word; words.len()];
-        self.list = Some(List { words, actions, enabled: Vec::new(), keys: Vec::new(), at: None, chosen, start, first: 0, server: false });
+        self.list = Some(List {
+            words,
+            actions,
+            enabled: Vec::new(),
+            keys: Vec::new(),
+            at: None,
+            chosen,
+            start,
+            first: 0,
+            server: false,
+        });
         true
     }
 
@@ -779,7 +802,10 @@ impl Doc {
         if !self.options.editable {
             return false;
         }
-        let clean: String = str::replace(&str::replace(text, "\r\n", "\n"), '\r', "\n").chars().filter(|c| !c.is_control() || *c == '\n' || *c == '\t').collect();
+        let clean: String = str::replace(&str::replace(text, "\r\n", "\n"), '\r', "\n")
+            .chars()
+            .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
+            .collect();
         let (a, b) = self.selection();
         if clean.is_empty() && a == b {
             return false;
@@ -914,7 +940,11 @@ impl Doc {
             self.reshape_all();
             self.revision += 1;
             self.anchor = Pos::new(first, 0);
-            self.caret = if first == last && self.anchor == self.caret { self.caret } else { Pos::new(last, self.buffer.line(last).len()) };
+            self.caret = if first == last && self.anchor == self.caret {
+                self.caret
+            } else {
+                Pos::new(last, self.buffer.line(last).len())
+            };
             self.caret = self.buffer.clamp(self.caret);
         }
         changed
@@ -952,7 +982,9 @@ impl Doc {
             }
         }
         // The list on request: Alt+Escape, F5 (as on a Mac), Ctrl+Space.
-        let asks = (key == sym::ESCAPE && m.alt) || (key == F5 && !m.ctrl && !m.alt) || (key == ' ' as u32 && m.ctrl && !m.alt);
+        let asks = (key == sym::ESCAPE && m.alt)
+            || (key == F5 && !m.ctrl && !m.alt)
+            || (key == ' ' as u32 && m.ctrl && !m.alt);
         if asks {
             self.open_list();
             return Effect { used: true, ..Effect::default() };
@@ -1034,7 +1066,11 @@ impl Doc {
                     };
                     (from, c, Kind::Deleting)
                 } else {
-                    (c, if command || m.alt { self.buffer.next_word(c) } else { self.buffer.next_char(c) }, Kind::Deleting)
+                    (
+                        c,
+                        if command || m.alt { self.buffer.next_word(c) } else { self.buffer.next_char(c) },
+                        Kind::Deleting,
+                    )
                 };
                 if from != to {
                     self.edit(from, to, "", kind);
@@ -1160,7 +1196,9 @@ impl Doc {
                 }
                 Some(e)
             }
-            _ if plain && typed.is_some_and(|t| !t.is_empty() && t.chars().all(|c| c.is_alphanumeric() || c == '_')) => {
+            _ if plain
+                && typed.is_some_and(|t| !t.is_empty() && t.chars().all(|c| c.is_alphanumeric() || c == '_')) =>
+            {
                 let e = self.key_plain(key, typed, m);
                 self.ghost = None;
                 if !self.open_list() {
@@ -1304,7 +1342,8 @@ impl Doc {
             }
         }
         let chosen = enabled.iter().position(|e| *e).unwrap_or(0);
-        self.list = Some(List { words, actions, enabled, keys, at: Some((x, y)), chosen, start: p, first: 0, server: false });
+        self.list =
+            Some(List { words, actions, enabled, keys, at: Some((x, y)), chosen, start: p, first: 0, server: false });
     }
 
     /// The right-click menu just opened (context), for the server to draw as
@@ -1322,7 +1361,13 @@ impl Doc {
             .enumerate()
             .map(|(i, a)| match a {
                 Action::Line => vergence_ui::MenuLine::Separator,
-                _ => vergence_ui::MenuLine::Item { id: base + i as u32, label: l.words[i].clone(), keys: l.keys.get(i).copied().unwrap_or("").to_string(), enabled: l.enabled.get(i).copied().unwrap_or(true), checked: None },
+                _ => vergence_ui::MenuLine::Item {
+                    id: base + i as u32,
+                    label: l.words[i].clone(),
+                    keys: l.keys.get(i).copied().unwrap_or("").to_string(),
+                    enabled: l.enabled.get(i).copied().unwrap_or(true),
+                    checked: None,
+                },
             })
             .collect();
         Some((at, lines))
@@ -1363,7 +1408,9 @@ impl Doc {
         }
         let line = self.buffer.line(i);
         let bad: Rc<[(usize, usize)]> = match vergence_spell::speller() {
-            Some(sp) => vergence_spell::words_to_check(line).into_iter().filter(|(a, b)| !sp.check(&line[*a..*b])).collect(),
+            Some(sp) => {
+                vergence_spell::words_to_check(line).into_iter().filter(|(a, b)| !sp.check(&line[*a..*b])).collect()
+            }
             None => Rc::from(Vec::new()),
         };
         if let Some(slot) = self.spelled.get_mut(i) {
@@ -1676,7 +1723,10 @@ impl Doc {
                 let (pa, pb) = if unit == 2 {
                     self.buffer.word_at(p)
                 } else {
-                    (Pos::new(p.line, 0), if p.line + 1 < self.buffer.line_count() { Pos::new(p.line + 1, 0) } else { self.buffer.end() })
+                    (
+                        Pos::new(p.line, 0),
+                        if p.line + 1 < self.buffer.line_count() { Pos::new(p.line + 1, 0) } else { self.buffer.end() },
+                    )
                 };
                 if p < a {
                     self.anchor = b;
@@ -1706,14 +1756,27 @@ impl Doc {
     /// What a screen reader is told: the whole text if not too long, the caret's place.
     pub(crate) fn meaning_value(&self) -> String {
         let (l, c) = self.line_column();
-        if self.buffer.bytes() <= TELL_WHOLE { format!("{} (line {l}, column {c})", self.buffer.to_text()) } else { format!("line {l} of {}, column {c}", self.buffer.line_count()) }
+        if self.buffer.bytes() <= TELL_WHOLE {
+            format!("{} (line {l}, column {c})", self.buffer.to_text())
+        } else {
+            format!("line {l} of {}, column {c}", self.buffer.line_count())
+        }
     }
 
     // --- Drawing ---
 
     /// Draws the area in `r`; its top `inset` points are under the window's
     /// bar: the text starts below them and scrolls up beneath them.
-    pub(crate) fn draw(&mut self, scene: &mut Scene, fonts: &mut Fonts, r: Rect, inset: f32, theme: &Theme, focused: bool, caret_on: bool) {
+    pub(crate) fn draw(
+        &mut self,
+        scene: &mut Scene,
+        fonts: &mut Fonts,
+        r: Rect,
+        inset: f32,
+        theme: &Theme,
+        focused: bool,
+        caret_on: bool,
+    ) {
         let inset = inset.clamp(0.0, (r.h - 40.0).max(0.0));
         let v = Rect::new(r.x, r.y + inset, r.w, r.h - inset);
         // "monospace" is the desktop's monospace font, at its size unless the
@@ -1726,7 +1789,13 @@ impl Doc {
             None => theme.text_size,
         }
         .clamp(4.0, 200.0);
-        let Some(face) = fonts.face(family, 400, false).or_else(|| fonts.face("monospace", 400, false)).or_else(|| fonts.face(&theme.font, 400, false)) else { return };
+        let Some(face) = fonts
+            .face(family, 400, false)
+            .or_else(|| fonts.face("monospace", 400, false))
+            .or_else(|| fonts.face(&theme.font, 400, false))
+        else {
+            return;
+        };
         let m = fonts.metrics(face, size);
         let spacing = self.options.line_spacing.filter(|s| s.is_finite()).unwrap_or(CODE_SPACING).clamp(1.0, 3.0);
         let line_h = (m.ascent + m.descent + m.line_gap).max(size * spacing).ceil();
@@ -1793,7 +1862,8 @@ impl Doc {
             widest = widest.max(s.width);
             if y + h > r.y {
                 // The words spelled wrong, less those let be and the one being typed.
-                let mut bad: Vec<(usize, usize)> = if self.options.spell { self.spelled_wrong(i).to_vec() } else { Vec::new() };
+                let mut bad: Vec<(usize, usize)> =
+                    if self.options.spell { self.spelled_wrong(i).to_vec() } else { Vec::new() };
                 if !self.ignored.is_empty() {
                     let line = self.buffer.line(i);
                     bad.retain(|(a, b)| !self.ignored.contains(&line[*a..*b]));
@@ -1823,7 +1893,10 @@ impl Doc {
                         }
                         let (from, to) = (ma.col.max(rs), mb.col.min(re));
                         if from < to {
-                            scene.fill(Rect::new(x0 + s.x_of(from), ry + 1.0, s.x_of(to) - s.x_of(from), line_h - 2.0), mark_c);
+                            scene.fill(
+                                Rect::new(x0 + s.x_of(from), ry + 1.0, s.x_of(to) - s.x_of(from), line_h - 2.0),
+                                mark_c,
+                            );
                         }
                     }
                     // The selection on this row.
@@ -1922,7 +1995,15 @@ impl Doc {
             } else if l.chosen >= l.first + rows {
                 l.first = l.chosen + 1 - rows;
             }
-            let widest = l.words.iter().zip(l.keys.iter().chain(std::iter::repeat(&""))).map(|(w, k)| fonts.layout(face, size, w).1 + if k.is_empty() { 0.0 } else { fonts.layout(face, size, k).1 + 28.0 }).fold(0.0f32, f32::max);
+            let widest = l
+                .words
+                .iter()
+                .zip(l.keys.iter().chain(std::iter::repeat(&"")))
+                .map(|(w, k)| {
+                    fonts.layout(face, size, w).1
+                        + if k.is_empty() { 0.0 } else { fonts.layout(face, size, k).1 + 28.0 }
+                })
+                .fold(0.0f32, f32::max);
             let w = (widest + 24.0).clamp(if menu { 220.0 } else { 140.0 }, (r.w - 8.0).max(140.0));
             let h = rows as f32 * line_h + 8.0;
             // Under the caret's row (above it where there is no room), or at the right click.
@@ -1934,14 +2015,27 @@ impl Doc {
             let ly = if below + h <= r.y + r.h { below } else { (ay - h).max(r.y) };
             let lr = Rect::new(lx, ly, w, h);
             let menu_c = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
-            let ground = if menu { menu_c(vergence_look::MENU) } else if theme.dark { theme.card } else { Color::rgb(255, 255, 255) };
-            scene.fill_rounded(Rect::new(lx - 1.0, ly + 1.0, w + 2.0, h + 2.0), vergence_look::RADIUS + 1.0, alpha(Color::rgb(0, 0, 0), 50));
+            let ground = if menu {
+                menu_c(vergence_look::MENU)
+            } else if theme.dark {
+                theme.card
+            } else {
+                Color::rgb(255, 255, 255)
+            };
+            scene.fill_rounded(
+                Rect::new(lx - 1.0, ly + 1.0, w + 2.0, h + 2.0),
+                vergence_look::RADIUS + 1.0,
+                alpha(Color::rgb(0, 0, 0), 50),
+            );
             scene.fill_rounded(lr, vergence_look::RADIUS, ground);
             scene.stroke(lr, vergence_look::RADIUS, 1.0, theme.line);
             for (k, word) in l.words.iter().enumerate().skip(l.first).take(rows) {
                 let ry = ly + 4.0 + (k - l.first) as f32 * line_h;
                 if menu && l.actions.get(k) == Some(&Action::Line) {
-                    scene.fill(Rect::new(lx + 10.0, ry + line_h / 2.0, w - 20.0, 1.0), alpha(menu_c(vergence_look::MENU_INK_OFF), 120));
+                    scene.fill(
+                        Rect::new(lx + 10.0, ry + line_h / 2.0, w - 20.0, 1.0),
+                        alpha(menu_c(vergence_look::MENU_INK_OFF), 120),
+                    );
                     continue;
                 }
                 let on = l.enabled.get(k) != Some(&false);
@@ -2052,7 +2146,11 @@ fn count_words(s: &str) -> u32 {
                 in_word = true;
             }
             prev_join = false;
-        } else if in_word && !prev_join && matches!(c, '\'' | '’' | '-') && chars.peek().is_some_and(|d| d.is_alphanumeric()) {
+        } else if in_word
+            && !prev_join
+            && matches!(c, '\'' | '’' | '-')
+            && chars.peek().is_some_and(|d| d.is_alphanumeric())
+        {
             prev_join = true;
         } else {
             in_word = false;
@@ -2078,7 +2176,17 @@ mod tests {
     fn doc(text: &str) -> Doc {
         let mut d = Doc::new(Buffer::from_text(text), AreaOptions::default());
         // Laid out as if drawn: 10-point rows, characters 8 wide, 80 wide.
-        d.geom = Geom { rect: Rect::new(0.0, 0.0, 200.0, 2.0 * PAD_Y + 50.0), text_x: 0.0, text_w: 80.0, line_h: 10.0, char_w: 8.0, wrap_w: 80.0, tab_w: 32.0, thumb: None, list: None };
+        d.geom = Geom {
+            rect: Rect::new(0.0, 0.0, 200.0, 2.0 * PAD_Y + 50.0),
+            text_x: 0.0,
+            text_w: 80.0,
+            line_h: 10.0,
+            char_w: 8.0,
+            wrap_w: 80.0,
+            tab_w: 32.0,
+            thumb: None,
+            list: None,
+        };
         d
     }
 
@@ -2314,7 +2422,9 @@ mod tests {
     #[test]
     fn the_list_chooses_and_narrows_and_takes_words_from_outside() {
         let mut d = doc("apple apricot\n");
-        d.set_words(Some(Rc::new(|p: &str, _| if "april".starts_with(&p.to_lowercase()) { vec!["April".to_string()] } else { vec![] })));
+        d.set_words(Some(Rc::new(|p: &str, _| {
+            if "april".starts_with(&p.to_lowercase()) { vec!["April".to_string()] } else { vec![] }
+        })));
         d.set_selection(Pos::new(1, 0), Pos::new(1, 0));
         typed(&mut d, "a");
         d.key(F5, None, Modifiers::default());

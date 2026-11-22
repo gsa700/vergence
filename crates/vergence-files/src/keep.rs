@@ -89,7 +89,10 @@ pub fn parse(text: &str) -> Vec<Snap> {
             let what = if line == "recent" {
                 Some(Kept::Recent)
             } else {
-                line.strip_prefix("tab ").map(Path::new).filter(|p| p.is_absolute()).map(|p| Kept::Folder(p.to_path_buf()))
+                line.strip_prefix("tab ")
+                    .map(Path::new)
+                    .filter(|p| p.is_absolute())
+                    .map(|p| Kept::Folder(p.to_path_buf()))
             };
             if let Some(what) = what {
                 w.tabs.push(KeptTab { what, scroll: 0.0 });
@@ -138,7 +141,15 @@ mod tests {
     #[test]
     fn windows_come_back_as_kept() {
         let all = vec![
-            Snap { token: "abc".into(), tabs: vec![folder("/home/d", 0.0), KeptTab { what: Kept::Recent, scroll: 120.0 }, folder("/home/d/My Pictures", 840.0)], front: 2 },
+            Snap {
+                token: "abc".into(),
+                tabs: vec![
+                    folder("/home/d", 0.0),
+                    KeptTab { what: Kept::Recent, scroll: 120.0 },
+                    folder("/home/d/My Pictures", 840.0),
+                ],
+                front: 2,
+            },
             Snap { token: "def".into(), tabs: vec![folder("/tmp", 0.0)], front: 0 },
             Snap { token: "empty".into(), tabs: Vec::new(), front: 0 },
         ];
@@ -147,7 +158,13 @@ mod tests {
 
     #[test]
     fn nonsense_is_left_out() {
-        let got = parse("tab /before/any/window\nwindow t\nfront 9\nat 50\ntab relative\nat 60\nnonsense\ntab /x\nat -3\nat 70\ntab /y\nat NaN\n");
-        assert_eq!(got, vec![Snap { token: "t".into(), tabs: vec![folder("/x", 0.0), folder("/y", 0.0)], front: 1 }], "a place goes only with the tab just before it");
+        let got = parse(
+            "tab /before/any/window\nwindow t\nfront 9\nat 50\ntab relative\nat 60\nnonsense\ntab /x\nat -3\nat 70\ntab /y\nat NaN\n",
+        );
+        assert_eq!(
+            got,
+            vec![Snap { token: "t".into(), tabs: vec![folder("/x", 0.0), folder("/y", 0.0)], front: 1 }],
+            "a place goes only with the tab just before it"
+        );
     }
 }

@@ -76,7 +76,24 @@ pub fn kind_of(name: &str, loopback: bool) -> Kind {
 
 /// Names of links that are no cable: bridges, tunnels, containers' and
 /// virtual machines' ends, on Linux and FreeBSD.
-const VIRTUAL: [&str; 16] = ["docker", "br-", "virbr", "veth", "tun", "tap", "wg", "tailscale", "zt", "vnet", "vboxnet", "vmnet", "bridge", "epair", "gif", "lxc"];
+const VIRTUAL: [&str; 16] = [
+    "docker",
+    "br-",
+    "virbr",
+    "veth",
+    "tun",
+    "tap",
+    "wg",
+    "tailscale",
+    "zt",
+    "vnet",
+    "vboxnet",
+    "vmnet",
+    "bridge",
+    "epair",
+    "gif",
+    "lxc",
+];
 
 /// Whether an interface is a network cable with a link at the other end (an
 /// Ethernet port, a phone's USB tethering): the rule Wi-Fi's "When no cable
@@ -99,7 +116,8 @@ pub fn is_phone(name: &str) -> bool {
     if name.contains('/') || name.starts_with('.') {
         return false;
     }
-    std::fs::read_link(format!("/sys/class/net/{name}/device/driver")).is_ok_and(|p| p.file_name().is_some_and(|d| d == "ipheth"))
+    std::fs::read_link(format!("/sys/class/net/{name}/device/driver"))
+        .is_ok_and(|p| p.file_name().is_some_and(|d| d == "ipheth"))
 }
 
 #[cfg(target_os = "freebsd")]
@@ -125,8 +143,10 @@ pub fn link(name: &str) -> (Option<u32>, Option<bool>) {
     if name.contains('/') || name.starts_with('.') {
         return (None, None);
     }
-    let read = |f: &str| std::fs::read_to_string(format!("/sys/class/net/{name}/{f}")).ok().map(|s| s.trim().to_string());
-    let speed = read("speed").and_then(|s| s.parse::<i64>().ok()).filter(|v| *v > 0 && *v < 10_000_000).map(|v| v as u32);
+    let read =
+        |f: &str| std::fs::read_to_string(format!("/sys/class/net/{name}/{f}")).ok().map(|s| s.trim().to_string());
+    let speed =
+        read("speed").and_then(|s| s.parse::<i64>().ok()).filter(|v| *v > 0 && *v < 10_000_000).map(|v| v as u32);
     let duplex = read("duplex").and_then(|d| match d.as_str() {
         "full" => Some(true),
         "half" => Some(false),
@@ -154,10 +174,14 @@ pub fn link(name: &str) -> (Option<u32>, Option<bool>) {
         fn close(fd: i32) -> i32;
     }
     // _IOWR('i', 56, struct ifmediareq): in|out, its size, group 'i', number 56.
-    const SIOCGIFMEDIA: std::ffi::c_ulong = 0xc000_0000 | ((std::mem::size_of::<IfMediaReq>() as std::ffi::c_ulong & 0x1fff) << 16) | ((b'i' as std::ffi::c_ulong) << 8) | 56;
+    const SIOCGIFMEDIA: std::ffi::c_ulong = 0xc000_0000
+        | ((std::mem::size_of::<IfMediaReq>() as std::ffi::c_ulong & 0x1fff) << 16)
+        | ((b'i' as std::ffi::c_ulong) << 8)
+        | 56;
     const IFM_ETHER: i32 = 0x20;
     const IFM_FDX: i32 = 0x0010_0000;
-    let mut req = IfMediaReq { name: [0; 16], current: 0, mask: 0, status: 0, active: 0, count: 0, ulist: std::ptr::null_mut() };
+    let mut req =
+        IfMediaReq { name: [0; 16], current: 0, mask: 0, status: 0, active: 0, count: 0, ulist: std::ptr::null_mut() };
     let bytes = name.as_bytes();
     if bytes.len() >= 16 {
         return (None, None);
@@ -236,7 +260,8 @@ mod sys {
 }
 
 fn mac_text(bytes: &[u8]) -> Option<String> {
-    (bytes.len() == 6 && bytes.iter().any(|b| *b != 0)).then(|| bytes.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(":"))
+    (bytes.len() == 6 && bytes.iter().any(|b| *b != 0))
+        .then(|| bytes.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(":"))
 }
 
 /// The prefix length a netmask's bytes make.
@@ -260,11 +285,20 @@ pub fn list() -> io::Result<Vec<Iface>> {
         if e.ifa_name.is_null() {
             continue;
         }
-        let name: String = unsafe { CStr::from_ptr(e.ifa_name) }.to_string_lossy().chars().filter(|c| !c.is_control()).take(32).collect();
+        let name: String = unsafe { CStr::from_ptr(e.ifa_name) }
+            .to_string_lossy()
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(32)
+            .collect();
         let i = match out.iter().position(|f| f.name == name) {
             Some(i) => i,
             None => {
-                out.push(Iface { kind: kind_of(&name, e.ifa_flags & IFF_LOOPBACK != 0), name: name.clone(), ..Default::default() });
+                out.push(Iface {
+                    kind: kind_of(&name, e.ifa_flags & IFF_LOOPBACK != 0),
+                    name: name.clone(),
+                    ..Default::default()
+                });
                 out.len() - 1
             }
         };
@@ -361,7 +395,14 @@ mod tests {
 
     #[test]
     fn what_counts_as_a_cable() {
-        let iface = |name: &str, kind: Kind, carrier: bool| Iface { name: name.into(), kind, up: true, carrier, mac: Some("aa:bb:cc:dd:ee:ff".into()), ..Default::default() };
+        let iface = |name: &str, kind: Kind, carrier: bool| Iface {
+            name: name.into(),
+            kind,
+            up: true,
+            carrier,
+            mac: Some("aa:bb:cc:dd:ee:ff".into()),
+            ..Default::default()
+        };
         assert!(is_cable(&iface("enp5s0", Kind::Wired, true)));
         assert!(is_cable(&iface("em0", Kind::Wired, true)));
         assert!(is_cable(&iface("eth1", Kind::Phone, true)), "a phone's USB tethering is a cable");

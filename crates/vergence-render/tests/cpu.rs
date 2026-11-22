@@ -28,7 +28,16 @@ fn a_fill_covers_exactly_its_pixels() {
     s.fill(Rect::new(2.0, 3.0, 4.0, 5.0), RED);
     let p = draw(&s, 1.0, BLACK);
     assert_eq!((p.width, p.height), (10, 10));
-    for (x, y, inside) in [(2, 3, true), (5, 7, true), (1, 3, false), (2, 2, false), (6, 7, false), (5, 8, false), (0, 0, false), (9, 9, false)] {
+    for (x, y, inside) in [
+        (2, 3, true),
+        (5, 7, true),
+        (1, 3, false),
+        (2, 2, false),
+        (6, 7, false),
+        (5, 8, false),
+        (0, 0, false),
+        (9, 9, false),
+    ] {
         assert_eq!(p.pixel(x, y), if inside { [255, 0, 0, 255] } else { [0, 0, 0, 255] }, "{x},{y}");
     }
 }
@@ -38,7 +47,12 @@ fn an_edge_between_pixels_is_half_covered() {
     let mut s = Scene::new(10.0, 10.0);
     s.fill(Rect::new(2.5, 2.0, 3.0, 2.5), WHITE);
     let p = draw(&s, 1.0, BLACK);
-    assert!(near(p.pixel(2, 2)[0], 128) && near(p.pixel(5, 2)[0], 128), "left and right edges: {:?} {:?}", p.pixel(2, 2), p.pixel(5, 2));
+    assert!(
+        near(p.pixel(2, 2)[0], 128) && near(p.pixel(5, 2)[0], 128),
+        "left and right edges: {:?} {:?}",
+        p.pixel(2, 2),
+        p.pixel(5, 2)
+    );
     assert_eq!(p.pixel(3, 2), [255, 255, 255, 255]);
     assert!(near(p.pixel(3, 4)[0], 128), "bottom edge: {:?}", p.pixel(3, 4));
     assert!(near(p.pixel(2, 4)[0], 64), "the corner is a quarter: {:?}", p.pixel(2, 4));
@@ -104,7 +118,21 @@ fn a_stroke_is_only_the_outline() {
     let mut s = Scene::new(20.0, 20.0);
     s.stroke(Rect::new(2.0, 2.0, 16.0, 16.0), 0.0, 2.0, RED);
     let p = draw(&s, 1.0, BLACK);
-    for (x, y, on) in [(2, 2, true), (3, 10, true), (4, 10, false), (10, 10, false), (15, 10, false), (16, 10, true), (17, 10, true), (18, 10, false), (10, 3, true), (10, 4, false), (10, 17, true), (10, 18, false), (1, 1, false)] {
+    for (x, y, on) in [
+        (2, 2, true),
+        (3, 10, true),
+        (4, 10, false),
+        (10, 10, false),
+        (15, 10, false),
+        (16, 10, true),
+        (17, 10, true),
+        (18, 10, false),
+        (10, 3, true),
+        (10, 4, false),
+        (10, 17, true),
+        (10, 18, false),
+        (1, 1, false),
+    ] {
         assert_eq!(p.pixel(x, y), if on { [255, 0, 0, 255] } else { [0, 0, 0, 255] }, "{x},{y}");
     }
     // Wider than the shape: all of it.
@@ -258,7 +286,11 @@ impl Rng {
 fn busy() -> Scene {
     let mut rng = Rng(0x1234_5678_9abc_def1);
     let mut s = Scene::new(300.0, 200.0);
-    let pic = s.image(Image { width: 3, height: 3, rgba: (0..36).map(|i| (i * 7) as u8 | if i % 4 == 3 { 0x80 } else { 0 }).collect() });
+    let pic = s.image(Image {
+        width: 3,
+        height: 3,
+        rgba: (0..36).map(|i| (i * 7) as u8 | if i % 4 == 3 { 0x80 } else { 0 }).collect(),
+    });
     let mut open = 0;
     for i in 0..400 {
         let r = Rect::new(rng.unit() * 320.0 - 20.0, rng.unit() * 220.0 - 20.0, rng.unit() * 90.0, rng.unit() * 60.0);
@@ -280,7 +312,15 @@ fn busy() -> Scene {
                 s.draw_image(pic, r, rng.unit());
             }
             7 if open < 3 => {
-                s.push_clip(Rect::new(rng.unit() * 150.0, rng.unit() * 100.0, 60.0 + rng.unit() * 150.0, 40.0 + rng.unit() * 100.0), if i % 2 == 0 { 0.0 } else { rng.unit() * 20.0 });
+                s.push_clip(
+                    Rect::new(
+                        rng.unit() * 150.0,
+                        rng.unit() * 100.0,
+                        60.0 + rng.unit() * 150.0,
+                        40.0 + rng.unit() * 100.0,
+                    ),
+                    if i % 2 == 0 { 0.0 } else { rng.unit() * 20.0 },
+                );
                 open += 1;
             }
             _ if open > 0 => {
@@ -469,7 +509,8 @@ fn grid_two_ways(fonts: &mut Fonts, face: vergence_text::FaceId) -> (Scene, Scen
                 // One character no font has: its cell holds glyph 0, the "no such character" box.
                 glyph: if ch == '&' { 0 } else { fonts.glyph(face, ch).1 },
                 font: 0,
-                flags: if r % 2 == 1 && (3..9).contains(&c) { CELL_UNDERLINE } else { 0 } | if ch == ' ' { 0 } else { CELL_GLYPH },
+                flags: if r % 2 == 1 && (3..9).contains(&c) { CELL_UNDERLINE } else { 0 }
+                    | if ch == ' ' { 0 } else { CELL_GLYPH },
             });
         }
     }
@@ -506,7 +547,13 @@ fn grid_two_ways(fonts: &mut Fonts, face: vergence_text::FaceId) -> (Scene, Scen
             }
         }
         for (c, cell) in row.iter().enumerate().filter(|(_, cell)| cell.flags & CELL_GLYPH != 0) {
-            plain.glyphs(font, size, cell.ink, Point::new(origin.x, top + baseline), vec![Glyph { id: cell.glyph, x: c as f32 * cw, y: 0.0 }]);
+            plain.glyphs(
+                font,
+                size,
+                cell.ink,
+                Point::new(origin.x, top + baseline),
+                vec![Glyph { id: cell.glyph, x: c as f32 * cw, y: 0.0 }],
+            );
         }
     }
     (grid, plain)
@@ -517,7 +564,12 @@ fn a_grid_of_cells_is_the_fills_and_glyphs_it_stands_for() {
     let (mut fonts, face) = mono();
     let (grid, plain) = grid_two_ways(&mut fonts, face);
     assert_eq!(grid.validate(), Ok(()));
-    assert!(grid.commands.len() == 2 && plain.commands.len() > 60, "{} commands against {}", grid.commands.len(), plain.commands.len());
+    assert!(
+        grid.commands.len() == 2 && plain.commands.len() > 60,
+        "{} commands against {}",
+        grid.commands.len(),
+        plain.commands.len()
+    );
     for scale in [1.0, 1.25, 2.0, 3.0] {
         let a = Cpu::new().render(&grid, &mut fonts, scale, BLACK).unwrap();
         let b = Cpu::new().render(&plain, &mut fonts, scale, BLACK).unwrap();

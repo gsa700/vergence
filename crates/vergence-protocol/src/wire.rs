@@ -292,8 +292,16 @@ mod tests {
 
     #[test]
     fn frames_arrive_in_pieces() {
-        let a = { let mut e = Encoder::frame(1); e.str("one"); e.finish().unwrap() };
-        let b = { let mut e = Encoder::frame(2); e.u32(2); e.finish().unwrap() };
+        let a = {
+            let mut e = Encoder::frame(1);
+            e.str("one");
+            e.finish().unwrap()
+        };
+        let b = {
+            let mut e = Encoder::frame(2);
+            e.u32(2);
+            e.finish().unwrap()
+        };
         let all: Vec<u8> = a.iter().chain(b.iter()).copied().collect();
         let mut r = FrameReader::new();
         let mut got = Vec::new();

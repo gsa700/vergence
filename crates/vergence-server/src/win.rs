@@ -129,7 +129,11 @@ impl Win {
         }
     }
 
-    pub fn surface_under<P: Into<Point<f64, Logical>>>(&self, point: P, kind: WindowSurfaceType) -> Option<(WlSurface, Point<i32, Logical>)> {
+    pub fn surface_under<P: Into<Point<f64, Logical>>>(
+        &self,
+        point: P,
+        kind: WindowSurfaceType,
+    ) -> Option<(WlSurface, Point<i32, Logical>)> {
         self.smithay().and_then(|w| w.surface_under(point, kind))
     }
 
@@ -141,8 +145,13 @@ impl Win {
     }
 
     /// Tells the window's surfaces that a frame has been shown on `output`.
-    pub fn send_frame<T, F>(&self, output: &Output, time: T, throttle: Option<std::time::Duration>, primary_scan_out_output: F)
-    where
+    pub fn send_frame<T, F>(
+        &self,
+        output: &Output,
+        time: T,
+        throttle: Option<std::time::Duration>,
+        primary_scan_out_output: F,
+    ) where
         T: Into<std::time::Duration>,
         F: FnMut(&WlSurface, &smithay::wayland::compositor::SurfaceData) -> Option<Output> + Copy,
     {
@@ -244,7 +253,13 @@ where
 {
     type RenderElement = WaylandSurfaceRenderElement<R>;
 
-    fn render_elements<C: From<WaylandSurfaceRenderElement<R>>>(&self, renderer: &mut R, location: Point<i32, Physical>, scale: Scale<f64>, alpha: f32) -> Vec<C> {
+    fn render_elements<C: From<WaylandSurfaceRenderElement<R>>>(
+        &self,
+        renderer: &mut R,
+        location: Point<i32, Physical>,
+        scale: Scale<f64>,
+        alpha: f32,
+    ) -> Vec<C> {
         match self {
             Win::Smithay(w) => w.render_elements(renderer, location, scale, alpha),
             // Drawn by the scene from its picture (decor.rs), not as a surface.

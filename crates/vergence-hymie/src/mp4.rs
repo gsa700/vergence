@@ -271,7 +271,9 @@ impl Walker<'_> {
                         walked?;
                     }
                 }
-                b"mdia" | b"minf" | b"stbl" | b"edts" | b"udta" | b"ilst" => self.walk(body, body_end, movie, trak, depth + 1)?,
+                b"mdia" | b"minf" | b"stbl" | b"edts" | b"udta" | b"ilst" => {
+                    self.walk(body, body_end, movie, trak, depth + 1)?
+                }
                 b"meta" => {
                     // A full box in MP4 (version and flags first), not in QuickTime.
                     let from = if be32(d, body) == 0 { body + 4 } else { body };
@@ -280,7 +282,8 @@ impl Walker<'_> {
                 b"mdhd" if trak => {
                     let version = byte(d, body);
                     movie.track_timescale = be32(d, body + if version == 1 { 20 } else { 12 }) as i64;
-                    movie.mdhd_duration = if version == 1 { be64(d, body + 24) as i64 } else { be32(d, body + 16) as i64 };
+                    movie.mdhd_duration =
+                        if version == 1 { be64(d, body + 24) as i64 } else { be32(d, body + 16) as i64 };
                 }
                 b"hdlr" if trak => {
                     if span(d, body + 8, body + 12) == b"soun" {
@@ -295,7 +298,11 @@ impl Walker<'_> {
                     let mut found = false;
                     let mut i = 0;
                     while i < count && e + step <= body_end {
-                        let (segment, media_time) = if version == 1 { (be64(d, e) as i64, be64(d, e + 8) as i64) } else { (be32(d, e) as i64, be32(d, e + 4) as i32 as i64) };
+                        let (segment, media_time) = if version == 1 {
+                            (be64(d, e) as i64, be64(d, e + 8) as i64)
+                        } else {
+                            (be32(d, e) as i64, be32(d, e + 4) as i32 as i64)
+                        };
                         e += step;
                         movie.edits_duration = movie.edits_duration.wrapping_add(segment);
                         if !found && media_time != -1 {
@@ -325,21 +332,34 @@ impl Walker<'_> {
                     let fixed_size = be32(d, body + 4) as u64;
                     let sample_count = be32(d, body + 8) as u64;
                     let len = d.len() as u64;
-                    if fixed_size > i32::MAX as u64 || sample_count > len || (fixed_size == 0 && 12 + 4 * sample_count > body_end - body) || sample_count * fixed_size > len {
+                    if fixed_size > i32::MAX as u64
+                        || sample_count > len
+                        || (fixed_size == 0 && 12 + 4 * sample_count > body_end - body)
+                        || sample_count * fixed_size > len
+                    {
                         return Err(damaged("A broken MP4 sample size table."));
                     }
                     movie.fixed_size = fixed_size as u32;
                     movie.sample_count = sample_count as u32;
-                    movie.sizes = Some(if fixed_size == 0 { (0..sample_count).map(|i| be32(d, body + 12 + i * 4)).collect() } else { Vec::new() });
+                    movie.sizes = Some(if fixed_size == 0 {
+                        (0..sample_count).map(|i| be32(d, body + 12 + i * 4)).collect()
+                    } else {
+                        Vec::new()
+                    });
                 }
                 b"stsc" if trak => {
                     let count = self.count(body, body_end, 12)? as u64;
-                    movie.stsc = Some((0..count).map(|i| (be32(d, body + 8 + i * 12), be32(d, body + 12 + i * 12))).collect());
+                    movie.stsc =
+                        Some((0..count).map(|i| (be32(d, body + 8 + i * 12), be32(d, body + 12 + i * 12))).collect());
                 }
                 b"stco" | b"co64" if trak => {
                     let wide = &t == b"co64";
                     let count = self.count(body, body_end, if wide { 8 } else { 4 })? as u64;
-                    movie.chunk_offsets = Some((0..count).map(|i| if wide { be64(d, body + 8 + i * 8) } else { be32(d, body + 8 + i * 4) as u64 }).collect());
+                    movie.chunk_offsets = Some(
+                        (0..count)
+                            .map(|i| if wide { be64(d, body + 8 + i * 8) } else { be32(d, body + 8 + i * 4) as u64 })
+                            .collect(),
+                    );
                 }
                 b"----" => self.freeform(body, body_end, movie),
                 // The tags a preview shows (Hymie read them with TagLib#).
@@ -373,7 +393,11 @@ impl Walker<'_> {
                         2 => 36,
                         _ => 0,
                     };
-                return if &t == b"mp4a" { self.esds(children, at + size, trak, depth + 1) } else { self.alac_cookie(children, at + size, trak, depth + 1) };
+                return if &t == b"mp4a" {
+                    self.esds(children, at + size, trak, depth + 1)
+                } else {
+                    self.alac_cookie(children, at + size, trak, depth + 1)
+                };
             }
             at += size;
         }
@@ -497,7 +521,11 @@ impl Walker<'_> {
             // int.TryParse(..., HexNumber): eight hex digits, the top bit the sign.
             let parts: Vec<&str> = value.split(' ').filter(|p| !p.is_empty()).collect();
             if parts.len() >= 4
-                && let (Ok(priming), Ok(remainder), Ok(samples)) = (u32::from_str_radix(parts[1], 16), u32::from_str_radix(parts[2], 16), u64::from_str_radix(parts[3], 16))
+                && let (Ok(priming), Ok(remainder), Ok(samples)) = (
+                    u32::from_str_radix(parts[1], 16),
+                    u32::from_str_radix(parts[2], 16),
+                    u64::from_str_radix(parts[3], 16),
+                )
             {
                 movie.smpb = Some((priming as i32, remainder as i32, samples as i64));
             }
@@ -531,7 +559,9 @@ impl Walker<'_> {
         for (kind, value) in self.data_atoms(start, end) {
             let text = match kind {
                 1 => String::from_utf8_lossy(value).into_owned(),
-                2 => String::from_utf16_lossy(&value.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes(*c)).collect::<Vec<_>>()),
+                2 => String::from_utf16_lossy(
+                    &value.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes(*c)).collect::<Vec<_>>(),
+                ),
                 _ => continue,
             };
             movie.tags.put_text(which, text);
@@ -693,10 +723,16 @@ impl Mp4Track {
 
         // The length and the cuts, in decoded samples (FFmpeg's st->duration,
         // skip_samples and first_discard_sample).
-        let to_samples = |t: i64| if movie.track_timescale == rate as i64 { t } else { rescale(t, rate as i64, movie.track_timescale) };
+        let to_samples = |t: i64| {
+            if movie.track_timescale == rate as i64 { t } else { rescale(t, rate as i64, movie.track_timescale) }
+        };
         let decoded = offsets.len() as i64 * frame_length as i64;
         let stts_total = movie.stts_total;
-        let mut duration = if movie.mdhd_duration > 0 { movie.mdhd_duration.min(if stts_total > 0 { stts_total } else { i64::MAX }) } else { stts_total };
+        let mut duration = if movie.mdhd_duration > 0 {
+            movie.mdhd_duration.min(if stts_total > 0 { stts_total } else { i64::MAX })
+        } else {
+            stts_total
+        };
         let (mut origin, mut skip) = (0i64, 0i64);
         if let Some(media_time) = movie.edit_media_time {
             origin = media_time;
@@ -809,7 +845,8 @@ impl Track for Mp4Track {
                 continue;
             }
             let n = ((want - done).min(self.pcm_frames - self.pcm_offset) as i64).min(self.end - s) as usize;
-            into[done * channels..(done + n) * channels].copy_from_slice(&self.pcm[self.pcm_offset * channels..(self.pcm_offset + n) * channels]);
+            into[done * channels..(done + n) * channels]
+                .copy_from_slice(&self.pcm[self.pcm_offset * channels..(self.pcm_offset + n) * channels]);
             self.pcm_offset += n;
             done += n;
         }

@@ -51,13 +51,7 @@ fn find_window(conn: &RustConnection, root: u32, title: &str) -> Res<Option<u32>
 fn find_box(conn: &RustConnection, win: u32) -> Res<Option<(u32, u32, u32, u32)>> {
     let g = conn.get_geometry(win)?.reply()?;
     let img = conn.get_image(ImageFormat::Z_PIXMAP, win, 0, 0, g.width, g.height, !0)?.reply()?;
-    let bpp = conn
-        .setup()
-        .pixmap_formats
-        .iter()
-        .find(|f| f.depth == img.depth)
-        .map(|f| f.bits_per_pixel)
-        .unwrap_or(32);
+    let bpp = conn.setup().pixmap_formats.iter().find(|f| f.depth == img.depth).map(|f| f.bits_per_pixel).unwrap_or(32);
     if bpp != 32 {
         return Err(format!("depth {} uses {bpp} bits per pixel; only 32 is supported", img.depth).into());
     }
@@ -113,10 +107,7 @@ pub fn measure(conn: &RustConnection, root: u32, title: &str) -> Res<Option<Foun
             return Err(format!("{} has no physical size", String::from_utf8_lossy(&oi.name)).into());
         }
         let panel = (bw as f64 / factor, bh as f64 / factor);
-        let mm = (
-            panel.0 * oi.mm_width as f64 / mode.width as f64,
-            panel.1 * oi.mm_height as f64 / mode.height as f64,
-        );
+        let mm = (panel.0 * oi.mm_width as f64 / mode.width as f64, panel.1 * oi.mm_height as f64 / mode.height as f64);
         return Ok(Some(Found { output: String::from_utf8_lossy(&oi.name).into_owned(), drawn: (bw, bh), panel, mm }));
     }
     Err(format!("{title}: the box is on no lit monitor").into())

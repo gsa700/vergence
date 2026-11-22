@@ -19,7 +19,9 @@ use std::process::ExitCode;
 use vergence_shell::{apps, open};
 
 fn usage() -> ExitCode {
-    eprintln!("usage: vergence-open [--with APP] FILE|LINK...\n       vergence-open --type|--apps FILE|LINK...\n       vergence-open --default TYPE APP");
+    eprintln!(
+        "usage: vergence-open [--with APP] FILE|LINK...\n       vergence-open --type|--apps FILE|LINK...\n       vergence-open --default TYPE APP"
+    );
     ExitCode::from(2)
 }
 
@@ -39,7 +41,12 @@ fn main() -> ExitCode {
             for given in &args[1..] {
                 let i = open::item(given);
                 let found = open::apps_for(&i.mime, &entries, &lists);
-                println!("{} ({}): {}", i.given, i.mime, if found.is_empty() { "none".into() } else { found.join(", ") });
+                println!(
+                    "{} ({}): {}",
+                    i.given,
+                    i.mime,
+                    if found.is_empty() { "none".into() } else { found.join(", ") }
+                );
             }
             ExitCode::SUCCESS
         }
@@ -69,10 +76,15 @@ fn run(given: &[String], app: Option<&str>) -> ExitCode {
         && let Ok(mut bus) = vergence_protocol::Client::connect("vergence-open")
     {
         let all: Vec<String> = items.iter().map(|i| i.arg.clone()).collect();
-        let reply = bus.request(|serial| vergence_protocol::bus::ClientMsg::Open { serial, items: all, app: app.unwrap_or_default().to_string() });
+        let reply = bus.request(|serial| vergence_protocol::bus::ClientMsg::Open {
+            serial,
+            items: all,
+            app: app.unwrap_or_default().to_string(),
+        });
         return match reply {
             Ok(vergence_protocol::bus::ServerMsg::Done { .. }) => ExitCode::SUCCESS,
-            Err(vergence_protocol::ClientError::Refused(_, message)) | Ok(vergence_protocol::bus::ServerMsg::Error { message, .. }) => {
+            Err(vergence_protocol::ClientError::Refused(_, message))
+            | Ok(vergence_protocol::bus::ServerMsg::Error { message, .. }) => {
                 eprintln!("vergence-open: {message}");
                 ExitCode::FAILURE
             }

@@ -74,7 +74,12 @@ impl App {
     pub fn places_dialog(&mut self, window: &mut Window) {
         if let Some(app) = self.places_ask.take() {
             let name = self.places_name(&app);
-            window.open_window(vergence_widgets::window(ForgetDialog { mail: self.mail.clone(), app, name, theme: Program::theme(self) }));
+            window.open_window(vergence_widgets::window(ForgetDialog {
+                mail: self.mail.clone(),
+                app,
+                name,
+                theme: Program::theme(self),
+            }));
         }
     }
 
@@ -84,20 +89,39 @@ impl App {
             return self.group(heading, vec![setting("Reading the list...", "", space())]);
         };
         if list.is_empty() {
-            return self.group(heading, vec![setting("No window places are kept", "Where each app's windows were is remembered when they move or close, per screen setup.", space())]);
+            return self.group(
+                heading,
+                vec![setting(
+                    "No window places are kept",
+                    "Where each app's windows were is remembered when they move or close, per screen setup.",
+                    space(),
+                )],
+            );
         }
         let mut rows: Vec<Element<Message>> = list
             .iter()
             .map(|(app, n)| {
                 let name = self.places_name(app);
-                let detail = if *n == 1 { "1 place kept.".to_string() } else { format!("{n} places kept, across screen setups.") };
-                setting(&name, &detail, button(label("Forget")).on_press(Message::Places(PlacesMsg::Ask(app.clone()))).name(&format!("Forget {name}'s window places")))
+                let detail = if *n == 1 {
+                    "1 place kept.".to_string()
+                } else {
+                    format!("{n} places kept, across screen setups.")
+                };
+                setting(
+                    &name,
+                    &detail,
+                    button(label("Forget"))
+                        .on_press(Message::Places(PlacesMsg::Ask(app.clone())))
+                        .name(&format!("Forget {name}'s window places")),
+                )
             })
             .collect();
         rows.push(setting(
             "Every app",
             "Windows open in the default place until they are moved again. Open windows stay where they are.",
-            button(label("Forget all")).on_press(Message::Places(PlacesMsg::Ask(String::new()))).name("Forget all window places"),
+            button(label("Forget all"))
+                .on_press(Message::Places(PlacesMsg::Ask(String::new())))
+                .name("Forget all window places"),
         ));
         self.group(heading, rows)
     }
@@ -121,7 +145,11 @@ pub enum ForgetMsg {
 
 impl ForgetDialog {
     fn question(&self) -> String {
-        if self.app.is_empty() { "Forget where every app's windows go?".into() } else { format!("Forget where {}'s windows go?", self.name) }
+        if self.app.is_empty() {
+            "Forget where every app's windows go?".into()
+        } else {
+            format!("Forget where {}'s windows go?", self.name)
+        }
     }
 }
 
@@ -137,20 +165,33 @@ impl Program for ForgetDialog {
         self.theme.clone()
     }
     fn view(&self, _: &Theme) -> Element<ForgetMsg> {
-        let detail = if self.app.is_empty() { "Every app's windows open in the default place next time." } else { "They open in the default place next time." };
-        panel(column(vec![
-            label(self.question()).size(15.0).weight(600).wrap().width(Length::FILL),
-            label(detail).dim().wrap().width(Length::FILL),
-            row(vec![
-                space().width(Length::FILL),
-                button(label("Cancel").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(ForgetMsg::Cancel).name("Cancel"),
-                button(label("Forget").size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(4.0, 14.0)).on_press(ForgetMsg::Forget).name("Forget"),
+        let detail = if self.app.is_empty() {
+            "Every app's windows open in the default place next time."
+        } else {
+            "They open in the default place next time."
+        };
+        panel(
+            column(vec![
+                label(self.question()).size(15.0).weight(600).wrap().width(Length::FILL),
+                label(detail).dim().wrap().width(Length::FILL),
+                row(vec![
+                    space().width(Length::FILL),
+                    button(label("Cancel").size(12.0))
+                        .padding(Padding::hv(4.0, 12.0))
+                        .on_press(ForgetMsg::Cancel)
+                        .name("Cancel"),
+                    button(label("Forget").size(12.0))
+                        .look(ButtonLook::Accent)
+                        .padding(Padding::hv(4.0, 14.0))
+                        .on_press(ForgetMsg::Forget)
+                        .name("Forget"),
+                ])
+                .spacing(8.0)
+                .width(Length::FILL),
             ])
-            .spacing(8.0)
+            .spacing(10.0)
             .width(Length::FILL),
-        ])
-        .spacing(10.0)
-        .width(Length::FILL))
+        )
         .padding(20.0)
         .radius(0.0)
         .width(Length::FILL)
@@ -164,7 +205,14 @@ impl Program for ForgetDialog {
         window.close();
     }
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: true, min: (400.0, 150.0), max: (0.0, 0.0), alone: false, frosted: false }
+        vergence_ui::Style {
+            kind: vergence_ui::WinKind::Dialog,
+            modal: true,
+            min: (400.0, 150.0),
+            max: (0.0, 0.0),
+            alone: false,
+            frosted: false,
+        }
     }
     fn scale(&mut self, _: f32) -> bool {
         false

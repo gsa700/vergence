@@ -33,7 +33,10 @@ pub struct WindowSnap {
 }
 
 pub fn dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
     Some(base.join("vergence/edit"))
 }
 
@@ -46,7 +49,14 @@ fn render(windows: &[WindowSnap], text_files: &[Vec<Option<String>>]) -> String 
         out += &format!("window {}\nfront {}\n", w.token.replace(['\n', '\t'], ""), w.front);
         for (t, f) in w.tabs.iter().zip(files) {
             let path = t.path.as_ref().map(|p| p.to_string_lossy().replace(['\n', '\t'], " ")).unwrap_or_default();
-            out += &format!("tab {}\t{}\t{}\t{}\t{}\n", t.untitled, t.caret.0, t.caret.1, f.as_deref().unwrap_or("-"), path);
+            out += &format!(
+                "tab {}\t{}\t{}\t{}\t{}\n",
+                t.untitled,
+                t.caret.0,
+                t.caret.1,
+                f.as_deref().unwrap_or("-"),
+                path
+            );
         }
     }
     out
@@ -60,7 +70,14 @@ pub fn save(windows: &[WindowSnap]) {
     }
     let write = |name: &str, text: &str| -> bool {
         let tmp = d.join(format!("{name}.new"));
-        let ok = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp).and_then(|mut f| f.write_all(text.as_bytes())).is_ok();
+        let ok = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&tmp)
+            .and_then(|mut f| f.write_all(text.as_bytes()))
+            .is_ok();
         ok && fs::rename(&tmp, d.join(name)).is_ok()
     };
     // The unsaved texts first, then the list that names them.
@@ -122,9 +139,16 @@ pub fn parse(text: &str, d: &Path) -> Vec<WindowSnap> {
                 continue;
             }
             // Only a text file of our own naming, in our own folder.
-            let text = (f[3] != "-" && f[3].starts_with("text-") && !f[3].contains('/')).then(|| fs::read_to_string(d.join(f[3])).ok()).flatten();
+            let text = (f[3] != "-" && f[3].starts_with("text-") && !f[3].contains('/'))
+                .then(|| fs::read_to_string(d.join(f[3])).ok())
+                .flatten();
             let path = (!f[4].is_empty() && f[4].starts_with('/')).then(|| PathBuf::from(f[4]));
-            w.tabs.push(TabSnap { untitled: f[0].parse().unwrap_or(1), caret: (f[1].parse().unwrap_or(0), f[2].parse().unwrap_or(0)), text, path });
+            w.tabs.push(TabSnap {
+                untitled: f[0].parse().unwrap_or(1),
+                caret: (f[1].parse().unwrap_or(0), f[2].parse().unwrap_or(0)),
+                text,
+                path,
+            });
         }
     }
     out

@@ -31,7 +31,10 @@ use std::time::{Instant, SystemTime};
 use vergence_scene::{Color, Image, Point, Rect};
 use vergence_ui::{MenuLine, Modifiers};
 use vergence_widgets::files::{self, Entry, Kind};
-use vergence_widgets::{Align, ButtonLook, Element, Input, Length, Padding, Program, Theme, Touch, Waker, Window, button, column, drawing, field, label, panel, row, space, stack};
+use vergence_widgets::{
+    Align, ButtonLook, Element, Input, Length, Padding, Program, Theme, Touch, Waker, Window, button, column, drawing,
+    field, label, panel, row, space, stack,
+};
 
 use crate::ops;
 
@@ -48,11 +51,18 @@ const DOUBLE: std::time::Duration = std::time::Duration::from_millis(450);
 
 /// The user's Desktop folder: the XDG user-dirs file's, else ~/Desktop.
 pub fn desktop_dir() -> PathBuf {
-    files::user_dirs().into_iter().find(|(n, _)| n == "Desktop").map(|(_, p)| p).unwrap_or_else(|| files::home().unwrap_or_else(|| PathBuf::from("/")).join("Desktop"))
+    files::user_dirs()
+        .into_iter()
+        .find(|(n, _)| n == "Desktop")
+        .map(|(_, p)| p)
+        .unwrap_or_else(|| files::home().unwrap_or_else(|| PathBuf::from("/")).join("Desktop"))
 }
 
 fn places_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| files::home().map(|h| h.join(".local/state")))?;
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| files::home().map(|h| h.join(".local/state")))?;
     Some(base.join("vergence/desktop-places"))
 }
 
@@ -75,7 +85,11 @@ fn write_places(all: &[(String, i32, i32, String)]) {
     if let Some(d) = p.parent() {
         let _ = std::fs::create_dir_all(d);
     }
-    let text: String = all.iter().filter(|(_, _, _, n)| !n.contains(['\t', '\n'])).map(|(s, c, r, n)| format!("{s}\t{c}\t{r}\t{n}\n")).collect();
+    let text: String = all
+        .iter()
+        .filter(|(_, _, _, n)| !n.contains(['\t', '\n']))
+        .map(|(s, c, r, n)| format!("{s}\t{c}\t{r}\t{n}\n"))
+        .collect();
     let tmp = p.with_extension("new");
     if std::fs::write(&tmp, text).is_ok() {
         let _ = std::fs::rename(&tmp, &p);
@@ -213,7 +227,8 @@ pub struct Desktop {
 
 impl Desktop {
     pub fn new() -> Desktop {
-        let desktop_text = vergence_widgets::prefs::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+        let desktop_text =
+            vergence_widgets::prefs::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
         let mut d = Desktop {
             dir: desktop_dir(),
             entries: Vec::new(),
@@ -249,16 +264,27 @@ impl Desktop {
 
     fn read(&mut self) {
         self.stamp = std::fs::metadata(&self.dir).and_then(|m| m.modified()).ok();
-        let mut e: Vec<Entry> = files::read_folder(&self.dir).unwrap_or_default().into_iter().filter(|e| !e.name.starts_with('.')).collect();
+        let mut e: Vec<Entry> = files::read_folder(&self.dir)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|e| !e.name.starts_with('.'))
+            .collect();
         match self.order {
             Order::Name => e.sort_by(|a, b| files::natural(&a.name, &b.name)),
-            Order::Kind => e.sort_by(|a, b| b.dir.cmp(&a.dir).then_with(|| a.mime.map(|m| m.to_string()).cmp(&b.mime.map(|m| m.to_string()))).then_with(|| files::natural(&a.name, &b.name))),
+            Order::Kind => e.sort_by(|a, b| {
+                b.dir
+                    .cmp(&a.dir)
+                    .then_with(|| a.mime.map(|m| m.to_string()).cmp(&b.mime.map(|m| m.to_string())))
+                    .then_with(|| files::natural(&a.name, &b.name))
+            }),
             Order::Date => e.sort_by(|a, b| b.changed.cmp(&a.changed)),
         }
         // The fixed icons first: Home, the disks mounted, the Trash.
         let wants = |k: &str| vergence_ui::table_value(&self.desktop_text, "[desktop]", k).as_deref() != Some("false");
         let mut fixed: Vec<(String, Fixed, String, PathBuf)> = Vec::new();
-        if wants("home") && let Some(h) = files::home() {
+        if wants("home")
+            && let Some(h) = files::home()
+        {
             fixed.push(("::home".into(), Fixed::Home, "Home".into(), h));
         }
         if wants("volumes") {
@@ -267,11 +293,23 @@ impl Desktop {
                 fixed.push((format!("::volume:{}", m.display()), Fixed::Volume, name, m));
             }
         }
-        if wants("trash") && let Some(t) = ops::trash_dir() {
+        if wants("trash")
+            && let Some(t) = ops::trash_dir()
+        {
             fixed.push(("::trash".into(), Fixed::Trash, "Trash".into(), t.join("files")));
         }
         self.fixed = fixed.iter().map(|(k, f, n, _)| (k.clone(), (*f, n.clone()))).collect();
-        let mut all: Vec<Entry> = fixed.into_iter().map(|(k, _, _, p)| Entry { name: k, path: p, dir: true, mime: Some(vergence_types::FOLDER), size: 0, changed: None }).collect();
+        let mut all: Vec<Entry> = fixed
+            .into_iter()
+            .map(|(k, _, _, p)| Entry {
+                name: k,
+                path: p,
+                dir: true,
+                mime: Some(vergence_types::FOLDER),
+                size: 0,
+                changed: None,
+            })
+            .collect();
         all.extend(e);
         self.entries = all;
         let here: HashSet<&PathBuf> = self.entries.iter().map(|e| &e.path).collect();
@@ -285,7 +323,8 @@ impl Desktop {
 
     fn save_places(&self) {
         let setup = self.setup();
-        let mut all: Vec<(String, i32, i32, String)> = read_places().into_iter().filter(|(s, ..)| *s != setup).collect();
+        let mut all: Vec<(String, i32, i32, String)> =
+            read_places().into_iter().filter(|(s, ..)| *s != setup).collect();
         all.extend(self.placed.iter().map(|(n, (c, r))| (setup.clone(), *c, *r, n.clone())));
         write_places(&all);
     }
@@ -300,12 +339,18 @@ impl Desktop {
     fn cells(&self) -> Vec<Rect> {
         let (cols, rows) = self.grid();
         let names: Vec<String> = self.entries.iter().map(|e| e.name.clone()).collect();
-        arrange(&names, &self.placed, cols, rows).into_iter().map(|(c, r)| Rect::new(MARGIN + c as f32 * CELL_W, MARGIN + r as f32 * CELL_H, CELL_W, CELL_H)).collect()
+        arrange(&names, &self.placed, cols, rows)
+            .into_iter()
+            .map(|(c, r)| Rect::new(MARGIN + c as f32 * CELL_W, MARGIN + r as f32 * CELL_H, CELL_W, CELL_H))
+            .collect()
     }
 
     fn cell_at(&self, x: f32, y: f32) -> (i32, i32) {
         let (cols, rows) = self.grid();
-        (((x - MARGIN) / CELL_W).floor().clamp(0.0, (cols - 1) as f32) as i32, ((y - MARGIN) / CELL_H).floor().clamp(0.0, (rows - 1) as f32) as i32)
+        (
+            ((x - MARGIN) / CELL_W).floor().clamp(0.0, (cols - 1) as f32) as i32,
+            ((y - MARGIN) / CELL_H).floor().clamp(0.0, (rows - 1) as f32) as i32,
+        )
     }
 
     fn icon_at(&self, x: f32, y: f32) -> Option<usize> {
@@ -318,7 +363,11 @@ impl Desktop {
 
     /// The chosen files of the Desktop folder (the fixed icons left out).
     fn chosen_files(&self) -> Vec<PathBuf> {
-        self.entries.iter().filter(|e| self.chosen.contains(&e.path) && self.fixed_of(e).is_none()).map(|e| e.path.clone()).collect()
+        self.entries
+            .iter()
+            .filter(|e| self.chosen.contains(&e.path) && self.fixed_of(e).is_none())
+            .map(|e| e.path.clone())
+            .collect()
     }
 
     /// Whether an entry is a launcher (a desktop entry file).
@@ -341,7 +390,14 @@ impl Desktop {
                 Fixed::Home => ("places", "home"),
                 Fixed::Volume => ("places", "usb"),
                 // Full while anything is in it (a few on the floor).
-                Fixed::Trash => ("places", if std::fs::read_dir(&e.path).is_ok_and(|mut d| d.next().is_some()) { "trash-full" } else { "trash" }),
+                Fixed::Trash => (
+                    "places",
+                    if std::fs::read_dir(&e.path).is_ok_and(|mut d| d.next().is_some()) {
+                        "trash-full"
+                    } else {
+                        "trash"
+                    },
+                ),
             });
         }
         if Desktop::launcher(e) {
@@ -366,7 +422,8 @@ impl Desktop {
     /// The key an entry's mark is kept under: its own path (a picture's
     /// thumbnail, a launcher's icon), else its own icon's ("::icon:places/home").
     fn mark_key(&self, e: &Entry) -> PathBuf {
-        let thumb = Desktop::launcher(e) || (!e.dir && vergence_thumbs::has_thumbnail(e.mime) && self.fixed_of(e).is_none());
+        let thumb =
+            Desktop::launcher(e) || (!e.dir && vergence_thumbs::has_thumbnail(e.mime) && self.fixed_of(e).is_none());
         match self.own_icon(e) {
             // By the theme too, so a theme chosen in Settings is drawn anew.
             Some((g, n)) if !thumb => PathBuf::from(format!("::icon:{}/{g}/{n}", files::icon_theme())),
@@ -385,11 +442,20 @@ impl Desktop {
             // Our icons and launchers' from the icon theme chosen in Settings
             // (Vergence's unless another is), ours where it has none.
             let theme = files::icon_theme();
-            let own = self.own_icon(e).filter(|_| key != e.path).and_then(|(g, n)| vergence_shell::icons::themed(&theme, g, n, 128));
+            let own = self
+                .own_icon(e)
+                .filter(|_| key != e.path)
+                .and_then(|(g, n)| vergence_shell::icons::themed(&theme, g, n, 128));
             let source = if let Some(own) = own {
                 Some(own)
             } else if Desktop::launcher(e) {
-                Desktop::entry_of(e).filter(|x| !x.icon.is_empty()).and_then(|x| if x.icon.starts_with('/') { Some(PathBuf::from(x.icon)) } else { vergence_shell::icons::find(&theme, &x.icon, 128) })
+                Desktop::entry_of(e).filter(|x| !x.icon.is_empty()).and_then(|x| {
+                    if x.icon.starts_with('/') {
+                        Some(PathBuf::from(x.icon))
+                    } else {
+                        vergence_shell::icons::find(&theme, &x.icon, 128)
+                    }
+                })
             } else if !e.dir && vergence_thumbs::has_thumbnail(e.mime) {
                 Some(e.path.clone())
             } else {
@@ -491,10 +557,19 @@ impl Desktop {
             .map(|(e, c)| {
                 let name = match self.fixed.get(&e.name) {
                     Some((_, n)) => n.clone(),
-                    None if Desktop::launcher(e) => Desktop::entry_of(e).map(|x| x.name).unwrap_or_else(|| e.name.clone()),
+                    None if Desktop::launcher(e) => {
+                        Desktop::entry_of(e).map(|x| x.name).unwrap_or_else(|| e.name.clone())
+                    }
                     None => e.name.clone(),
                 };
-                (c, name, e.kind(), marks.get(&self.mark_key(e)).cloned().flatten(), self.chosen.contains(&e.path), self.fixed_of(e))
+                (
+                    c,
+                    name,
+                    e.kind(),
+                    marks.get(&self.mark_key(e)).cloned().flatten(),
+                    self.chosen.contains(&e.path),
+                    self.fixed_of(e),
+                )
             })
             .collect();
         let accent = t.accent;
@@ -503,7 +578,11 @@ impl Desktop {
             for (c, name, kind, img, chosen, fixed) in &items {
                 let c = Rect::new(r.x + c.x, r.y + c.y, c.w, c.h);
                 if *chosen {
-                    scene.fill_rounded(Rect::new(c.x + 4.0, c.y + 2.0, c.w - 8.0, c.h - 6.0), 8.0, Color { a: 110, ..accent });
+                    scene.fill_rounded(
+                        Rect::new(c.x + 4.0, c.y + 2.0, c.w - 8.0, c.h - 6.0),
+                        8.0,
+                        Color { a: 110, ..accent },
+                    );
                 }
                 let icon = Rect::new(c.x + (c.w - ICON) / 2.0, c.y + 8.0, ICON, ICON);
                 match img {
@@ -513,7 +592,11 @@ impl Desktop {
                         let s = (ICON / img.width as f32).min(ICON / img.height as f32);
                         let (w, h) = (img.width as f32 * s, img.height as f32 * s);
                         let id = scene.image(img.clone());
-                        scene.draw_image(id, Rect::new(icon.x + (ICON - w) / 2.0, icon.y + (ICON - h) / 2.0, w, h), 1.0);
+                        scene.draw_image(
+                            id,
+                            Rect::new(icon.x + (ICON - w) / 2.0, icon.y + (ICON - h) / 2.0, w, h),
+                            1.0,
+                        );
                     }
                     None => files::draw_kind(scene, icon, 3.2, *kind, t),
                 }
@@ -532,7 +615,15 @@ impl Desktop {
                 }
                 let w = fonts.layout(f, size, &text).1;
                 let at = Point::new(c.x + (c.w - w) / 2.0, icon.y + ICON + 18.0);
-                vergence_render::text(scene, fonts, f, size, Color::rgba(0, 0, 0, 200), Point::new(at.x + 1.0, at.y + 1.0), &text);
+                vergence_render::text(
+                    scene,
+                    fonts,
+                    f,
+                    size,
+                    Color::rgba(0, 0, 0, 200),
+                    Point::new(at.x + 1.0, at.y + 1.0),
+                    &text,
+                );
                 vergence_render::text(scene, fonts, f, size, Color::rgb(255, 255, 255), at, &text);
             }
         })
@@ -542,12 +633,23 @@ impl Desktop {
     }
 
     fn strip(&self, t: &Theme) -> Option<Element<Msg>> {
-        let b = |text: &str, m: Msg, accent: bool| -> Element<Msg> { button(label(text).size(12.0)).look(if accent { ButtonLook::Accent } else { ButtonLook::Plain }).padding(Padding::hv(3.0, 10.0)).on_press(m).name(text) };
+        let b = |text: &str, m: Msg, accent: bool| -> Element<Msg> {
+            button(label(text).size(12.0))
+                .look(if accent { ButtonLook::Accent } else { ButtonLook::Plain })
+                .padding(Padding::hv(3.0, 10.0))
+                .on_press(m)
+                .name(text)
+        };
         let items: Vec<Element<Msg>> = match (&self.ask, &self.notice) {
             (Some(Ask::Trust(p)), _) => vec![
                 label(format!(
                     "Allow “{}” to start a program? This launcher came from elsewhere; allow it only if you trust it.",
-                    self.entries.iter().find(|e| &e.path == p).and_then(Desktop::entry_of).map(|x| x.name).unwrap_or_else(|| p.file_name().unwrap_or_default().to_string_lossy().into_owned())
+                    self.entries
+                        .iter()
+                        .find(|e| &e.path == p)
+                        .and_then(Desktop::entry_of)
+                        .map(|x| x.name)
+                        .unwrap_or_else(|| p.file_name().unwrap_or_default().to_string_lossy().into_owned())
                 ))
                 .size(12.0)
                 .wrap()
@@ -555,14 +657,48 @@ impl Desktop {
                 b("Cancel", Msg::Cancel, false),
                 b("Allow and start", Msg::Allow, true),
             ],
-            (Some(Ask::NewFolder(text)), _) => vec![label("New folder").size(12.0), field(text.clone(), Msg::NameTyped).on_submit(Msg::NameDone).autofocus().width(Length::Fixed(260.0)).name("Name"), b("Cancel", Msg::Cancel, false), b("Make", Msg::NameDone, true)],
-            (Some(Ask::EmptyTrash), _) => vec![label("Empty the Trash? Its files are deleted for good.").size(12.0), b("Cancel", Msg::Cancel, false), b("Empty Trash", Msg::EmptyTrash, true)],
-            (Some(Ask::Rename(_, text)), _) => vec![label("New name").size(12.0), field(text.clone(), Msg::NameTyped).on_submit(Msg::NameDone).autofocus().width(Length::Fixed(260.0)).name("Name"), b("Cancel", Msg::Cancel, false), b("Rename", Msg::NameDone, true)],
-            (None, Some(n)) => vec![label(n.clone()).size(12.0).wrap().width(Length::Fixed(380.0)), b("OK", Msg::Cancel, false)],
+            (Some(Ask::NewFolder(text)), _) => vec![
+                label("New folder").size(12.0),
+                field(text.clone(), Msg::NameTyped)
+                    .on_submit(Msg::NameDone)
+                    .autofocus()
+                    .width(Length::Fixed(260.0))
+                    .name("Name"),
+                b("Cancel", Msg::Cancel, false),
+                b("Make", Msg::NameDone, true),
+            ],
+            (Some(Ask::EmptyTrash), _) => vec![
+                label("Empty the Trash? Its files are deleted for good.").size(12.0),
+                b("Cancel", Msg::Cancel, false),
+                b("Empty Trash", Msg::EmptyTrash, true),
+            ],
+            (Some(Ask::Rename(_, text)), _) => vec![
+                label("New name").size(12.0),
+                field(text.clone(), Msg::NameTyped)
+                    .on_submit(Msg::NameDone)
+                    .autofocus()
+                    .width(Length::Fixed(260.0))
+                    .name("Name"),
+                b("Cancel", Msg::Cancel, false),
+                b("Rename", Msg::NameDone, true),
+            ],
+            (None, Some(n)) => {
+                vec![label(n.clone()).size(12.0).wrap().width(Length::Fixed(380.0)), b("OK", Msg::Cancel, false)]
+            }
             (None, None) => return None,
         };
-        let card = panel(row(items).spacing(8.0).align(Align::Center)).color(t.card).radius(10.0).edge(t.line, 1.0).padding(Padding::hv(8.0, 12.0));
-        Some(column(vec![space().height(Length::Fixed(16.0)), row(vec![space().width(Length::FILL), card, space().width(Length::FILL)]).width(Length::FILL)]).width(Length::FILL))
+        let card = panel(row(items).spacing(8.0).align(Align::Center))
+            .color(t.card)
+            .radius(10.0)
+            .edge(t.line, 1.0)
+            .padding(Padding::hv(8.0, 12.0));
+        Some(
+            column(vec![
+                space().height(Length::Fixed(16.0)),
+                row(vec![space().width(Length::FILL), card, space().width(Length::FILL)]).width(Length::FILL),
+            ])
+            .width(Length::FILL),
+        )
     }
 
     /// The right-click menu (bus v20, drawn by the server): for the icons
@@ -640,7 +776,12 @@ impl Desktop {
     /// The preview follows the chosen icon (the arrows move it).
     fn sync_peek(&self) {
         let Some(l) = &self.peek else { return };
-        let now = self.chosen.last().and_then(|p| self.entries.iter().find(|e| &e.path == p)).filter(|e| self.fixed_of(e).is_none()).cloned();
+        let now = self
+            .chosen
+            .last()
+            .and_then(|p| self.entries.iter().find(|e| &e.path == p))
+            .filter(|e| self.fixed_of(e).is_none())
+            .cloned();
         let mut link = l.borrow_mut();
         if !link.open || now.is_none() || link.entry.as_ref().map(|e| &e.path) == now.as_ref().map(|e| &e.path) {
             return;
@@ -723,9 +864,18 @@ impl Program for Desktop {
                 {
                     self.dragged = true;
                     // The fixed icons only move on the desktop: their drag has no file links.
-                    let keys: Vec<String> = self.entries.iter().filter(|e| self.chosen.contains(&e.path) && self.fixed_of(e).is_some()).map(|e| e.name.clone()).collect();
+                    let keys: Vec<String> = self
+                        .entries
+                        .iter()
+                        .filter(|e| self.chosen.contains(&e.path) && self.fixed_of(e).is_some())
+                        .map(|e| e.name.clone())
+                        .collect();
                     if !keys.is_empty() {
-                        let label = if keys.len() == 1 { self.fixed.get(&keys[0]).map(|(_, n)| n.clone()).unwrap_or_default() } else { format!("{} items", keys.len()) };
+                        let label = if keys.len() == 1 {
+                            self.fixed.get(&keys[0]).map(|(_, n)| n.clone()).unwrap_or_default()
+                        } else {
+                            format!("{} items", keys.len())
+                        };
                         window.start_drag(&label, vec![(FIXED_KIND.into(), keys.join("\n").into_bytes())]);
                         window.redraw();
                         return;
@@ -738,7 +888,13 @@ impl Program for Desktop {
                         many => format!("{} items", many.len()),
                     };
                     if uris.len() + plain.len() <= vergence_protocol::window::MAX_DRAG_BYTES {
-                        window.start_drag(&label, vec![("text/uri-list".into(), uris.into_bytes()), ("text/plain".into(), plain.into_bytes())]);
+                        window.start_drag(
+                            &label,
+                            vec![
+                                ("text/uri-list".into(), uris.into_bytes()),
+                                ("text/plain".into(), plain.into_bytes()),
+                            ],
+                        );
                     }
                 }
             }
@@ -847,7 +1003,15 @@ impl Program for Desktop {
                 true
             }
             Input::Paste(text) => {
-                let paths: Vec<PathBuf> = text.lines().map(str::trim).filter(|l| !l.is_empty()).filter_map(|l| vergence_types::path_of_link(l).or_else(|| l.starts_with('/').then(|| PathBuf::from(l)))).filter(|p| p.symlink_metadata().is_ok()).collect();
+                let paths: Vec<PathBuf> = text
+                    .lines()
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty())
+                    .filter_map(|l| {
+                        vergence_types::path_of_link(l).or_else(|| l.starts_with('/').then(|| PathBuf::from(l)))
+                    })
+                    .filter(|p| p.symlink_metadata().is_ok())
+                    .collect();
                 if paths.is_empty() {
                     return false;
                 }
@@ -856,7 +1020,10 @@ impl Program for Desktop {
                 if let Some(e) = error {
                     self.notice = Some(e);
                 }
-                let names = plan.iter().filter_map(|(_, to)| to.file_name().map(|n| n.to_string_lossy().into_owned())).collect();
+                let names = plan
+                    .iter()
+                    .filter_map(|(_, to)| to.file_name().map(|n| n.to_string_lossy().into_owned()))
+                    .collect();
                 self.place_at(names, self.menu_cell);
                 true
             }
@@ -914,7 +1081,13 @@ impl Program for Desktop {
         let paths = self.chosen_files();
         match id {
             cmd::OPEN => {
-                let idx: Vec<usize> = self.entries.iter().enumerate().filter(|(_, e)| self.chosen.contains(&e.path)).map(|(i, _)| i).collect();
+                let idx: Vec<usize> = self
+                    .entries
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, e)| self.chosen.contains(&e.path))
+                    .map(|(i, _)| i)
+                    .collect();
                 for i in idx {
                     self.open(i);
                 }
@@ -942,7 +1115,10 @@ impl Program for Desktop {
             cmd::TRASH => {
                 for p in &paths {
                     if let Err(e) = ops::trash(p) {
-                        self.notice = Some(format!("“{}” could not be moved to the Trash: {e}", p.file_name().unwrap_or_default().to_string_lossy()));
+                        self.notice = Some(format!(
+                            "“{}” could not be moved to the Trash: {e}",
+                            p.file_name().unwrap_or_default().to_string_lossy()
+                        ));
                         break;
                     }
                 }
@@ -953,7 +1129,8 @@ impl Program for Desktop {
             }
             cmd::EMPTY_TRASH => self.ask = Some(Ask::EmptyTrash),
             cmd::EJECT => {
-                let disks: Vec<Entry> = chosen.iter().filter(|e| self.fixed_of(e) == Some(Fixed::Volume)).cloned().collect();
+                let disks: Vec<Entry> =
+                    chosen.iter().filter(|e| self.fixed_of(e) == Some(Fixed::Volume)).cloned().collect();
                 for e in disks {
                     let name = self.fixed.get(&e.name).map(|(_, n)| n.clone()).unwrap_or_default();
                     let image = files::is_image_mount(&e.path);
@@ -995,7 +1172,11 @@ impl Program for Desktop {
             cmd::PROPERTIES => {
                 let items = if paths.is_empty() { vec![self.dir.clone()] } else { paths.clone() };
                 for p in items.into_iter().take(8) {
-                    window.open_window(vergence_widgets::window(crate::props::Properties::new(p, crate::lone_shared(), crate::files_theme(&self.desktop_text))));
+                    window.open_window(vergence_widgets::window(crate::props::Properties::new(
+                        p,
+                        crate::lone_shared(),
+                        crate::files_theme(&self.desktop_text),
+                    )));
                 }
             }
             _ => {}
@@ -1049,7 +1230,10 @@ impl Program for Desktop {
                     self.close_peek();
                 } else if let Some(e) = at.map(|i| self.entries[i].clone()).filter(|e| self.fixed_of(e).is_none()) {
                     let link = crate::preview::link(e);
-                    window.open_window(vergence_widgets::window(crate::preview::Peek::new(link.clone(), crate::files_theme(&self.desktop_text))));
+                    window.open_window(vergence_widgets::window(crate::preview::Peek::new(
+                        link.clone(),
+                        crate::files_theme(&self.desktop_text),
+                    )));
                     self.peek = Some(link);
                 }
             }
@@ -1064,7 +1248,10 @@ impl Program for Desktop {
             DELETE if !self.chosen_files().is_empty() => {
                 for p in self.chosen_files() {
                     if let Err(e) = ops::trash(&p) {
-                        self.notice = Some(format!("“{}” could not be moved to the Trash: {e}", p.file_name().unwrap_or_default().to_string_lossy()));
+                        self.notice = Some(format!(
+                            "“{}” could not be moved to the Trash: {e}",
+                            p.file_name().unwrap_or_default().to_string_lossy()
+                        ));
                         break;
                     }
                 }
@@ -1076,7 +1263,9 @@ impl Program for Desktop {
                     self.ask = Some(Ask::Rename(one.clone(), name));
                 }
             }
-            s if m.ctrl && (s == 0x61 || s == 0x41) => self.chosen = self.entries.iter().map(|e| e.path.clone()).collect(),
+            s if m.ctrl && (s == 0x61 || s == 0x41) => {
+                self.chosen = self.entries.iter().map(|e| e.path.clone()).collect()
+            }
             // The arrows move through the icons in their order (down a column, then across).
             UP => step(-1, self),
             DOWN => step(1, self),
@@ -1106,7 +1295,14 @@ impl Program for Desktop {
         if let Some(l) = self.peek.clone() {
             let keys = std::mem::take(&mut l.borrow_mut().keys);
             for sym in keys {
-                let key = Input::Key { sym, text: None, pressed: true, repeat: false, composing: false, modifiers: Modifiers::default() };
+                let key = Input::Key {
+                    sym,
+                    text: None,
+                    pressed: true,
+                    repeat: false,
+                    composing: false,
+                    modifiers: Modifiers::default(),
+                };
                 self.key_first(&key, window);
             }
             if !l.borrow().open {
@@ -1129,9 +1325,12 @@ impl Program for Desktop {
         let all = files::mounted_disks();
         // A drive ejected and then pulled out is forgotten (plugged in again, it shows).
         self.ejected.retain(|p| all.contains(p));
-        let disks: Vec<String> = all.iter().filter(|m| !self.ejected.contains(*m)).map(|m| format!("::volume:{}", m.display())).collect();
-        let shown: Vec<String> = self.entries.iter().filter(|e| self.fixed_of(e) == Some(Fixed::Volume)).map(|e| e.name.clone()).collect();
-        let wants_volumes = vergence_ui::table_value(&self.desktop_text, "[desktop]", "volumes").as_deref() != Some("false");
+        let disks: Vec<String> =
+            all.iter().filter(|m| !self.ejected.contains(*m)).map(|m| format!("::volume:{}", m.display())).collect();
+        let shown: Vec<String> =
+            self.entries.iter().filter(|e| self.fixed_of(e) == Some(Fixed::Volume)).map(|e| e.name.clone()).collect();
+        let wants_volumes =
+            vergence_ui::table_value(&self.desktop_text, "[desktop]", "volumes").as_deref() != Some("false");
         if now != self.stamp || (wants_volumes && disks != shown) {
             self.read();
             self.want_marks();
@@ -1158,18 +1357,36 @@ impl Program for Desktop {
     fn dropped(&mut self, x: f32, y: f32, action: u8, items: &[(String, Vec<u8>)], window: &mut Window) {
         let (c0, r0) = self.cell_at(x, y);
         // The fixed icons, moved on the desktop.
-        let fixed_keys: Vec<String> = items.iter().find(|(k, _)| k == FIXED_KIND).map(|(_, v)| String::from_utf8_lossy(v).lines().map(str::to_string).filter(|k| self.fixed.contains_key(k)).collect()).unwrap_or_default();
-        let paths: Vec<PathBuf> = items.iter().find(|(k, _)| k == "text/uri-list").map(|(_, v)| String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()).unwrap_or_default();
+        let fixed_keys: Vec<String> = items
+            .iter()
+            .find(|(k, _)| k == FIXED_KIND)
+            .map(|(_, v)| {
+                String::from_utf8_lossy(v).lines().map(str::to_string).filter(|k| self.fixed.contains_key(k)).collect()
+            })
+            .unwrap_or_default();
+        let paths: Vec<PathBuf> = items
+            .iter()
+            .find(|(k, _)| k == "text/uri-list")
+            .map(|(_, v)| {
+                String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()
+            })
+            .unwrap_or_default();
         if paths.is_empty() && fixed_keys.is_empty() {
             return;
         }
         // Onto an icon that takes files: the Trash, Home, a disk, a folder.
-        let onto = self.icon_at(x, y).and_then(|i| self.entries.get(i).cloned()).filter(|e| fixed_keys.is_empty() && !paths.contains(&e.path));
+        let onto = self
+            .icon_at(x, y)
+            .and_then(|i| self.entries.get(i).cloned())
+            .filter(|e| fixed_keys.is_empty() && !paths.contains(&e.path));
         if let Some(target) = onto {
             if self.fixed_of(&target) == Some(Fixed::Trash) {
                 for p in &paths {
                     if let Err(e) = ops::trash(p) {
-                        self.notice = Some(format!("“{}” could not be moved to the Trash: {e}", p.file_name().unwrap_or_default().to_string_lossy()));
+                        self.notice = Some(format!(
+                            "“{}” could not be moved to the Trash: {e}",
+                            p.file_name().unwrap_or_default().to_string_lossy()
+                        ));
                         break;
                     }
                 }
@@ -1178,8 +1395,10 @@ impl Program for Desktop {
                 return;
             }
             if target.dir {
-                let plan = ops::plan_paste(&paths, &target.path, action == vergence_ui::DROP_MOVE, ops::Clash::KeepBoth);
-                let (_, error) = ops::run_paste(&plan, action == vergence_ui::DROP_MOVE, &Arc::new(ops::Progress::default()));
+                let plan =
+                    ops::plan_paste(&paths, &target.path, action == vergence_ui::DROP_MOVE, ops::Clash::KeepBoth);
+                let (_, error) =
+                    ops::run_paste(&plan, action == vergence_ui::DROP_MOVE, &Arc::new(ops::Progress::default()));
                 if let Some(e) = error {
                     self.notice = Some(e);
                 }
@@ -1227,9 +1446,21 @@ fn draw_fixed(scene: &mut vergence_scene::Scene, r: Rect, f: Fixed, t: &Theme) {
             scene.fill_rounded(Rect::new(r.x + 6.8 * k, r.y + 10.0 * k, 2.4 * k, 5.0 * k), 0.5 * k, ink);
         }
         Fixed::Volume => {
-            scene.fill_rounded(Rect::new(r.x + 1.5 * k, r.y + 5.0 * k, 13.0 * k, 7.0 * k), 1.5 * k, Color::rgb(0x8a, 0x92, 0xa3));
-            scene.fill_rounded(Rect::new(r.x + 2.5 * k, r.y + 9.5 * k, 11.0 * k, 1.0 * k), 0.5 * k, Color::rgb(0x5d, 0x65, 0x75));
-            scene.fill_rounded(Rect::new(r.x + 11.5 * k, r.y + 6.5 * k, 1.5 * k, 1.5 * k), 0.75 * k, Color::rgb(0x6f, 0xd0, 0x80));
+            scene.fill_rounded(
+                Rect::new(r.x + 1.5 * k, r.y + 5.0 * k, 13.0 * k, 7.0 * k),
+                1.5 * k,
+                Color::rgb(0x8a, 0x92, 0xa3),
+            );
+            scene.fill_rounded(
+                Rect::new(r.x + 2.5 * k, r.y + 9.5 * k, 11.0 * k, 1.0 * k),
+                0.5 * k,
+                Color::rgb(0x5d, 0x65, 0x75),
+            );
+            scene.fill_rounded(
+                Rect::new(r.x + 11.5 * k, r.y + 6.5 * k, 1.5 * k, 1.5 * k),
+                0.75 * k,
+                Color::rgb(0x6f, 0xd0, 0x80),
+            );
         }
         Fixed::Trash => {
             let body = Color::rgb(0xd5, 0xd8, 0xde);
@@ -1262,12 +1493,19 @@ mod tests {
         assert_eq!(arrange(&names, &placed, 3, 2), vec![(0, 0), (0, 1), (1, 0), (1, 1), (2, 0)]);
         placed.insert("e".to_string(), (0, 0));
         placed.insert("c".to_string(), (9, 9));
-        assert_eq!(arrange(&names, &placed, 3, 2), vec![(0, 1), (1, 0), (1, 1), (2, 0), (0, 0)], "e keeps its cell; c's is off the grid, so it is free");
+        assert_eq!(
+            arrange(&names, &placed, 3, 2),
+            vec![(0, 1), (1, 0), (1, 1), (2, 0), (0, 0)],
+            "e keeps its cell; c's is off the grid, so it is free"
+        );
     }
 
     #[test]
     fn places_round_trip() {
-        let all = vec![("1280x720".to_string(), 1, 2, "a b.txt".to_string()), ("2560x1440".to_string(), 0, 0, "x".to_string())];
+        let all = vec![
+            ("1280x720".to_string(), 1, 2, "a b.txt".to_string()),
+            ("2560x1440".to_string(), 0, 0, "x".to_string()),
+        ];
         let text: String = all.iter().map(|(s, c, r, n)| format!("{s}\t{c}\t{r}\t{n}\n")).collect();
         let back: Vec<(String, i32, i32, String)> = text
             .lines()

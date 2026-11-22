@@ -13,7 +13,10 @@ pub mod hash;
 use crate::object::{Dict, Object};
 
 /// The 32 bytes every password is padded with (revisions 2 to 4).
-const PAD: [u8; 32] = [0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41, 0x64, 0x00, 0x4E, 0x56, 0xFF, 0xFA, 0x01, 0x08, 0x2E, 0x2E, 0x00, 0xB6, 0xD0, 0x68, 0x3E, 0x80, 0x2F, 0x0C, 0xA9, 0xFE, 0x64, 0x53, 0x69, 0x7A];
+const PAD: [u8; 32] = [
+    0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41, 0x64, 0x00, 0x4E, 0x56, 0xFF, 0xFA, 0x01, 0x08, 0x2E, 0x2E, 0x00,
+    0xB6, 0xD0, 0x68, 0x3E, 0x80, 0x2F, 0x0C, 0xA9, 0xFE, 0x64, 0x53, 0x69, 0x7A,
+];
 
 /// How a kind of data (strings, streams) is encrypted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,7 +81,8 @@ impl Security {
                     if name == b"Identity" {
                         return Method::None;
                     }
-                    let filter = cf.and_then(|d| d.get(std::str::from_utf8(name).unwrap_or(""))).and_then(Object::as_dict);
+                    let filter =
+                        cf.and_then(|d| d.get(std::str::from_utf8(name).unwrap_or(""))).and_then(Object::as_dict);
                     match filter.and_then(|f| f.name("CFM")) {
                         Some(b"V2") => Method::Rc4,
                         Some(b"AESV2") => Method::Aes128,
@@ -111,7 +115,13 @@ impl Security {
 
     /// The file's keys if `password` is its user or owner password.
     pub fn unlock(&self, password: &[u8]) -> Option<Keys> {
-        let keys = |key: Vec<u8>, owner: bool| Keys { key, strings: self.strings, streams: self.streams, encrypt_metadata: self.encrypt_metadata, owner };
+        let keys = |key: Vec<u8>, owner: bool| Keys {
+            key,
+            strings: self.strings,
+            streams: self.streams,
+            encrypt_metadata: self.encrypt_metadata,
+            owner,
+        };
         if self.revision >= 5 {
             // UTF-8, at most 127 bytes (SASLprep left out: plain passwords are unchanged by it).
             let pw = &password[..password.len().min(127)];
@@ -187,7 +197,8 @@ impl Security {
     /// Revisions 5 and 6: the file key from /UE (or /OE for the owner).
     fn aes256_key(&self, pw: &[u8], owner: bool) -> Option<Vec<u8>> {
         let (o, u) = (self.o.get(..48)?, self.u.get(..48)?);
-        let (hash_part, salts, extra, wrapped) = if owner { (&o[..32], &o[32..48], u, &self.oe) } else { (&u[..32], &u[32..48], &[][..], &self.ue) };
+        let (hash_part, salts, extra, wrapped) =
+            if owner { (&o[..32], &o[32..48], u, &self.oe) } else { (&u[..32], &u[32..48], &[][..], &self.ue) };
         let (validation, key_salt) = (&salts[..8], &salts[8..16]);
         if self.hash_r56(pw, validation, extra) != hash_part {
             return None;
@@ -382,7 +393,19 @@ mod tests {
         let file_key = [0x5au8; 32];
         let user_pw = b"vergence";
         let (uvs, uks) = (*b"uvsalt01", *b"ukeyslt1");
-        let sec0 = Security { revision: 6, length: 32, o: vec![], u: vec![], oe: vec![], ue: vec![], p: -4, id0: vec![], encrypt_metadata: true, strings: Method::Aes256, streams: Method::Aes256 };
+        let sec0 = Security {
+            revision: 6,
+            length: 32,
+            o: vec![],
+            u: vec![],
+            oe: vec![],
+            ue: vec![],
+            p: -4,
+            id0: vec![],
+            encrypt_metadata: true,
+            strings: Method::Aes256,
+            streams: Method::Aes256,
+        };
         let mut u = sec0.hash_r56(user_pw, &uvs, &[]);
         u.extend_from_slice(&uvs);
         u.extend_from_slice(&uks);

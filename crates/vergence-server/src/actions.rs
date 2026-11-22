@@ -32,21 +32,31 @@ impl Server {
     /// Run an action by its id, or by its name (case not looked at).
     pub fn action_run(&mut self, which: &str) -> Result<String, String> {
         let all = self.actions_all();
-        let a = all.iter().find(|a| a.id == which).or_else(|| all.iter().find(|a| a.name.eq_ignore_ascii_case(which))).cloned().ok_or_else(|| format!("no action {which:?}"))?;
+        let a = all
+            .iter()
+            .find(|a| a.id == which)
+            .or_else(|| all.iter().find(|a| a.name.eq_ignore_ascii_case(which)))
+            .cloned()
+            .ok_or_else(|| format!("no action {which:?}"))?;
         tracing::info!("actions: {} ({})", a.name, a.id);
         let id = a.id.as_str();
         match id {
-            "sound.mute" | "sound.unmute" => self.desktop_tile_action("sound", "mute", if id == "sound.mute" { 1.0 } else { 0.0 }),
+            "sound.mute" | "sound.unmute" => {
+                self.desktop_tile_action("sound", "mute", if id == "sound.mute" { 1.0 } else { 0.0 })
+            }
             "sound.up" => self.volume_key(5),
             "sound.down" => self.volume_key(-5),
             // After a moment: the key that ran it, let go, is input and would wake them.
             "screens.off" => {
-                let _ = self.loop_handle.insert_source(Timer::from_duration(std::time::Duration::from_millis(700)), |_, _, st| {
-                    st.energy.screens_off = true;
-                    crate::drm::screens_off(st);
-                    st.input_screens_off();
-                    TimeoutAction::Drop
-                });
+                let _ = self.loop_handle.insert_source(
+                    Timer::from_duration(std::time::Duration::from_millis(700)),
+                    |_, _, st| {
+                        st.energy.screens_off = true;
+                        crate::drm::screens_off(st);
+                        st.input_screens_off();
+                        TimeoutAction::Drop
+                    },
+                );
             }
             "desktop.show" => self.show_desktop(),
             "lock.screen" => {

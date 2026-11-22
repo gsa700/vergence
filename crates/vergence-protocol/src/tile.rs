@@ -78,7 +78,9 @@ impl std::hash::Hash for Control {
         match self.kind {
             ControlKind::Button => 0u8.hash(h),
             ControlKind::Switch(on) => (1u8, on).hash(h),
-            ControlKind::Slider { value, min, max, step } => (2u8, value.to_bits(), min.to_bits(), max.to_bits(), step.to_bits()).hash(h),
+            ControlKind::Slider { value, min, max, step } => {
+                (2u8, value.to_bits(), min.to_bits(), max.to_bits(), step.to_bits()).hash(h)
+            }
         }
     }
 }
@@ -96,7 +98,9 @@ pub const MAX_TEXT: usize = 200;
 impl Tile {
     /// Whether the server takes this tile, and if not, why.
     pub fn check(&self) -> Result<(), String> {
-        let long = |what: &str, s: &str, max: usize| if s.chars().count() > max { Err(format!("{what} longer than {max}")) } else { Ok(()) };
+        let long = |what: &str, s: &str, max: usize| {
+            if s.chars().count() > max { Err(format!("{what} longer than {max}")) } else { Ok(()) }
+        };
         if self.id.is_empty() || self.id.chars().any(char::is_control) {
             return Err("an empty id, or one with control characters".into());
         }

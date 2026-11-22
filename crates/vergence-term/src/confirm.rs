@@ -9,17 +9,28 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use vergence_ui::{Waker, Window};
-use vergence_widgets::{Align, ButtonLook, Element, Length, Padding, Program, Theme, button, column, label, panel, row, space};
+use vergence_widgets::{
+    Align, ButtonLook, Element, Length, Padding, Program, Theme, button, column, label, panel, row, space,
+};
 
 /// What the question says: (heading, detail).
 pub fn question(tabs: usize, running: &[String]) -> Option<(String, String)> {
     let first = running.first().map(String::as_str).unwrap_or("a program");
     match (tabs, running.len()) {
         (0 | 1, 0) => None,
-        (0 | 1, _) => Some((format!("A program is running in this tab ({first}). Close it?"), "Closing the window ends it.".into())),
+        (0 | 1, _) => Some((
+            format!("A program is running in this tab ({first}). Close it?"),
+            "Closing the window ends it.".into(),
+        )),
         (n, 0) => Some((format!("Close {n} tabs?"), "Closing the window closes every tab in it.".into())),
-        (n, 1) => Some((format!("Close {n} tabs?"), format!("{first} is running in one of them; closing the window ends it."))),
-        (n, k) => Some((format!("Close {n} tabs?"), format!("Programs are running in {k} of them ({first} and more); closing the window ends them."))),
+        (n, 1) => Some((
+            format!("Close {n} tabs?"),
+            format!("{first} is running in one of them; closing the window ends it."),
+        )),
+        (n, k) => Some((
+            format!("Close {n} tabs?"),
+            format!("Programs are running in {k} of them ({first} and more); closing the window ends them."),
+        )),
     }
 }
 
@@ -54,20 +65,29 @@ impl Program for CloseDialog {
         self.theme.clone()
     }
     fn view(&self, _: &Theme) -> Element<CloseMsg> {
-        panel(column(vec![
-            label(self.heading.clone()).size(15.0).weight(600).wrap().width(Length::FILL),
-            label(self.detail.clone()).dim().wrap().width(Length::FILL),
-            row(vec![
-                space().width(Length::FILL),
-                button(label("Cancel").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(CloseMsg::Cancel).name("Cancel"),
-                button(label("Close").size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(4.0, 14.0)).on_press(CloseMsg::Close).name("Close"),
+        panel(
+            column(vec![
+                label(self.heading.clone()).size(15.0).weight(600).wrap().width(Length::FILL),
+                label(self.detail.clone()).dim().wrap().width(Length::FILL),
+                row(vec![
+                    space().width(Length::FILL),
+                    button(label("Cancel").size(12.0))
+                        .padding(Padding::hv(4.0, 12.0))
+                        .on_press(CloseMsg::Cancel)
+                        .name("Cancel"),
+                    button(label("Close").size(12.0))
+                        .look(ButtonLook::Accent)
+                        .padding(Padding::hv(4.0, 14.0))
+                        .on_press(CloseMsg::Close)
+                        .name("Close"),
+                ])
+                .spacing(8.0)
+                .align(Align::Center)
+                .width(Length::FILL),
             ])
-            .spacing(8.0)
-            .align(Align::Center)
+            .spacing(10.0)
             .width(Length::FILL),
-        ])
-        .spacing(10.0)
-        .width(Length::FILL))
+        )
         .padding(20.0)
         .radius(0.0)
         .width(Length::FILL)
@@ -84,7 +104,14 @@ impl Program for CloseDialog {
         window.close();
     }
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: true, min: (400.0, 150.0), max: (0.0, 0.0), alone: false, frosted: false }
+        vergence_ui::Style {
+            kind: vergence_ui::WinKind::Dialog,
+            modal: true,
+            min: (400.0, 150.0),
+            max: (0.0, 0.0),
+            alone: false,
+            frosted: false,
+        }
     }
     fn scale(&mut self, _: f32) -> bool {
         false

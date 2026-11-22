@@ -68,7 +68,8 @@ pub fn table<'a>(file: &'a [u8], index: u32, tag: &[u8; 4]) -> Option<&'a [u8]> 
 /// A variable font's axis by tag: its least, default and most values.
 pub fn axis(file: &[u8], index: u32, tag: &[u8; 4]) -> Option<(f32, f32, f32)> {
     let fvar = table(file, index, b"fvar")?;
-    let (first, count, size) = (u16_at(fvar, 4)? as usize, (u16_at(fvar, 8)? as usize).min(64), (u16_at(fvar, 10)? as usize).max(20));
+    let (first, count, size) =
+        (u16_at(fvar, 4)? as usize, (u16_at(fvar, 8)? as usize).min(64), (u16_at(fvar, 10)? as usize).max(20));
     let fixed = |at: usize| u32_at(fvar, at).map(|v| v as i32 as f32 / 65536.0);
     (0..count).find_map(|i| {
         let a = first + i * size;
@@ -85,13 +86,19 @@ pub fn axis(file: &[u8], index: u32, tag: &[u8; 4]) -> Option<(f32, f32, f32)> {
 /// (`wght` 400); axes not given are at their defaults.
 pub fn coordinates(file: &[u8], index: u32, settings: &[([u8; 4], f32)]) -> Vec<f32> {
     let Some(fvar) = table(file, index, b"fvar") else { return Vec::new() };
-    let (Some(first), Some(count), Some(size)) = (u16_at(fvar, 4), u16_at(fvar, 8), u16_at(fvar, 10)) else { return Vec::new() };
+    let (Some(first), Some(count), Some(size)) = (u16_at(fvar, 4), u16_at(fvar, 8), u16_at(fvar, 10)) else {
+        return Vec::new();
+    };
     let (first, count, size) = (first as usize, (count as usize).min(64), (size as usize).max(20));
     let fixed = |at: usize| u32_at(fvar, at).map(|v| v as i32 as f32 / 65536.0);
     let mut coords = Vec::with_capacity(count);
     for i in 0..count {
         let a = first + i * size;
-        let (Some(tag), Some(min), Some(def), Some(max)) = (fvar.get(a..a + 4), fixed(a + 4), fixed(a + 8), fixed(a + 12)) else { break };
+        let (Some(tag), Some(min), Some(def), Some(max)) =
+            (fvar.get(a..a + 4), fixed(a + 4), fixed(a + 8), fixed(a + 12))
+        else {
+            break;
+        };
         let v = settings.iter().find(|(t, _)| t == tag).map_or(def, |(_, v)| *v);
         let v = if v.is_finite() { v.clamp(min.min(def), max.max(def)) } else { def };
         let n = if v < def && def > min {
@@ -110,7 +117,9 @@ pub fn coordinates(file: &[u8], index: u32, settings: &[([u8; 4], f32)]) -> Vec<
         for c in coords.iter_mut().take(axes) {
             let Some(maps) = u16_at(avar, at) else { break };
             let maps = maps as usize;
-            let pairs: Vec<(f32, f32)> = (0..maps).filter_map(|k| Some((f2dot14(avar, at + 2 + 4 * k)?, f2dot14(avar, at + 4 + 4 * k)?))).collect();
+            let pairs: Vec<(f32, f32)> = (0..maps)
+                .filter_map(|k| Some((f2dot14(avar, at + 2 + 4 * k)?, f2dot14(avar, at + 4 + 4 * k)?)))
+                .collect();
             at += 2 + 4 * maps;
             if pairs.len() != maps || maps < 2 {
                 continue;
@@ -161,7 +170,8 @@ impl Kerning {
         if lookups.is_empty() {
             return None;
         }
-        let deltas = if coords.iter().any(|c| *c != 0.0) { Deltas::read(table(file, index, b"GDEF")?, coords) } else { None };
+        let deltas =
+            if coords.iter().any(|c| *c != 0.0) { Deltas::read(table(file, index, b"GDEF")?, coords) } else { None };
         Some(Kerning { gpos: gpos.to_vec(), lookups, deltas })
     }
 
@@ -407,7 +417,9 @@ impl Deltas {
             let mut scalar = 1.0f32;
             for a in 0..axes {
                 let at = regions + 4 + (r * axes + a) * 6;
-                let (Some(start), Some(peak), Some(end)) = (f2dot14(gdef, at), f2dot14(gdef, at + 2), f2dot14(gdef, at + 4)) else {
+                let (Some(start), Some(peak), Some(end)) =
+                    (f2dot14(gdef, at), f2dot14(gdef, at + 2), f2dot14(gdef, at + 4))
+                else {
                     scalar = 0.0;
                     break;
                 };
@@ -468,7 +480,8 @@ mod tests {
     use super::*;
 
     fn shipped(name: &str) -> Vec<u8> {
-        std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/fonts").join(name)).expect("the shipped fonts")
+        std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/fonts").join(name))
+            .expect("the shipped fonts")
     }
 
     /// Glyph numbers from the font's cmap, through ab_glyph.
@@ -508,7 +521,11 @@ mod tests {
     fn the_same_as_harfbuzz() {
         let file = shipped("InterVariable.ttf");
         let text: Vec<u16> = "AVATo.Ty".chars().map(|c| glyph(&file, c)).collect();
-        for (w, want) in [(400.0, [-140, -140, -174, -160, 0, -69, -128]), (700.0, [-162, -162, -182, -160, 0, -69, -128]), (900.0, [-180, -180, -189, -160, 0, -69, -128])] {
+        for (w, want) in [
+            (400.0, [-140, -140, -174, -160, 0, -69, -128]),
+            (700.0, [-162, -162, -182, -160, 0, -69, -128]),
+            (900.0, [-180, -180, -189, -160, 0, -69, -128]),
+        ] {
             let k = Kerning::read(&file, 0, &coordinates(&file, 0, &[(*b"wght", w)])).unwrap();
             let got: Vec<i32> = text.windows(2).map(|p| k.pair(p[0], p[1]).round() as i32).collect();
             assert_eq!(got, want, "weight {w}");

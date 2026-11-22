@@ -73,7 +73,10 @@ impl Record {
 
 /// Where the history lives.
 pub fn path() -> Option<PathBuf> {
-    let state = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    let state = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
     Some(state.join("vergence/battery.csv"))
 }
 
@@ -97,7 +100,11 @@ fn open_private(path: &Path, append: bool) -> std::io::Result<std::fs::File> {
     }
     let mut o = std::fs::OpenOptions::new();
     o.create(true).mode(0o600);
-    if append { o.append(true) } else { o.write(true).truncate(true) };
+    if append {
+        o.append(true)
+    } else {
+        o.write(true).truncate(true)
+    };
     o.open(path)
 }
 

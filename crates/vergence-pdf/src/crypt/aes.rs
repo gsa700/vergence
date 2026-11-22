@@ -66,7 +66,12 @@ impl Aes {
         for i in nk..4 * (rounds + 1) {
             let mut temp = w[i - 1];
             if i % nk == 0 {
-                temp = [t.sbox[temp[1] as usize] ^ rcon, t.sbox[temp[2] as usize], t.sbox[temp[3] as usize], t.sbox[temp[0] as usize]];
+                temp = [
+                    t.sbox[temp[1] as usize] ^ rcon,
+                    t.sbox[temp[2] as usize],
+                    t.sbox[temp[3] as usize],
+                    t.sbox[temp[0] as usize],
+                ];
                 rcon = xtime(rcon);
             } else if nk > 6 && i % nk == 4 {
                 temp = temp.map(|b| t.sbox[b as usize]);
@@ -217,7 +222,10 @@ mod tests {
     #[test]
     fn fips_197_vectors_both_ways() {
         let pt: [u8; 16] = h("00112233445566778899aabbccddeeff").try_into().unwrap();
-        for (key, ct) in [("000102030405060708090a0b0c0d0e0f", "69c4e0d86a7b0430d8cdb78070b4c55a"), ("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", "8ea2b7ca516745bfeafc49904b496089")] {
+        for (key, ct) in [
+            ("000102030405060708090a0b0c0d0e0f", "69c4e0d86a7b0430d8cdb78070b4c55a"),
+            ("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", "8ea2b7ca516745bfeafc49904b496089"),
+        ] {
             let aes = Aes::new(&h(key)).unwrap();
             let mut b = pt;
             aes.encrypt_block(&mut b);

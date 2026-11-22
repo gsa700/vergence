@@ -44,8 +44,8 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::{
-    Cell, Color, Command, FontRef, Glyph, Image, MAX_COMMANDS, MAX_FAMILY, MAX_FONTS, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_RUN_GLYPHS, MAX_SCENE_GLYPHS,
-    Point, Rect, Scene, SceneError, VERSION, image_len,
+    Cell, Color, Command, FontRef, Glyph, Image, MAX_COMMANDS, MAX_FAMILY, MAX_FONTS, MAX_IMAGE_BYTES, MAX_IMAGES,
+    MAX_RUN_GLYPHS, MAX_SCENE_GLYPHS, Point, Rect, Scene, SceneError, VERSION, image_len,
 };
 
 pub const MAGIC: [u8; 4] = *b"VSCN";
@@ -432,7 +432,13 @@ impl Scene {
                     }
                     let mut cells = Vec::with_capacity(count);
                     for _ in 0..count {
-                        cells.push(Cell { ground: r.color()?, ink: r.color()?, glyph: r.u32()?, font: r.u16()?, flags: r.u16()? });
+                        cells.push(Cell {
+                            ground: r.color()?,
+                            ink: r.color()?,
+                            glyph: r.u32()?,
+                            font: r.u16()?,
+                            flags: r.u16()?,
+                        });
                     }
                     Command::Cells { origin, cell_w, cell_h, baseline, size, columns, cells }
                 }
@@ -472,16 +478,40 @@ mod tests {
         let pic = s.image(Image { width: 2, height: 2, rgba: (0..16).collect() });
         s.fill(Rect::new(0.0, 0.0, 640.0, 400.0), Color::rgb(46, 52, 54));
         s.push_clip(Rect::new(0.0, 36.0, 640.0, 364.0), 4.0);
-        s.glyphs(mono, 13.5, Color::rgb(211, 215, 207), Point::new(6.0, 52.0), vec![Glyph { id: 71, x: 0.0, y: 0.0 }, Glyph { id: 72, x: 8.1, y: -0.25 }]);
+        s.glyphs(
+            mono,
+            13.5,
+            Color::rgb(211, 215, 207),
+            Point::new(6.0, 52.0),
+            vec![Glyph { id: 71, x: 0.0, y: 0.0 }, Glyph { id: 72, x: 8.1, y: -0.25 }],
+        );
         s.glyphs(slanted, 9.0, Color::rgba(252, 233, 79, 200), Point::new(6.0, 70.0), vec![]);
         s.draw_image(pic, Rect::new(600.0, 40.0, 32.0, 16.0), 0.5);
         s.pop_clip();
         s.stroke(Rect::new(0.5, 0.5, 639.0, 399.0), 2.0, 1.0, Color::rgb(80, 90, 110));
         s.line(Point::new(12.0, 12.0), Point::new(22.0, 22.0), 1.25, Color::rgb(235, 235, 235));
         let cells = vec![
-            Cell { ground: Color::rgb(1, 2, 3), ink: Color::rgb(250, 251, 252), glyph: 40, font: mono as u16, flags: crate::CELL_GLYPH },
-            Cell { ground: Color::rgba(0, 0, 0, 0), ink: Color::rgb(9, 8, 7), glyph: 0, font: 7, flags: crate::CELL_UNDERLINE },
-            Cell { ground: Color::rgb(4, 5, 6), ink: Color::rgba(1, 1, 1, 153), glyph: 41, font: slanted as u16, flags: crate::CELL_UNDERLINE | crate::CELL_GLYPH },
+            Cell {
+                ground: Color::rgb(1, 2, 3),
+                ink: Color::rgb(250, 251, 252),
+                glyph: 40,
+                font: mono as u16,
+                flags: crate::CELL_GLYPH,
+            },
+            Cell {
+                ground: Color::rgba(0, 0, 0, 0),
+                ink: Color::rgb(9, 8, 7),
+                glyph: 0,
+                font: 7,
+                flags: crate::CELL_UNDERLINE,
+            },
+            Cell {
+                ground: Color::rgb(4, 5, 6),
+                ink: Color::rgba(1, 1, 1, 153),
+                glyph: 41,
+                font: slanted as u16,
+                flags: crate::CELL_UNDERLINE | crate::CELL_GLYPH,
+            },
             Cell::default(),
         ];
         s.cells(Point::new(4.0, 40.0), 8.25, 17.0, 13.0, 13.5, 2, cells);
@@ -517,7 +547,10 @@ mod tests {
         assert!(d.new.is_empty());
         // A key never sent is refused, not guessed.
         let empty: HashMap<u64, Arc<Image>> = HashMap::new();
-        assert_eq!(Scene::decode_keyed(&second, &|k| empty.get(&k).cloned()).err(), Some(DecodeError::UnknownImage(0xA1)));
+        assert_eq!(
+            Scene::decode_keyed(&second, &|k| empty.get(&k).cloned()).err(),
+            Some(DecodeError::UnknownImage(0xA1))
+        );
         // Versions do not mix: a keyed scene is not a file's, nor the other way.
         assert_eq!(Scene::decode(&second).err(), Some(DecodeError::Version(WIRE_VERSION)));
         assert_eq!(Scene::decode_keyed(&s.encode().unwrap(), &|_| None).err(), Some(DecodeError::Version(VERSION)));

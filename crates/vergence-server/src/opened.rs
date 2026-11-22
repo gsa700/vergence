@@ -37,12 +37,22 @@ impl Server {
         // (found 2026-11-15: the editor's Open dialog opened behind it).
         let parent = self.window_style(w).parent;
         let same = match &focused {
-            Some(f) => self.same_program(f, w) || parent.as_ref() == Some(f) || parent.as_ref().is_some_and(|p| self.same_program(f, p)),
+            Some(f) => {
+                self.same_program(f, w)
+                    || parent.as_ref() == Some(f)
+                    || parent.as_ref().is_some_and(|p| self.same_program(f, p))
+            }
             None => false,
         };
         let items = self.shelf_items();
         let key = items.iter().find(|(_, ws)| ws.contains(w)).map(|(i, _)| i.key.clone());
-        let started_at = key.as_ref().and_then(|key| self.shelf.launched.iter().find(|(k, since)| k == key && since.elapsed() < LAUNCHED).map(|(_, since)| *since));
+        let started_at = key.as_ref().and_then(|key| {
+            self.shelf
+                .launched
+                .iter()
+                .find(|(k, since)| k == key && since.elapsed() < LAUNCHED)
+                .map(|(_, since)| *since)
+        });
         let take = takes_keyboard(focused.is_some(), same, started_at, typed_at);
         // The launch is used up by its first window.
         if let Some(key) = key {
@@ -67,7 +77,13 @@ impl Server {
         let same = focused.as_ref().is_some_and(|f| self.same_program(f, w));
         let items = self.shelf_items();
         let key = items.iter().find(|(_, ws)| ws.contains(w)).map(|(i, _)| i.key.clone());
-        let started_at = key.as_ref().and_then(|key| self.shelf.launched.iter().find(|(k, since)| k == key && since.elapsed() < LAUNCHED).map(|(_, since)| *since));
+        let started_at = key.as_ref().and_then(|key| {
+            self.shelf
+                .launched
+                .iter()
+                .find(|(k, since)| k == key && since.elapsed() < LAUNCHED)
+                .map(|(_, since)| *since)
+        });
         if !takes_keyboard(focused.is_some(), same, started_at, self.input.typed_at) {
             tracing::info!("activate: refused for {:?} (not just started by the person)", self.window_title(w));
             return;
@@ -103,7 +119,12 @@ impl Server {
 /// The rule, apart from the windows: does a new window take the keyboard?
 /// `started_at`: when its application was started by the person, if it was
 /// and is still starting; `typed_at`: when a key last went into a window.
-fn takes_keyboard(something_focused: bool, same_program: bool, started_at: Option<std::time::Instant>, typed_at: Option<std::time::Instant>) -> bool {
+fn takes_keyboard(
+    something_focused: bool,
+    same_program: bool,
+    started_at: Option<std::time::Instant>,
+    typed_at: Option<std::time::Instant>,
+) -> bool {
     !something_focused || same_program || started_at.is_some_and(|since| typed_at.is_none_or(|t| t < since))
 }
 

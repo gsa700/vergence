@@ -23,8 +23,19 @@ fn main() {
             None if app.icon.is_empty() => "(no icon named)".to_string(),
             None => format!("(no file for \"{}\")", app.icon),
         };
-        let notes = [app.terminal.then_some("in a terminal"), app.no_display.then_some("not listed")].into_iter().flatten().collect::<Vec<_>>().join(", ");
-        println!("{}\t{}\t{}\t{}{}", app.name, app.id, app.exec.join(" "), icon, if notes.is_empty() { String::new() } else { format!("\t({notes})") });
+        let notes = [app.terminal.then_some("in a terminal"), app.no_display.then_some("not listed")]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!(
+            "{}\t{}\t{}\t{}{}",
+            app.name,
+            app.id,
+            app.exec.join(" "),
+            icon,
+            if notes.is_empty() { String::new() } else { format!("\t({notes})") }
+        );
     }
     eprintln!("{} applications ({} not listed)", found.len(), found.iter().filter(|a| a.no_display).count());
 }

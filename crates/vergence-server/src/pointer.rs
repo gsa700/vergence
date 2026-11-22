@@ -66,7 +66,13 @@ impl Server {
     /// state (nothing else sets them: with libinput they are the
     /// compositor's to drive); a pointing one gets the settings and is kept.
     pub fn pointer_device_added(&mut self, mut d: Device) {
-        tracing::info!("input: device {:?} (touch {}, pointer {}, keyboard {})", d.name(), d.has_capability(DeviceCapability::Touch), d.has_capability(DeviceCapability::Pointer), d.has_capability(DeviceCapability::Keyboard));
+        tracing::info!(
+            "input: device {:?} (touch {}, pointer {}, keyboard {})",
+            d.name(),
+            d.has_capability(DeviceCapability::Touch),
+            d.has_capability(DeviceCapability::Pointer),
+            d.has_capability(DeviceCapability::Keyboard)
+        );
         self.inputs_device_added(&d);
         if d.has_capability(DeviceCapability::Keyboard) {
             self.keys_ready();
@@ -147,7 +153,12 @@ impl Server {
         tracing::info!(
             "pointer: {} gets speed {speed}{}, natural scrolling {}, left-handed {}",
             d.name(),
-            if !pad && matches!(self.pointer_setting(MOUSE, "accel-profile"), Some(SettingValue::Str(p)) if p == "flat") { " flat" } else { "" },
+            if !pad && matches!(self.pointer_setting(MOUSE, "accel-profile"), Some(SettingValue::Str(p)) if p == "flat")
+            {
+                " flat"
+            } else {
+                ""
+            },
             self.pointer_flag(ns, "natural-scroll", pad),
             self.pointer_flag(MOUSE, "left-handed", false)
         );
@@ -156,7 +167,11 @@ impl Server {
             let _ = d.config_tap_set_enabled(self.pointer_flag(TOUCHPAD, "tap-to-click", true));
             let _ = d.config_tap_set_drag_enabled(self.pointer_flag(TOUCHPAD, "tap-and-drag", true));
             let _ = d.config_dwt_set_enabled(self.pointer_flag(TOUCHPAD, "disable-while-typing", true));
-            let method = if self.pointer_flag(TOUCHPAD, "edge-scrolling-enabled", false) { ScrollMethod::Edge } else { ScrollMethod::TwoFinger };
+            let method = if self.pointer_flag(TOUCHPAD, "edge-scrolling-enabled", false) {
+                ScrollMethod::Edge
+            } else {
+                ScrollMethod::TwoFinger
+            };
             let _ = d.config_scroll_set_method(method);
             let click = match self.pointer_setting(TOUCHPAD, "click-method") {
                 Some(SettingValue::Str(m)) if m == "fingers" => ClickMethod::Clickfinger,

@@ -258,7 +258,9 @@ impl InputKind {
     }
 
     pub fn from_name(s: &str) -> Option<InputKind> {
-        [InputKind::Keyboard, InputKind::Mouse, InputKind::Touchpad, InputKind::Touchscreen].into_iter().find(|k| k.name() == s)
+        [InputKind::Keyboard, InputKind::Mouse, InputKind::Touchpad, InputKind::Touchscreen]
+            .into_iter()
+            .find(|k| k.name() == s)
     }
 }
 
@@ -397,62 +399,123 @@ pub enum ClientMsg {
     /// First message on a connection. `app_id` names the application (the
     /// same id its windows carry); the server records it but does not trust
     /// it for permissions (§7.4).
-    Hello { version: u32, app_id: String },
-    Ping { serial: u32 },
+    Hello {
+        version: u32,
+        app_id: String,
+    },
+    Ping {
+        serial: u32,
+    },
     /// Start receiving a topic's events. The reply is [`ServerMsg::Done`],
     /// followed at once by the topic's current state as an event.
-    Subscribe { serial: u32, topic: Topic },
-    Unsubscribe { serial: u32, topic: Topic },
+    Subscribe {
+        serial: u32,
+        topic: Topic,
+    },
+    Unsubscribe {
+        serial: u32,
+        topic: Topic,
+    },
     /// The monitors now, as a reply (no subscription).
-    GetOutputs { serial: u32 },
+    GetOutputs {
+        serial: u32,
+    },
     /// Every setting now, as a reply (no subscription).
-    GetSettings { serial: u32 },
+    GetSettings {
+        serial: u32,
+    },
     /// Show a notification (or replace one of this client's: `replaces`, else
     /// 0). `urgency` 0 low, 1 normal, 2 critical; `timeout_ms` -1 for the
     /// server's choice, 0 to stay until clicked. `actions` are (key, label);
     /// "default" is a click on the notification. Reply: [`ServerMsg::Notified`].
-    Notify { serial: u32, replaces: u32, summary: String, body: String, urgency: u8, timeout_ms: i32, actions: Vec<(String, String)> },
+    Notify {
+        serial: u32,
+        replaces: u32,
+        summary: String,
+        body: String,
+        urgency: u8,
+        timeout_ms: i32,
+        actions: Vec<(String, String)>,
+    },
     /// Close one of this client's notifications. Reply: Done, or an error.
-    CloseNotification { serial: u32, id: u32 },
+    CloseNotification {
+        serial: u32,
+        id: u32,
+    },
     /// The apps window memory keeps places for. Reply: [`ServerMsg::Places`].
-    ListPlaces { serial: u32 },
+    ListPlaces {
+        serial: u32,
+    },
     /// Forget every place of an app (its class), on every setup; an empty
     /// `app` forgets all. Reply: Done.
-    ForgetPlaces { serial: u32, app: String },
+    ForgetPlaces {
+        serial: u32,
+        app: String,
+    },
     /// The user's running applications (Force Quit, tools milestone 1).
     /// Reply: [`ServerMsg::Apps`].
-    ListApps { serial: u32 },
+    ListApps {
+        serial: u32,
+    },
     /// End an application at once: every process of its windows is sent
     /// SIGKILL (the user's own processes only). Reply: Done, or an error.
-    ForceQuit { serial: u32, app: String },
+    ForceQuit {
+        serial: u32,
+        app: String,
+    },
     /// The answer to [`ServerMsg::Alive`]: this client's loop is running.
-    Alive { serial: u32 },
+    Alive {
+        serial: u32,
+    },
     /// Open files (absolute paths) and links with an application: `app`, a
     /// desktop entry id ("firefox.desktop"), or, empty, each one's default
     /// for its type (files milestone 1). The server starts them as the dock
     /// does. Reply: Done, or an error naming what could not be opened.
-    Open { serial: u32, items: Vec<String>, app: String },
+    Open {
+        serial: u32,
+        items: Vec<String>,
+        app: String,
+    },
     /// Put up a live tile on the dock, or change one of this client's with
     /// the same id (dock milestone 1; tile.rs). It stays until removed or
     /// until this connection ends. Reply: Done, or an error saying why the
     /// tile was refused.
-    SetTile { serial: u32, tile: crate::tile::Tile },
+    SetTile {
+        serial: u32,
+        tile: crate::tile::Tile,
+    },
     /// Take down one of this client's tiles. Reply: Done, or an error.
-    RemoveTile { serial: u32, id: String },
+    RemoveTile {
+        serial: u32,
+        id: String,
+    },
     /// The agents' grants (Privacy > Agents; bus v27). Reply: [`ServerMsg::Grants`].
-    ListGrants { serial: u32 },
+    ListGrants {
+        serial: u32,
+    },
     /// Take grants back: one agent's for one app, every one of an agent's
     /// (`app` empty), or every grant (both empty). They ask again next
     /// time. Reply: Done.
-    RevokeGrants { serial: u32, agent: String, program: String, app: String },
+    RevokeGrants {
+        serial: u32,
+        agent: String,
+        program: String,
+        app: String,
+    },
     /// Open the screenshot bar (Super+Shift+5's), on the screen under the
     /// pointer (bus v32; the Screenshot app). Reply: Done, or an error
     /// (locked, at the login screen).
-    ScreenshotBar { serial: u32 },
+    ScreenshotBar {
+        serial: u32,
+    },
     /// Do something with a drive (bus v34): eject or mount the one at
     /// `path`, or mount the disk image at `path`. Reply: DriveDone (where it
     /// is mounted, for a mount), or an error saying why not.
-    Drive { serial: u32, action: DriveAction, path: String },
+    Drive {
+        serial: u32,
+        action: DriveAction,
+        path: String,
+    },
     /// Windows (window.rs).
     Window(crate::window::WinRequest),
     /// An agent's request (agent.rs; meaning milestone 1, step 3).
@@ -500,52 +563,111 @@ pub const MAX_APP_ICONS: usize = 12;
 /// Server to client.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ServerMsg {
-    Welcome { version: u32, client_id: u32 },
-    Pong { serial: u32 },
+    Welcome {
+        version: u32,
+        client_id: u32,
+    },
+    Pong {
+        serial: u32,
+    },
     /// A request that has no other reply succeeded.
-    Done { serial: u32 },
-    Error { serial: u32, code: ErrorCode, message: String },
+    Done {
+        serial: u32,
+    },
+    Error {
+        serial: u32,
+        code: ErrorCode,
+        message: String,
+    },
     /// The monitors: a reply (serial of the request) or an event (serial 0),
     /// and the setup they make (the set of their EDIDs, hashed): settings kept
     /// per setup (the arrangement) are keyed by it.
-    Outputs { serial: u32, outputs: Vec<OutputInfo>, setup: String },
+    Outputs {
+        serial: u32,
+        outputs: Vec<OutputInfo>,
+        setup: String,
+    },
     /// Settings: a reply or the first event after subscribing (`complete`:
     /// every setting), or an event with the ones that changed. A setting
     /// that disappeared is not sent; a later version may add removals.
-    Settings { serial: u32, complete: bool, settings: Vec<Setting> },
+    Settings {
+        serial: u32,
+        complete: bool,
+        settings: Vec<Setting>,
+    },
     /// The id of a notification just shown.
-    Notified { serial: u32, id: u32 },
+    Notified {
+        serial: u32,
+        id: u32,
+    },
     /// One of this client's notifications closed. `reason`: 1 expired, 2
     /// dismissed by the user, 3 closed by the client.
-    NotificationClosed { id: u32, reason: u32 },
+    NotificationClosed {
+        id: u32,
+        reason: u32,
+    },
     /// The user chose an action on one of this client's notifications.
-    ActionInvoked { id: u32, key: String },
+    ActionInvoked {
+        id: u32,
+        key: String,
+    },
     /// The input devices present, and every kind this machine has had
     /// (remembered by the server across sessions): an event (serial 0).
-    Inputs { serial: u32, devices: Vec<InputInfo>, seen: Vec<InputKind> },
+    Inputs {
+        serial: u32,
+        devices: Vec<InputInfo>,
+        seen: Vec<InputKind>,
+    },
     /// The drives (bus v34): an event (serial 0) on subscribe and whenever
     /// the list changes.
-    Drives { serial: u32, drives: Vec<DriveInfo> },
+    Drives {
+        serial: u32,
+        drives: Vec<DriveInfo>,
+    },
     /// A drive action done: where the drive or image is mounted (empty for an eject).
-    DriveDone { serial: u32, path: String },
+    DriveDone {
+        serial: u32,
+        path: String,
+    },
     /// The apps window memory keeps places for (their class) and how many places each.
-    Places { serial: u32, apps: Vec<(String, u32)> },
+    Places {
+        serial: u32,
+        apps: Vec<(String, u32)>,
+    },
     /// The agents' grants (bus v27).
-    Grants { serial: u32, grants: Vec<Grant> },
+    Grants {
+        serial: u32,
+        grants: Vec<Grant>,
+    },
     /// The user's running applications.
-    Apps { serial: u32, apps: Vec<AppInfo> },
+    Apps {
+        serial: u32,
+        apps: Vec<AppInfo>,
+    },
     /// Is this client's loop running? Answer with [`ClientMsg::Alive`] (the
     /// toolkit does, from its loop): a client that has not answered for a
     /// few seconds is "not responding" in Force Quit.
-    Alive { serial: u32 },
+    Alive {
+        serial: u32,
+    },
     /// One of this client's tiles: its card opened (a live card may now
     /// publish about once a second) or closed (back to quiet).
-    CardOpened { id: String },
-    CardClosed { id: String },
+    CardOpened {
+        id: String,
+    },
+    CardClosed {
+        id: String,
+    },
     /// A click on one of this client's tiles that names no settings page.
-    TileClicked { id: String },
+    TileClicked {
+        id: String,
+    },
     /// A control on one of this client's cards was used (tile.rs `Control`).
-    TileAction { id: String, control: String, value: f64 },
+    TileAction {
+        id: String,
+        control: String,
+        value: f64,
+    },
     /// Windows (window.rs).
     Window(crate::window::WinEvent),
     /// A reply to an agent (agent.rs; meaning milestone 1, step 3).
@@ -763,7 +885,9 @@ impl ClientMsg {
     /// the connection with (its descriptors may be out of step).
     pub fn decode_with_fds(frame: &Frame, fds: &mut dyn crate::window::FdSource) -> Result<ClientMsg, Unknown> {
         if crate::window::is_window_opcode(frame.opcode) {
-            return crate::window::WinRequest::decode(frame.opcode, &frame.payload, fds).map(ClientMsg::Window).map_err(|error| Unknown { serial: 0, code: ErrorCode::BadMessage, error });
+            return crate::window::WinRequest::decode(frame.opcode, &frame.payload, fds)
+                .map(ClientMsg::Window)
+                .map_err(|error| Unknown { serial: 0, code: ErrorCode::BadMessage, error });
         }
         ClientMsg::decode(frame)
     }
@@ -773,7 +897,9 @@ impl ClientMsg {
             return ClientMsg::decode_with_fds(frame, &mut crate::window::NoFds);
         }
         if crate::agent::is_agent_opcode(frame.opcode) {
-            return crate::agent::AgentRequest::decode(frame.opcode, &frame.payload).map(ClientMsg::Agent).map_err(|(serial, error)| Unknown { serial, code: ErrorCode::BadMessage, error });
+            return crate::agent::AgentRequest::decode(frame.opcode, &frame.payload)
+                .map(ClientMsg::Agent)
+                .map_err(|(serial, error)| Unknown { serial, code: ErrorCode::BadMessage, error });
         }
         let mut d = Decoder::new(&frame.payload);
         let bad = |serial: u32, error: WireError| Unknown { serial, code: ErrorCode::BadMessage, error };
@@ -788,7 +914,11 @@ impl ClientMsg {
                 let serial = d.u32().map_err(|e| bad(0, e))?;
                 let topic = topic(&mut d).map_err(|(v, error)| Unknown {
                     serial,
-                    code: if v == 0 && error == WireError::Short { ErrorCode::BadMessage } else { ErrorCode::UnknownTopic },
+                    code: if v == 0 && error == WireError::Short {
+                        ErrorCode::BadMessage
+                    } else {
+                        ErrorCode::UnknownTopic
+                    },
                     error,
                 })?;
                 Ok(if frame.opcode == op::SUBSCRIBE {
@@ -825,7 +955,11 @@ impl ClientMsg {
             op::LIST_GRANTS => Ok(ClientMsg::ListGrants { serial: d.u32().map_err(|e| bad(0, e))? }),
             op::REVOKE_GRANTS => {
                 let serial = d.u32().map_err(|e| bad(0, e))?;
-                let (agent, program, app) = (d.str().map_err(|e| bad(serial, e))?, d.str().map_err(|e| bad(serial, e))?, d.str().map_err(|e| bad(serial, e))?);
+                let (agent, program, app) = (
+                    d.str().map_err(|e| bad(serial, e))?,
+                    d.str().map_err(|e| bad(serial, e))?,
+                    d.str().map_err(|e| bad(serial, e))?,
+                );
                 Ok(ClientMsg::RevokeGrants { serial, agent, program, app })
             }
             op::FORGET_PLACES => {
@@ -837,7 +971,8 @@ impl ClientMsg {
             op::SCREENSHOT_BAR => Ok(ClientMsg::ScreenshotBar { serial: d.u32().map_err(|e| bad(0, e))? }),
             op::DRIVE => {
                 let serial = d.u32().map_err(|e| bad(0, e))?;
-                let action = DriveAction::from_wire(d.u8().map_err(|e| bad(serial, e))?).ok_or_else(|| bad(serial, WireError::BadValue("drive action")))?;
+                let action = DriveAction::from_wire(d.u8().map_err(|e| bad(serial, e))?)
+                    .ok_or_else(|| bad(serial, WireError::BadValue("drive action")))?;
                 let path = d.str().map_err(|e| bad(serial, e))?;
                 Ok(ClientMsg::Drive { serial, action, path })
             }
@@ -906,7 +1041,20 @@ impl ServerMsg {
                 let mut e = Encoder::frame(op::OUTPUTS);
                 e.u32(*serial).count(outputs.len());
                 for o in outputs {
-                    e.str(&o.id).str(&o.name).str(&o.description).i32(o.x).i32(o.y).i32(o.width).i32(o.height).f64(o.scale).str(&o.note).f64(o.default_scale).f64(o.base_scale).str(&o.shown_by).str(&o.drawn_by).count(o.modes.len());
+                    e.str(&o.id)
+                        .str(&o.name)
+                        .str(&o.description)
+                        .i32(o.x)
+                        .i32(o.y)
+                        .i32(o.width)
+                        .i32(o.height)
+                        .f64(o.scale)
+                        .str(&o.note)
+                        .f64(o.default_scale)
+                        .f64(o.base_scale)
+                        .str(&o.shown_by)
+                        .str(&o.drawn_by)
+                        .count(o.modes.len());
                     for m in &o.modes {
                         e.u32(m.width).u32(m.height).u32(m.refresh_mhz).bool(m.preferred);
                     }
@@ -979,7 +1127,13 @@ impl ServerMsg {
                 let mut e = Encoder::frame(op::GRANTS);
                 e.u32(*serial).count(grants.len());
                 for g in grants {
-                    e.str(&g.agent).str(&g.program).str(&g.app).str(&g.shown).str(&g.span).u32(g.minutes_left).bool(g.working);
+                    e.str(&g.agent)
+                        .str(&g.program)
+                        .str(&g.app)
+                        .str(&g.shown)
+                        .str(&g.span)
+                        .u32(g.minutes_left)
+                        .bool(g.working);
                 }
                 e
             }
@@ -1068,7 +1222,12 @@ impl ServerMsg {
                             let n = d.count(13)?;
                             let mut v = Vec::with_capacity(n);
                             for _ in 0..n {
-                                v.push(ModeInfo { width: d.u32()?, height: d.u32()?, refresh_mhz: d.u32()?, preferred: d.bool()? });
+                                v.push(ModeInfo {
+                                    width: d.u32()?,
+                                    height: d.u32()?,
+                                    refresh_mhz: d.u32()?,
+                                    preferred: d.bool()?,
+                                });
                             }
                             v
                         },
@@ -1127,7 +1286,15 @@ impl ServerMsg {
                 let n = d.count(16 + 5)?;
                 let mut grants = Vec::with_capacity(n);
                 for _ in 0..n {
-                    grants.push(Grant { agent: d.str()?, program: d.str()?, app: d.str()?, shown: d.str()?, span: d.str()?, minutes_left: d.u32()?, working: d.bool()? });
+                    grants.push(Grant {
+                        agent: d.str()?,
+                        program: d.str()?,
+                        app: d.str()?,
+                        shown: d.str()?,
+                        span: d.str()?,
+                        minutes_left: d.u32()?,
+                        working: d.bool()?,
+                    });
                 }
                 ServerMsg::Grants { serial, grants }
             }
@@ -1137,7 +1304,14 @@ impl ServerMsg {
                 let n = d.count(15)?;
                 let mut drives = Vec::with_capacity(n);
                 for _ in 0..n {
-                    drives.push(DriveInfo { name: d.str()?, path: d.str()?, kind: DriveKind::from_wire(d.u8()?), mounted: d.bool()?, ejectable: d.bool()?, device: d.str()? });
+                    drives.push(DriveInfo {
+                        name: d.str()?,
+                        path: d.str()?,
+                        kind: DriveKind::from_wire(d.u8()?),
+                        mounted: d.bool()?,
+                        ejectable: d.bool()?,
+                        device: d.str()?,
+                    });
                 }
                 ServerMsg::Drives { serial, drives }
             }
@@ -1175,8 +1349,45 @@ mod tests {
 
     fn outputs() -> Vec<OutputInfo> {
         vec![
-            OutputInfo { id: "3f2a9c0e1b7d4a55".into(), name: "eDP-1".into(), description: "14\" 4K".into(), x: 0, y: 0, width: 1170, height: 658, scale: 3.283_333, note: "calculated".into(), default_scale: 3.0, base_scale: 3.0, shown_by: "Intel graphics (i915)".into(), drawn_by: "Intel graphics (i915)".into(), modes: vec![ModeInfo { width: 3840, height: 2160, refresh_mhz: 60000, preferred: true }, ModeInfo { width: 1920, height: 1080, refresh_mhz: 59940, preferred: false }], mode: 0, text_ratio: 1.09 },
-            OutputInfo { id: "9b1c22d4e5f60718".into(), name: "HDMI-A-1".into(), description: "ASUS VS229".into(), x: 1170, y: 0, width: 1794, height: 1009, scale: 1.075, note: "set by hand".into(), default_scale: 1.0, base_scale: 1.25, shown_by: "NVIDIA graphics (nouveau)".into(), drawn_by: "Intel graphics (i915)".into(), modes: Vec::new(), mode: u32::MAX, text_ratio: 0.86 },
+            OutputInfo {
+                id: "3f2a9c0e1b7d4a55".into(),
+                name: "eDP-1".into(),
+                description: "14\" 4K".into(),
+                x: 0,
+                y: 0,
+                width: 1170,
+                height: 658,
+                scale: 3.283_333,
+                note: "calculated".into(),
+                default_scale: 3.0,
+                base_scale: 3.0,
+                shown_by: "Intel graphics (i915)".into(),
+                drawn_by: "Intel graphics (i915)".into(),
+                modes: vec![
+                    ModeInfo { width: 3840, height: 2160, refresh_mhz: 60000, preferred: true },
+                    ModeInfo { width: 1920, height: 1080, refresh_mhz: 59940, preferred: false },
+                ],
+                mode: 0,
+                text_ratio: 1.09,
+            },
+            OutputInfo {
+                id: "9b1c22d4e5f60718".into(),
+                name: "HDMI-A-1".into(),
+                description: "ASUS VS229".into(),
+                x: 1170,
+                y: 0,
+                width: 1794,
+                height: 1009,
+                scale: 1.075,
+                note: "set by hand".into(),
+                default_scale: 1.0,
+                base_scale: 1.25,
+                shown_by: "NVIDIA graphics (nouveau)".into(),
+                drawn_by: "Intel graphics (i915)".into(),
+                modes: Vec::new(),
+                mode: u32::MAX,
+                text_ratio: 0.86,
+            },
         ]
     }
 
@@ -1197,7 +1408,11 @@ mod tests {
                 controls: vec![
                     Control { id: "test".into(), label: "Self-test".into(), kind: ControlKind::Button },
                     Control { id: "beep".into(), label: "Beeper".into(), kind: ControlKind::Switch(true) },
-                    Control { id: "x".into(), label: "X".into(), kind: ControlKind::Slider { value: 0.5, min: 0.0, max: 1.0, step: 0.05 } },
+                    Control {
+                        id: "x".into(),
+                        label: "X".into(),
+                        kind: ControlKind::Slider { value: 0.5, min: 0.0, max: 1.0, step: 0.05 },
+                    },
                 ],
                 note: "sample".into(),
             },
@@ -1216,7 +1431,11 @@ mod tests {
         t.card.chart.push(f32::NAN);
         assert!(t.check().is_err());
         let mut t = sample_tile();
-        t.card.controls.push(Control { id: "s".into(), label: String::new(), kind: ControlKind::Slider { value: 0.0, min: 1.0, max: 1.0, step: 0.0 } });
+        t.card.controls.push(Control {
+            id: "s".into(),
+            label: String::new(),
+            kind: ControlKind::Slider { value: 0.0, min: 1.0, max: 1.0, step: 0.0 },
+        });
         assert!(t.check().is_err(), "a slider with no range");
         let mut t = sample_tile();
         t.id = "a\nb".into();
@@ -1245,16 +1464,29 @@ mod tests {
             ClientMsg::CloseNotification { serial: 16, id: 3 },
             ClientMsg::ListPlaces { serial: 17 },
             ClientMsg::ListGrants { serial: 40 },
-            ClientMsg::RevokeGrants { serial: 41, agent: "Claude".into(), program: "/usr/local/bin/vergence-agent-mcp".into(), app: String::new() },
+            ClientMsg::RevokeGrants {
+                serial: 41,
+                agent: "Claude".into(),
+                program: "/usr/local/bin/vergence-agent-mcp".into(),
+                app: String::new(),
+            },
             ClientMsg::ForgetPlaces { serial: 18, app: "vergence-term".into() },
             ClientMsg::ForgetPlaces { serial: 19, app: String::new() },
             ClientMsg::ListApps { serial: 22 },
             ClientMsg::ForceQuit { serial: 23, app: "firefox".into() },
             ClientMsg::ScreenshotBar { serial: 24 },
             ClientMsg::Drive { serial: 25, action: DriveAction::Eject, path: "/media/USB".into() },
-            ClientMsg::Drive { serial: 26, action: DriveAction::MountImage, path: "/home/d/Downloads/Fedora 45.iso".into() },
+            ClientMsg::Drive {
+                serial: 26,
+                action: DriveAction::MountImage,
+                path: "/home/d/Downloads/Fedora 45.iso".into(),
+            },
             ClientMsg::Alive { serial: 25 },
-            ClientMsg::Open { serial: 26, items: vec!["/home/u/a b.png".into(), "https://example.org".into()], app: String::new() },
+            ClientMsg::Open {
+                serial: 26,
+                items: vec!["/home/u/a b.png".into(), "https://example.org".into()],
+                app: String::new(),
+            },
             ClientMsg::Open { serial: 27, items: vec![], app: "firefox.desktop".into() },
             ClientMsg::SetTile { serial: 28, tile: crate::tile::Tile::default() },
             ClientMsg::SetTile { serial: 29, tile: sample_tile() },
@@ -1287,11 +1519,42 @@ mod tests {
                 seen: vec![InputKind::Keyboard, InputKind::Touchpad, InputKind::Touchscreen],
             },
             ServerMsg::Inputs { serial: 0, devices: Vec::new(), seen: Vec::new() },
-            ServerMsg::Drives { serial: 0, drives: vec![DriveInfo { name: "USB".into(), path: "/media/USB".into(), kind: DriveKind::Removable, mounted: false, ejectable: true, device: "/dev/msdosfs/USB".into() }, DriveInfo { name: "Fedora".into(), path: "/mnt/Fedora".into(), kind: DriveKind::Image, mounted: true, ejectable: true, device: "/dev/md0".into() }] },
+            ServerMsg::Drives {
+                serial: 0,
+                drives: vec![
+                    DriveInfo {
+                        name: "USB".into(),
+                        path: "/media/USB".into(),
+                        kind: DriveKind::Removable,
+                        mounted: false,
+                        ejectable: true,
+                        device: "/dev/msdosfs/USB".into(),
+                    },
+                    DriveInfo {
+                        name: "Fedora".into(),
+                        path: "/mnt/Fedora".into(),
+                        kind: DriveKind::Image,
+                        mounted: true,
+                        ejectable: true,
+                        device: "/dev/md0".into(),
+                    },
+                ],
+            },
             ServerMsg::DriveDone { serial: 9, path: "/mnt/Fedora".into() },
             ServerMsg::Places { serial: 20, apps: vec![("vergence-term".into(), 3), ("firefox".into(), 1)] },
             ServerMsg::Places { serial: 21, apps: Vec::new() },
-            ServerMsg::Grants { serial: 40, grants: vec![Grant { agent: "Claude".into(), program: "/usr/local/bin/vergence-agent-mcp".into(), app: "vergence-calc".into(), shown: "Calculator".into(), span: "timed".into(), minutes_left: 42, working: true }] },
+            ServerMsg::Grants {
+                serial: 40,
+                grants: vec![Grant {
+                    agent: "Claude".into(),
+                    program: "/usr/local/bin/vergence-agent-mcp".into(),
+                    app: "vergence-calc".into(),
+                    shown: "Calculator".into(),
+                    span: "timed".into(),
+                    minutes_left: 42,
+                    working: true,
+                }],
+            },
             ServerMsg::Alive { serial: 26 },
             ServerMsg::CardOpened { id: "ups".into() },
             ServerMsg::CardClosed { id: "ups".into() },
@@ -1300,17 +1563,43 @@ mod tests {
             ServerMsg::Apps {
                 serial: 24,
                 apps: vec![
-                    AppInfo { key: "vergence-calc".into(), name: "Calculator".into(), icon_side: 2, icon: vec![9; 16], responding: true, quitting: false },
-                    AppInfo { key: "firefox".into(), name: "Firefox".into(), icon_side: 0, icon: Vec::new(), responding: false, quitting: true },
+                    AppInfo {
+                        key: "vergence-calc".into(),
+                        name: "Calculator".into(),
+                        icon_side: 2,
+                        icon: vec![9; 16],
+                        responding: true,
+                        quitting: false,
+                    },
+                    AppInfo {
+                        key: "firefox".into(),
+                        name: "Firefox".into(),
+                        icon_side: 0,
+                        icon: Vec::new(),
+                        responding: false,
+                        quitting: true,
+                    },
                 ],
             },
             ServerMsg::Settings {
                 serial: 0,
                 complete: true,
                 settings: vec![
-                    Setting { namespace: "org.freedesktop.appearance".into(), key: "color-scheme".into(), value: SettingValue::U32(1) },
-                    Setting { namespace: "org.freedesktop.appearance".into(), key: "accent-color".into(), value: SettingValue::Rgb(0.2, 0.5, 1.0) },
-                    Setting { namespace: "org.gnome.desktop.interface".into(), key: "font-name".into(), value: SettingValue::Str("Sans 10".into()) },
+                    Setting {
+                        namespace: "org.freedesktop.appearance".into(),
+                        key: "color-scheme".into(),
+                        value: SettingValue::U32(1),
+                    },
+                    Setting {
+                        namespace: "org.freedesktop.appearance".into(),
+                        key: "accent-color".into(),
+                        value: SettingValue::Rgb(0.2, 0.5, 1.0),
+                    },
+                    Setting {
+                        namespace: "org.gnome.desktop.interface".into(),
+                        key: "font-name".into(),
+                        value: SettingValue::Str("Sans 10".into()),
+                    },
                     Setting { namespace: "n".into(), key: "b".into(), value: SettingValue::Bool(true) },
                     Setting { namespace: "n".into(), key: "i".into(), value: SettingValue::I32(-24) },
                     Setting { namespace: "n".into(), key: "d".into(), value: SettingValue::F64(1.25) },

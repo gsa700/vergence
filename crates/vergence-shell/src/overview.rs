@@ -42,7 +42,9 @@ pub fn arrange(windows: &[Rect], area: Rect, gap: i32) -> Vec<Rect> {
         }
     }
     let Some((scale, rows)) = best else { return Vec::new() };
-    let size = |i: usize| (((windows[i].w as f64 * scale).round() as i32).max(1), ((windows[i].h as f64 * scale).round() as i32).max(1));
+    let size = |i: usize| {
+        (((windows[i].w as f64 * scale).round() as i32).max(1), ((windows[i].h as f64 * scale).round() as i32).max(1))
+    };
     let heights: Vec<i32> = rows.iter().map(|row| row.iter().map(|&i| size(i).1).max().unwrap_or(0)).collect();
     let total_h = heights.iter().sum::<i32>() + gap * (rows.len() as i32 - 1);
     let mut out = vec![Rect::new(0, 0, 0, 0); n];
@@ -121,11 +123,23 @@ mod tests {
     fn windows_never_overlap_and_stay_inside() {
         let area = Rect::new(0, 40, 1920, 990);
         // Five windows piled on one another, as they often are.
-        let windows = [Rect::new(100, 100, 1200, 800), Rect::new(150, 150, 1200, 800), Rect::new(600, 200, 900, 700), Rect::new(0, 0, 1920, 1030), Rect::new(1400, 600, 400, 300)];
+        let windows = [
+            Rect::new(100, 100, 1200, 800),
+            Rect::new(150, 150, 1200, 800),
+            Rect::new(600, 200, 900, 700),
+            Rect::new(0, 0, 1920, 1030),
+            Rect::new(1400, 600, 400, 300),
+        ];
         let out = arrange(&windows, area, 24);
         assert_eq!(out.len(), 5);
         for (i, a) in out.iter().enumerate() {
-            assert!(a.x >= area.x + 24 && a.y >= area.y + 24 && a.x + a.w <= area.x + area.w - 24 && a.y + a.h <= area.y + area.h - 24, "{i} inside: {a:?}");
+            assert!(
+                a.x >= area.x + 24
+                    && a.y >= area.y + 24
+                    && a.x + a.w <= area.x + area.w - 24
+                    && a.y + a.h <= area.y + area.h - 24,
+                "{i} inside: {a:?}"
+            );
             for b in &out[i + 1..] {
                 assert!(!overlap(a, b), "{a:?} and {b:?}");
             }
@@ -155,7 +169,8 @@ mod tests {
     #[test]
     fn windows_keep_their_rough_places() {
         // Two side by side stay side by side, left on the left.
-        let out = arrange(&[Rect::new(1000, 100, 800, 600), Rect::new(0, 100, 800, 600)], Rect::new(0, 0, 1920, 1080), 24);
+        let out =
+            arrange(&[Rect::new(1000, 100, 800, 600), Rect::new(0, 100, 800, 600)], Rect::new(0, 0, 1920, 1080), 24);
         assert!(out[1].x < out[0].x);
         // Many: the top one is in the top row.
         let windows: Vec<Rect> = (0..6).map(|i| Rect::new((i % 3) * 600, (i / 3) * 500, 560, 460)).collect();
@@ -165,7 +180,12 @@ mod tests {
 
     #[test]
     fn the_arrows_move_to_the_nearest_that_way() {
-        let places = [Rect::new(0, 0, 100, 100), Rect::new(200, 0, 100, 100), Rect::new(0, 200, 100, 100), Rect::new(200, 200, 100, 100)];
+        let places = [
+            Rect::new(0, 0, 100, 100),
+            Rect::new(200, 0, 100, 100),
+            Rect::new(0, 200, 100, 100),
+            Rect::new(200, 200, 100, 100),
+        ];
         assert_eq!(step(&places, 0, 1, 0), 1);
         assert_eq!(step(&places, 0, 0, 1), 2);
         assert_eq!(step(&places, 3, -1, 0), 2);

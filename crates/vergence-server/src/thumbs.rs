@@ -23,11 +23,16 @@ use smithay::{
     backend::renderer::{
         Bind, Offscreen,
         damage::OutputDamageTracker,
-        element::{AsRenderElements, Element, Id, Kind, RenderElement, memory::MemoryRenderBufferRenderElement, surface::WaylandSurfaceRenderElement, texture::TextureRenderElement},
+        element::{
+            AsRenderElements, Element, Id, Kind, RenderElement, memory::MemoryRenderBufferRenderElement,
+            surface::WaylandSurfaceRenderElement, texture::TextureRenderElement,
+        },
         gles::{GlesError, GlesFrame, GlesRenderer, GlesTexture},
         utils::{CommitCounter, DamageSet, OpaqueRegions},
     },
-    utils::{Buffer as BufferCoords, Logical, Physical, Point, Rectangle, Scale, Size, Transform, user_data::UserDataMap},
+    utils::{
+        Buffer as BufferCoords, Logical, Physical, Point, Rectangle, Scale, Size, Transform, user_data::UserDataMap,
+    },
 };
 
 use crate::decor::SceneElement;
@@ -73,7 +78,8 @@ fn content_size(w: &Win) -> Option<Size<i32, Logical>> {
 /// blurred), and the picture's size in pixels at that scale (at least 1x1).
 pub fn fit(content: Size<i32, Logical>, room: Size<i32, Physical>) -> (f64, Size<i32, Physical>) {
     let k = (room.w as f64 / content.w.max(1) as f64).min(room.h as f64 / content.h.max(1) as f64).clamp(0.0, 1.0);
-    let px = Size::from((((content.w as f64 * k).round() as i32).max(1), ((content.h as f64 * k).round() as i32).max(1)));
+    let px =
+        Size::from((((content.w as f64 * k).round() as i32).max(1), ((content.h as f64 * k).round() as i32).max(1)));
     (k, px)
 }
 
@@ -87,22 +93,41 @@ fn draw(renderer: &mut GlesRenderer, w: &Win, k: f64, px: Size<i32, Physical>) -
         let whole = Rectangle::<f64, Logical>::from_size((p.px.w as f64, p.px.h as f64).into());
         match &p.content {
             crate::native::Content::Memory(buffer) => {
-                let e = MemoryRenderBufferRenderElement::from_buffer(renderer, (0.0, 0.0), buffer, None, Some(whole), Some(size_pt), Kind::Unspecified).map_err(|e| format!("{e:?}"))?;
+                let e = MemoryRenderBufferRenderElement::from_buffer(
+                    renderer,
+                    (0.0, 0.0),
+                    buffer,
+                    None,
+                    Some(whole),
+                    Some(size_pt),
+                    Kind::Unspecified,
+                )
+                .map_err(|e| format!("{e:?}"))?;
                 elements.push(SceneElement::Memory(e));
             }
             crate::native::Content::Gpu(_) => {
                 let (t, _, _, _) = crate::decor::native_texture(renderer, w).ok_or("no GPU picture")?;
-                elements.push(SceneElement::Texture(TextureRenderElement::from_texture_buffer((0.0, 0.0), &t, None, Some(whole), Some(size_pt), Kind::Unspecified)));
+                elements.push(SceneElement::Texture(TextureRenderElement::from_texture_buffer(
+                    (0.0, 0.0),
+                    &t,
+                    None,
+                    Some(whole),
+                    Some(size_pt),
+                    Kind::Unspecified,
+                )));
             }
         }
     } else {
         // From the window's geometry's corner (a client's own shadow left out).
-        let at: Point<i32, Physical> = (Point::<i32, Logical>::from((0, 0)) - w.geometry().loc).to_f64().to_physical(k).to_i32_round();
-        let surfaces: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = w.render_elements(renderer, at, Scale::from(k), 1.0);
+        let at: Point<i32, Physical> =
+            (Point::<i32, Logical>::from((0, 0)) - w.geometry().loc).to_f64().to_physical(k).to_i32_round();
+        let surfaces: Vec<WaylandSurfaceRenderElement<GlesRenderer>> =
+            w.render_elements(renderer, at, Scale::from(k), 1.0);
         elements.extend(surfaces.into_iter().map(SceneElement::Surface));
     }
     let buf = Size::<i32, BufferCoords>::from((px.w, px.h));
-    let mut tex: GlesTexture = renderer.create_buffer(smithay::backend::allocator::Fourcc::Abgr8888, buf).map_err(|e| e.to_string())?;
+    let mut tex: GlesTexture =
+        renderer.create_buffer(smithay::backend::allocator::Fourcc::Abgr8888, buf).map_err(|e| e.to_string())?;
     {
         let mut fb = renderer.bind(&mut tex).map_err(|e| e.to_string())?;
         let mut damage = OutputDamageTracker::new(px, 1.0, Transform::Normal);
@@ -115,7 +140,12 @@ impl Server {
     /// Window `w`'s picture fitted into `room` pixels, drawn (again, if it is
     /// older than `EVERY` or its size changed) and kept; its texture and size.
     /// None if the window has nothing to show or it cannot be drawn.
-    pub fn thumb(&mut self, renderer: &mut GlesRenderer, w: &Win, room: Size<i32, Physical>) -> Option<(GlesTexture, Size<i32, Physical>)> {
+    pub fn thumb(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        w: &Win,
+        room: Size<i32, Physical>,
+    ) -> Option<(GlesTexture, Size<i32, Physical>)> {
         let content = content_size(w)?;
         let (k, px) = fit(content, room);
         let now = Instant::now();
@@ -123,7 +153,11 @@ impl Server {
         if !fresh {
             match draw(renderer, w, k, px) {
                 Ok(texture) => {
-                    let (id, mut commit) = self.thumbs.by_window.remove(w).map_or_else(|| (Id::new(), CommitCounter::default()), |t| (t.id, t.commit));
+                    let (id, mut commit) = self
+                        .thumbs
+                        .by_window
+                        .remove(w)
+                        .map_or_else(|| (Id::new(), CommitCounter::default()), |t| (t.id, t.commit));
                     commit.increment();
                     self.thumbs.by_window.insert(w.clone(), Thumb { texture, px, drawn: now, asked: now, id, commit });
                 }
@@ -143,10 +177,17 @@ impl Server {
 
     /// Window `w`'s picture as an element filling `dst` (its shape kept,
     /// centered in it), faded to `alpha`. None if it has none.
-    pub fn thumb_element(&mut self, renderer: &mut GlesRenderer, w: &Win, dst: Rectangle<i32, Physical>, alpha: f32) -> Option<ThumbElement> {
+    pub fn thumb_element(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        w: &Win,
+        dst: Rectangle<i32, Physical>,
+        alpha: f32,
+    ) -> Option<ThumbElement> {
         let (texture, px) = self.thumb(renderer, w, dst.size)?;
         let t = self.thumbs.by_window.get(w)?;
-        let at = Point::<i32, Physical>::from((dst.loc.x + (dst.size.w - px.w) / 2, dst.loc.y + (dst.size.h - px.h) / 2));
+        let at =
+            Point::<i32, Physical>::from((dst.loc.x + (dst.size.w - px.w) / 2, dst.loc.y + (dst.size.h - px.h) / 2));
         Some(ThumbElement { id: t.id.clone(), commit: t.commit, dst: Rectangle::new(at, px), texture, alpha })
     }
 
@@ -189,7 +230,11 @@ impl Element for ThumbElement {
     }
 
     fn damage_since(&self, scale: Scale<f64>, commit: Option<CommitCounter>) -> DamageSet<i32, Physical> {
-        if commit == Some(self.commit) { DamageSet::default() } else { DamageSet::from_slice(&[Rectangle::from_size(self.geometry(scale).size)]) }
+        if commit == Some(self.commit) {
+            DamageSet::default()
+        } else {
+            DamageSet::from_slice(&[Rectangle::from_size(self.geometry(scale).size)])
+        }
     }
 
     fn opaque_regions(&self, _scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
@@ -215,7 +260,17 @@ impl RenderElement<GlesRenderer> for ThumbElement {
         opaque_regions: &[Rectangle<i32, Physical>],
         _cache: Option<&UserDataMap>,
     ) -> Result<(), GlesError> {
-        frame.render_texture_from_to(&self.texture, src, dst, damage, opaque_regions, Transform::Normal, self.alpha, None, &[])
+        frame.render_texture_from_to(
+            &self.texture,
+            src,
+            dst,
+            damage,
+            opaque_regions,
+            Transform::Normal,
+            self.alpha,
+            None,
+            &[],
+        )
     }
 }
 

@@ -11,7 +11,9 @@ pub(crate) const SCROLL_GUTTER: f32 = 10.0;
 
 use vergence_scene::{Color, Image, Rect};
 
-use crate::element::{Align, ButtonLook, Draw, Element, FIELD_PAD_H, FIELD_PAD_V, Fit, Kind, Label, Length, OnTouch, Weight};
+use crate::element::{
+    Align, ButtonLook, Draw, Element, FIELD_PAD_H, FIELD_PAD_V, Fit, Kind, Label, Length, OnTouch, Weight,
+};
 
 /// A widget's name between builds: its place in the tree, or the key its
 /// program gave it, under its parent's id.
@@ -37,21 +39,80 @@ pub struct Line {
 
 pub(crate) enum What<M> {
     Space,
-    Rule { color: Option<Color> },
-    Label { lines: Vec<Line>, size: f32, weight: Weight, color: Option<Color>, dim: bool },
-    Panel { fill: Option<Color>, edge: Option<(Color, f32)>, radius: f32 },
-    Button { on_press: Option<M>, look: ButtonLook, on_drag: Option<M> },
+    Rule {
+        color: Option<Color>,
+    },
+    Label {
+        lines: Vec<Line>,
+        size: f32,
+        weight: Weight,
+        color: Option<Color>,
+        dim: bool,
+    },
+    Panel {
+        fill: Option<Color>,
+        edge: Option<(Color, f32)>,
+        radius: f32,
+    },
+    Button {
+        on_press: Option<M>,
+        look: ButtonLook,
+        on_drag: Option<M>,
+    },
     Group,
-    Switch { on: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
-    Slider { min: f32, max: f32, step: f32, value: f32, marks: Vec<f32>, on_change: Option<Box<dyn Fn(f32) -> M>>, on_release: Option<M> },
+    Switch {
+        on: bool,
+        on_toggle: Option<Box<dyn Fn(bool) -> M>>,
+    },
+    Slider {
+        min: f32,
+        max: f32,
+        step: f32,
+        value: f32,
+        marks: Vec<f32>,
+        on_change: Option<Box<dyn Fn(f32) -> M>>,
+        on_release: Option<M>,
+    },
     /// `baseline`: of the text, below the field's top.
-    Field { value: String, placeholder: String, secret: bool, autofocus: bool, on_input: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, size: f32, baseline: f32 },
-    Choice { options: Vec<String>, selected: Option<usize>, placeholder: String, on_select: Option<Box<dyn Fn(usize) -> M>>, size: f32, baseline: f32, step: f32 },
+    Field {
+        value: String,
+        placeholder: String,
+        secret: bool,
+        autofocus: bool,
+        on_input: Option<Box<dyn Fn(String) -> M>>,
+        on_submit: Option<M>,
+        size: f32,
+        baseline: f32,
+    },
+    Choice {
+        options: Vec<String>,
+        selected: Option<usize>,
+        placeholder: String,
+        on_select: Option<Box<dyn Fn(usize) -> M>>,
+        size: f32,
+        baseline: f32,
+        step: f32,
+    },
     /// `content`: the height of what is in it.
-    Scroll { content: f32 },
-    Picture { image: Arc<Image>, fit: Fit, radius: f32, opacity: f32 },
-    Drawing { draw: Draw, on_touch: Option<OnTouch<M>>, cursor: Option<vergence_ui::Cursor> },
-    Area { doc: crate::textarea::TextDoc, on_change: Option<M>, autofocus: bool },
+    Scroll {
+        content: f32,
+    },
+    Picture {
+        image: Arc<Image>,
+        fit: Fit,
+        radius: f32,
+        opacity: f32,
+    },
+    Drawing {
+        draw: Draw,
+        on_touch: Option<OnTouch<M>>,
+        cursor: Option<vergence_ui::Cursor>,
+    },
+    Area {
+        doc: crate::textarea::TextDoc,
+        on_change: Option<M>,
+        autofocus: bool,
+    },
 }
 
 pub(crate) struct Node<M> {
@@ -81,7 +142,9 @@ pub(crate) fn child_id(parent: Id, index: usize, key: Option<u64>) -> Id {
     };
     // The +1 and the constant keep a first child from sharing its parent's id
     // (zero would hash to zero).
-    let mut z = (parent ^ 0x2545_f491_4f6c_dd1d).rotate_left(17).wrapping_add(tag.wrapping_add(1).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+    let mut z = (parent ^ 0x2545_f491_4f6c_dd1d)
+        .rotate_left(17)
+        .wrapping_add(tag.wrapping_add(1).wrapping_mul(0x9e37_79b9_7f4a_7c15));
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
     z ^ (z >> 31)
@@ -175,7 +238,11 @@ impl Layout<'_> {
                 }
             }
         }
-        let out = lines.into_iter().enumerate().map(|(i, (text, w))| Line { text, x: 0.0, baseline: (ascent + i as f32 * step).round(), width: w }).collect::<Vec<_>>();
+        let out = lines
+            .into_iter()
+            .enumerate()
+            .map(|(i, (text, w))| Line { text, x: 0.0, baseline: (ascent + i as f32 * step).round(), width: w })
+            .collect::<Vec<_>>();
         let height = (out.len() as f32 * step).ceil();
         self.lines_seen.insert(key, (out.clone(), height));
         (out, height)
@@ -215,7 +282,8 @@ impl Layout<'_> {
                 Size { w, h }
             }
             Kind::Row { children, spacing, .. } => {
-                let natural: f32 = children.iter().map(|c| self.main_natural(c, avail, true)).sum::<f32>() + gaps(children.len(), *spacing);
+                let natural: f32 = children.iter().map(|c| self.main_natural(c, avail, true)).sum::<f32>()
+                    + gaps(children.len(), *spacing);
                 let room = if e.width == Length::Shrink { natural.min(avail) } else { avail };
                 let widths = self.distribute(children, room, *spacing, true, avail);
                 let h = children.iter().zip(&widths).map(|(c, w)| self.cross(c, *w)).fold(0.0, f32::max);
@@ -226,10 +294,13 @@ impl Layout<'_> {
                 let mut h = gaps(children.len(), *spacing);
                 for c in children {
                     let s = self.measure(c, avail);
-                    let cw = clamp_w(c, match c.width {
-                        Length::Fixed(f) => f,
-                        _ => s.w,
-                    });
+                    let cw = clamp_w(
+                        c,
+                        match c.width {
+                            Length::Fixed(f) => f,
+                            _ => s.w,
+                        },
+                    );
                     w = w.max(cw);
                     h += match c.height {
                         Length::Fixed(f) => f,
@@ -253,10 +324,13 @@ impl Layout<'_> {
             Kind::Picture { .. } | Kind::Drawing { .. } | Kind::Area { .. } => Size { w: 0.0, h: 0.0 },
         };
         Size {
-            w: clamp_w(e, match e.width {
-                Length::Fixed(w) => w,
-                _ => content.w,
-            }),
+            w: clamp_w(
+                e,
+                match e.width {
+                    Length::Fixed(w) => w,
+                    _ => content.w,
+                },
+            ),
             h: match e.height {
                 Length::Fixed(h) => h,
                 _ => content.h,
@@ -323,7 +397,14 @@ impl Layout<'_> {
     /// fixed and shrinking ones first, then what is left by weight among
     /// the filling ones. `avail` is the width the children may measure in
     /// (a column's children are measured at their own widths beforehand).
-    fn distribute<M>(&mut self, children: &[Element<M>], room: f32, spacing: f32, across: bool, avail: f32) -> Vec<f32> {
+    fn distribute<M>(
+        &mut self,
+        children: &[Element<M>],
+        room: f32,
+        spacing: f32,
+        across: bool,
+        avail: f32,
+    ) -> Vec<f32> {
         let mut out = vec![0.0; children.len()];
         let mut used = gaps(children.len(), spacing);
         let mut weights = 0u32;
@@ -362,7 +443,20 @@ impl Layout<'_> {
         let hover_only = e.hover_only;
         let pointer = e.pointer;
         let on_menu = e.on_menu;
-        let push = |out: &mut Vec<Node<M>>, what: What<M>| out.push(Node { id, rect, parent, what, name: name.clone(), value: value.clone(), on_menu: None, reveal, hover_only, pointer });
+        let push = |out: &mut Vec<Node<M>>, what: What<M>| {
+            out.push(Node {
+                id,
+                rect,
+                parent,
+                what,
+                name: name.clone(),
+                value: value.clone(),
+                on_menu: None,
+                reveal,
+                hover_only,
+                pointer,
+            })
+        };
         // Each element is one node, pushed before its children.
         self.arrange_kind(e.kind, rect, me, id, push, out);
         if let Some(n) = out.get_mut(me) {
@@ -370,7 +464,15 @@ impl Layout<'_> {
         }
     }
 
-    fn arrange_kind<M>(&mut self, kind: Kind<M>, rect: Rect, me: usize, id: Id, push: impl Fn(&mut Vec<Node<M>>, What<M>), out: &mut Vec<Node<M>>) {
+    fn arrange_kind<M>(
+        &mut self,
+        kind: Kind<M>,
+        rect: Rect,
+        me: usize,
+        id: Id,
+        push: impl Fn(&mut Vec<Node<M>>, What<M>),
+        out: &mut Vec<Node<M>>,
+    ) {
         match kind {
             Kind::Space => push(out, What::Space),
             Kind::Rule { color, .. } => push(out, What::Rule { color }),
@@ -402,18 +504,29 @@ impl Layout<'_> {
             }
             Kind::Panel { child, padding, fill, edge, radius, align_x, align_y } => {
                 push(out, What::Panel { fill, edge, radius });
-                let inner = Rect::new(rect.x + padding.left, rect.y + padding.top, (rect.w - padding.width()).max(0.0), (rect.h - padding.height()).max(0.0));
+                let inner = Rect::new(
+                    rect.x + padding.left,
+                    rect.y + padding.top,
+                    (rect.w - padding.width()).max(0.0),
+                    (rect.h - padding.height()).max(0.0),
+                );
                 self.place_one(*child, inner, align_x, align_y, me, id, out);
             }
             Kind::Button { child, padding, on_press, look, on_drag } => {
                 push(out, What::Button { on_press, look, on_drag });
-                let inner = Rect::new(rect.x + padding.left, rect.y + padding.top, (rect.w - padding.width()).max(0.0), (rect.h - padding.height()).max(0.0));
+                let inner = Rect::new(
+                    rect.x + padding.left,
+                    rect.y + padding.top,
+                    (rect.w - padding.width()).max(0.0),
+                    (rect.h - padding.height()).max(0.0),
+                );
                 self.place_one(*child, inner, Align::Center, Align::Center, me, id, out);
             }
             Kind::Row { children, spacing, align, wrap: true } => {
                 push(out, What::Group);
                 let lines = self.flow(&children, rect.w, spacing);
-                let mut sizes: Vec<(f32, f32)> = lines.iter().flat_map(|l| l.sizes.clone()).collect::<Vec<_>>().into_iter().rev().collect();
+                let mut sizes: Vec<(f32, f32)> =
+                    lines.iter().flat_map(|l| l.sizes.clone()).collect::<Vec<_>>().into_iter().rev().collect();
                 let mut y = rect.y;
                 let mut iter = children.into_iter().enumerate();
                 for line in &lines {
@@ -450,11 +563,14 @@ impl Layout<'_> {
                 let widths: Vec<f32> = children
                     .iter()
                     .map(|c| {
-                        clamp_w(c, match c.width {
-                            Length::Fill(_) => rect.w,
-                            Length::Fixed(w) => w,
-                            Length::Shrink => self.measure(c, rect.w).w.min(rect.w),
-                        })
+                        clamp_w(
+                            c,
+                            match c.width {
+                                Length::Fill(_) => rect.w,
+                                Length::Fixed(w) => w,
+                                Length::Shrink => self.measure(c, rect.w).w.min(rect.w),
+                            },
+                        )
                     })
                     .collect();
                 // Heights at each child's own width.
@@ -491,15 +607,32 @@ impl Layout<'_> {
                 }
             }
             Kind::Switch { on, on_toggle } => push(out, What::Switch { on, on_toggle }),
-            Kind::Slider { min, max, step, value, marks, on_change, on_release } => push(out, What::Slider { min, max, step, value, marks, on_change, on_release }),
+            Kind::Slider { min, max, step, value, marks, on_change, on_release } => {
+                push(out, What::Slider { min, max, step, value, marks, on_change, on_release })
+            }
             Kind::Field { value, placeholder, secret, autofocus, on_input, on_submit } => {
                 let baseline = self.field_baseline(rect.h);
-                push(out, What::Field { value, placeholder, secret, autofocus, on_input, on_submit, size: self.text_size, baseline });
+                push(
+                    out,
+                    What::Field {
+                        value,
+                        placeholder,
+                        secret,
+                        autofocus,
+                        on_input,
+                        on_submit,
+                        size: self.text_size,
+                        baseline,
+                    },
+                );
             }
             Kind::Choice { options, selected, placeholder, on_select } => {
                 let baseline = self.field_baseline(rect.h);
                 let step = self.measure.line(self.text_size, 400).1;
-                push(out, What::Choice { options, selected, placeholder, on_select, size: self.text_size, baseline, step });
+                push(
+                    out,
+                    What::Choice { options, selected, placeholder, on_select, size: self.text_size, baseline, step },
+                );
             }
             Kind::Picture { image, fit, radius, opacity } => push(out, What::Picture { image, fit, radius, opacity }),
             Kind::Drawing { draw, on_touch, cursor } => push(out, What::Drawing { draw, on_touch, cursor }),
@@ -507,11 +640,14 @@ impl Layout<'_> {
             Kind::Scroll { child } => {
                 push(out, What::Scroll { content: rect.h });
                 // The child as tall as it needs (or the place, if more), at the place's width.
-                let w = clamp_w(&child, match child.width {
-                    Length::Fixed(w) => w,
-                    Length::Shrink => self.measure(&child, rect.w).w.min(rect.w),
-                    Length::Fill(_) => rect.w,
-                });
+                let w = clamp_w(
+                    &child,
+                    match child.width {
+                        Length::Fixed(w) => w,
+                        Length::Shrink => self.measure(&child, rect.w).w.min(rect.w),
+                        Length::Fill(_) => rect.w,
+                    },
+                );
                 let mut natural = match child.height {
                     Length::Fixed(h) => h,
                     _ => self.measure(&child, w).h,
@@ -537,18 +673,39 @@ impl Layout<'_> {
     }
 
     /// Places the one child of a panel or button in `inner`.
-    fn place_one<M>(&mut self, child: Element<M>, inner: Rect, ax: Align, ay: Align, parent: usize, parent_id: Id, out: &mut Vec<Node<M>>) {
+    fn place_one<M>(
+        &mut self,
+        child: Element<M>,
+        inner: Rect,
+        ax: Align,
+        ay: Align,
+        parent: usize,
+        parent_id: Id,
+        out: &mut Vec<Node<M>>,
+    ) {
         let cid = child_id(parent_id, 0, child.key);
         self.place_one_id(child, inner, ax, ay, parent, cid, out);
     }
 
-    fn place_one_id<M>(&mut self, child: Element<M>, inner: Rect, ax: Align, ay: Align, parent: usize, cid: Id, out: &mut Vec<Node<M>>) {
+    fn place_one_id<M>(
+        &mut self,
+        child: Element<M>,
+        inner: Rect,
+        ax: Align,
+        ay: Align,
+        parent: usize,
+        cid: Id,
+        out: &mut Vec<Node<M>>,
+    ) {
         let natural = self.measure(&child, inner.w);
-        let w = clamp_w(&child, match child.width {
-            Length::Fill(_) => inner.w,
-            Length::Fixed(w) => w,
-            Length::Shrink => natural.w.min(inner.w),
-        });
+        let w = clamp_w(
+            &child,
+            match child.width {
+                Length::Fill(_) => inner.w,
+                Length::Fixed(w) => w,
+                Length::Shrink => natural.w.min(inner.w),
+            },
+        );
         let h = match child.height {
             Length::Fill(_) => inner.h,
             Length::Fixed(h) => h,

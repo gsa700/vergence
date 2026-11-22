@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use vergence_scene::{Color, Image, Point, Rect};
 use vergence_widgets::{
-    Align, ButtonLook, Element, Fit, Length, Padding, Program, Theme, Touch, Window, button, choice, column, drawing, field, label, panel, picture, row, rule, run, scroll, slider, space, switch,
+    Align, ButtonLook, Element, Fit, Length, Padding, Program, Theme, Touch, Window, button, choice, column, drawing,
+    field, label, panel, picture, row, rule, run, scroll, slider, space, switch,
 };
 
 #[derive(Debug, Clone)]
@@ -42,7 +43,9 @@ struct Demo {
 const FITS: [&str; 3] = ["Contain", "Cover", "Stretch"];
 
 fn desktop() -> String {
-    let dir = std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".config")));
+    let dir = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".config")));
     dir.and_then(|d| std::fs::read_to_string(d.join("vergence/desktop.toml")).ok()).unwrap_or_default()
 }
 
@@ -78,9 +81,19 @@ impl Program for Demo {
     }
 
     fn view(&self, t: &Theme) -> Element<Msg> {
-        let side = |left: bool, name: &str| button(label(name)).look(if self.left == left { ButtonLook::Chosen } else { ButtonLook::Normal }).on_press(Msg::Side(left));
+        let side = |left: bool, name: &str| {
+            button(label(name))
+                .look(if self.left == left { ButtonLook::Chosen } else { ButtonLook::Normal })
+                .on_press(Msg::Side(left))
+        };
         let setting = |title: &str, note: &str, control: Element<Msg>| {
-            row(vec![column(vec![label(title), label(note).dim().size(11.0).wrap()]).spacing(2.0).width(Length::FILL), control]).spacing(16.0).align(Align::Center).width(Length::FILL)
+            row(vec![
+                column(vec![label(title), label(note).dim().size(11.0).wrap()]).spacing(2.0).width(Length::FILL),
+                control,
+            ])
+            .spacing(16.0)
+            .align(Align::Center)
+            .width(Length::FILL)
         };
         let card = |items: Vec<Element<Msg>>| {
             let mut with_rules = Vec::new();
@@ -90,42 +103,94 @@ impl Program for Demo {
                 }
                 with_rules.push(item);
             }
-            panel(column(with_rules).spacing(10.0).width(Length::FILL)).color(t.card).padding(Padding::all(14.0)).width(Length::FILL)
+            panel(column(with_rules).spacing(10.0).width(Length::FILL))
+                .color(t.card)
+                .padding(Padding::all(14.0))
+                .width(Length::FILL)
         };
         let buttons = card(vec![
-            setting("Count", &format!("Pressed so far: {}.", self.count), row(vec![button(label("\u{2212}")).name("Less").on_press(Msg::Count(-1)), button(label("+")).name("More").on_press(Msg::Count(1))]).spacing(6.0)),
-            setting("Controls", "Left, as on a Mac; right, as on Windows.", row(vec![side(true, "Left"), side(false, "Right")]).spacing(6.0)),
-            setting("Look", "Dark or light, for this window only.", button(label(if self.dark { "Light" } else { "Dark" })).look(ButtonLook::Accent).on_press(Msg::Dark(!self.dark))),
+            setting(
+                "Count",
+                &format!("Pressed so far: {}.", self.count),
+                row(vec![
+                    button(label("\u{2212}")).name("Less").on_press(Msg::Count(-1)),
+                    button(label("+")).name("More").on_press(Msg::Count(1)),
+                ])
+                .spacing(6.0),
+            ),
+            setting(
+                "Controls",
+                "Left, as on a Mac; right, as on Windows.",
+                row(vec![side(true, "Left"), side(false, "Right")]).spacing(6.0),
+            ),
+            setting(
+                "Look",
+                "Dark or light, for this window only.",
+                button(label(if self.dark { "Light" } else { "Dark" }))
+                    .look(ButtonLook::Accent)
+                    .on_press(Msg::Dark(!self.dark)),
+            ),
             setting("Off", "A button with nothing to do.", button(label("Nothing"))),
         ]);
-        let mut repeat_rows = vec![setting("Key repeat", "Holding a key down types it again and again.", switch(self.repeat, Msg::Repeat).name("Key repeat"))];
+        let mut repeat_rows = vec![setting(
+            "Key repeat",
+            "Holding a key down types it again and again.",
+            switch(self.repeat, Msg::Repeat).name("Key repeat"),
+        )];
         if self.repeat {
             repeat_rows.push(setting(
                 "Delay",
                 &format!("{:.0} ms; let go {} times.", self.delay, self.released),
-                slider(150.0, 1000.0, self.delay, Msg::Delay).step(10.0).marks(vec![150.0, 500.0, 1000.0]).on_release(Msg::DelayDone).name("Delay"),
+                slider(150.0, 1000.0, self.delay, Msg::Delay)
+                    .step(10.0)
+                    .marks(vec![150.0, 500.0, 1000.0])
+                    .on_release(Msg::DelayDone)
+                    .name("Delay"),
             ));
         }
-        repeat_rows.push(setting("Fixed", "A switch that cannot be changed.", switch(true, Msg::Repeat).disabled().name("Fixed")));
+        repeat_rows.push(setting(
+            "Fixed",
+            "A switch that cannot be changed.",
+            switch(true, Msg::Repeat).disabled().name("Fixed"),
+        ));
         let controls = card(repeat_rows);
         let fields = card(vec![
             setting(
                 "Custom accent",
                 "Any color as #rrggbb; Enter applies it to this window.",
-                field(&self.accent, Msg::Accent).placeholder("#rrggbb").on_submit(Msg::AccentApply).width(Length::Fixed(140.0)).name("Custom accent"),
+                field(&self.accent, Msg::Accent)
+                    .placeholder("#rrggbb")
+                    .on_submit(Msg::AccentApply)
+                    .width(Length::Fixed(140.0))
+                    .name("Custom accent"),
             ),
             setting(
                 "Password",
                 &format!("Never shown, copied or told; {} characters.", self.secret.chars().count()),
-                field(&self.secret, Msg::Secret).secret().placeholder("secret").width(Length::Fixed(140.0)).name("Password"),
+                field(&self.secret, Msg::Secret)
+                    .secret()
+                    .placeholder("secret")
+                    .width(Length::Fixed(140.0))
+                    .name("Password"),
             ),
-            setting("Fit", "How the picture below fills its place.", choice(FITS.iter().map(|s| s.to_string()).collect(), Some(self.fit), Msg::Fit).width(Length::Fixed(140.0)).name("Fit")),
+            setting(
+                "Fit",
+                "How the picture below fills its place.",
+                choice(FITS.iter().map(|s| s.to_string()).collect(), Some(self.fit), Msg::Fit)
+                    .width(Length::Fixed(140.0))
+                    .name("Fit"),
+            ),
         ]);
         let fit = [Fit::Contain, Fit::Cover, Fit::Stretch][self.fit];
         let (dx, dy, dragging) = (self.dot.0, self.dot.1, self.dragging);
         let pictures = card(vec![
             row(vec![
-                picture(self.picture.clone()).fit(fit).radius(8.0).width(Length::Fixed(200.0)).height(Length::Fixed(80.0)).name("A wash of color"),
+                picture(self.picture.clone())
+                    .fit(fit)
+                    .radius(8.0)
+                    .width(Length::Fixed(200.0))
+                    .height(Length::Fixed(80.0))
+                    .name("A wash of color"),
                 drawing(move |scene, _fonts, r, t| {
                     scene.fill_rounded(r, 8.0, t.page);
                     scene.stroke(r, 8.0, 1.0, t.line);

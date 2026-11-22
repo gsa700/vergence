@@ -32,7 +32,13 @@ fn disc(cx: f32, cy: f32, r: f32, turn: f32, rim: &str) -> String {
     for (i, c) in colors.iter().enumerate() {
         let a0 = (i as f32 * 60.0 - 90.0).to_radians();
         let a1 = ((i + 1) as f32 * 60.0 - 90.0).to_radians();
-        s += &format!(r#"<path d="M0 0 L{:.3} {:.3} A{r} {r} 0 0 1 {:.3} {:.3} Z" fill="{c}"/>"#, r * a0.cos(), r * a0.sin(), r * a1.cos(), r * a1.sin());
+        s += &format!(
+            r#"<path d="M0 0 L{:.3} {:.3} A{r} {r} 0 0 1 {:.3} {:.3} Z" fill="{c}"/>"#,
+            r * a0.cos(),
+            r * a0.sin(),
+            r * a1.cos(),
+            r * a1.sin()
+        );
     }
     s += &format!(r#"<circle r="{r}" fill="none" stroke="{rim}" stroke-width="1.4"/></g>"#);
     s
@@ -58,7 +64,14 @@ fn arrow(_: usize) -> String {
 /// little too short now. maybe add back half of what we removed"), the
 /// hand moved down 0.3 to make room for it.
 fn hand(_: usize) -> String {
-    parts(&[(8.0, 11.8, 17.5, 16.5, 6.5, 0.0), (8.8, 1.3, 3.8, 15.0, 1.9, 0.0), (12.9, 8.6, 4.0, 6.8, 2.0, 0.0), (17.0, 8.9, 4.0, 6.6, 2.0, 0.0), (21.0, 10.3, 3.8, 6.0, 1.9, 0.0), (5.0, 15.8, 4.0, 8.0, 2.0, -30.0)])
+    parts(&[
+        (8.0, 11.8, 17.5, 16.5, 6.5, 0.0),
+        (8.8, 1.3, 3.8, 15.0, 1.9, 0.0),
+        (12.9, 8.6, 4.0, 6.8, 2.0, 0.0),
+        (17.0, 8.9, 4.0, 6.6, 2.0, 0.0),
+        (21.0, 10.3, 3.8, 6.0, 1.9, 0.0),
+        (5.0, 15.8, 4.0, 8.0, 2.0, -30.0),
+    ])
 }
 
 /// Parts of a hand drawn as one, as Mac OS X's hands (Dave, 2026-11-21:
@@ -67,8 +80,17 @@ fn hand(_: usize) -> String {
 /// part's black rim, then every part filled white over them (the rims
 /// show between the fingers, not across them).
 fn parts(rects: &[(f32, f32, f32, f32, f32, f32)]) -> String {
-    let one = |(x, y, w, h, r, turn): (f32, f32, f32, f32, f32, f32), extra: &str| format!(r##"<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}" transform="rotate({turn} {} {})" {extra}/>"##, x + w / 2.0, y + h / 2.0);
-    let shadow: String = rects.iter().map(|r| one(*r, r##"fill="#000" fill-opacity="0.25" stroke="#000" stroke-opacity="0.25" stroke-width="2.4""##)).collect();
+    let one = |(x, y, w, h, r, turn): (f32, f32, f32, f32, f32, f32), extra: &str| {
+        format!(
+            r##"<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}" transform="rotate({turn} {} {})" {extra}/>"##,
+            x + w / 2.0,
+            y + h / 2.0
+        )
+    };
+    let shadow: String = rects
+        .iter()
+        .map(|r| one(*r, r##"fill="#000" fill-opacity="0.25" stroke="#000" stroke-opacity="0.25" stroke-width="2.4""##))
+        .collect();
     let rims: String = rects.iter().map(|r| one(*r, r##"fill="#000" stroke="#000" stroke-width="2.4""##)).collect();
     let fills: String = rects.iter().map(|r| one(*r, r##"fill="#fff""##)).collect();
     format!(r##"<g transform="translate(0.9 1.3)">{shadow}</g>"##) + &rims + &fills
@@ -96,12 +118,19 @@ fn closed_hand(_: usize) -> String {
         (17.0, 7.8, 4.0, 7.0, 2.0, 0.0),
         (21.0, 9.5, 3.8, 6.5, 1.9, 0.0),
         (5.0, 15.5, 4.0, 8.0, 2.0, -30.0),
-    ]) + &[12.7f32, 16.9, 21.0].iter().map(|x| format!(r##"<path d="M{x} 12.2 L{x} 15.2" stroke="#000" stroke-width="0.9" stroke-linecap="round"/>"##)).collect::<String>()
+    ]) + &[12.7f32, 16.9, 21.0]
+        .iter()
+        .map(|x| {
+            format!(r##"<path d="M{x} 12.2 L{x} 15.2" stroke="#000" stroke-width="0.9" stroke-linecap="round"/>"##)
+        })
+        .collect::<String>()
 }
 
 fn ibeam(_: usize) -> String {
     let p = "M11 3 L15 3 L16 4 L17 3 L21 3 M16 4 L16 28 M11 29 L15 29 L16 28 L17 29 L21 29";
-    format!(r##"<path d="{p}" fill="none" stroke="#fff" stroke-width="4"/><path d="{p}" fill="none" stroke="#000" stroke-width="2"/>"##)
+    format!(
+        r##"<path d="{p}" fill="none" stroke="#fff" stroke-width="4"/><path d="{p}" fill="none" stroke="#000" stroke-width="2"/>"##
+    )
 }
 
 /// The two-headed arrow across, turned by `deg` (0 across, 90 up and down).
@@ -130,11 +159,14 @@ fn moving(_: usize) -> String {
 
 fn crosshair(_: usize) -> String {
     let p = "M16 3 L16 13 M16 19 L16 29 M3 16 L13 16 M19 16 L29 16";
-    format!(r##"<path d="{p}" stroke="#fff" stroke-width="4" stroke-linecap="square"/><path d="{p}" stroke="#000" stroke-width="2"/><circle cx="16" cy="16" r="1.5" fill="#e0574a" stroke="#fff" stroke-width="0.8"/>"##)
+    format!(
+        r##"<path d="{p}" stroke="#fff" stroke-width="4" stroke-linecap="square"/><path d="{p}" stroke="#000" stroke-width="2"/><circle cx="16" cy="16" r="1.5" fill="#e0574a" stroke="#fff" stroke-width="0.8"/>"##
+    )
 }
 
 fn busy(i: usize) -> String {
-    disc(16.0, 16.0, 12.0, i as f32 * 360.0 / BUSY_FRAMES as f32, "#000") + r##"<circle cx="16" cy="16" r="13.2" fill="none" stroke="#fff" stroke-width="1"/><circle cx="16" cy="16" r="2.6" fill="#fff" stroke="#000" stroke-width="1"/>"##
+    disc(16.0, 16.0, 12.0, i as f32 * 360.0 / BUSY_FRAMES as f32, "#000")
+        + r##"<circle cx="16" cy="16" r="13.2" fill="none" stroke="#fff" stroke-width="1"/><circle cx="16" cy="16" r="2.6" fill="#fff" stroke="#000" stroke-width="1"/>"##
 }
 
 fn progress(i: usize) -> String {
@@ -142,20 +174,28 @@ fn progress(i: usize) -> String {
 }
 
 fn copy(_: usize) -> String {
-    format!(r##"{ARROW}<circle cx="24" cy="24" r="6.5" fill="#2e9e5b" stroke="#fff" stroke-width="1.2"/><path d="M24 20.5 L24 27.5 M20.5 24 L27.5 24" stroke="#fff" stroke-width="2" stroke-linecap="round"/>"##)
+    format!(
+        r##"{ARROW}<circle cx="24" cy="24" r="6.5" fill="#2e9e5b" stroke="#fff" stroke-width="1.2"/><path d="M24 20.5 L24 27.5 M20.5 24 L27.5 24" stroke="#fff" stroke-width="2" stroke-linecap="round"/>"##
+    )
 }
 
 fn not_allowed(_: usize) -> String {
-    format!(r##"{ARROW}<circle cx="24" cy="24" r="6.5" fill="#fff" stroke="#d23c30" stroke-width="2.2"/><line x1="19.6" y1="28.4" x2="28.4" y2="19.6" stroke="#d23c30" stroke-width="2.2"/>"##)
+    format!(
+        r##"{ARROW}<circle cx="24" cy="24" r="6.5" fill="#fff" stroke="#d23c30" stroke-width="2.2"/><line x1="19.6" y1="28.4" x2="28.4" y2="19.6" stroke="#d23c30" stroke-width="2.2"/>"##
+    )
 }
 
 fn help(_: usize) -> String {
     // The question mark as strokes (no fonts in the picture helper).
-    format!(r##"{ARROW}<circle cx="24" cy="24" r="7" fill="#2f7ae6" stroke="#fff" stroke-width="1.2"/><path d="M21.6 22 Q21.6 19.6 24 19.6 Q26.4 19.6 26.4 21.8 Q26.4 23.4 24.6 24.2 Q24 24.6 24 25.6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/><circle cx="24" cy="28.2" r="1.1" fill="#fff"/>"##)
+    format!(
+        r##"{ARROW}<circle cx="24" cy="24" r="7" fill="#2f7ae6" stroke="#fff" stroke-width="1.2"/><path d="M21.6 22 Q21.6 19.6 24 19.6 Q26.4 19.6 26.4 21.8 Q26.4 23.4 24.6 24.2 Q24 24.6 24 25.6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/><circle cx="24" cy="28.2" r="1.1" fill="#fff"/>"##
+    )
 }
 
 fn context(_: usize) -> String {
-    format!(r##"{ARROW}<rect x="19" y="18" width="11" height="12" rx="2" fill="#fff" stroke="#000" stroke-width="1.2"/><path d="M21.5 21.5 L27.5 21.5 M21.5 24 L27.5 24 M21.5 26.5 L25.5 26.5" stroke="#2f7ae6" stroke-width="1.4"/>"##)
+    format!(
+        r##"{ARROW}<rect x="19" y="18" width="11" height="12" rx="2" fill="#fff" stroke="#000" stroke-width="1.2"/><path d="M21.5 21.5 L27.5 21.5 M21.5 24 L27.5 24 M21.5 26.5 L25.5 26.5" stroke="#2f7ae6" stroke-width="1.4"/>"##
+    )
 }
 
 fn shapes() -> Vec<Shape> {
@@ -165,17 +205,91 @@ fn shapes() -> Vec<Shape> {
         Shape { names: &["grab", "openhand", "dnd-move", "dnd-none"], hot: (16.0, 14.0), body: open_hand, frames: 1 },
         Shape { names: &["grabbing", "closedhand"], hot: (16.0, 16.0), body: closed_hand, frames: 1 },
         Shape { names: &["text", "xterm", "ibeam", "vertical-text"], hot: (16.0, 16.0), body: ibeam, frames: 1 },
-        Shape { names: &["ew-resize", "e-resize", "w-resize", "col-resize", "sb_h_double_arrow", "h_double_arrow", "size_hor", "split_h"], hot: (16.0, 16.0), body: ew, frames: 1 },
-        Shape { names: &["ns-resize", "n-resize", "s-resize", "row-resize", "sb_v_double_arrow", "v_double_arrow", "size_ver", "split_v"], hot: (16.0, 16.0), body: ns, frames: 1 },
-        Shape { names: &["nwse-resize", "nw-resize", "se-resize", "bd_double_arrow", "size_fdiag", "top_left_corner", "bottom_right_corner"], hot: (16.0, 16.0), body: nwse, frames: 1 },
-        Shape { names: &["nesw-resize", "ne-resize", "sw-resize", "fd_double_arrow", "size_bdiag", "top_right_corner", "bottom_left_corner"], hot: (16.0, 16.0), body: nesw, frames: 1 },
+        Shape {
+            names: &[
+                "ew-resize",
+                "e-resize",
+                "w-resize",
+                "col-resize",
+                "sb_h_double_arrow",
+                "h_double_arrow",
+                "size_hor",
+                "split_h",
+            ],
+            hot: (16.0, 16.0),
+            body: ew,
+            frames: 1,
+        },
+        Shape {
+            names: &[
+                "ns-resize",
+                "n-resize",
+                "s-resize",
+                "row-resize",
+                "sb_v_double_arrow",
+                "v_double_arrow",
+                "size_ver",
+                "split_v",
+            ],
+            hot: (16.0, 16.0),
+            body: ns,
+            frames: 1,
+        },
+        Shape {
+            names: &[
+                "nwse-resize",
+                "nw-resize",
+                "se-resize",
+                "bd_double_arrow",
+                "size_fdiag",
+                "top_left_corner",
+                "bottom_right_corner",
+            ],
+            hot: (16.0, 16.0),
+            body: nwse,
+            frames: 1,
+        },
+        Shape {
+            names: &[
+                "nesw-resize",
+                "ne-resize",
+                "sw-resize",
+                "fd_double_arrow",
+                "size_bdiag",
+                "top_right_corner",
+                "bottom_left_corner",
+            ],
+            hot: (16.0, 16.0),
+            body: nesw,
+            frames: 1,
+        },
         Shape { names: &["move", "all-scroll", "fleur", "size_all"], hot: (16.0, 16.0), body: moving, frames: 1 },
-        Shape { names: &["crosshair", "cross", "tcross", "cell", "plus"], hot: (16.0, 16.0), body: crosshair, frames: 1 },
+        Shape {
+            names: &["crosshair", "cross", "tcross", "cell", "plus"],
+            hot: (16.0, 16.0),
+            body: crosshair,
+            frames: 1,
+        },
         Shape { names: &["wait", "watch"], hot: (16.0, 16.0), body: busy, frames: BUSY_FRAMES },
-        Shape { names: &["progress", "left_ptr_watch", "half-busy"], hot: (3.0, 2.0), body: progress, frames: BUSY_FRAMES },
+        Shape {
+            names: &["progress", "left_ptr_watch", "half-busy"],
+            hot: (3.0, 2.0),
+            body: progress,
+            frames: BUSY_FRAMES,
+        },
         Shape { names: &["copy", "dnd-copy", "alias", "dnd-link", "link"], hot: (3.0, 2.0), body: copy, frames: 1 },
-        Shape { names: &["not-allowed", "no-drop", "crossed_circle", "forbidden", "dnd-no-drop", "circle"], hot: (3.0, 2.0), body: not_allowed, frames: 1 },
-        Shape { names: &["help", "question_arrow", "whats_this", "left_ptr_help"], hot: (3.0, 2.0), body: help, frames: 1 },
+        Shape {
+            names: &["not-allowed", "no-drop", "crossed_circle", "forbidden", "dnd-no-drop", "circle"],
+            hot: (3.0, 2.0),
+            body: not_allowed,
+            frames: 1,
+        },
+        Shape {
+            names: &["help", "question_arrow", "whats_this", "left_ptr_help"],
+            hot: (3.0, 2.0),
+            body: help,
+            frames: 1,
+        },
         Shape { names: &["context-menu"], hot: (3.0, 2.0), body: context, frames: 1 },
     ]
 }
@@ -235,7 +349,9 @@ const INDEX: &str = "[Icon Theme]\nName=Vergence\nComment=Vergence's own icons a
 /// index (Dave, 2026-11-18: a named set chosen in Settings, our apps
 /// following it).
 pub fn icon_theme(args: &[String]) -> Result<bool, Box<dyn Error>> {
-    let (Some(src), Some(dest)) = (args.first(), args.get(1)) else { return Err("icon-theme <data/icons> <share/icons/Vergence>".into()) };
+    let (Some(src), Some(dest)) = (args.first(), args.get(1)) else {
+        return Err("icon-theme <data/icons> <share/icons/Vergence>".into());
+    };
     let (src, dest) = (Path::new(src), Path::new(dest));
     let apps = dest.join("scalable/apps");
     std::fs::create_dir_all(&apps)?;
@@ -284,7 +400,11 @@ pub fn run(args: &[String]) -> Result<bool, Box<dyn Error>> {
         }
         count += 1;
     }
-    println!("{count} shapes ({} names) in {}", shapes().iter().map(|s| s.names.len()).sum::<usize>(), cursors.display());
+    println!(
+        "{count} shapes ({} names) in {}",
+        shapes().iter().map(|s| s.names.len()).sum::<usize>(),
+        cursors.display()
+    );
     Ok(true)
 }
 
@@ -316,7 +436,9 @@ mod tests {
 /// height as little-endian words, then straight RGBA), so the toolkit shows
 /// them with no SVG code of its own (vergence-widgets files.rs own_icon).
 pub fn icons(args: &[String]) -> Result<bool, Box<dyn Error>> {
-    let (Some(src), Some(dest)) = (args.first(), args.get(1)) else { return Err("icons <data/icons> <share/vergence/icons>".into()) };
+    let (Some(src), Some(dest)) = (args.first(), args.get(1)) else {
+        return Err("icons <data/icons> <share/vergence/icons>".into());
+    };
     let mut count = 0;
     for group in ["places", "kinds"] {
         let to = Path::new(dest).join(group);

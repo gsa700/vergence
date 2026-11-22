@@ -152,17 +152,29 @@ impl Default for Config {
 
 pub fn parse(text: &str) -> Config {
     let d = Config::default();
-    let Some(t) = text.parse::<toml::Table>().ok().and_then(|t| t.get("notifications").and_then(|n| n.as_table()).cloned()) else { return d };
+    let Some(t) =
+        text.parse::<toml::Table>().ok().and_then(|t| t.get("notifications").and_then(|n| n.as_table()).cloned())
+    else {
+        return d;
+    };
     Config {
         do_not_disturb: t.get("do-not-disturb").and_then(|v| v.as_bool()).unwrap_or(false),
-        timeout: t.get("seconds").and_then(|v| v.as_integer()).map(|s| Duration::from_secs(s.clamp(2, 600) as u64)).unwrap_or(d.timeout),
+        timeout: t
+            .get("seconds")
+            .and_then(|v| v.as_integer())
+            .map(|s| Duration::from_secs(s.clamp(2, 600) as u64))
+            .unwrap_or(d.timeout),
         corner: match t.get("corner").and_then(|v| v.as_str()).unwrap_or("") {
             "top-left" => (false, false),
             "bottom-right" => (true, true),
             "bottom-left" => (false, true),
             _ => (true, false),
         },
-        off: t.get("off").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str()).map(|s| s.trim().to_lowercase()).collect()).unwrap_or_default(),
+        off: t
+            .get("off")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|v| v.as_str()).map(|s| s.trim().to_lowercase()).collect())
+            .unwrap_or_default(),
     }
 }
 
@@ -170,7 +182,10 @@ pub fn parse(text: &str) -> Config {
 const MAX_APP: usize = 64;
 
 fn apps_path() -> Option<std::path::PathBuf> {
-    let state = std::env::var_os("XDG_STATE_HOME").map(std::path::PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")))?;
+    let state = std::env::var_os("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")))?;
     Some(state.join("vergence/notify-apps.toml"))
 }
 
@@ -189,13 +204,19 @@ fn read_apps() -> HashMap<String, u64> {
 
 /// Written beside and moved into place, readable by its owner only.
 fn write_apps(apps: &HashMap<String, u64>) -> std::io::Result<()> {
-    use std::{io::Write, os::unix::fs::{DirBuilderExt, OpenOptionsExt}};
+    use std::{
+        io::Write,
+        os::unix::fs::{DirBuilderExt, OpenOptionsExt},
+    };
     let Some(path) = apps_path() else { return Ok(()) };
     if let Some(dir) = path.parent() {
         std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
     }
     let mut table = toml::Table::new();
-    table.insert("apps".into(), toml::Value::Table(apps.iter().map(|(k, v)| (k.clone(), toml::Value::Integer(*v as i64))).collect()));
+    table.insert(
+        "apps".into(),
+        toml::Value::Table(apps.iter().map(|(k, v)| (k.clone(), toml::Value::Integer(*v as i64))).collect()),
+    );
     let text = toml::to_string(&table).map_err(std::io::Error::other)?;
     let beside = path.with_extension("toml.new");
     let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&beside)?;
@@ -204,7 +225,10 @@ fn write_apps(apps: &HashMap<String, u64>) -> std::io::Result<()> {
 }
 
 pub fn load() -> Config {
-    crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| parse(&t)).unwrap_or_default()
+    crate::wallpaper::desktop_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|t| parse(&t))
+        .unwrap_or_default()
 }
 
 struct Palette {
@@ -278,7 +302,8 @@ impl Server {
     pub fn notify(&mut self, origin: Origin, req: Request) -> u32 {
         let buttons = req.actions.iter().any(|(k, _)| !k.is_empty() && k != "default");
         let c = self.notes.config.clone();
-        let app: String = req.app.chars().filter(|ch| !ch.is_control()).take(MAX_APP).collect::<String>().trim().to_string();
+        let app: String =
+            req.app.chars().filter(|ch| !ch.is_control()).take(MAX_APP).collect::<String>().trim().to_string();
         if origin != Origin::Server && !app.is_empty() {
             self.notify_remember(&app);
         }
@@ -304,8 +329,11 @@ impl Server {
             t => Some(Duration::from_millis(t as u64)),
         };
         // Paused (pointer over the stack): the countdown starts when it leaves.
-        let (expires, left) = if self.notes.paused { (None, timeout) } else { (timeout.map(|t| Instant::now() + t), None) };
-        let replacing = (req.replaces != 0).then(|| self.notes.notes.iter().position(|n| n.id == req.replaces && n.origin == origin)).flatten();
+        let (expires, left) =
+            if self.notes.paused { (None, timeout) } else { (timeout.map(|t| Instant::now() + t), None) };
+        let replacing = (req.replaces != 0)
+            .then(|| self.notes.notes.iter().position(|n| n.id == req.replaces && n.origin == origin))
+            .flatten();
         let id = match replacing {
             Some(i) => self.notes.notes[i].id,
             None => {
@@ -382,7 +410,8 @@ impl Server {
             return;
         }
         // Stay on the stack's monitor while it exists (and is still there).
-        let outputs: Vec<Rectangle<i32, Logical>> = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).collect();
+        let outputs: Vec<Rectangle<i32, Logical>> =
+            self.space.outputs().filter_map(|o| self.space.output_geometry(o)).collect();
         let anchor = match self.notes.anchor {
             Some(a) if outputs.contains(&a) => a,
             _ => match self.output_at_pointer() {
@@ -403,7 +432,8 @@ impl Server {
         // so the newest ends nearest the corner.
         let top = area.loc.y + MARGIN;
         let mut y = top;
-        let order: Vec<usize> = if bottom { (0..self.notes.notes.len()).rev().collect() } else { (0..self.notes.notes.len()).collect() };
+        let order: Vec<usize> =
+            if bottom { (0..self.notes.notes.len()).rev().collect() } else { (0..self.notes.notes.len()).collect() };
         for i in order {
             let n = &mut self.notes.notes[i];
             let mut lines = Vec::new();
@@ -497,8 +527,13 @@ impl Server {
         self.notes.timer_running = true;
         let res = self.loop_handle.insert_source(Timer::from_duration(Duration::from_millis(250)), |_, _, state| {
             let now = Instant::now();
-            let expired: Vec<(Origin, u32)> =
-                state.notes.notes.iter().filter(|n| n.expires.is_some_and(|e| e <= now)).map(|n| (n.origin, n.id)).collect();
+            let expired: Vec<(Origin, u32)> = state
+                .notes
+                .notes
+                .iter()
+                .filter(|n| n.expires.is_some_and(|e| e <= now))
+                .map(|n| (n.origin, n.id))
+                .collect();
             if !expired.is_empty() {
                 state.notes.notes.retain(|n| !n.expires.is_some_and(|e| e <= now));
                 for (o, id) in expired {
@@ -565,7 +600,12 @@ impl Server {
     }
 
     /// The cards' elements for an output, front to back.
-    pub fn notify_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
+    pub fn notify_elements(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Vec<SceneElement> {
         if self.notes.notes.is_empty() {
             return Vec::new();
         }
@@ -583,8 +623,11 @@ impl Server {
                 continue;
             }
             // Text and button labels (front).
-            let mut texts: Vec<(String, Rectangle<i32, Logical>, [f32; 3])> =
-                n.lines.iter().map(|(t, r, title)| (t.clone(), *r, if *title { pal.title } else { pal.text })).collect();
+            let mut texts: Vec<(String, Rectangle<i32, Logical>, [f32; 3])> = n
+                .lines
+                .iter()
+                .map(|(t, r, title)| (t.clone(), *r, if *title { pal.title } else { pal.text }))
+                .collect();
             for (key, r) in &n.buttons {
                 let label = n.actions.iter().find(|(k, _)| k == key).map(|(_, l)| l.clone()).unwrap_or_default();
                 let inner = Rectangle::new((r.loc.x + 10, r.loc.y).into(), (r.size.w - 20, r.size.h).into());
@@ -602,20 +645,46 @@ impl Server {
                     });
                     let at = (r.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>().to_f64();
                     let src = Rectangle::<f64, Logical>::from_size((pw as f64, ph as f64).into());
-                    if let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(renderer, at, buf, None, Some(src), Some(r.size), Kind::Unspecified) {
+                    if let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(
+                        renderer,
+                        at,
+                        buf,
+                        None,
+                        Some(src),
+                        Some(r.size),
+                        Kind::Unspecified,
+                    ) {
                         els.push(SceneElement::Memory(el));
                     }
                 }
             }
             // Buttons, background, edge (back).
             for (i, (_, r)) in n.buttons.iter().enumerate() {
-                els.push(SceneElement::Solid(SolidColorRenderElement::new(n.ids[3 + i].clone(), phys(*r), n.commit, pal.button, Kind::Unspecified)));
+                els.push(SceneElement::Solid(SolidColorRenderElement::new(
+                    n.ids[3 + i].clone(),
+                    phys(*r),
+                    n.commit,
+                    pal.button,
+                    Kind::Unspecified,
+                )));
             }
             let r = n.rect;
             let edge = if n.urgency >= 2 { pal.critical } else { pal.edge };
             let inner = Rectangle::new((r.loc.x + 1, r.loc.y + 1).into(), (r.size.w - 2, r.size.h - 2).into());
-            els.push(SceneElement::Solid(SolidColorRenderElement::new(n.ids[0].clone(), phys(inner), n.commit, pal.bg, Kind::Unspecified)));
-            els.push(SceneElement::Solid(SolidColorRenderElement::new(n.ids[1].clone(), phys(r), n.commit, edge, Kind::Unspecified)));
+            els.push(SceneElement::Solid(SolidColorRenderElement::new(
+                n.ids[0].clone(),
+                phys(inner),
+                n.commit,
+                pal.bg,
+                Kind::Unspecified,
+            )));
+            els.push(SceneElement::Solid(SolidColorRenderElement::new(
+                n.ids[1].clone(),
+                phys(r),
+                n.commit,
+                edge,
+                Kind::Unspecified,
+            )));
         }
         els
     }
@@ -641,7 +710,10 @@ impl Server {
                     (None, Some(l)) => format!("paused, {:.1} s left", l.as_secs_f64()),
                     _ => "stays".into(),
                 };
-                format!("#{} {:?} {} {:?} {:?} urgency {} actions {:?} {left} at {:?}", n.id, n.origin, n.app, n.summary, n.body, n.urgency, n.actions, n.rect)
+                format!(
+                    "#{} {:?} {} {:?} {:?} urgency {} actions {:?} {left} at {:?}",
+                    n.id, n.origin, n.app, n.summary, n.body, n.urgency, n.actions, n.rect
+                )
             })
             .collect::<Vec<_>>()
             .join("\n")
@@ -663,7 +735,10 @@ mod tests {
         assert_eq!(c.corner, (false, true));
         assert_eq!(parse("[notifications]\nseconds = 0\ncorner = \"middle\"\n").timeout, Duration::from_secs(2));
         assert_eq!(parse("[notifications]\ncorner = \"middle\"\n").corner, (true, false));
-        assert_eq!(parse("[notifications]\noff = [\" Firefox \", \"notify-send\"]\n").off, vec!["firefox", "notify-send"]);
+        assert_eq!(
+            parse("[notifications]\noff = [\" Firefox \", \"notify-send\"]\n").off,
+            vec!["firefox", "notify-send"]
+        );
         let apps = super::parse_apps("[apps]\nFirefox = 1731629000\n\"vergence-settings\" = 1731629100\n");
         assert_eq!(apps.get("Firefox"), Some(&1731629000));
         assert_eq!(apps.len(), 2);

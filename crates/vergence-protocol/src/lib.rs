@@ -8,16 +8,13 @@
 pub mod agent;
 pub mod bus;
 pub mod commands;
+pub mod shm;
 pub mod sock;
+pub mod tile;
 pub mod window;
 pub mod wire;
-pub mod shm;
-pub mod tile;
 
-use std::{
-    os::unix::net::UnixStream,
-    path::PathBuf,
-};
+use std::{os::unix::net::UnixStream, path::PathBuf};
 
 use bus::{ClientMsg, ServerMsg, VERSION};
 use wire::{FrameReader, WireError};
@@ -104,7 +101,14 @@ impl Client {
 
     pub fn connect_to(path: &std::path::Path, app_id: &str) -> Result<Client, ClientError> {
         let stream = UnixStream::connect(path)?;
-        let mut c = Client { stream, reader: FrameReader::new(), fds: Default::default(), serial: 0, events: Default::default(), client_id: 0 };
+        let mut c = Client {
+            stream,
+            reader: FrameReader::new(),
+            fds: Default::default(),
+            serial: 0,
+            events: Default::default(),
+            client_id: 0,
+        };
         c.send(&ClientMsg::Hello { version: VERSION, app_id: app_id.into() })?;
         match c.read()? {
             ServerMsg::Welcome { client_id, .. } => c.client_id = client_id,
@@ -204,10 +208,22 @@ impl Client {
 /// The serial a server message answers, if it is a reply (events have 0).
 pub fn reply_serial(m: &ServerMsg) -> Option<u32> {
     let s = match m {
-        ServerMsg::Welcome { .. } | ServerMsg::NotificationClosed { .. } | ServerMsg::ActionInvoked { .. } | ServerMsg::Alive { .. } => return None,
-        ServerMsg::CardOpened { .. } | ServerMsg::CardClosed { .. } | ServerMsg::TileClicked { .. } | ServerMsg::TileAction { .. } => return None,
+        ServerMsg::Welcome { .. }
+        | ServerMsg::NotificationClosed { .. }
+        | ServerMsg::ActionInvoked { .. }
+        | ServerMsg::Alive { .. } => return None,
+        ServerMsg::CardOpened { .. }
+        | ServerMsg::CardClosed { .. }
+        | ServerMsg::TileClicked { .. }
+        | ServerMsg::TileAction { .. } => return None,
         ServerMsg::Pong { serial } | ServerMsg::Done { serial } | ServerMsg::Notified { serial, .. } => *serial,
-        ServerMsg::Error { serial, .. } | ServerMsg::Outputs { serial, .. } | ServerMsg::Settings { serial, .. } | ServerMsg::Inputs { serial, .. } | ServerMsg::Places { serial, .. } | ServerMsg::Apps { serial, .. } | ServerMsg::Grants { serial, .. } => *serial,
+        ServerMsg::Error { serial, .. }
+        | ServerMsg::Outputs { serial, .. }
+        | ServerMsg::Settings { serial, .. }
+        | ServerMsg::Inputs { serial, .. }
+        | ServerMsg::Places { serial, .. }
+        | ServerMsg::Apps { serial, .. }
+        | ServerMsg::Grants { serial, .. } => *serial,
         ServerMsg::Drives { serial, .. } | ServerMsg::DriveDone { serial, .. } => *serial,
         ServerMsg::Window(w) => return w.reply_serial(),
         ServerMsg::Agent(a) => a.serial(),

@@ -134,7 +134,11 @@ fn desktop_entries() -> Vec<Entry> {
         }
         Entry::Run(label.into(), argv)
     };
-    vec![Entry::Separator, settings("Change wallpaper…", Some("wallpaper")), settings("Display settings…", Some("screens"))]
+    vec![
+        Entry::Separator,
+        settings("Change wallpaper…", Some("wallpaper")),
+        settings("Display settings…", Some("screens")),
+    ]
 }
 
 /// The desktop menu's own lines (Change wallpaper…, Display settings…,
@@ -174,23 +178,37 @@ pub(crate) fn desktop_own_lines(first: u32) -> (Vec<vergence_protocol::window::M
 /// A menu's panel (vergence-look's menus): rounded, its ground and edge.
 pub(crate) fn menu_ground(scene: &mut Scene, w: f32, h: f32, light: bool) {
     let s = vergence_look::shelf_look(light);
-    scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::MENU_RADIUS, Color::rgb(s.menu.0, s.menu.1, s.menu.2));
-    scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::MENU_RADIUS, vergence_look::EDGE, Color::rgb(s.edge.0, s.edge.1, s.edge.2));
+    scene.fill_rounded(
+        SceneRect::new(0.0, 0.0, w, h),
+        vergence_look::MENU_RADIUS,
+        Color::rgb(s.menu.0, s.menu.1, s.menu.2),
+    );
+    scene.stroke(
+        SceneRect::new(0.0, 0.0, w, h),
+        vergence_look::MENU_RADIUS,
+        vergence_look::EDGE,
+        Color::rgb(s.edge.0, s.edge.1, s.edge.2),
+    );
 }
 
 /// A separator line's rule, in its row `r`.
 pub(crate) fn menu_separator(scene: &mut Scene, r: SceneRect, light: bool) {
     let s = vergence_look::shelf_look(light);
     let inset = vergence_look::MENU_SEP_INSET;
-    scene.fill(SceneRect::new(r.x + inset, r.y + (r.h / 2.0).floor(), r.w - 2.0 * inset, 1.0), Color::rgb(s.separator.0, s.separator.1, s.separator.2));
+    scene.fill(
+        SceneRect::new(r.x + inset, r.y + (r.h / 2.0).floor(), r.w - 2.0 * inset, 1.0),
+        Color::rgb(s.separator.0, s.separator.1, s.separator.2),
+    );
 }
 
 /// Applications desktop.toml's [[menu.item]] puts on the desktop menu (none by default).
 fn configured_apps() -> Vec<Item> {
-    crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| toml::from_str::<MenuFile>(&t).ok()).map(|f| f.menu.item).unwrap_or_default()
+    crate::wallpaper::desktop_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|t| toml::from_str::<MenuFile>(&t).ok())
+        .map(|f| f.menu.item)
+        .unwrap_or_default()
 }
-
-
 
 impl OpenMenu {
     fn height(&self) -> i32 {
@@ -216,10 +234,7 @@ impl OpenMenu {
     }
 
     fn entry_at(&self, pos: Point<f64, Logical>) -> Option<usize> {
-        self.rows()
-            .iter()
-            .position(|r| r.to_f64().contains(pos))
-            .filter(|i| self.entries[*i] != Entry::Separator)
+        self.rows().iter().position(|r| r.to_f64().contains(pos)).filter(|i| self.entries[*i] != Entry::Separator)
     }
 }
 
@@ -264,7 +279,11 @@ impl Server {
             group = Some(c.menu.clone());
             // A command that is on says so (Arrange by name).
             let label = c.label_shown("");
-            entries.push(Entry::Command(w.clone(), c.id, if c.checked == Some(true) { format!("{label}  •") } else { label }));
+            entries.push(Entry::Command(
+                w.clone(),
+                c.id,
+                if c.checked == Some(true) { format!("{label}  •") } else { label },
+            ));
         }
         // The desktop's own entries on the bare desktop (its commands all in
         // groups named "Desktop..."), not on its icons' menu.
@@ -290,7 +309,12 @@ impl Server {
 
     /// The list of an application's windows, beside its icon's place on the dock
     /// (`slot`) on the side `towards` names, kept on its screen's work area.
-    pub fn open_window_list(&mut self, slot: Rectangle<i32, Logical>, towards: vergence_shell::Edge, windows: Vec<(crate::win::Win, String)>) {
+    pub fn open_window_list(
+        &mut self,
+        slot: Rectangle<i32, Logical>,
+        towards: vergence_shell::Edge,
+        windows: Vec<(crate::win::Win, String)>,
+    ) {
         self.open_beside(slot, towards, windows.into_iter().map(|(w, title)| Entry::Window(w, title)).collect());
     }
 
@@ -299,7 +323,9 @@ impl Server {
     /// A tab's menu (bar milestone 1), below the tab: Close, Close the others
     /// and Move to a new window (with more than one tab), then the program's own.
     pub fn open_tab_menu(&mut self, w: &crate::win::Win, tab: u32, slot: Rectangle<i32, Logical>) {
-        let Some(vergence_protocol::window::Bar::Tabs { tabs, menu, .. }) = w.native().and_then(|n| n.bar()) else { return };
+        let Some(vergence_protocol::window::Bar::Tabs { tabs, menu, .. }) = w.native().and_then(|n| n.bar()) else {
+            return;
+        };
         let mut entries = vec![Entry::Tab(w.clone(), tab, TabAct::Close, "Close".into())];
         if tabs.len() > 1 {
             entries.push(Entry::Tab(w.clone(), tab, TabAct::CloseOthers, "Close the others".into()));
@@ -307,12 +333,20 @@ impl Server {
         }
         if !menu.is_empty() {
             entries.push(Entry::Separator);
-            entries.extend(menu.iter().map(|m| Entry::Tab(w.clone(), tab, TabAct::Program(m.id), m.label.chars().take(60).collect())));
+            entries.extend(
+                menu.iter()
+                    .map(|m| Entry::Tab(w.clone(), tab, TabAct::Program(m.id), m.label.chars().take(60).collect())),
+            );
         }
         self.open_beside(slot, vergence_shell::Edge::Bottom, entries);
     }
 
-    pub fn open_shelf_menu(&mut self, slot: Rectangle<i32, Logical>, towards: vergence_shell::Edge, acts: Vec<(crate::shelf::Act, String)>) {
+    pub fn open_shelf_menu(
+        &mut self,
+        slot: Rectangle<i32, Logical>,
+        towards: vergence_shell::Edge,
+        acts: Vec<(crate::shelf::Act, String)>,
+    ) {
         self.open_beside(slot, towards, acts.into_iter().map(|(act, label)| Entry::Shelf(act, label)).collect());
     }
 
@@ -378,7 +412,14 @@ impl Server {
         let at = self.pointer_location().to_i32_round();
         let slot = if on_button {
             self.bar_of(w)
-                .and_then(|(bar, layout)| layout.buttons.iter().find(|(b, _)| *b == vergence_bar::WinButton::Maximize).map(|(_, r)| Rectangle::new((bar.loc.x + r.x as i32, bar.loc.y + r.y as i32).into(), (r.w as i32, r.h as i32).into())))
+                .and_then(|(bar, layout)| {
+                    layout.buttons.iter().find(|(b, _)| *b == vergence_bar::WinButton::Maximize).map(|(_, r)| {
+                        Rectangle::new(
+                            (bar.loc.x + r.x as i32, bar.loc.y + r.y as i32).into(),
+                            (r.w as i32, r.h as i32).into(),
+                        )
+                    })
+                })
                 .unwrap_or(Rectangle::new(at, (1, 1).into()))
         } else {
             Rectangle::new(at, (1, 1).into())
@@ -390,7 +431,12 @@ impl Server {
     pub fn menu_near(&self, pos: Point<f64, Logical>, pad: i32) -> bool {
         self.menu.as_ref().is_some_and(|m| {
             let r = m.rect();
-            Rectangle::<i32, Logical>::new((r.loc.x - pad, r.loc.y - pad).into(), (r.size.w + 2 * pad, r.size.h + 2 * pad).into()).to_f64().contains(pos)
+            Rectangle::<i32, Logical>::new(
+                (r.loc.x - pad, r.loc.y - pad).into(),
+                (r.size.w + 2 * pad, r.size.h + 2 * pad).into(),
+            )
+            .to_f64()
+            .contains(pos)
         })
     }
 
@@ -461,7 +507,13 @@ impl Server {
             Entry::Command(w, id, label) => {
                 tracing::info!("context menu: {label}");
                 if let crate::win::Win::Native(n) = w {
-                    self.bus_send(n.client, vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::Command { window: n.id, id: *id }));
+                    self.bus_send(
+                        n.client,
+                        vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::Command {
+                            window: n.id,
+                            id: *id,
+                        }),
+                    );
                 }
             }
             Entry::Run(label, argv) => {
@@ -470,7 +522,9 @@ impl Server {
                     let mut c = std::process::Command::new(p);
                     c.args(rest);
                     // The Terminal opens in the Desktop folder.
-                    if p == "vergence-term" && let Some(d) = crate::desktop::desktop_dir().filter(|d| d.is_dir()) {
+                    if p == "vergence-term"
+                        && let Some(d) = crate::desktop::desktop_dir().filter(|d| d.is_dir())
+                    {
                         c.current_dir(d);
                     }
                     if let Err(e) = crate::spawn(&mut c) {
@@ -488,7 +542,12 @@ impl Server {
 
     /// The menu's elements for an output (empty if closed or elsewhere):
     /// one picture, drawn again when what it shows changes.
-    pub fn menu_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
+    pub fn menu_elements(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Vec<SceneElement> {
         // Light or dark (look milestone 1): the dock's and menus' look.
         let light = self.light_style();
         let accent = self.accent();
@@ -524,7 +583,18 @@ impl Server {
             menu_ground(&mut scene, w, h, light);
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
             let face = fonts.face("sans-serif", 400, false);
-            let local: Vec<SceneRect> = m.rows().iter().map(|r| SceneRect::new((r.loc.x - rect.loc.x) as f32, (r.loc.y - rect.loc.y) as f32, r.size.w as f32, r.size.h as f32)).collect();
+            let local: Vec<SceneRect> = m
+                .rows()
+                .iter()
+                .map(|r| {
+                    SceneRect::new(
+                        (r.loc.x - rect.loc.x) as f32,
+                        (r.loc.y - rect.loc.y) as f32,
+                        r.size.w as f32,
+                        r.size.h as f32,
+                    )
+                })
+                .collect();
             for (i, e) in m.entries.iter().enumerate() {
                 let r = local[i];
                 if *e == Entry::Separator {
@@ -548,21 +618,52 @@ impl Server {
                         Some(z) => vergence_shell::snap::zone_rect(z, screen, true).0,
                         None => screen,
                     };
-                    scene.stroke(SceneRect::new(x as f32 + 0.5, y as f32 + 0.5, ICON_W as f32 - 1.0, ICON_H as f32 - 1.0), 1.0, 1.0, color(look.menu_ink));
-                    scene.fill(SceneRect::new(part.x as f32 + 2.0, part.y as f32 + 2.0, (part.w - 3).max(1) as f32, (part.h - 3).max(1) as f32), Color::rgb(accent.r, accent.g, accent.b));
+                    scene.stroke(
+                        SceneRect::new(x as f32 + 0.5, y as f32 + 0.5, ICON_W as f32 - 1.0, ICON_H as f32 - 1.0),
+                        1.0,
+                        1.0,
+                        color(look.menu_ink),
+                    );
+                    scene.fill(
+                        SceneRect::new(
+                            part.x as f32 + 2.0,
+                            part.y as f32 + 2.0,
+                            (part.w - 3).max(1) as f32,
+                            (part.h - 3).max(1) as f32,
+                        ),
+                        Color::rgb(accent.r, accent.g, accent.b),
+                    );
                     indent = 8.0 + ICON_W as f32;
                 }
                 if let Some(face) = face {
                     let size = vergence_look::MENU_TEXT;
                     let mt = fonts.metrics(face, size);
                     scene.push_clip(SceneRect::new(r.x + 10.0 + indent, r.y, r.w - 20.0 - indent, r.h), 0.0);
-                    vergence_render::text(&mut scene, fonts, face, size, color(look.menu_ink), ScenePoint::new(r.x + 10.0 + indent, (r.y + (r.h - mt.ascent - mt.descent) / 2.0 + mt.ascent).round()), &label(e));
+                    vergence_render::text(
+                        &mut scene,
+                        fonts,
+                        face,
+                        size,
+                        color(look.menu_ink),
+                        ScenePoint::new(
+                            r.x + 10.0 + indent,
+                            (r.y + (r.h - mt.ascent - mt.descent) / 2.0 + mt.ascent).round(),
+                        ),
+                        &label(e),
+                    );
                     scene.pop_clip();
                 }
             }
             match vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) {
                 Ok(p) => {
-                    let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+                    let buffer = MemoryRenderBuffer::from_slice(
+                        &p.data,
+                        Fourcc::Abgr8888,
+                        (p.width as i32, p.height as i32),
+                        1,
+                        Transform::Normal,
+                        None,
+                    );
                     if let Some(m) = self.menu.as_mut() {
                         m.picture = Some((stamp, buffer));
                     }
@@ -577,7 +678,15 @@ impl Server {
         let a = (rect.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let b = (rect.loc + rect.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
-        match MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(rect.size), Kind::Unspecified) {
+        match MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            a.to_f64(),
+            buffer,
+            None,
+            Some(src),
+            Some(rect.size),
+            Kind::Unspecified,
+        ) {
             Ok(el) => vec![SceneElement::Memory(el)],
             Err(_) => Vec::new(),
         }
@@ -593,8 +702,16 @@ mod tests {
     fn the_desktop_menu_keeps_its_own_lines() {
         let first = vergence_protocol::window::MENU_SERVER_IDS;
         let (lines, own) = desktop_own_lines(first);
-        assert!(matches!(own.last().map(|(_, e)| e), Some(Entry::Run(l, _)) if l == "Display settings…"), "the screens' settings last");
-        assert!(!lines.iter().any(|l| matches!(l, MenuLine::Item { label, .. } if label.contains("Log Out") || label == "Settings…")), "Log Out is the launcher's");
+        assert!(
+            matches!(own.last().map(|(_, e)| e), Some(Entry::Run(l, _)) if l == "Display settings…"),
+            "the screens' settings last"
+        );
+        assert!(
+            !lines.iter().any(
+                |l| matches!(l, MenuLine::Item { label, .. } if label.contains("Log Out") || label == "Settings…")
+            ),
+            "Log Out is the launcher's"
+        );
         assert!(own.iter().enumerate().all(|(i, (id, _))| *id == first + i as u32), "numbered from the server's ids");
         assert_eq!(lines.iter().filter(|l| matches!(l, MenuLine::Item { .. })).count(), own.len());
         assert_ne!(lines.first(), Some(&MenuLine::Separator), "no separator first");

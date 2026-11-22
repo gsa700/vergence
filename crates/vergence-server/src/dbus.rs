@@ -30,7 +30,10 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     io::{ErrorKind, Read, Write},
-    os::unix::{fs::PermissionsExt, net::{UnixListener, UnixStream}},
+    os::unix::{
+        fs::PermissionsExt,
+        net::{UnixListener, UnixStream},
+    },
     path::PathBuf,
 };
 
@@ -160,7 +163,11 @@ pub fn listen(state: &mut Server) {
         unsafe { std::env::set_var("DBUS_SESSION_BUS_ADDRESS", format!("unix:path={}", path.display())) };
         tracing::info!("dbus: edge {} is the session bus", path.display());
     } else {
-        tracing::info!("dbus: edge {} (the session bus stays {:?}; VERGENCE_DBUS=1 takes over)", path.display(), existing);
+        tracing::info!(
+            "dbus: edge {} (the session bus stays {:?}; VERGENCE_DBUS=1 takes over)",
+            path.display(),
+            existing
+        );
     }
     state.dbus.path = Some(path);
 }
@@ -187,7 +194,9 @@ fn peer_pid(stream: &UnixStream) -> Option<u32> {
         let mut buf = [0u8; 88];
         let mut len = buf.len() as u32;
         let ok = unsafe { getsockopt(stream.as_raw_fd(), 0, 1, buf.as_mut_ptr(), &mut len) } == 0;
-        (ok && len as usize >= 84).then(|| i32::from_ne_bytes(buf[80..84].try_into().unwrap()) as u32).filter(|p| *p > 0)
+        (ok && len as usize >= 84)
+            .then(|| i32::from_ne_bytes(buf[80..84].try_into().unwrap()) as u32)
+            .filter(|p| *p > 0)
     }
     #[cfg(target_os = "linux")]
     {
@@ -234,9 +243,10 @@ impl Server {
         let Ok(write_half) = stream.try_clone() else { return };
         self.dbus.next_id = self.dbus.next_id.wrapping_add(1).max(1);
         let id = self.dbus.next_id;
-        let res = self.loop_handle.insert_source(Generic::new(stream, Interest::READ, Mode::Level), move |_, s, state| {
-            Ok(if state.dbus_readable(id, s) { PostAction::Continue } else { PostAction::Remove })
-        });
+        let res =
+            self.loop_handle.insert_source(Generic::new(stream, Interest::READ, Mode::Level), move |_, s, state| {
+                Ok(if state.dbus_readable(id, s) { PostAction::Continue } else { PostAction::Remove })
+            });
         if let Err(e) = res {
             return tracing::warn!("dbus: {e}");
         }
@@ -355,7 +365,10 @@ impl Server {
                     // Its descriptors, in the order they came.
                     let want = m.unix_fds as usize;
                     if want > MAX_FDS || want > c.fds_in.len() {
-                        tracing::warn!("dbus: {} sent a message naming {want} file descriptors it didn't send; disconnecting", c.program);
+                        tracing::warn!(
+                            "dbus: {} sent a message naming {want} file descriptors it didn't send; disconnecting",
+                            c.program
+                        );
                         c.closing = true;
                         return;
                     }
@@ -400,8 +413,16 @@ impl Server {
             if !to_bus && entry.0 == 1 {
                 let program = &self.dbus_who(id);
                 match owner {
-                    Some(_) => tracing::info!("dbus: {program} {unique} -> {dest} {} {}", m.method(), m.path.as_deref().unwrap_or("")),
-                    None => tracing::info!("dbus: {program} {unique} -> {dest} {} {} (nobody owns it)", m.method(), m.path.as_deref().unwrap_or("")),
+                    Some(_) => tracing::info!(
+                        "dbus: {program} {unique} -> {dest} {} {}",
+                        m.method(),
+                        m.path.as_deref().unwrap_or("")
+                    ),
+                    None => tracing::info!(
+                        "dbus: {program} {unique} -> {dest} {} {} (nobody owns it)",
+                        m.method(),
+                        m.path.as_deref().unwrap_or("")
+                    ),
                 }
             }
         }
@@ -427,12 +448,21 @@ impl Server {
                 // portal); passing them between programs isn't done yet.
                 Some(_) if !self.dbus.fds.is_empty() => {
                     if m.kind == METHOD_CALL && m.flags & NO_REPLY_EXPECTED == 0 {
-                        self.dbus_reply(id, Message::error(&m, BUS_NAME, "org.freedesktop.DBus.Error.NotSupported", "Vergence's bus doesn't pass file descriptors between programs yet"));
+                        self.dbus_reply(
+                            id,
+                            Message::error(
+                                &m,
+                                BUS_NAME,
+                                "org.freedesktop.DBus.Error.NotSupported",
+                                "Vergence's bus doesn't pass file descriptors between programs yet",
+                            ),
+                        );
                     }
                 }
                 Some(to) => self.dbus_deliver(to, &m),
                 None if m.kind == METHOD_CALL && m.flags & NO_REPLY_EXPECTED == 0 => {
-                    let text = format!("The name {dest} is not provided by this session (Vergence starts nothing on demand)");
+                    let text =
+                        format!("The name {dest} is not provided by this session (Vergence starts nothing on demand)");
                     self.dbus_reply(id, Message::error(&m, BUS_NAME, E_SERVICE_UNKNOWN, &text));
                 }
                 None => {}
@@ -440,7 +470,10 @@ impl Server {
             None if m.kind == SIGNAL && self.dbus.fds.is_empty() => self.dbus_broadcast(&m),
             None => {
                 if m.kind == METHOD_CALL && m.flags & NO_REPLY_EXPECTED == 0 {
-                    self.dbus_reply(id, Message::error(&m, BUS_NAME, E_UNKNOWN_METHOD, "method calls need a destination"));
+                    self.dbus_reply(
+                        id,
+                        Message::error(&m, BUS_NAME, E_UNKNOWN_METHOD, "method calls need a destination"),
+                    );
                 }
             }
         }
@@ -504,7 +537,9 @@ impl Server {
             return vec![EDGE_UNIQUE.into(), PORTAL_NAME.into(), NOTIFY_NAME.into()];
         }
         let mut out = vec![self.dbus_unique(id)];
-        out.extend(self.dbus.names.iter().filter(|(_, q)| q.front().is_some_and(|(o, _)| *o == id)).map(|(n, _)| n.clone()));
+        out.extend(
+            self.dbus.names.iter().filter(|(_, q)| q.front().is_some_and(|(o, _)| *o == id)).map(|(n, _)| n.clone()),
+        );
         out
     }
 
@@ -566,7 +601,11 @@ impl Server {
     }
 
     fn dbus_owner_changed(&mut self, name: &str, old: &str, new: &str) {
-        self.dbus_bus_signal("NameOwnerChanged", &[Value::Str(name.into()), Value::Str(old.into()), Value::Str(new.into())], None);
+        self.dbus_bus_signal(
+            "NameOwnerChanged",
+            &[Value::Str(name.into()), Value::Str(old.into()), Value::Str(new.into())],
+            None,
+        );
     }
 
     fn dbus_driver(&mut self, id: u32, m: &Message) {
@@ -603,7 +642,12 @@ impl Server {
                 None => err(E_INVALID_ARGS, "NameHasOwner(s)"),
             },
             (BUS_NAME, "ListNames") => {
-                let mut names = vec![BUS_NAME.to_string(), EDGE_UNIQUE.to_string(), PORTAL_NAME.to_string(), NOTIFY_NAME.to_string()];
+                let mut names = vec![
+                    BUS_NAME.to_string(),
+                    EDGE_UNIQUE.to_string(),
+                    PORTAL_NAME.to_string(),
+                    NOTIFY_NAME.to_string(),
+                ];
                 names.extend(self.dbus.conns.values().filter_map(|c| c.unique.clone()));
                 names.extend(self.dbus.names.keys().cloned());
                 ok(&[Value::strings(names)])
@@ -645,7 +689,9 @@ impl Server {
                 }
                 None => err(E_INVALID_ARGS, "RemoveMatch(s)"),
             },
-            (BUS_NAME, "GetConnectionUnixUser") | (BUS_NAME, "GetConnectionUnixProcessID") | (BUS_NAME, "GetConnectionCredentials") => {
+            (BUS_NAME, "GetConnectionUnixUser")
+            | (BUS_NAME, "GetConnectionUnixProcessID")
+            | (BUS_NAME, "GetConnectionCredentials") => {
                 match s(0).and_then(|n| self.dbus_owner(&n)).and_then(|o| self.dbus.conns.get(&o)) {
                     Some(c) => match member {
                         "GetConnectionUnixUser" => ok(&[Value::U32(c.uid)]),
@@ -675,11 +721,17 @@ impl Server {
             ("org.freedesktop.DBus.Peer", "Ping") => ok(&[]),
             ("org.freedesktop.DBus.Peer", "GetMachineId") => ok(&[Value::Str(machine_id())]),
             ("org.freedesktop.DBus.Introspectable", "Introspect") => ok(&[Value::Str(INTROSPECTION.into())]),
-            ("org.freedesktop.DBus.Properties", "GetAll") => {
-                ok(&[Value::Array("{sv}".into(), vec![entry("Features", Value::strings(Vec::<String>::new())), entry("Interfaces", Value::strings(Vec::<String>::new()))])])
-            }
+            ("org.freedesktop.DBus.Properties", "GetAll") => ok(&[Value::Array(
+                "{sv}".into(),
+                vec![
+                    entry("Features", Value::strings(Vec::<String>::new())),
+                    entry("Interfaces", Value::strings(Vec::<String>::new())),
+                ],
+            )]),
             ("org.freedesktop.DBus.Properties", "Get") => match s(1).as_deref() {
-                Some("Features") | Some("Interfaces") => ok(&[Value::Variant(Box::new(Value::strings(Vec::<String>::new())))]),
+                Some("Features") | Some("Interfaces") => {
+                    ok(&[Value::Variant(Box::new(Value::strings(Vec::<String>::new())))])
+                }
                 _ => err(E_INVALID_ARGS, "no such property"),
             },
             _ => err(E_UNKNOWN_METHOD, &format!("{iface}.{member} is not provided by this bus")),
@@ -691,7 +743,12 @@ impl Server {
 
     /// RequestName: 1 primary owner, 2 queued, 3 exists, 4 already owner.
     fn dbus_request_name(&mut self, id: u32, name: &str, flags: u32) -> Result<u32, String> {
-        if name.starts_with(':') || name == BUS_NAME || name == PORTAL_NAME || name == NOTIFY_NAME || !vergence_dbus::valid_bus_name(name) {
+        if name.starts_with(':')
+            || name == BUS_NAME
+            || name == PORTAL_NAME
+            || name == NOTIFY_NAME
+            || !vergence_dbus::valid_bus_name(name)
+        {
             return Err(format!("{name} can't be requested"));
         }
         let me = self.dbus_unique(id);
@@ -805,16 +862,17 @@ impl Server {
             return;
         }
         let Ok(half) = c.stream.try_clone() else { return };
-        let res = self.loop_handle.insert_source(Generic::new(half, Interest::WRITE, Mode::Level), move |_, _, state| {
-            if state.dbus_flush(id) {
-                if let Some(c) = state.dbus.conns.get_mut(&id) {
-                    c.write_source = None;
+        let res =
+            self.loop_handle.insert_source(Generic::new(half, Interest::WRITE, Mode::Level), move |_, _, state| {
+                if state.dbus_flush(id) {
+                    if let Some(c) = state.dbus.conns.get_mut(&id) {
+                        c.write_source = None;
+                    }
+                    Ok(PostAction::Remove)
+                } else {
+                    Ok(PostAction::Continue)
                 }
-                Ok(PostAction::Remove)
-            } else {
-                Ok(PostAction::Continue)
-            }
-        });
+            });
         if let Ok(t) = res {
             c.write_source = Some(t);
         }
@@ -826,7 +884,8 @@ impl Server {
         let Some(c) = self.dbus.conns.get(&id) else { return };
         let unique = c.unique.clone();
         let program = c.program.clone();
-        let owned: Vec<String> = self.dbus.names.iter().filter(|(_, q)| q.iter().any(|(o, _)| *o == id)).map(|(n, _)| n.clone()).collect();
+        let owned: Vec<String> =
+            self.dbus.names.iter().filter(|(_, q)| q.iter().any(|(o, _)| *o == id)).map(|(n, _)| n.clone()).collect();
         for n in owned {
             self.dbus_release_name(id, &n, false);
         }
@@ -881,7 +940,8 @@ impl Server {
         let on_portal = m.path.as_deref() == Some(PORTAL_PATH);
         let ok = |vals: &[Value]| Message::method_return(m, EDGE_UNIQUE, vals);
         let err = |name: &str, text: &str| Message::error(m, EDGE_UNIQUE, name, text);
-        let not_found = |ns: &str, key: &str| err("org.freedesktop.portal.Error.NotFound", &format!("{ns} {key}: no such setting"));
+        let not_found =
+            |ns: &str, key: &str| err("org.freedesktop.portal.Error.NotFound", &format!("{ns} {key}: no such setting"));
         let reply = match (iface, member) {
             ("org.freedesktop.DBus.Peer", "Ping") => ok(&[]),
             ("org.freedesktop.DBus.Peer", "GetMachineId") => ok(&[Value::Str(machine_id())]),
@@ -889,7 +949,9 @@ impl Server {
                 ok(&[Value::Str(if on_portal { PORTAL_INTROSPECTION } else { EMPTY_INTROSPECTION }.into())])
             }
             // A portal Request object (portal.rs): the caller gives up.
-            (crate::portal::REQUEST, "Close") if m.path.as_deref().is_some_and(|p| p.starts_with(crate::portal::REQUEST_PREFIX)) => {
+            (crate::portal::REQUEST, "Close")
+                if m.path.as_deref().is_some_and(|p| p.starts_with(crate::portal::REQUEST_PREFIX)) =>
+            {
                 self.portal_close(m.path.as_deref().unwrap_or_default());
                 ok(&[])
             }
@@ -928,7 +990,9 @@ impl Server {
                     self.dbus_log_read(id, &ns, &key);
                     match self.settings.current.get(&(ns.clone(), key.clone())) {
                         // Read (deprecated) wraps the value in a second variant.
-                        Some(v) if member == "Read" => ok(&[Value::Variant(Box::new(Value::Variant(Box::new(to_dbus(v)))))]),
+                        Some(v) if member == "Read" => {
+                            ok(&[Value::Variant(Box::new(Value::Variant(Box::new(to_dbus(v)))))])
+                        }
                         Some(v) => ok(&[Value::Variant(Box::new(to_dbus(v)))]),
                         None => not_found(&ns, &key),
                     }
@@ -949,7 +1013,9 @@ impl Server {
                 }
                 let outer = by_ns
                     .into_iter()
-                    .map(|(ns, entries)| Value::Entry(Box::new(Value::Str(ns)), Box::new(Value::Array("{sv}".into(), entries))))
+                    .map(|(ns, entries)| {
+                        Value::Entry(Box::new(Value::Str(ns)), Box::new(Value::Array("{sv}".into(), entries)))
+                    })
                     .collect();
                 ok(&[Value::Array("{sa{sv}}".into(), outer)])
             }
@@ -957,13 +1023,19 @@ impl Server {
                 (Some(PORTAL_SETTINGS), Some("version")) => ok(&[Value::Variant(Box::new(Value::U32(2)))]),
                 (Some(crate::portal::FILE_CHOOSER), Some("version")) => ok(&[Value::Variant(Box::new(Value::U32(3)))]),
                 (Some(crate::portal::OPEN_URI), Some("version")) => ok(&[Value::Variant(Box::new(Value::U32(3)))]),
-                (Some(crate::portal_shot::SCREENSHOT), Some("version")) => ok(&[Value::Variant(Box::new(Value::U32(2)))]),
+                (Some(crate::portal_shot::SCREENSHOT), Some("version")) => {
+                    ok(&[Value::Variant(Box::new(Value::U32(2)))])
+                }
                 _ => err(E_INVALID_ARGS, "no such interface or property"),
             },
             ("org.freedesktop.DBus.Properties", "GetAll") => match s(0).as_deref() {
                 Some(PORTAL_SETTINGS) => ok(&[Value::Array("{sv}".into(), vec![entry("version", Value::U32(2))])]),
-                Some(crate::portal::FILE_CHOOSER) | Some(crate::portal::OPEN_URI) => ok(&[Value::Array("{sv}".into(), vec![entry("version", Value::U32(3))])]),
-                Some(crate::portal_shot::SCREENSHOT) => ok(&[Value::Array("{sv}".into(), vec![entry("version", Value::U32(2))])]),
+                Some(crate::portal::FILE_CHOOSER) | Some(crate::portal::OPEN_URI) => {
+                    ok(&[Value::Array("{sv}".into(), vec![entry("version", Value::U32(3))])])
+                }
+                Some(crate::portal_shot::SCREENSHOT) => {
+                    ok(&[Value::Array("{sv}".into(), vec![entry("version", Value::U32(2))])])
+                }
                 _ => err(E_INVALID_ARGS, "no such interface"),
             },
             _ => err(E_UNKNOWN_METHOD, &format!("{iface}.{member} is not provided (yet) by Vergence")),
@@ -983,7 +1055,9 @@ impl Server {
         let reply = match (iface, member) {
             ("org.freedesktop.DBus.Peer", "Ping") => ok(&[]),
             ("org.freedesktop.DBus.Introspectable", "Introspect") => ok(&[Value::Str(NOTIFY_INTROSPECTION.into())]),
-            (NOTIFY_NAME, "GetCapabilities") | ("", "GetCapabilities") => ok(&[Value::strings(["body", "actions", "persistence"])]),
+            (NOTIFY_NAME, "GetCapabilities") | ("", "GetCapabilities") => {
+                ok(&[Value::strings(["body", "actions", "persistence"])])
+            }
             (NOTIFY_NAME, "GetServerInformation") | ("", "GetServerInformation") => ok(&[
                 Value::Str("Vergence".into()),
                 Value::Str("Vergence".into()),
@@ -997,16 +1071,18 @@ impl Server {
                 }
                 None => err(E_INVALID_ARGS, "Notify(susssasa{sv}i)"),
             },
-            (NOTIFY_NAME, "CloseNotification") | ("", "CloseNotification") => match args.first().and_then(Value::as_u32) {
-                Some(nid) => {
-                    if self.notify_close(crate::notify::Origin::DBus(id), nid) {
-                        ok(&[])
-                    } else {
-                        err(E_INVALID_ARGS, &format!("no notification {nid} of yours"))
+            (NOTIFY_NAME, "CloseNotification") | ("", "CloseNotification") => {
+                match args.first().and_then(Value::as_u32) {
+                    Some(nid) => {
+                        if self.notify_close(crate::notify::Origin::DBus(id), nid) {
+                            ok(&[])
+                        } else {
+                            err(E_INVALID_ARGS, &format!("no notification {nid} of yours"))
+                        }
                     }
+                    None => err(E_INVALID_ARGS, "CloseNotification(u)"),
                 }
-                None => err(E_INVALID_ARGS, "CloseNotification(u)"),
-            },
+            }
             _ => err(E_UNKNOWN_METHOD, &format!("{iface}.{member} is not provided by Vergence")),
         };
         if m.flags & NO_REPLY_EXPECTED == 0 {
@@ -1022,7 +1098,8 @@ impl Server {
     /// A portal Request's Response signal, to the connection that made it only.
     pub fn dbus_request_response(&mut self, conn: u32, handle: &str, response: u32, results: Value) {
         let Some(dest) = self.dbus.conns.get(&conn).and_then(|c| c.unique.clone()) else { return };
-        let mut sig = Message::signal(EDGE_UNIQUE, handle, crate::portal::REQUEST, "Response", &[Value::U32(response), results]);
+        let mut sig =
+            Message::signal(EDGE_UNIQUE, handle, crate::portal::REQUEST, "Response", &[Value::U32(response), results]);
         sig.destination = Some(dest);
         sig.serial = self.dbus_next_serial();
         let bytes = sig.serialize();
@@ -1060,7 +1137,11 @@ impl Server {
             return;
         }
         for c in changed {
-            let args = [Value::Str(c.namespace.clone()), Value::Str(c.key.clone()), Value::Variant(Box::new(to_dbus(&c.value)))];
+            let args = [
+                Value::Str(c.namespace.clone()),
+                Value::Str(c.key.clone()),
+                Value::Variant(Box::new(to_dbus(&c.value))),
+            ];
             let mut sig = Message::signal(EDGE_UNIQUE, PORTAL_PATH, PORTAL_SETTINGS, "SettingChanged", &args);
             sig.serial = self.dbus_next_serial();
             self.dbus_broadcast(&sig);
@@ -1215,7 +1296,8 @@ const INTROSPECTION: &str = r#"<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS 
 /// (SCM_RIGHTS; close-on-exec).
 fn recv_with_fds(stream: &UnixStream, buf: &mut [u8]) -> std::io::Result<(usize, Vec<std::os::fd::OwnedFd>)> {
     use smithay::reexports::rustix::net::{RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, recvmsg};
-    let mut space = [std::mem::MaybeUninit::<u8>::uninit(); smithay::reexports::rustix::cmsg_space!(ScmRights(MAX_FDS))];
+    let mut space =
+        [std::mem::MaybeUninit::<u8>::uninit(); smithay::reexports::rustix::cmsg_space!(ScmRights(MAX_FDS))];
     let mut control = RecvAncillaryBuffer::new(&mut space);
     let mut iov = [std::io::IoSliceMut::new(buf)];
     let got = recvmsg(stream, &mut iov, &mut control, RecvFlags::CMSG_CLOEXEC).map_err(std::io::Error::from)?;

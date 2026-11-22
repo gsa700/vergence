@@ -442,12 +442,25 @@ mod tests {
     /// button's white mark on its red.
     #[test]
     fn bar_text_is_readable_in_both_styles() {
-        let looks: Vec<(String, BarLook)> = (BAR_SHADE_MIN..=BAR_SHADE_MAX).flat_map(|s| [(format!("dark, shade {s}"), bar_look_shaded(false, s)), (format!("light, shade {s}"), bar_look_shaded(true, s))]).collect();
+        let looks: Vec<(String, BarLook)> = (BAR_SHADE_MIN..=BAR_SHADE_MAX)
+            .flat_map(|s| {
+                [
+                    (format!("dark, shade {s}"), bar_look_shaded(false, s)),
+                    (format!("light, shade {s}"), bar_look_shaded(true, s)),
+                ]
+            })
+            .collect();
         for (name, l) in &looks {
             for focused in [true, false] {
-                let (ground, ink, front) = if focused { (l.ground, l.ink, l.front) } else { (l.ground_off, l.ink_off, l.front_off) };
+                let (ground, ink, front) =
+                    if focused { (l.ground, l.ink, l.front) } else { (l.ground_off, l.ink_off, l.front_off) };
                 let need = if focused { 4.5 } else { 3.0 };
-                let grounds = [("ground", ground), ("tab behind", over(ground, l.shape, l.tab_rest)), ("under the pointer", over(ground, l.shape, l.shape_hover)), ("tab in front", front)];
+                let grounds = [
+                    ("ground", ground),
+                    ("tab behind", over(ground, l.shape, l.tab_rest)),
+                    ("under the pointer", over(ground, l.shape, l.shape_hover)),
+                    ("tab in front", front),
+                ];
                 for (what, g) in grounds {
                     let c = contrast(ink, g);
                     assert!(c >= need, "{name}, focused {focused}: title on {what} {c:.2} < {need}");
@@ -456,7 +469,11 @@ mod tests {
                 assert!(contrast(ink, button) >= 3.0, "{name}: button mark {:.2}", contrast(ink, button));
                 // While a superuser's tab is in front: the same on the alarm ground.
                 let alarm = if focused { l.alert_ground } else { l.alert_ground_off };
-                for (what, g) in [("alarm ground", alarm), ("tab behind on it", over(alarm, l.shape, l.tab_rest)), ("under the pointer on it", over(alarm, l.shape, l.shape_hover))] {
+                for (what, g) in [
+                    ("alarm ground", alarm),
+                    ("tab behind on it", over(alarm, l.shape, l.tab_rest)),
+                    ("under the pointer on it", over(alarm, l.shape, l.shape_hover)),
+                ] {
                     let c = contrast(ink, g);
                     assert!(c >= need, "{name}, focused {focused}: title on {what} {c:.2} < {need}");
                 }
@@ -523,7 +540,10 @@ mod tests {
                             }
                             for a in shapes {
                                 let c = contrast(ink, over(ground, l.shape, a));
-                                assert!(c >= rule, "light {light} focused {focused}: {ground:?} with shape {a}: {c:.2}");
+                                assert!(
+                                    c >= rule,
+                                    "light {light} focused {focused}: {ground:?} with shape {a}: {c:.2}"
+                                );
                             }
                         }
                     }
@@ -559,7 +579,13 @@ mod tests {
 
     #[test]
     fn ink_on_a_page_color_reads() {
-        for page in [Rgb(0x1e, 0x1e, 0x2e), Rgb(0xff, 0xff, 0xff), Rgb(0xef, 0xf1, 0xf5), Rgb(0x30, 0x0a, 0x24), Rgb(0x28, 0x2a, 0x36)] {
+        for page in [
+            Rgb(0x1e, 0x1e, 0x2e),
+            Rgb(0xff, 0xff, 0xff),
+            Rgb(0xef, 0xf1, 0xf5),
+            Rgb(0x30, 0x0a, 0x24),
+            Rgb(0x28, 0x2a, 0x36),
+        ] {
             assert!(contrast(ink_on(page), page) >= 4.5, "{page:?}");
         }
         assert_eq!(over(Rgb(0, 0, 0), Rgb(255, 255, 255), 255), Rgb(255, 255, 255));

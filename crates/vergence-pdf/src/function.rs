@@ -5,8 +5,8 @@
 //! Untrusted: sample tables and nesting are bounded, a calculator program
 //! runs a bounded number of steps on a bounded stack.
 
-use crate::object::{Dict, Object};
 use crate::Document;
+use crate::object::{Dict, Object};
 
 const MAX_INPUTS: usize = 8;
 const MAX_OUTPUTS: usize = 32;
@@ -17,10 +17,32 @@ const MAX_STACK: usize = 100;
 
 #[derive(Debug, Clone)]
 pub enum Function {
-    Sampled { domain: Vec<f64>, range: Vec<f64>, size: Vec<usize>, encode: Vec<f64>, decode: Vec<f64>, samples: Vec<f64>, outputs: usize },
-    Exponential { domain: Vec<f64>, c0: Vec<f64>, c1: Vec<f64>, n: f64 },
-    Stitching { domain: Vec<f64>, functions: Vec<Function>, bounds: Vec<f64>, encode: Vec<f64> },
-    Calculator { domain: Vec<f64>, range: Vec<f64>, program: Vec<Op> },
+    Sampled {
+        domain: Vec<f64>,
+        range: Vec<f64>,
+        size: Vec<usize>,
+        encode: Vec<f64>,
+        decode: Vec<f64>,
+        samples: Vec<f64>,
+        outputs: usize,
+    },
+    Exponential {
+        domain: Vec<f64>,
+        c0: Vec<f64>,
+        c1: Vec<f64>,
+        n: f64,
+    },
+    Stitching {
+        domain: Vec<f64>,
+        functions: Vec<Function>,
+        bounds: Vec<f64>,
+        encode: Vec<f64>,
+    },
+    Calculator {
+        domain: Vec<f64>,
+        range: Vec<f64>,
+        program: Vec<Op>,
+    },
     /// Several one-output functions, one per output (an array of them).
     Each(Vec<Function>),
 }
@@ -45,7 +67,8 @@ impl Function {
         }
         let o = doc.resolve(o);
         if let Object::Array(a) = &o {
-            let fs: Vec<Function> = a.iter().take(MAX_OUTPUTS).filter_map(|f| Self::parse_at(f, doc, depth + 1)).collect();
+            let fs: Vec<Function> =
+                a.iter().take(MAX_OUTPUTS).filter_map(|f| Self::parse_at(f, doc, depth + 1)).collect();
             return (!fs.is_empty()).then_some(Function::Each(fs));
         }
         let d: Dict = o.as_dict()?.clone();
@@ -98,7 +121,8 @@ impl Function {
                 };
                 let bounds = nums(d.get("Bounds"), doc);
                 let encode = nums(d.get("Encode"), doc);
-                (!functions.is_empty() && bounds.len() + 1 == functions.len() && encode.len() >= functions.len() * 2).then_some(Function::Stitching { domain, functions, bounds, encode })
+                (!functions.is_empty() && bounds.len() + 1 == functions.len() && encode.len() >= functions.len() * 2)
+                    .then_some(Function::Stitching { domain, functions, bounds, encode })
             }
             4 => {
                 let Object::Stream(s) = &o else { return None };
@@ -166,13 +190,25 @@ impl Function {
                     .collect()
             }
             Function::Calculator { domain, range, program } => {
-                let mut stack: Vec<Value> = input.iter().enumerate().map(|(i, x)| Value::Num(clip(*x, domain.get(2 * i).copied().unwrap_or(f64::MIN), domain.get(2 * i + 1).copied().unwrap_or(f64::MAX)))).collect();
+                let mut stack: Vec<Value> = input
+                    .iter()
+                    .enumerate()
+                    .map(|(i, x)| {
+                        Value::Num(clip(
+                            *x,
+                            domain.get(2 * i).copied().unwrap_or(f64::MIN),
+                            domain.get(2 * i + 1).copied().unwrap_or(f64::MAX),
+                        ))
+                    })
+                    .collect();
                 let mut steps = 0;
                 run(program, &mut stack, &mut steps);
                 let outs = range.len() / 2;
                 let vals: Vec<f64> = stack.iter().map(Value::num).collect();
                 let start = vals.len().saturating_sub(outs);
-                (0..outs).map(|j| clip(vals.get(start + j).copied().unwrap_or(0.0), range[2 * j], range[2 * j + 1])).collect()
+                (0..outs)
+                    .map(|j| clip(vals.get(start + j).copied().unwrap_or(0.0), range[2 * j], range[2 * j + 1]))
+                    .collect()
             }
         }
     }
@@ -484,7 +520,11 @@ mod tests {
         assert_eq!(f.eval(&[0.75]), vec![0.5]);
         // A CMYK-from-tint transform of the usual kind: tint -> 4 outputs.
         let prog = parse_program(b"{ dup 0 mul exch dup 1 mul exch dup 0.5 mul exch 0 mul }").unwrap();
-        let f = Function::Calculator { domain: vec![0.0, 1.0], range: vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0], program: prog };
+        let f = Function::Calculator {
+            domain: vec![0.0, 1.0],
+            range: vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+            program: prog,
+        };
         assert_eq!(f.eval(&[1.0]), vec![0.0, 1.0, 0.5, 0.0]);
         // Runaway or broken programs stop.
         assert!(parse_program(b"{ 1 2 ").is_none());
@@ -496,7 +536,15 @@ mod tests {
     #[test]
     fn sampled_interpolates() {
         // One input, two samples 0 and 255: halfway is half.
-        let f = Function::Sampled { domain: vec![0.0, 1.0], range: vec![0.0, 1.0], size: vec![2], encode: vec![0.0, 1.0], decode: vec![0.0, 1.0], samples: vec![0.0, 1.0], outputs: 1 };
+        let f = Function::Sampled {
+            domain: vec![0.0, 1.0],
+            range: vec![0.0, 1.0],
+            size: vec![2],
+            encode: vec![0.0, 1.0],
+            decode: vec![0.0, 1.0],
+            samples: vec![0.0, 1.0],
+            outputs: 1,
+        };
         assert_eq!(f.eval(&[0.5]), vec![0.5]);
         assert_eq!(f.eval(&[2.0]), vec![1.0], "clipped to the domain");
     }

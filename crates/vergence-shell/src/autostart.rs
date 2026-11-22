@@ -12,7 +12,10 @@ use crate::desktop::{Entry, parse};
 
 /// The user's autostart directory.
 pub fn dir() -> Option<PathBuf> {
-    let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
     Some(config.join("autostart"))
 }
 
@@ -22,7 +25,11 @@ const MOST: usize = 64;
 /// The entries in `dir` to start, by name.
 pub fn entries(dir: &Path) -> Vec<Entry> {
     let Ok(read) = std::fs::read_dir(dir) else { return Vec::new() };
-    let mut names: Vec<PathBuf> = read.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "desktop") && p.is_file()).collect();
+    let mut names: Vec<PathBuf> = read
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "desktop") && p.is_file())
+        .collect();
     names.sort();
     names
         .into_iter()

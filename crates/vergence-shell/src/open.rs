@@ -35,7 +35,12 @@ pub fn desktop_id(id: &str) -> String {
 
 /// The applications installed, as vergence-types sees them.
 fn known<'a>(entries: &'a [Entry], ids: &'a [String]) -> Vec<vergence_types::App<'a>> {
-    entries.iter().zip(ids).filter(|(e, _)| !e.hidden).map(|(e, id)| vergence_types::App { id, types: &e.mime_types }).collect()
+    entries
+        .iter()
+        .zip(ids)
+        .filter(|(e, _)| !e.hidden)
+        .map(|(e, id)| vergence_types::App { id, types: &e.mime_types })
+        .collect()
 }
 
 /// The applications that open an item's type, best first (desktop file ids).
@@ -47,7 +52,12 @@ pub fn apps_for(mime: &str, entries: &[Entry], lists: &[vergence_types::MimeApps
 /// What to start: each application with its items (arguments), and the
 /// items nothing opens, with why. With `app` given (a desktop id), every
 /// item goes to it.
-pub fn plan(items: &[Item], app: Option<&str>, entries: &[Entry], lists: &[vergence_types::MimeApps]) -> (Vec<(Entry, Vec<String>)>, Vec<String>) {
+pub fn plan(
+    items: &[Item],
+    app: Option<&str>,
+    entries: &[Entry],
+    lists: &[vergence_types::MimeApps],
+) -> (Vec<(Entry, Vec<String>)>, Vec<String>) {
     let ids: Vec<String> = entries.iter().map(|e| desktop_id(&e.id)).collect();
     let apps = known(entries, &ids);
     let entry_of = |id: &str| entries.iter().find(|e| !e.hidden && desktop_id(&e.id) == desktop_id(id)).cloned();
@@ -66,7 +76,12 @@ pub fn plan(items: &[Item], app: Option<&str>, entries: &[Entry], lists: &[verge
                 Some((_, args)) => args.push(i.arg.clone()),
                 None => groups.push((e, vec![i.arg.clone()])),
             },
-            None => failed.push(format!("{}: no application opens {} ({})", i.given, vergence_types::describe(&i.mime), i.mime)),
+            None => failed.push(format!(
+                "{}: no application opens {} ({})",
+                i.given,
+                vergence_types::describe(&i.mime),
+                i.mime
+            )),
         }
     }
     (groups, failed)
@@ -94,13 +109,19 @@ mod tests {
     use super::*;
 
     fn entry(id: &str, exec: &str, types: &str, terminal: bool) -> Entry {
-        let text = format!("[Desktop Entry]\nType=Application\nName={id}\nExec={exec}\nMimeType={types}\nTerminal={terminal}\n");
+        let text = format!(
+            "[Desktop Entry]\nType=Application\nName={id}\nExec={exec}\nMimeType={types}\nTerminal={terminal}\n"
+        );
         crate::desktop::parse(id, &text).unwrap()
     }
 
     #[test]
     fn items_go_to_their_apps_grouped_in_order() {
-        let entries = vec![entry("edit", "edit %F", "text/plain;", false), entry("view", "view %f", "image/png;", false), entry("vi", "vi %F", "text/plain;", true)];
+        let entries = vec![
+            entry("edit", "edit %F", "text/plain;", false),
+            entry("view", "view %f", "image/png;", false),
+            entry("vi", "vi %F", "text/plain;", true),
+        ];
         let items = vec![
             Item { given: "a.txt".into(), arg: "/a.txt".into(), mime: "text/plain".into() },
             Item { given: "b.png".into(), arg: "/b.png".into(), mime: "image/png".into() },
@@ -109,7 +130,10 @@ mod tests {
         ];
         let (groups, failed) = plan(&items, None, &entries, &[]);
         let got: Vec<(&str, Vec<String>)> = groups.iter().map(|(e, a)| (e.id.as_str(), a.clone())).collect();
-        assert_eq!(got, vec![("edit", vec!["/a.txt".to_string(), "/c.md".to_string()]), ("view", vec!["/b.png".to_string()])]);
+        assert_eq!(
+            got,
+            vec![("edit", vec!["/a.txt".to_string(), "/c.md".to_string()]), ("view", vec!["/b.png".to_string()])]
+        );
         assert_eq!(failed.len(), 1);
         assert!(failed[0].contains("Zip archive"));
         let lists = [vergence_types::MimeApps::parse("[Default Applications]\ntext/plain=vi.desktop\n")];

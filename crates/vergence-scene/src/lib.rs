@@ -163,20 +163,47 @@ pub const CELL_GLYPH: u16 = 2;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     /// A filled rectangle; `radius` rounds its corners (0: square).
-    Fill { rect: Rect, radius: f32, color: Color },
+    Fill {
+        rect: Rect,
+        radius: f32,
+        color: Color,
+    },
     /// A rectangle's outline, `width` wide, drawn inside `rect`.
-    Stroke { rect: Rect, radius: f32, width: f32, color: Color },
+    Stroke {
+        rect: Rect,
+        radius: f32,
+        width: f32,
+        color: Color,
+    },
     /// A straight line with round ends.
-    Line { from: Point, to: Point, width: f32, color: Color },
+    Line {
+        from: Point,
+        to: Point,
+        width: f32,
+        color: Color,
+    },
     /// Glyphs of the font `font` (an index into [`Scene::fonts`]) at `size`
     /// reference units to the em, the first baseline origin at `origin`.
-    Glyphs { font: u32, size: f32, color: Color, origin: Point, glyphs: Vec<Glyph> },
+    Glyphs {
+        font: u32,
+        size: f32,
+        color: Color,
+        origin: Point,
+        glyphs: Vec<Glyph>,
+    },
     /// The picture `image` (an index into [`Scene::images`]) stretched to
     /// `rect`, at `opacity` (0 to 1).
-    Image { image: u32, rect: Rect, opacity: f32 },
+    Image {
+        image: u32,
+        rect: Rect,
+        opacity: f32,
+    },
     /// Until the matching [`Command::PopClip`], nothing is drawn outside
     /// this rectangle (and the clips around it).
-    PushClip { rect: Rect, radius: f32 },
+    PushClip {
+        rect: Rect,
+        radius: f32,
+    },
     PopClip,
     /// A grid of cells, `columns` to the row, rows downwards from `origin`
     /// (the first cell's top-left corner), each `cell_w` by `cell_h`. Drawn
@@ -186,7 +213,15 @@ pub enum Command {
     /// unit above the row's foot; then the glyphs at `size`, each with its
     /// origin at its cell's left edge, `baseline` below the row's top. A
     /// glyph wider than its cell is drawn over the next.
-    Cells { origin: Point, cell_w: f32, cell_h: f32, baseline: f32, size: f32, columns: u32, cells: Vec<Cell> },
+    Cells {
+        origin: Point,
+        cell_w: f32,
+        cell_h: f32,
+        baseline: f32,
+        size: f32,
+        columns: u32,
+        cells: Vec<Cell>,
+    },
 }
 
 /// What is wrong with a scene. `at` is the command's place in the list.
@@ -245,7 +280,8 @@ impl Scene {
 
     /// The index of this font in the scene's table, added if it is new.
     pub fn font(&mut self, family: &str, weight: u16, italic: bool) -> u32 {
-        if let Some(i) = self.fonts.iter().position(|f| f.family == family && f.weight == weight && f.italic == italic) {
+        if let Some(i) = self.fonts.iter().position(|f| f.family == family && f.weight == weight && f.italic == italic)
+        {
             return i as u32;
         }
         self.fonts.push(FontRef { family: family.to_string(), weight, italic });
@@ -313,7 +349,10 @@ impl Scene {
         };
         for c in &mut self.commands {
             match c {
-                Command::Fill { rect, .. } | Command::Stroke { rect, .. } | Command::Image { rect, .. } | Command::PushClip { rect, .. } => r(rect),
+                Command::Fill { rect, .. }
+                | Command::Stroke { rect, .. }
+                | Command::Image { rect, .. }
+                | Command::PushClip { rect, .. } => r(rect),
                 Command::Line { from, to, .. } => {
                     p(from);
                     p(to);
@@ -327,7 +366,16 @@ impl Scene {
 
     /// A grid of cells ([`Command::Cells`]); `cells` holds whole rows of `columns`.
     #[allow(clippy::too_many_arguments)]
-    pub fn cells(&mut self, origin: Point, cell_w: f32, cell_h: f32, baseline: f32, size: f32, columns: u32, cells: Vec<Cell>) -> &mut Self {
+    pub fn cells(
+        &mut self,
+        origin: Point,
+        cell_w: f32,
+        cell_h: f32,
+        baseline: f32,
+        size: f32,
+        columns: u32,
+        cells: Vec<Cell>,
+    ) -> &mut Self {
         self.commands.push(Command::Cells { origin, cell_w, cell_h, baseline, size, columns, cells });
         self
     }
@@ -343,7 +391,12 @@ impl Scene {
             return Err(SceneError::TooMany("fonts"));
         }
         for (i, f) in self.fonts.iter().enumerate() {
-            if f.family.is_empty() || f.family.len() > MAX_FAMILY || f.weight == 0 || f.weight > 1000 || f.family.chars().any(char::is_control) {
+            if f.family.is_empty()
+                || f.family.len() > MAX_FAMILY
+                || f.weight == 0
+                || f.weight > 1000
+                || f.family.chars().any(char::is_control)
+            {
                 return Err(SceneError::BadFont(i));
             }
         }
@@ -530,10 +583,15 @@ mod tests {
         s.translate(0.0, 30.0);
         for (a, b) in before.iter().zip(&s.commands) {
             match (a, b) {
-                (Command::Fill { rect: ra, .. }, Command::Fill { rect: rb, .. }) | (Command::Stroke { rect: ra, .. }, Command::Stroke { rect: rb, .. }) | (Command::PushClip { rect: ra, .. }, Command::PushClip { rect: rb, .. }) | (Command::Image { rect: ra, .. }, Command::Image { rect: rb, .. }) => {
+                (Command::Fill { rect: ra, .. }, Command::Fill { rect: rb, .. })
+                | (Command::Stroke { rect: ra, .. }, Command::Stroke { rect: rb, .. })
+                | (Command::PushClip { rect: ra, .. }, Command::PushClip { rect: rb, .. })
+                | (Command::Image { rect: ra, .. }, Command::Image { rect: rb, .. }) => {
                     assert_eq!((rb.x, rb.y, rb.w, rb.h), (ra.x, ra.y + 30.0, ra.w, ra.h));
                 }
-                (Command::Line { from: fa, to: ta, .. }, Command::Line { from: fb, to: tb, .. }) => assert_eq!((fb.y, tb.y), (fa.y + 30.0, ta.y + 30.0)),
+                (Command::Line { from: fa, to: ta, .. }, Command::Line { from: fb, to: tb, .. }) => {
+                    assert_eq!((fb.y, tb.y), (fa.y + 30.0, ta.y + 30.0))
+                }
                 (Command::Glyphs { origin: oa, glyphs: ga, .. }, Command::Glyphs { origin: ob, glyphs: gb, .. }) => {
                     assert_eq!((ob.x, ob.y), (oa.x, oa.y + 30.0));
                     assert_eq!(ga, gb, "glyphs stay where they are on their origin");
@@ -554,7 +612,13 @@ mod tests {
         s.fill(Rect::new(0.0, 0.0, 640.0, 400.0), Color::rgb(46, 52, 54));
         s.fill_rounded(Rect::new(8.0, 4.0, 200.0, 28.0), 7.0, Color::rgba(255, 255, 255, 20));
         s.push_clip(Rect::new(0.0, 36.0, 640.0, 364.0), 0.0);
-        s.glyphs(mono, 13.5, Color::rgb(211, 215, 207), Point::new(6.0, 52.0), vec![Glyph { id: 71, x: 0.0, y: 0.0 }, Glyph { id: 72, x: 8.1, y: 0.0 }]);
+        s.glyphs(
+            mono,
+            13.5,
+            Color::rgb(211, 215, 207),
+            Point::new(6.0, 52.0),
+            vec![Glyph { id: 71, x: 0.0, y: 0.0 }, Glyph { id: 72, x: 8.1, y: 0.0 }],
+        );
         s.glyphs(bold, 13.5, Color::rgb(252, 233, 79), Point::new(6.0, 70.0), vec![]);
         s.draw_image(pic, Rect::new(600.0, 40.0, 32.0, 16.0), 0.5);
         s.pop_clip();
@@ -656,7 +720,12 @@ mod tests {
         let grid = |change: &dyn Fn(&mut Command)| {
             let mut s = Scene::new(100.0, 100.0);
             let font = s.font("Mono", 400, false) as u16;
-            let cells = vec![Cell { glyph: 5, font, flags: CELL_GLYPH, ..Cell::default() }, Cell { flags: CELL_UNDERLINE, ..Cell::default() }, Cell::default(), Cell::default()];
+            let cells = vec![
+                Cell { glyph: 5, font, flags: CELL_GLYPH, ..Cell::default() },
+                Cell { flags: CELL_UNDERLINE, ..Cell::default() },
+                Cell::default(),
+                Cell::default(),
+            ];
             s.cells(Point::new(1.0, 2.0), 8.0, 16.0, 12.0, 13.0, 2, cells);
             change(s.commands.last_mut().unwrap());
             s.validate()
@@ -669,19 +738,43 @@ mod tests {
         };
         // A font that is not in the table matters only where there is a glyph.
         assert_eq!(grid(&|c| cells_of(c, &|cells| cells[1].font = 9)), Ok(()));
-        assert!(matches!(grid(&|c| cells_of(c, &|cells| cells[0].font = 9)), Err(SceneError::BadIndex { what: "font", .. })));
-        assert!(matches!(grid(&|c| cells_of(c, &|cells| cells[2].flags = 4)), Err(SceneError::BadNumber { what: "cell flags", .. })));
-        assert!(matches!(grid(&|c| cells_of(c, &|cells| cells.truncate(3))), Err(SceneError::BadNumber { what: "cells: not whole rows", .. })));
+        assert!(matches!(
+            grid(&|c| cells_of(c, &|cells| cells[0].font = 9)),
+            Err(SceneError::BadIndex { what: "font", .. })
+        ));
+        assert!(matches!(
+            grid(&|c| cells_of(c, &|cells| cells[2].flags = 4)),
+            Err(SceneError::BadNumber { what: "cell flags", .. })
+        ));
+        assert!(matches!(
+            grid(&|c| cells_of(c, &|cells| cells.truncate(3))),
+            Err(SceneError::BadNumber { what: "cells: not whole rows", .. })
+        ));
         let set = |c: &mut Command, f: &dyn Fn(&mut f32, &mut f32, &mut f32, &mut u32)| {
             if let Command::Cells { cell_w, baseline, size, columns, .. } = c {
                 f(cell_w, baseline, size, columns)
             }
         };
-        assert!(matches!(grid(&|c| set(c, &|w, _, _, _| *w = 0.0)), Err(SceneError::BadNumber { what: "cell size", .. })));
-        assert!(matches!(grid(&|c| set(c, &|w, _, _, _| *w = f32::NAN)), Err(SceneError::BadNumber { what: "cell size", .. })));
-        assert!(matches!(grid(&|c| set(c, &|_, b, _, _| *b = f32::INFINITY)), Err(SceneError::BadNumber { what: "baseline", .. })));
-        assert!(matches!(grid(&|c| set(c, &|_, _, s, _| *s = 0.0)), Err(SceneError::BadNumber { what: "font size", .. })));
+        assert!(matches!(
+            grid(&|c| set(c, &|w, _, _, _| *w = 0.0)),
+            Err(SceneError::BadNumber { what: "cell size", .. })
+        ));
+        assert!(matches!(
+            grid(&|c| set(c, &|w, _, _, _| *w = f32::NAN)),
+            Err(SceneError::BadNumber { what: "cell size", .. })
+        ));
+        assert!(matches!(
+            grid(&|c| set(c, &|_, b, _, _| *b = f32::INFINITY)),
+            Err(SceneError::BadNumber { what: "baseline", .. })
+        ));
+        assert!(matches!(
+            grid(&|c| set(c, &|_, _, s, _| *s = 0.0)),
+            Err(SceneError::BadNumber { what: "font size", .. })
+        ));
         assert!(matches!(grid(&|c| set(c, &|_, _, _, n| *n = 0)), Err(SceneError::BadNumber { what: "columns", .. })));
-        assert!(matches!(grid(&|c| set(c, &|w, _, _, _| *w = MAX_COORD)), Err(SceneError::BadNumber { what: "grid size", .. })));
+        assert!(matches!(
+            grid(&|c| set(c, &|w, _, _, _| *w = MAX_COORD)),
+            Err(SceneError::BadNumber { what: "grid size", .. })
+        ));
     }
 }

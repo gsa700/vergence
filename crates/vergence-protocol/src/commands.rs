@@ -128,12 +128,30 @@ pub struct Command {
 impl Command {
     /// A role's command.
     pub fn role(id: u32, role: Role) -> Command {
-        Command { id, role, menu: String::new(), label: String::new(), keys: String::new(), enabled: true, checked: None, featured: false }
+        Command {
+            id,
+            role,
+            menu: String::new(),
+            label: String::new(),
+            keys: String::new(),
+            enabled: true,
+            checked: None,
+            featured: false,
+        }
     }
 
     /// One of the app's own.
     pub fn own(id: u32, menu: &str, label: &str, keys: &str) -> Command {
-        Command { id, role: Role::Own, menu: menu.into(), label: label.into(), keys: keys.into(), enabled: true, checked: None, featured: false }
+        Command {
+            id,
+            role: Role::Own,
+            menu: menu.into(),
+            label: label.into(),
+            keys: keys.into(),
+            enabled: true,
+            checked: None,
+            featured: false,
+        }
     }
 
     pub fn enabled(mut self, on: bool) -> Command {
@@ -184,7 +202,12 @@ impl Command {
     pub fn keys_shown(&self, terminal: bool) -> String {
         match self.role.info() {
             Some(i) => keys_for(i.role, i.keys, terminal),
-            None if ROLES.iter().any(|r| !r.keys.is_empty() && (keys_for(r.role, r.keys, terminal) == self.keys || r.keys == self.keys)) => String::new(),
+            None if ROLES.iter().any(|r| {
+                !r.keys.is_empty() && (keys_for(r.role, r.keys, terminal) == self.keys || r.keys == self.keys)
+            }) =>
+            {
+                String::new()
+            }
             None => self.keys.clone(),
         }
     }
@@ -226,10 +249,22 @@ mod tests {
 
     #[test]
     fn a_role_is_the_same_whatever_the_app_sends() {
-        let c = Command { id: 1, role: Role::Copy, menu: "Stuff".into(), label: "Duplicate".into(), keys: "Ctrl+D".into(), enabled: true, checked: None, featured: false };
+        let c = Command {
+            id: 1,
+            role: Role::Copy,
+            menu: "Stuff".into(),
+            label: "Duplicate".into(),
+            keys: "Ctrl+D".into(),
+            enabled: true,
+            checked: None,
+            featured: false,
+        };
         assert_eq!(c.key(), "role:23");
         assert_eq!(Command::own(2, "Tab", "Split", "").key(), "Tab/Split");
-        assert_eq!((c.menu_shown(), c.label_shown("Terminal").as_str(), c.keys_shown(false).as_str()), ("Edit", "Copy", "Ctrl+C"));
+        assert_eq!(
+            (c.menu_shown(), c.label_shown("Terminal").as_str(), c.keys_shown(false).as_str()),
+            ("Edit", "Copy", "Ctrl+C")
+        );
         assert_eq!(Command::role(2, Role::Quit).label_shown("Terminal"), "Quit Terminal");
     }
 

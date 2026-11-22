@@ -216,7 +216,11 @@ fn split_filled(exec: &str, files: &[String]) -> Option<Vec<String>> {
 /// Exec that cannot be split. `id` is given by the caller, from the file's
 /// name.
 pub fn parse(id: &str, text: &str) -> Option<Entry> {
-    let text = if text.len() > MAX_FILE { text.get(..MAX_FILE).or_else(|| text.get(..text.floor_char_boundary(MAX_FILE)))? } else { text };
+    let text = if text.len() > MAX_FILE {
+        text.get(..MAX_FILE).or_else(|| text.get(..text.floor_char_boundary(MAX_FILE)))?
+    } else {
+        text
+    };
     let mut entry = Entry { id: id.to_string(), ..Entry::default() };
     let (mut in_group, mut seen_group, mut application, mut exec) = (false, false, false, None);
     let names = |v: &str| v.split(';').any(|d| d.trim() == DESKTOP);
@@ -253,11 +257,35 @@ pub fn parse(id: &str, text: &str) -> Option<Entry> {
             "OnlyShowIn" => only_elsewhere = !names(value),
             "NotShowIn" => not_here = names(value),
             "StartupWMClass" => entry.startup_wm_class = unescape(value),
-            "Keywords" => entry.keywords = unescape(value).split(';').map(str::trim).filter(|k| !k.is_empty()).take(MAX_LIST).map(str::to_string).collect(),
+            "Keywords" => {
+                entry.keywords = unescape(value)
+                    .split(';')
+                    .map(str::trim)
+                    .filter(|k| !k.is_empty())
+                    .take(MAX_LIST)
+                    .map(str::to_string)
+                    .collect()
+            }
             "GenericName" => entry.generic_name = unescape(value),
             "Comment" => entry.comment = unescape(value),
-            "MimeType" => entry.mime_types = unescape(value).split(';').map(str::trim).filter(|k| !k.is_empty()).take(MAX_TYPES).map(str::to_string).collect(),
-            "Categories" => entry.categories = unescape(value).split(';').map(str::trim).filter(|k| !k.is_empty()).take(MAX_LIST).map(str::to_string).collect(),
+            "MimeType" => {
+                entry.mime_types = unescape(value)
+                    .split(';')
+                    .map(str::trim)
+                    .filter(|k| !k.is_empty())
+                    .take(MAX_TYPES)
+                    .map(str::to_string)
+                    .collect()
+            }
+            "Categories" => {
+                entry.categories = unescape(value)
+                    .split(';')
+                    .map(str::trim)
+                    .filter(|k| !k.is_empty())
+                    .take(MAX_LIST)
+                    .map(str::to_string)
+                    .collect()
+            }
             _ => {}
         }
     }
@@ -294,7 +322,9 @@ mod tests {
     #[test]
     fn generic_name_comment_and_categories_are_read() {
         let many: String = (0..100).map(|i| format!("C{i};")).collect();
-        let text = format!("[Desktop Entry]\nType=Application\nName=Firefox\nExec=firefox %u\nGenericName=Web Browser\nComment=Browse the\\sWeb\nCategories=Network;WebBrowser;\nKeywords={many}\n");
+        let text = format!(
+            "[Desktop Entry]\nType=Application\nName=Firefox\nExec=firefox %u\nGenericName=Web Browser\nComment=Browse the\\sWeb\nCategories=Network;WebBrowser;\nKeywords={many}\n"
+        );
         let e = parse("firefox", &text).expect("an entry");
         assert_eq!(e.generic_name, "Web Browser");
         assert_eq!(e.comment, "Browse the Web");
@@ -310,7 +340,10 @@ mod tests {
         assert_eq!(args("/usr/bin/htop"), list(&["/usr/bin/htop"]));
         assert_eq!(args("  env   FOO=1  prog  --flag  "), list(&["env", "FOO=1", "prog", "--flag"]));
         // Quotes hold spaces; a backslash in them gives the four characters it may.
-        assert_eq!(args(r#"sh -c "echo \"hi there\" \$HOME \\ \`x\`""#), list(&["sh", "-c", r#"echo "hi there" $HOME \ `x`"#]));
+        assert_eq!(
+            args(r#"sh -c "echo \"hi there\" \$HOME \\ \`x\`""#),
+            list(&["sh", "-c", r#"echo "hi there" $HOME \ `x`"#])
+        );
         assert_eq!(args(r#""/opt/My App/run" --name "A B""#), list(&["/opt/My App/run", "--name", "A B"]));
         // An empty quoted argument is an argument.
         assert_eq!(args(r#"prog "" x"#), list(&["prog", "", "x"]));
@@ -323,13 +356,22 @@ mod tests {
     /// line with no file code gets none; MimeType and the raw line are kept.
     #[test]
     fn files_are_put_where_the_exec_line_says() {
-        let entry = |exec: &str| parse("x", &format!("[Desktop Entry]\nType=Application\nName=X\nExec={exec}\nMimeType=image/png;image/jpeg;\n")).unwrap();
+        let entry = |exec: &str| {
+            parse(
+                "x",
+                &format!("[Desktop Entry]\nType=Application\nName=X\nExec={exec}\nMimeType=image/png;image/jpeg;\n"),
+            )
+            .unwrap()
+        };
         let files = vec!["/a b.png".to_string(), "/c.png".to_string()];
         let e = entry("view %F");
         assert_eq!(e.mime_types, vec!["image/png", "image/jpeg"]);
         assert_eq!(e.exec_line, "view %F");
         assert_eq!(command_for(&e, &files), vec![vec!["view", "/a b.png", "/c.png"]]);
-        assert_eq!(command_for(&entry("view --open %U --new"), &files), vec![vec!["view", "--open", "/a b.png", "/c.png", "--new"]]);
+        assert_eq!(
+            command_for(&entry("view --open %U --new"), &files),
+            vec![vec!["view", "--open", "/a b.png", "/c.png", "--new"]]
+        );
         assert_eq!(command_for(&entry("view %f"), &files), vec![vec!["view", "/a b.png"], vec!["view", "/c.png"]]);
         assert_eq!(command_for(&entry("view --file=%u"), &files[..1]), vec![vec!["view", "--file=/a b.png"]]);
         assert_eq!(command_for(&entry("view"), &files), vec![vec!["view"]]);
@@ -376,7 +418,11 @@ Exec=firefox --new-window %u
         assert_eq!(e.keywords, ["web", "browser", "internet"]);
         assert_eq!(e.startup_wm_class, "firefox");
         assert!(!e.terminal && !e.no_display && !e.hidden);
-        let htop = parse("htop", "[Desktop Entry]\nType=Application\nName=Htop\nExec=htop\nTerminal=true\nIcon=htop\nNoDisplay=false\n").unwrap();
+        let htop = parse(
+            "htop",
+            "[Desktop Entry]\nType=Application\nName=Htop\nExec=htop\nTerminal=true\nIcon=htop\nNoDisplay=false\n",
+        )
+        .unwrap();
         assert!(htop.terminal && !htop.no_display);
         // Escapes in values.
         let e = parse("x", "[Desktop Entry]\nType=Application\nName=Two\\sWords\\\\\nExec=prog\n").unwrap();

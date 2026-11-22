@@ -107,7 +107,14 @@ pub struct Energy {
 
 impl Energy {
     pub fn new() -> Self {
-        Energy { config: load(), last_input: Instant::now(), screens_off: false, slept: false, on_battery: Arc::new(AtomicBool::new(false)), was_on_battery: false }
+        Energy {
+            config: load(),
+            last_input: Instant::now(),
+            screens_off: false,
+            slept: false,
+            on_battery: Arc::new(AtomicBool::new(false)),
+            was_on_battery: false,
+        }
     }
 }
 
@@ -120,23 +127,37 @@ pub fn load() -> Config {
 }
 
 pub fn parse(text: &str) -> Config {
-    let table = text.parse::<toml::Table>().ok().and_then(|t| t.get("energy").and_then(|e| e.as_table()).cloned()).unwrap_or_default();
+    let table = text
+        .parse::<toml::Table>()
+        .ok()
+        .and_then(|t| t.get("energy").and_then(|e| e.as_table()).cloned())
+        .unwrap_or_default();
     let read = |t: &toml::Table, k: &str| {
         t.get(k)
             .and_then(|v| v.as_integer().or_else(|| v.as_float().map(|f| f.round() as i64)))
             .map(|v| Duration::from_secs(v.clamp(0, 24 * 60) as u64 * 60))
     };
     let battery = table.get("battery").and_then(|b| b.as_table()).cloned().unwrap_or_default();
-    let lock = text.parse::<toml::Table>().ok().and_then(|t| t.get("lock").and_then(|e| e.as_table()).cloned()).unwrap_or_default();
+    let lock = text
+        .parse::<toml::Table>()
+        .ok()
+        .and_then(|t| t.get("lock").and_then(|e| e.as_table()).cloned())
+        .unwrap_or_default();
     let on = |k: &str| lock.get(k).and_then(|v| v.as_bool()).unwrap_or(true);
     Config {
         lock_on_screens_off: on("screens-off"),
-        lock_grace: Duration::from_secs(lock.get("grace").and_then(|v| v.as_integer()).unwrap_or(0).clamp(0, 300) as u64),
+        lock_grace: Duration::from_secs(
+            lock.get("grace").and_then(|v| v.as_integer()).unwrap_or(0).clamp(0, 300) as u64
+        ),
         lock_after: read(&lock, "after").unwrap_or_default(),
         lock_before_sleep: on("before-sleep"),
         screens_off: read(&table, "screens-off").unwrap_or_default(),
         sleep: read(&table, "sleep").unwrap_or_default(),
-        sleep_command: table.get("sleep-command").and_then(|v| v.as_str()).map(|s| s.trim().to_string()).unwrap_or_default(),
+        sleep_command: table
+            .get("sleep-command")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default(),
         battery_screens_off: read(&battery, "screens-off"),
         battery_sleep: read(&battery, "sleep"),
     }
@@ -215,7 +236,12 @@ impl Server {
         if battery != self.energy.was_on_battery {
             self.energy.was_on_battery = battery;
             let (off, sleep) = c.times(battery);
-            tracing::info!("energy: on {}; screens off after {}, sleep after {}", if battery { "battery" } else { "power" }, minutes(off), minutes(sleep));
+            tracing::info!(
+                "energy: on {}; screens off after {}, sleep after {}",
+                if battery { "battery" } else { "power" },
+                minutes(off),
+                minutes(sleep)
+            );
         }
         let (screens_off, sleep) = c.times(battery);
         // [lock] after: locked after this long with no input, screens on or off.
@@ -223,7 +249,13 @@ impl Server {
             self.lock_for_idle("no input for the lock's time");
         }
         // The grace after the screens went off has passed with no input: locked.
-        if c.lock_on_screens_off && !c.lock_grace.is_zero() && self.energy.screens_off && !screens_off.is_zero() && idle >= screens_off + c.lock_grace && !self.lock.on {
+        if c.lock_on_screens_off
+            && !c.lock_grace.is_zero()
+            && self.energy.screens_off
+            && !screens_off.is_zero()
+            && idle >= screens_off + c.lock_grace
+            && !self.lock.on
+        {
             self.lock_for_idle("the screens went off, and the grace passed");
         }
         if !screens_off.is_zero() && !self.energy.screens_off && idle >= screens_off {
@@ -248,7 +280,7 @@ impl Server {
             if !self.energy.screens_off {
                 self.energy.screens_off = true;
                 crate::drm::screens_off(self);
-            self.input_screens_off();
+                self.input_screens_off();
             }
             // The command may block until the machine wakes (zzz does); its
             // result is only logged, the wake comes through input like any other.
@@ -261,9 +293,11 @@ impl Server {
                 crate::no_terminal(&mut c);
                 let res = c.output();
                 match res {
-                Ok(o) if o.status.success() => tracing::info!("energy: back from sleep ({cmd})"),
-                Ok(o) => tracing::warn!("energy: {cmd}: {} {}", o.status, String::from_utf8_lossy(&o.stderr).trim()),
-                Err(e) => tracing::warn!("energy: {cmd}: {e}"),
+                    Ok(o) if o.status.success() => tracing::info!("energy: back from sleep ({cmd})"),
+                    Ok(o) => {
+                        tracing::warn!("energy: {cmd}: {} {}", o.status, String::from_utf8_lossy(&o.stderr).trim())
+                    }
+                    Err(e) => tracing::warn!("energy: {cmd}: {e}"),
                 }
             });
         }

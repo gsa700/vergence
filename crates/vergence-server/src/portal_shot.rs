@@ -86,7 +86,10 @@ pub struct PortalShots {
 }
 
 fn grants_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
     Some(base.join("vergence/screenshot-programs"))
 }
 
@@ -96,7 +99,9 @@ pub fn parse_grants(text: &str) -> HashMap<String, String> {
         .filter_map(|l| {
             let mut f = l.split('\t');
             match (f.next(), f.next(), f.next()) {
-                (Some("allow"), Some(p), name) if p.starts_with('/') => Some((p.to_string(), name.unwrap_or("").to_string())),
+                (Some("allow"), Some(p), name) if p.starts_with('/') => {
+                    Some((p.to_string(), name.unwrap_or("").to_string()))
+                }
                 _ => None,
             }
         })
@@ -109,7 +114,10 @@ fn write_grants(g: &HashMap<String, String>) {
     if let Some(d) = p.parent() {
         let _ = std::fs::create_dir_all(d);
     }
-    let mut lines: Vec<String> = g.iter().map(|(p, n)| format!("allow\t{}\t{}\n", p.replace(['\t', '\n'], " "), n.replace(['\t', '\n'], " "))).collect();
+    let mut lines: Vec<String> = g
+        .iter()
+        .map(|(p, n)| format!("allow\t{}\t{}\n", p.replace(['\t', '\n'], " "), n.replace(['\t', '\n'], " ")))
+        .collect();
     lines.sort();
     if let Ok(mut f) = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&p) {
         use std::io::Write;
@@ -137,15 +145,24 @@ fn option<'a>(options: Option<&'a Value>, key: &str) -> Option<&'a Value> {
 impl Server {
     /// Screenshot.Screenshot or Screenshot.PickColor: the Request's path at
     /// once; asked about first unless the program may always.
-    pub fn portal_screenshot(&mut self, conn: u32, unique: &str, member: &str, args: &[Value]) -> Result<String, String> {
+    pub fn portal_screenshot(
+        &mut self,
+        conn: u32,
+        unique: &str,
+        member: &str,
+        args: &[Value],
+    ) -> Result<String, String> {
         let options = args.get(1);
         let token = option(options, "handle_token").and_then(Value::as_str).unwrap_or("vergence").to_string();
         let handle = crate::portal::request_path(unique, &token);
         let interactive = matches!(option(options, "interactive"), Some(Value::Bool(true)));
         let kind = if member == "PickColor" { Kind2::Color } else { Kind2::Screenshot { interactive } };
         let pid = self.dbus_conn_pid(conn);
-        let program = pid.and_then(vergence_dm::elevate::program_path).map(|p| p.display().to_string()).unwrap_or_default();
-        let name = pid.and_then(crate::portal::process_name).unwrap_or_else(|| program.rsplit('/').next().unwrap_or("A program").to_string());
+        let program =
+            pid.and_then(vergence_dm::elevate::program_path).map(|p| p.display().to_string()).unwrap_or_default();
+        let name = pid
+            .and_then(crate::portal::process_name)
+            .unwrap_or_else(|| program.rsplit('/').next().unwrap_or("A program").to_string());
         let asked = Asked { conn, handle: handle.clone(), program: program.clone(), name, kind };
         tracing::info!("portal: {} ({program}) asks for {kind:?}", asked.name);
         if self.lock.on || crate::greeter() || program.is_empty() {
@@ -153,11 +170,14 @@ impl Server {
             return Ok(handle);
         }
         // Read each time: Settings > Screenshots takes grants back in the file.
-        let always = grants_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| parse_grants(&t)).unwrap_or_default();
+        let always =
+            grants_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| parse_grants(&t)).unwrap_or_default();
         self.portal_shots.always = Some(always.clone());
         if always.contains_key(&program) {
             self.portal_shot_start(asked);
-        } else if self.portal_shots.refused.get(&program).is_some_and(|t| t.elapsed() < COOL_DOWN) || self.portal_shots.asking.len() >= WAITING_MAX {
+        } else if self.portal_shots.refused.get(&program).is_some_and(|t| t.elapsed() < COOL_DOWN)
+            || self.portal_shots.asking.len() >= WAITING_MAX
+        {
             self.dbus_request_response(conn, &handle, 1, Value::Array("{sv}".into(), Vec::new()));
         } else {
             if self.portal_shots.asking.is_empty() {
@@ -178,8 +198,11 @@ impl Server {
         use crate::capture::{Dest, Request, What};
         match a.kind {
             Kind2::Screenshot { interactive: false } => {
-                let screens: Vec<Rectangle<i32, Logical>> = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).collect();
-                let Some(all) = screens.iter().copied().reduce(|x, y| x.merge(y)) else { return self.portal_shot_done(&a, None) };
+                let screens: Vec<Rectangle<i32, Logical>> =
+                    self.space.outputs().filter_map(|o| self.space.output_geometry(o)).collect();
+                let Some(all) = screens.iter().copied().reduce(|x, y| x.merge(y)) else {
+                    return self.portal_shot_done(&a, None);
+                };
                 let req = Request { what: What::Area(all), dest: Dest::Portal(a), pointer: false, shadow: true };
                 if let Err(e) = self.capture_ask(req.clone()) {
                     tracing::info!("portal: {e}");
@@ -210,9 +233,20 @@ impl Server {
             return self.dbus_request_response(a.conn, &a.handle, 2, empty());
         };
         if a.kind == Kind2::Color {
-            let (r, g, b) = (rgba.first().copied().unwrap_or(0), rgba.get(1).copied().unwrap_or(0), rgba.get(2).copied().unwrap_or(0));
-            let color = Value::Struct(vec![Value::Double(r as f64 / 255.0), Value::Double(g as f64 / 255.0), Value::Double(b as f64 / 255.0)]);
-            let results = Value::Array("{sv}".into(), vec![Value::Entry(Box::new(Value::Str("color".into())), Box::new(Value::Variant(Box::new(color))))]);
+            let (r, g, b) = (
+                rgba.first().copied().unwrap_or(0),
+                rgba.get(1).copied().unwrap_or(0),
+                rgba.get(2).copied().unwrap_or(0),
+            );
+            let color = Value::Struct(vec![
+                Value::Double(r as f64 / 255.0),
+                Value::Double(g as f64 / 255.0),
+                Value::Double(b as f64 / 255.0),
+            ]);
+            let results = Value::Array(
+                "{sv}".into(),
+                vec![Value::Entry(Box::new(Value::Str("color".into())), Box::new(Value::Variant(Box::new(color))))],
+            );
             tracing::info!("portal: {} picked the color {r},{g},{b}", a.name);
             return self.dbus_request_response(a.conn, &a.handle, 0, results);
         }
@@ -226,7 +260,13 @@ impl Server {
                     Some(p) => {
                         tracing::info!("portal: a screenshot for {name}: {}", p.display());
                         let uri = crate::portal::file_uri(&p);
-                        let results = Value::Array("{sv}".into(), vec![Value::Entry(Box::new(Value::Str("uri".into())), Box::new(Value::Variant(Box::new(Value::Str(uri)))))]);
+                        let results = Value::Array(
+                            "{sv}".into(),
+                            vec![Value::Entry(
+                                Box::new(Value::Str("uri".into())),
+                                Box::new(Value::Variant(Box::new(Value::Str(uri)))),
+                            )],
+                        );
                         st.dbus_request_response(conn, &handle, 0, results);
                     }
                     None => st.dbus_request_response(conn, &handle, 2, Value::Array("{sv}".into(), Vec::new())),
@@ -250,7 +290,10 @@ impl Server {
         match choice {
             1 | 2 => {
                 if choice == 2 {
-                    let mut g = grants_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| parse_grants(&t)).unwrap_or_default();
+                    let mut g = grants_path()
+                        .and_then(|p| std::fs::read_to_string(p).ok())
+                        .map(|t| parse_grants(&t))
+                        .unwrap_or_default();
                     g.insert(a.program.clone(), a.name.clone());
                     write_grants(&g);
                     self.portal_shots.always = Some(g);
@@ -282,7 +325,12 @@ impl Server {
     }
 
     /// The question over the screen under the pointer, everything dimmed.
-    pub fn portal_ask_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
+    pub fn portal_ask_elements(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Vec<SceneElement> {
         let mut els = Vec::new();
         if out.to_f64().contains(self.pointer_location())
             && let Some(e) = self.portal_ask_panel(renderer, out, scale)
@@ -290,21 +338,37 @@ impl Server {
             els.push(e);
         }
         let (id, commit) = self.portal_shots.dim.get_or_insert_with(|| (Id::new(), CommitCounter::default())).clone();
-        let phys = Rectangle::<i32, smithay::utils::Physical>::from_size(out.size.to_f64().to_physical(scale).to_i32_round());
-        els.push(SceneElement::Solid(SolidColorRenderElement::new(id, phys, commit, [0.0, 0.0, 0.0, 0.45], Kind::Unspecified)));
+        let phys =
+            Rectangle::<i32, smithay::utils::Physical>::from_size(out.size.to_f64().to_physical(scale).to_i32_round());
+        els.push(SceneElement::Solid(SolidColorRenderElement::new(
+            id,
+            phys,
+            commit,
+            [0.0, 0.0, 0.0, 0.45],
+            Kind::Unspecified,
+        )));
         els
     }
 
-    fn portal_ask_panel(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Option<SceneElement> {
+    fn portal_ask_panel(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Option<SceneElement> {
         let a = self.portal_shots.asking.front()?.clone();
         let light = self.light_style();
         let accent = self.accent();
-        let panel = Rectangle::<i32, Logical>::new((out.loc.x + (out.size.w - W) / 2, out.loc.y + (out.size.h - H) / 2).into(), (W, H).into());
+        let panel = Rectangle::<i32, Logical>::new(
+            (out.loc.x + (out.size.w - W) / 2, out.loc.y + (out.size.h - H) / 2).into(),
+            (W, H).into(),
+        );
         let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
         let face = fonts.face("sans-serif", 400, false)?;
         let bold = fonts.face("sans-serif", 600, false).unwrap_or(face);
         let labels: [(u8, &str); 3] = [(0, "Don't allow"), (1, "Allow once"), (2, "Always allow")];
-        let widths: Vec<i32> = labels.iter().map(|(_, l)| (fonts.layout(face, 13.0, l).1 + 28.0).ceil() as i32).collect();
+        let widths: Vec<i32> =
+            labels.iter().map(|(_, l)| (fonts.layout(face, 13.0, l).1 + 28.0).ceil() as i32).collect();
         let y = H - PAD - BUTTON_H;
         let mut local = vec![(0u8, PAD, widths[0])];
         let mut x = W - PAD;
@@ -314,7 +378,10 @@ impl Server {
             x -= 8;
         }
         self.portal_shots.panel = panel;
-        self.portal_shots.buttons = local.iter().map(|&(c, bx, bw)| (c, Rectangle::new((panel.loc.x + bx, panel.loc.y + y).into(), (bw, BUTTON_H).into()))).collect();
+        self.portal_shots.buttons = local
+            .iter()
+            .map(|&(c, bx, bw)| (c, Rectangle::new((panel.loc.x + bx, panel.loc.y + y).into(), (bw, BUTTON_H).into())))
+            .collect();
         let what = match a.kind {
             Kind2::Color => "pick a color from your screen",
             _ => "take a picture of your screen",
@@ -331,17 +398,61 @@ impl Server {
             let s = vergence_look::shelf_look(light);
             let ink = vergence_scene::Color::rgb(s.menu_ink.0, s.menu_ink.1, s.menu_ink.2);
             let dim = vergence_scene::Color::rgba(s.menu_ink.0, s.menu_ink.1, s.menu_ink.2, 170);
-            scene.fill_rounded(vergence_scene::Rect::new(0.0, 0.0, W as f32, H as f32), 12.0, vergence_scene::Color::rgb(s.menu.0, s.menu.1, s.menu.2));
-            scene.stroke(vergence_scene::Rect::new(0.0, 0.0, W as f32, H as f32), 12.0, 1.0, vergence_scene::Color::rgba(128, 128, 128, 90));
+            scene.fill_rounded(
+                vergence_scene::Rect::new(0.0, 0.0, W as f32, H as f32),
+                12.0,
+                vergence_scene::Color::rgb(s.menu.0, s.menu.1, s.menu.2),
+            );
+            scene.stroke(
+                vergence_scene::Rect::new(0.0, 0.0, W as f32, H as f32),
+                12.0,
+                1.0,
+                vergence_scene::Color::rgba(128, 128, 128, 90),
+            );
             let m = fonts.metrics(bold, 15.0);
-            vergence_render::text(&mut scene, fonts, bold, 15.0, ink, vergence_scene::Point::new(PAD as f32, PAD as f32 + m.ascent), &title);
-            let body = if a.kind == Kind2::Color { "It gets the color of the pixel you click." } else { "It gets the picture you take (or of every screen)." };
+            vergence_render::text(
+                &mut scene,
+                fonts,
+                bold,
+                15.0,
+                ink,
+                vergence_scene::Point::new(PAD as f32, PAD as f32 + m.ascent),
+                &title,
+            );
+            let body = if a.kind == Kind2::Color {
+                "It gets the color of the pixel you click."
+            } else {
+                "It gets the picture you take (or of every screen)."
+            };
             let m2 = fonts.metrics(face, 13.0);
-            vergence_render::text(&mut scene, fonts, face, 13.0, dim, vergence_scene::Point::new(PAD as f32, PAD as f32 + m.ascent + 12.0 + m2.ascent), body);
-            vergence_render::text(&mut scene, fonts, face, 12.0, dim, vergence_scene::Point::new(PAD as f32, PAD as f32 + m.ascent + 12.0 + m2.ascent + 20.0), &format!("Program: {}", a.program));
+            vergence_render::text(
+                &mut scene,
+                fonts,
+                face,
+                13.0,
+                dim,
+                vergence_scene::Point::new(PAD as f32, PAD as f32 + m.ascent + 12.0 + m2.ascent),
+                body,
+            );
+            vergence_render::text(
+                &mut scene,
+                fonts,
+                face,
+                12.0,
+                dim,
+                vergence_scene::Point::new(PAD as f32, PAD as f32 + m.ascent + 12.0 + m2.ascent + 20.0),
+                &format!("Program: {}", a.program),
+            );
             for &(c, bx, bw) in &local {
                 let r = vergence_scene::Rect::new(bx as f32, y as f32, bw as f32, BUTTON_H as f32);
-                let (bg, fg) = if c == 2 { (vergence_scene::Color::rgb(accent.r, accent.g, accent.b), vergence_scene::Color::rgb(255, 255, 255)) } else { (vergence_scene::Color::rgba(128, 128, 128, 60), ink) };
+                let (bg, fg) = if c == 2 {
+                    (
+                        vergence_scene::Color::rgb(accent.r, accent.g, accent.b),
+                        vergence_scene::Color::rgb(255, 255, 255),
+                    )
+                } else {
+                    (vergence_scene::Color::rgba(128, 128, 128, 60), ink)
+                };
                 scene.fill_rounded(r, 7.0, bg);
                 // Don't allow is the keyboard's (Enter, Escape): ringed.
                 if c == 0 {
@@ -349,15 +460,45 @@ impl Server {
                 }
                 let l = labels[c as usize].1;
                 let (_, tw) = fonts.layout(face, 13.0, l);
-                vergence_render::text(&mut scene, fonts, face, 13.0, fg, vergence_scene::Point::new((r.x + (r.w - tw) / 2.0).round(), (r.y + (r.h - m2.ascent - m2.descent) / 2.0 + m2.ascent).round()), l);
+                vergence_render::text(
+                    &mut scene,
+                    fonts,
+                    face,
+                    13.0,
+                    fg,
+                    vergence_scene::Point::new(
+                        (r.x + (r.w - tw) / 2.0).round(),
+                        (r.y + (r.h - m2.ascent - m2.descent) / 2.0 + m2.ascent).round(),
+                    ),
+                    l,
+                );
             }
-            let pic = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0)).ok()?;
-            let buffer = MemoryRenderBuffer::from_slice(&pic.data, smithay::backend::allocator::Fourcc::Abgr8888, (pic.width as i32, pic.height as i32), 1, smithay::utils::Transform::Normal, None);
+            let pic = vergence_render::Cpu::new()
+                .render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0))
+                .ok()?;
+            let buffer = MemoryRenderBuffer::from_slice(
+                &pic.data,
+                smithay::backend::allocator::Fourcc::Abgr8888,
+                (pic.width as i32, pic.height as i32),
+                1,
+                smithay::utils::Transform::Normal,
+                None,
+            );
             self.portal_shots.picture = Some((key, buffer));
         }
         let (_, buffer) = self.portal_shots.picture.as_ref()?;
         let loc = (panel.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
-        MemoryRenderBufferRenderElement::from_buffer(renderer, loc.to_f64(), buffer, None, None, Some(panel.size), Kind::Unspecified).ok().map(SceneElement::Memory)
+        MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            loc.to_f64(),
+            buffer,
+            None,
+            None,
+            Some(panel.size),
+            Kind::Unspecified,
+        )
+        .ok()
+        .map(SceneElement::Memory)
     }
 
     /// A program's connection ended: its questions and picker go.
@@ -383,7 +524,9 @@ mod tests {
 
     #[test]
     fn grants_read_back_and_nonsense_is_left_out() {
-        let g = parse_grants("allow\t/usr/lib/firefox/firefox\tfirefox\nallow\trelative\tx\ndeny\t/bin/sh\tsh\nallow\t/usr/bin/obs\n");
+        let g = parse_grants(
+            "allow\t/usr/lib/firefox/firefox\tfirefox\nallow\trelative\tx\ndeny\t/bin/sh\tsh\nallow\t/usr/bin/obs\n",
+        );
         assert_eq!(g.len(), 2);
         assert_eq!(g.get("/usr/lib/firefox/firefox").map(String::as_str), Some("firefox"));
         assert_eq!(g.get("/usr/bin/obs").map(String::as_str), Some(""));

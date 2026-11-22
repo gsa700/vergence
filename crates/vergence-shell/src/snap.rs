@@ -51,7 +51,9 @@ impl Zone {
     }
 
     pub fn parse(s: &str) -> Option<Zone> {
-        [Zone::Left, Zone::Right, Zone::TopLeft, Zone::TopRight, Zone::BottomLeft, Zone::BottomRight, Zone::Top].into_iter().find(|z| z.as_str() == s)
+        [Zone::Left, Zone::Right, Zone::TopLeft, Zone::TopRight, Zone::BottomLeft, Zone::BottomRight, Zone::Top]
+            .into_iter()
+            .find(|z| z.as_str() == s)
     }
 }
 
@@ -95,7 +97,13 @@ pub fn zone_at(x: f64, y: f64, screen: Rect, screens: &[Rect]) -> Option<(Zone, 
         return Some((zone, shared));
     }
     if top {
-        let zone = if near_left { Zone::TopLeft } else if near_right { Zone::TopRight } else { Zone::Top };
+        let zone = if near_left {
+            Zone::TopLeft
+        } else if near_right {
+            Zone::TopRight
+        } else {
+            Zone::Top
+        };
         return Some((zone, beyond_top));
     }
     if bottom && (near_left || near_right) {
@@ -180,7 +188,12 @@ pub fn beside(screens: &[Rect], at: usize, right: bool) -> Option<usize> {
     screens
         .iter()
         .enumerate()
-        .filter(|(i, o)| *i != at && o.y < s.bottom() && s.y < o.bottom() && if right { o.x >= s.right() - 1 } else { o.right() <= s.x + 1 })
+        .filter(|(i, o)| {
+            *i != at
+                && o.y < s.bottom()
+                && s.y < o.bottom()
+                && if right { o.x >= s.right() - 1 } else { o.right() <= s.x + 1 }
+        })
         .min_by_key(|(_, o)| if right { o.x - s.right() } else { s.x - o.right() })
         .map(|(i, _)| i)
 }
@@ -322,7 +335,9 @@ mod tests {
 
     #[test]
     fn zones_read_back_as_written() {
-        for z in [Zone::Left, Zone::Right, Zone::TopLeft, Zone::TopRight, Zone::BottomLeft, Zone::BottomRight, Zone::Top] {
+        for z in
+            [Zone::Left, Zone::Right, Zone::TopLeft, Zone::TopRight, Zone::BottomLeft, Zone::BottomRight, Zone::Top]
+        {
             assert_eq!(Zone::parse(z.as_str()), Some(z));
         }
         assert_eq!(Zone::parse("middle"), None);
@@ -366,7 +381,10 @@ mod tests {
     #[test]
     fn quarters_move_along_their_row_and_up_and_down_between_rows() {
         assert_eq!(key_act(Standing::Snapped(Zone::TopLeft), Arrow::Right, 0, &[S]), KeyAct::Snap(Zone::TopRight, 0));
-        assert_eq!(key_act(Standing::Snapped(Zone::BottomRight), Arrow::Left, 0, &[S]), KeyAct::Snap(Zone::BottomLeft, 0));
+        assert_eq!(
+            key_act(Standing::Snapped(Zone::BottomRight), Arrow::Left, 0, &[S]),
+            KeyAct::Snap(Zone::BottomLeft, 0)
+        );
         assert_eq!(key_act(Standing::Snapped(Zone::TopLeft), Arrow::Down, 0, &[S]), KeyAct::Snap(Zone::BottomLeft, 0));
         assert_eq!(key_act(Standing::Snapped(Zone::BottomRight), Arrow::Up, 0, &[S]), KeyAct::Snap(Zone::TopRight, 0));
     }

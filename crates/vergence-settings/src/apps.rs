@@ -51,7 +51,12 @@ impl App {
     }
 
     fn app_bar(&self, id: &str) -> Option<String> {
-        self.desktop.get("app").and_then(|a| a.get(id)).and_then(|t| t.get("bar-style")).and_then(|v| v.as_str()).map(String::from)
+        self.desktop
+            .get("app")
+            .and_then(|a| a.get(id))
+            .and_then(|t| t.get("bar-style"))
+            .and_then(|v| v.as_str())
+            .map(String::from)
     }
 
     pub fn apps_message(&mut self, m: AppsMsg) {
@@ -100,11 +105,23 @@ impl App {
             .into_iter()
             .map(|id| {
                 let name = self.known_app_name(&id);
-                let what = if OURS.iter().any(|(o, _)| *o == id) { "Settings of its own: Ctrl+, in it" } else { "Title bar, window places" };
-                setting(&name, what, button(label("Open").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Apps(AppsMsg::Open(id.clone()))).name(format!("Open {name}")))
+                let what = if OURS.iter().any(|(o, _)| *o == id) {
+                    "Settings of its own: Ctrl+, in it"
+                } else {
+                    "Title bar, window places"
+                };
+                setting(
+                    &name,
+                    what,
+                    button(label("Open").size(12.0))
+                        .padding(Padding::hv(4.0, 12.0))
+                        .on_press(Message::Apps(AppsMsg::Open(id.clone())))
+                        .name(format!("Open {name}")),
+                )
             })
             .collect();
-        let own = self.desktop.get("apps").and_then(|a| a.get("own-file-dialog")).and_then(|v| v.as_bool()).unwrap_or(false);
+        let own =
+            self.desktop.get("apps").and_then(|a| a.get("own-file-dialog")).and_then(|v| v.as_bool()).unwrap_or(false);
         let all = self.group(
             Some("Every app"),
             vec![setting(
@@ -120,16 +137,26 @@ impl App {
         let Some(id) = self.app_open.clone() else { return self.apps_page() };
         let name = self.known_app_name(&id);
         let back = row(vec![
-            button(row(vec![label("‹").size(14.0), label("Apps").size(12.0)]).spacing(4.0).align(Align::Center)).look(ButtonLook::Plain).padding(Padding::hv(2.0, 4.0)).on_press(Message::Apps(AppsMsg::Back)).name("Back to Apps"),
+            button(row(vec![label("‹").size(14.0), label("Apps").size(12.0)]).spacing(4.0).align(Align::Center))
+                .look(ButtonLook::Plain)
+                .padding(Padding::hv(2.0, 4.0))
+                .on_press(Message::Apps(AppsMsg::Back))
+                .name("Back to Apps"),
             space().width(Length::FILL),
         ])
         .width(Length::FILL);
-        let places = self.places.as_ref().and_then(|l| l.iter().find(|(a, _)| a.to_lowercase() == id).map(|(a, n)| (a.clone(), *n)));
+        let places = self
+            .places
+            .as_ref()
+            .and_then(|l| l.iter().find(|(a, _)| a.to_lowercase() == id).map(|(a, n)| (a.clone(), *n)));
         let forget: Element<Message> = match &places {
             Some((app, n)) => setting(
                 "Window places",
                 &format!("Kept for {n} set{} of screens.", if *n == 1 { "" } else { "s" }),
-                button(label("Forget…").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Places(PlacesMsg::Ask(app.clone()))).name("Forget window places"),
+                button(label("Forget…").size(12.0))
+                    .padding(Padding::hv(4.0, 12.0))
+                    .on_press(Message::Places(PlacesMsg::Ask(app.clone())))
+                    .name("Forget window places"),
             ),
             None => setting("Window places", "None kept.", space()),
         };
@@ -143,7 +170,18 @@ impl App {
         // The desktop's Style forces every app while it is Dark or Light (Dave, 2026-11-14).
         let scheme = appearance_text(&self.desktop, "color-scheme");
         let bar: Element<Message> = if scheme == "dark" || scheme == "light" {
-            setting("Title bar", "", label(format!("{} for every app: Appearance > Style", if scheme == "light" { "Light" } else { "Dark" })).size(12.0).dim().wrap().width(Length::Fixed(230.0)))
+            setting(
+                "Title bar",
+                "",
+                label(format!(
+                    "{} for every app: Appearance > Style",
+                    if scheme == "light" { "Light" } else { "Dark" }
+                ))
+                .size(12.0)
+                .dim()
+                .wrap()
+                .width(Length::Fixed(230.0)),
+            )
         } else {
             let own = self.app_bar(&id);
             let names = vec!["Desktop default (Dark)".to_string(), "Dark".into(), "Light".into()];
@@ -153,8 +191,25 @@ impl App {
                 _ => 0,
             };
             let id2 = id.clone();
-            setting("Title bar", "Its bar's light or dark, while the desktop's Style is App default.", choice(names, Some(at), move |i| Message::Apps(AppsMsg::Bar(id2.clone(), [None, Some("dark".to_string()), Some("light".to_string())][i.min(2)].clone()))).width(Length::Fixed(230.0)).name("Title bar"))
+            setting(
+                "Title bar",
+                "Its bar's light or dark, while the desktop's Style is App default.",
+                choice(names, Some(at), move |i| {
+                    Message::Apps(AppsMsg::Bar(
+                        id2.clone(),
+                        [None, Some("dark".to_string()), Some("light".to_string())][i.min(2)].clone(),
+                    ))
+                })
+                .width(Length::Fixed(230.0))
+                .name("Title bar"),
+            )
         };
-        self.page_layout(&name, &format!("{name} keeps its own settings and commands in its own menu; these are what the desktop does with it."), vec![back, self.group(Some(&name), vec![bar, forget])])
+        self.page_layout(
+            &name,
+            &format!(
+                "{name} keeps its own settings and commands in its own menu; these are what the desktop does with it."
+            ),
+            vec![back, self.group(Some(&name), vec![bar, forget])],
+        )
     }
 }

@@ -44,14 +44,18 @@ impl TrueType {
         let base = if data.get(..4)? == b"ttcf" { u32_at(&data, 12)? as usize } else { 0 };
         let n = u16_at(&data, base + 4)? as usize;
         let table = |tag: &[u8; 4]| -> Option<(usize, usize)> {
-            (0..n.min(256)).find_map(|i| {
-                let r = base + 12 + 16 * i;
-                (data.get(r..r + 4)? == tag).then(|| Some((u32_at(&data, r + 8)? as usize, u32_at(&data, r + 12)? as usize))).flatten()
-            })
-            .filter(|(o, l)| o.checked_add(*l).is_some_and(|e| e <= data.len()))
+            (0..n.min(256))
+                .find_map(|i| {
+                    let r = base + 12 + 16 * i;
+                    (data.get(r..r + 4)? == tag)
+                        .then(|| Some((u32_at(&data, r + 8)? as usize, u32_at(&data, r + 12)? as usize)))
+                        .flatten()
+                })
+                .filter(|(o, l)| o.checked_add(*l).is_some_and(|e| e <= data.len()))
         };
         let head = table(b"head");
-        let units_per_em = head.and_then(|(o, _)| u16_at(&data, o + 18)).filter(|u| (16..=16384).contains(u)).unwrap_or(1000) as f64;
+        let units_per_em =
+            head.and_then(|(o, _)| u16_at(&data, o + 18)).filter(|u| (16..=16384).contains(u)).unwrap_or(1000) as f64;
         let long_loca = head.and_then(|(o, _)| i16_at(&data, o + 50)).unwrap_or(0) == 1;
         let num_glyphs = table(b"maxp").and_then(|(o, _)| u16_at(&data, o + 4)).unwrap_or(0) as usize;
         let long_metrics = table(b"hhea").and_then(|(o, _)| u16_at(&data, o + 34)).unwrap_or(0) as usize;
@@ -90,7 +94,9 @@ impl TrueType {
     /// platform's encodings (0, *), wider ranges first (step 9: a subset
     /// with only (0, 1), Unicode 1.1, drew one letter of a title).
     pub fn lookup_unicode(&self, u: u32) -> Option<u16> {
-        [(3, 10), (3, 1), (0, 6), (0, 4), (0, 3), (0, 2), (0, 1), (0, 0)].iter().find_map(|&(p, e)| self.lookup(p, e, u))
+        [(3, 10), (3, 1), (0, 6), (0, 4), (0, 3), (0, 2), (0, 1), (0, 0)]
+            .iter()
+            .find_map(|&(p, e)| self.lookup(p, e, u))
     }
 
     /// `code` through the cmap subtable for platform `p`, encoding `e`.
@@ -104,7 +110,8 @@ impl TrueType {
                     return None;
                 }
                 let segs = (u16_at(d, at + 6)? / 2) as usize;
-                let (ends, starts, deltas, ranges) = (at + 14, at + 16 + 2 * segs, at + 16 + 4 * segs, at + 16 + 6 * segs);
+                let (ends, starts, deltas, ranges) =
+                    (at + 14, at + 16 + 2 * segs, at + 16 + 4 * segs, at + 16 + 6 * segs);
                 let i = (0..segs).find(|i| u16_at(d, ends + 2 * i).is_some_and(|e| e as u32 >= code))?;
                 let start = u16_at(d, starts + 2 * i)? as u32;
                 if code < start {
@@ -153,7 +160,11 @@ impl TrueType {
         if self.num_glyphs > 0 && i >= self.num_glyphs {
             return None;
         }
-        let (a, b) = if self.long_loca { (u32_at(&self.data, lo + 4 * i)? as usize, u32_at(&self.data, lo + 4 * i + 4)? as usize) } else { (u16_at(&self.data, lo + 2 * i)? as usize * 2, u16_at(&self.data, lo + 2 * i + 2)? as usize * 2) };
+        let (a, b) = if self.long_loca {
+            (u32_at(&self.data, lo + 4 * i)? as usize, u32_at(&self.data, lo + 4 * i + 4)? as usize)
+        } else {
+            (u16_at(&self.data, lo + 2 * i)? as usize * 2, u16_at(&self.data, lo + 2 * i + 2)? as usize * 2)
+        };
         (b > a && b <= gl).then_some((go + a, go + b))
     }
 

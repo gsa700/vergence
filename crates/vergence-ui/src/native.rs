@@ -48,9 +48,8 @@ use vergence_scene::{Color, Scene};
 use vergence_text::Fonts;
 
 use crate::{
-    TabEvent,
-    App, Button, Command, Cursor, Frame, GPU_BUFFERS, Input, MAX_KEYMAP, MeaningTree, MAX_PASTE, Modifiers, PASTE_TIMEOUT, Paste, Repeat, TEXT_KINDS, Waker, Window, keyboard, other, set_timer,
-    touch,
+    App, Button, Command, Cursor, Frame, GPU_BUFFERS, Input, MAX_KEYMAP, MAX_PASTE, MeaningTree, Modifiers,
+    PASTE_TIMEOUT, Paste, Repeat, TEXT_KINDS, TabEvent, Waker, Window, keyboard, other, set_timer, touch,
 };
 
 /// A GPU buffer and whether the server may still be reading it.
@@ -192,7 +191,9 @@ fn client_error(e: ClientError) -> io::Error {
 /// a window this way; the program has not been called, and the caller opens
 /// it over Wayland.
 pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>> {
-    if std::env::var("VERGENCE_UI_WAYLAND").as_deref() == Ok("1") || std::env::var_os(vergence_protocol::BUS_ENV).is_none() {
+    if std::env::var("VERGENCE_UI_WAYLAND").as_deref() == Ok("1")
+        || std::env::var_os(vergence_protocol::BUS_ENV).is_none()
+    {
         return Ok(None);
     }
     let Ok(mut client) = Client::connect(&app.app_id()) else { return Ok(None) };
@@ -221,7 +222,9 @@ pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>>
         match Gpu::new() {
             Ok(g) if g.shares_buffers() => Some(g),
             Ok(_) => {
-                eprintln!("vergence-ui: drawing in software: the GPU can't make buffers to share with the display server");
+                eprintln!(
+                    "vergence-ui: drawing in software: the GPU can't make buffers to share with the display server"
+                );
                 None
             }
             Err(e) => {
@@ -283,7 +286,14 @@ pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>>
 /// The Style request for an app's window, if it says anything a normal window
 /// without limits would not.
 fn style_request(s: crate::Style, window: u32) -> Option<WinRequest> {
-    (s != crate::Style::default()).then_some(WinRequest::Style { window, kind: s.kind, modal: s.modal, min: s.min, max: s.max, frosted: s.frosted })
+    (s != crate::Style::default()).then_some(WinRequest::Style {
+        window,
+        kind: s.kind,
+        modal: s.modal,
+        min: s.min,
+        max: s.max,
+        frosted: s.frosted,
+    })
 }
 
 /// The Create request for a window run by `app` (its serial filled in by the
@@ -373,8 +383,17 @@ impl<'a> Native<'a> {
             let now = Instant::now();
             let repeat = self.repeat.as_ref().map(|r| r.next.saturating_duration_since(now));
             let paste = self.paste.as_ref().map(|p| (p.started + PASTE_TIMEOUT).saturating_duration_since(now));
-            let timer = self.windows.iter().flat_map(|w| w.timers.iter().map(|t| t.1)).min().map(|t| t.saturating_duration_since(now));
-            let wait = if self.client.has_buffered() { Some(Duration::ZERO) } else { [repeat, paste, timer].into_iter().flatten().min() };
+            let timer = self
+                .windows
+                .iter()
+                .flat_map(|w| w.timers.iter().map(|t| t.1))
+                .min()
+                .map(|t| t.saturating_duration_since(now));
+            let wait = if self.client.has_buffered() {
+                Some(Duration::ZERO)
+            } else {
+                [repeat, paste, timer].into_iter().flatten().min()
+            };
             let pipe = self.paste.as_ref().map(|p| p.pipe.as_raw_fd());
             let ready = sock::poll_readable(&[Some(self.client.raw_fd()), pipe, Some(self.wake.as_raw_fd())], wait)?;
             if ready[0] && !self.client.read_ready().map_err(client_error)? {
@@ -469,7 +488,10 @@ impl<'a> Native<'a> {
                 Command::GroundClicked => self.send(WinRequest::GroundClicked { window: id })?,
                 Command::Minimize => self.send(WinRequest::Minimize { window: id })?,
                 Command::Copy(text) => {
-                    self.send(WinRequest::Copy { input_serial: self.input_serial, kinds: TEXT_KINDS.iter().map(|k| k.to_string()).collect() })?;
+                    self.send(WinRequest::Copy {
+                        input_serial: self.input_serial,
+                        kinds: TEXT_KINDS.iter().map(|k| k.to_string()).collect(),
+                    })?;
                     self.copied = Some(text.into());
                     self.own_offer_due = true;
                 }
@@ -511,7 +533,9 @@ impl<'a> Native<'a> {
             self.inbox.push((id, Input::Paste(text.to_string())));
             return Ok(());
         }
-        let Some(kind) = TEXT_KINDS.iter().find(|k| self.clip_kinds.iter().any(|have| have == *k)) else { return Ok(()) };
+        let Some(kind) = TEXT_KINDS.iter().find(|k| self.clip_kinds.iter().any(|have| have == *k)) else {
+            return Ok(());
+        };
         let serial = self.client.next_serial();
         self.send(WinRequest::Paste { serial, kind: kind.to_string() })?;
         self.paste_serial = Some(serial);
@@ -584,7 +608,16 @@ impl<'a> Native<'a> {
                         // does, the server takes it for a dialog (no window memory).
                         let style = self.windows[i].app.get().style();
                         let opened = self.windows[i].opened_by != 0;
-                        if let Some(r) = style_request(style, window).or_else(|| opened.then_some(WinRequest::Style { window, kind: style.kind, modal: style.modal, min: style.min, max: style.max, frosted: style.frosted })) {
+                        if let Some(r) = style_request(style, window).or_else(|| {
+                            opened.then_some(WinRequest::Style {
+                                window,
+                                kind: style.kind,
+                                modal: style.modal,
+                                min: style.min,
+                                max: style.max,
+                                frosted: style.frosted,
+                            })
+                        }) {
                             self.send(r)?;
                         }
                     }
@@ -594,14 +627,20 @@ impl<'a> Native<'a> {
                 self.send(WinRequest::AckConfigure { window, serial })?;
                 let Some(i) = self.index(window) else { return Ok(()) };
                 let w = &mut self.windows[i];
-                w.inset = if inset.is_finite() && (0.0..=vergence_protocol::window::MAX_INSET).contains(&inset) { inset as f32 } else { 0.0 };
+                w.inset = if inset.is_finite() && (0.0..=vergence_protocol::window::MAX_INSET).contains(&inset) {
+                    inset as f32
+                } else {
+                    0.0
+                };
                 if width.is_finite() && height.is_finite() && width >= 1.0 && height >= 1.0 {
                     (w.width, w.height) = (width.round() as u32, height.round() as u32);
                 }
                 if scale.is_finite() && scale > 0.0 {
                     w.scale = scale;
                 }
-                if text.is_finite() && (vergence_protocol::window::MIN_TEXT..=vergence_protocol::window::MAX_TEXT).contains(&text) {
+                if text.is_finite()
+                    && (vergence_protocol::window::MIN_TEXT..=vergence_protocol::window::MAX_TEXT).contains(&text)
+                {
                     w.text = text;
                 }
                 w.configured = true;
@@ -733,7 +772,10 @@ impl<'a> Native<'a> {
                 if pressed {
                     self.input_serial = serial;
                     let repeats = self.repeat_rate > 0 && self.keyboard.as_ref().is_some_and(|k| k.repeats(key));
-                    self.repeat = repeats.then(|| Repeat { key, next: Instant::now() + Duration::from_millis(self.repeat_delay.max(0) as u64) });
+                    self.repeat = repeats.then(|| Repeat {
+                        key,
+                        next: Instant::now() + Duration::from_millis(self.repeat_delay.max(0) as u64),
+                    });
                 } else if self.repeat.as_ref().is_some_and(|r| r.key == key) {
                     self.repeat = None;
                 }
@@ -745,7 +787,8 @@ impl<'a> Native<'a> {
                 if !std::mem::take(&mut self.own_offer_due) {
                     self.copied = None;
                 }
-                self.clip_kinds = kinds.into_iter().take(crate::MAX_KINDS).filter(|k| k.len() <= crate::MAX_KIND_NAME).collect();
+                self.clip_kinds =
+                    kinds.into_iter().take(crate::MAX_KINDS).filter(|k| k.len() <= crate::MAX_KIND_NAME).collect();
             }
             WinEvent::ClipboardSend { kind, fd } => {
                 if let Some(text) = &self.copied
@@ -767,7 +810,9 @@ impl<'a> Native<'a> {
                 }
             }
             // The bar's events (bar milestone 1): what was done with the tabs the server drew.
-            WinEvent::TabChosen { window, tab } => self.with_window(window, |app, w| app.tab(TabEvent::Chosen(tab), w))?,
+            WinEvent::TabChosen { window, tab } => {
+                self.with_window(window, |app, w| app.tab(TabEvent::Chosen(tab), w))?
+            }
             WinEvent::BarButton { window, id } => self.with_window(window, |app, w| app.bar_button(id, w))?,
             WinEvent::Command { window, id } => self.with_window(window, |app, w| app.command(id, w))?,
             // An agent's action on a widget by its meaning node (bus v24).
@@ -787,7 +832,9 @@ impl<'a> Native<'a> {
             WinEvent::DragOver { window, x, y, kinds, mods } => {
                 let y = y + self.index(window).map_or(0.0, |i| self.windows[i].inset as f64);
                 let mut action = crate::DROP_NONE;
-                self.with_window(window, |app, _| action = app.drag_over(x as f32, y as f32, &kinds, mods & vergence_protocol::window::DRAG_CTRL != 0))?;
+                self.with_window(window, |app, _| {
+                    action = app.drag_over(x as f32, y as f32, &kinds, mods & vergence_protocol::window::DRAG_CTRL != 0)
+                })?;
                 self.send(WinRequest::DragAccept { window, action })?;
             }
             WinEvent::DragLeave { window } => self.with_window(window, |app, _| app.drag_left())?,
@@ -804,7 +851,9 @@ impl<'a> Native<'a> {
             WinEvent::SessionEnding { window } => self.with_window(window, |app, _| app.session_ending())?,
             WinEvent::ScenesOff { window, why } => {
                 if let Some(i) = self.index(window) {
-                    eprintln!("vergence-ui: window {window}: the server draws its scenes no more ({why}); drawing its pixels");
+                    eprintln!(
+                        "vergence-ui: window {window}: the server draws its scenes no more ({why}); drawing its pixels"
+                    );
                     let w = &mut self.windows[i];
                     w.pixels = true;
                     w.frame_pending = false;
@@ -818,13 +867,25 @@ impl<'a> Native<'a> {
                     w.dirty = true;
                 }
             }
-            WinEvent::TabClose { window, tab } => self.with_window(window, |app, w| app.tab(TabEvent::Close(tab), w))?,
-            WinEvent::TabCloseOthers { window, tab } => self.with_window(window, |app, w| app.tab(TabEvent::CloseOthers(tab), w))?,
+            WinEvent::TabClose { window, tab } => {
+                self.with_window(window, |app, w| app.tab(TabEvent::Close(tab), w))?
+            }
+            WinEvent::TabCloseOthers { window, tab } => {
+                self.with_window(window, |app, w| app.tab(TabEvent::CloseOthers(tab), w))?
+            }
             WinEvent::TabNew { window } => self.with_window(window, |app, w| app.tab(TabEvent::New, w))?,
-            WinEvent::TabMoved { window, tab, to } => self.with_window(window, |app, w| app.tab(TabEvent::Moved { tab, to }, w))?,
-            WinEvent::TabOut { window, tab, place } => self.with_window(window, |app, w| app.tab(TabEvent::Out { tab, place }, w))?,
-            WinEvent::TabJoin { window, tab, into, to } => self.with_window(window, |app, w| app.tab(TabEvent::Join { tab, into, to }, w))?,
-            WinEvent::TabMenu { window, tab, entry } => self.with_window(window, |app, w| app.tab(TabEvent::Menu { tab, entry }, w))?,
+            WinEvent::TabMoved { window, tab, to } => {
+                self.with_window(window, |app, w| app.tab(TabEvent::Moved { tab, to }, w))?
+            }
+            WinEvent::TabOut { window, tab, place } => {
+                self.with_window(window, |app, w| app.tab(TabEvent::Out { tab, place }, w))?
+            }
+            WinEvent::TabJoin { window, tab, into, to } => {
+                self.with_window(window, |app, w| app.tab(TabEvent::Join { tab, into, to }, w))?
+            }
+            WinEvent::TabMenu { window, tab, entry } => {
+                self.with_window(window, |app, w| app.tab(TabEvent::Menu { tab, entry }, w))?
+            }
         }
         Ok(())
     }
@@ -888,7 +949,15 @@ impl<'a> Native<'a> {
 
     /// Draws the scene into a free GPU buffer of this size and attaches it,
     /// for window `i`. Ok(false): not this time (draw in software).
-    fn draw_on_gpu(&mut self, i: usize, scene: &Scene, scale: f32, background: Color, pw: u32, ph: u32) -> io::Result<bool> {
+    fn draw_on_gpu(
+        &mut self,
+        i: usize,
+        scene: &Scene,
+        scale: f32,
+        background: Color,
+        pw: u32,
+        ph: u32,
+    ) -> io::Result<bool> {
         let Some(gpu) = self.gpu.as_mut() else { return Ok(false) };
         let w = &mut self.windows[i];
         // Buffers of another size the server is done with are let go.
@@ -947,7 +1016,13 @@ impl<'a> Native<'a> {
         }
         let b = &w.slots[index].buffer;
         let plane = Plane { fd: Fd(Arc::new(b.fd.try_clone()?)), offset: b.offset, stride: b.stride };
-        let buffer = Buffer::Dmabuf { planes: vec![plane], width: b.width, height: b.height, format: b.format, modifier: b.modifier };
+        let buffer = Buffer::Dmabuf {
+            planes: vec![plane],
+            width: b.width,
+            height: b.height,
+            format: b.format,
+            modifier: b.modifier,
+        };
         let id = w.id;
         w.slots[index].busy = true;
         w.showing = Some(index);
@@ -969,7 +1044,11 @@ impl<'a> Native<'a> {
         let mut keys = Vec::with_capacity(scene.images.len());
         for im in &scene.images {
             let at = Arc::as_ptr(im) as usize;
-            let known = w.scene_keys.get(&at).filter(|(_, weak)| weak.upgrade().is_some_and(|o| Arc::ptr_eq(&o, im))).map(|(k, _)| *k);
+            let known = w
+                .scene_keys
+                .get(&at)
+                .filter(|(_, weak)| weak.upgrade().is_some_and(|o| Arc::ptr_eq(&o, im)))
+                .map(|(k, _)| *k);
             let key = known.unwrap_or_else(|| {
                 let k = NEXT_KEY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 w.scene_keys.insert(at, (k, Arc::downgrade(im)));
@@ -981,7 +1060,13 @@ impl<'a> Native<'a> {
         let bytes = scene.encode_keyed(&keys, &|k| sent.contains(&k)).map_err(other)?;
         // Pictures this frame does not show: the server lets them go.
         let used: std::collections::HashSet<u64> = keys.iter().copied().collect();
-        let forget: Vec<u64> = w.scene_sent.iter().copied().filter(|k| !used.contains(k)).take(vergence_protocol::window::MAX_FORGET).collect();
+        let forget: Vec<u64> = w
+            .scene_sent
+            .iter()
+            .copied()
+            .filter(|k| !used.contains(k))
+            .take(vergence_protocol::window::MAX_FORGET)
+            .collect();
         for k in &forget {
             w.scene_sent.remove(k);
         }
@@ -999,7 +1084,19 @@ impl<'a> Native<'a> {
     fn draw(&mut self, i: usize) -> io::Result<()> {
         let t = Instant::now();
         let w = &mut self.windows[i];
-        let frame = Frame { width: w.width as f32, height: w.height as f32 + w.inset, scale: w.scale as f32, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: w.bar_by_server, top: w.inset , tint: w.tint, text: w.text as f32, native: true };
+        let frame = Frame {
+            width: w.width as f32,
+            height: w.height as f32 + w.inset,
+            scale: w.scale as f32,
+            time: w.started.elapsed().as_secs_f64(),
+            number: w.frames,
+            drawn_by: w.drawn_by,
+            bar_by_server: w.bar_by_server,
+            top: w.inset,
+            tint: w.tint,
+            text: w.text as f32,
+            native: true,
+        };
         let id = w.id;
         let scene = w.app.get().scene(&frame, &mut self.fonts);
         let background = self.windows[i].app.get().background();
@@ -1097,11 +1194,25 @@ fn meaning_request(window: u32, tree: &MeaningTree) -> WinRequest {
             items: {
                 // A choice's items, within their share: a long list is cut.
                 let mut room = MEANING_TEXT * 8;
-                n.items.iter().take(vergence_protocol::window::MAX_ITEMS).map(|i| cut(i)).take_while(|i| room.checked_sub(i.len() + 4).map(|r| room = r).is_some()).collect()
+                n.items
+                    .iter()
+                    .take(vergence_protocol::window::MAX_ITEMS)
+                    .map(|i| cut(i))
+                    .take_while(|i| room.checked_sub(i.len() + 4).map(|r| room = r).is_some())
+                    .collect()
             },
         };
         // Its share of the frame: ids and bounds, the strings with their lengths.
-        let size = 8 + 8 + 32 + 4 * (4 + node.states.len() + node.items.len()) + 1 + node.role.len() + node.name.len() + node.value.as_ref().map_or(0, String::len) + node.states.iter().map(String::len).sum::<usize>() + node.items.iter().map(String::len).sum::<usize>();
+        let size = 8
+            + 8
+            + 32
+            + 4 * (4 + node.states.len() + node.items.len())
+            + 1
+            + node.role.len()
+            + node.name.len()
+            + node.value.as_ref().map_or(0, String::len)
+            + node.states.iter().map(String::len).sum::<usize>()
+            + node.items.iter().map(String::len).sum::<usize>();
         if used + size > MEANING_BUDGET {
             break;
         }
@@ -1117,7 +1228,19 @@ mod tests {
     use super::*;
 
     fn node(i: u64, name_len: usize) -> crate::MeaningNode {
-        crate::MeaningNode { id: i + 1, parent: 0, role: "label".into(), name: "n".repeat(name_len), value: Some("v".repeat(name_len)), states: vec!["focused".into(); 20], x: 0.0, y: 0.0, w: 1.0, h: 1.0, items: vec![] }
+        crate::MeaningNode {
+            id: i + 1,
+            parent: 0,
+            role: "label".into(),
+            name: "n".repeat(name_len),
+            value: Some("v".repeat(name_len)),
+            states: vec!["focused".into(); 20],
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            items: vec![],
+        }
     }
 
     #[test]
@@ -1134,7 +1257,8 @@ mod tests {
 
     #[test]
     fn a_small_tree_goes_whole() {
-        let tree = MeaningTree { focus: 2, caret: Some((1.0, 2.0, 1.0, 14.0)), nodes: (0..40).map(|i| node(i, 12)).collect() };
+        let tree =
+            MeaningTree { focus: 2, caret: Some((1.0, 2.0, 1.0, 14.0)), nodes: (0..40).map(|i| node(i, 12)).collect() };
         let WinRequest::Meaning { focus, caret, nodes, .. } = meaning_request(1, &tree) else { panic!() };
         assert_eq!((focus, nodes.len(), caret), (2, 40, Some((1.0, 2.0, 1.0, 14.0))));
     }

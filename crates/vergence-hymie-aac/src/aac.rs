@@ -63,7 +63,8 @@ fn unsupported(m: impl Into<String>) -> Error {
     Error::Unsupported(m.into())
 }
 
-const SAMPLE_RATES: [u32; 13] = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+const SAMPLE_RATES: [u32; 13] =
+    [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
 const NUM_SWB_1024_WINDOW: [usize; 12] = [41, 41, 47, 49, 49, 51, 47, 47, 43, 43, 43, 40];
 const NUM_SWB_128_WINDOW: [usize; 12] = [12, 12, 12, 14, 14, 14, 15, 15, 15, 15, 15, 15];
 static SWB_OFFSET_1024_WINDOW: [&[u16]; 12] = [
@@ -279,8 +280,11 @@ impl AacDecoder {
         quant_to_spec(ics, &self.spec_data1, &mut self.spec_coef1)?;
         pns_decode(ics, None, &mut self.spec_coef1, None, false, &mut self.r1, &mut self.r2);
         tns_decode_frame(ics, &mut self.spec_coef1, self.sf_index);
-        let fb = FilterBank { transf_buf: &mut self.transf_buf, mdct2048: &mut self.mdct2048, mdct256: &mut self.mdct256 };
-        let (Some(time_out), Some(overlap), Some(prev)) = (self.time_out.get_mut(channel), self.overlap.get_mut(channel), self.window_shape_prev.get_mut(channel)) else {
+        let fb =
+            FilterBank { transf_buf: &mut self.transf_buf, mdct2048: &mut self.mdct2048, mdct256: &mut self.mdct256 };
+        let (Some(time_out), Some(overlap), Some(prev)) =
+            (self.time_out.get_mut(channel), self.overlap.get_mut(channel), self.window_shape_prev.get_mut(channel))
+        else {
             return Err(damaged("AAC channel out of range."));
         };
         fb.ifilter_bank(ics.window_sequence, ics.window_shape, *prev, &self.spec_coef1, time_out, overlap);
@@ -326,7 +330,15 @@ impl AacDecoder {
         quant_to_spec(ics1, &self.spec_data1, &mut self.spec_coef1)?;
         quant_to_spec(ics2, &self.spec_data2, &mut self.spec_coef2)?;
         let pair = ics1.ms_mask_present != 0;
-        pns_decode(ics1, Some(&*ics2), &mut self.spec_coef1, Some(&mut *self.spec_coef2), pair, &mut self.r1, &mut self.r2);
+        pns_decode(
+            ics1,
+            Some(&*ics2),
+            &mut self.spec_coef1,
+            Some(&mut *self.spec_coef2),
+            pair,
+            &mut self.r1,
+            &mut self.r2,
+        );
         ms_decode(ics1, ics2, &mut self.spec_coef1, &mut self.spec_coef2);
         is_decode(ics1, ics2, &self.spec_coef1, &mut self.spec_coef2);
         tns_decode_frame(ics1, &mut self.spec_coef1, self.sf_index);
@@ -336,9 +348,24 @@ impl AacDecoder {
         }
         let (t1, t2) = self.time_out[channel..channel + 2].split_at_mut(1);
         let (o1, o2) = self.overlap[channel..channel + 2].split_at_mut(1);
-        let mut fb = FilterBank { transf_buf: &mut self.transf_buf, mdct2048: &mut self.mdct2048, mdct256: &mut self.mdct256 };
-        fb.ifilter_bank_mut(ics1.window_sequence, ics1.window_shape, self.window_shape_prev[channel], &self.spec_coef1, &mut t1[0], &mut o1[0]);
-        fb.ifilter_bank(ics2.window_sequence, ics2.window_shape, self.window_shape_prev[channel + 1], &self.spec_coef2, &mut t2[0], &mut o2[0]);
+        let mut fb =
+            FilterBank { transf_buf: &mut self.transf_buf, mdct2048: &mut self.mdct2048, mdct256: &mut self.mdct256 };
+        fb.ifilter_bank_mut(
+            ics1.window_sequence,
+            ics1.window_shape,
+            self.window_shape_prev[channel],
+            &self.spec_coef1,
+            &mut t1[0],
+            &mut o1[0],
+        );
+        fb.ifilter_bank(
+            ics2.window_sequence,
+            ics2.window_shape,
+            self.window_shape_prev[channel + 1],
+            &self.spec_coef2,
+            &mut t2[0],
+            &mut o2[0],
+        );
         self.window_shape_prev[channel] = ics1.window_shape;
         self.window_shape_prev[channel + 1] = ics2.window_shape;
         Ok(())
@@ -371,7 +398,13 @@ impl FrameDecoder for AacDecoder {
 
 #[cfg(test)]
 fn count(seen: &mut [usize; 5], ics: &Ics) {
-    let used = [ics.window_sequence == EIGHT_SHORT_SEQUENCE, ics.ms_mask_present != 0, ics.is_used, ics.tns_data_present, ics.pulse_data_present];
+    let used = [
+        ics.window_sequence == EIGHT_SHORT_SEQUENCE,
+        ics.ms_mask_present != 0,
+        ics.is_used,
+        ics.tns_data_present,
+        ics.pulse_data_present,
+    ];
     for (s, u) in seen.iter_mut().zip(used) {
         *s += usize::from(u);
     }
@@ -448,7 +481,13 @@ fn ics_info(ld: &mut BitReader, ics: &mut Ics, sf_index: usize) -> Result<(), Er
     Ok(())
 }
 
-fn individual_channel_stream(ld: &mut BitReader, ics: &mut Ics, common_window: bool, spec_data: &mut [i32; FRAME_LENGTH], sf_index: usize) -> Result<(), Error> {
+fn individual_channel_stream(
+    ld: &mut BitReader,
+    ics: &mut Ics,
+    common_window: bool,
+    spec_data: &mut [i32; FRAME_LENGTH],
+    sf_index: usize,
+) -> Result<(), Error> {
     // side_info
     ics.global_gain = ld.get_bits(8) as i32;
     if !common_window {
@@ -526,7 +565,11 @@ fn window_grouping_info(ics: &mut Ics, sf: usize) -> Result<(), Error> {
             for g in 0..ics.num_window_groups {
                 let mut offset = 0;
                 for i in 0..ics.num_swb {
-                    let width = if i + 1 == ics.num_swb { NSHORT - table[i] as usize } else { (table[i + 1] - table[i]) as usize };
+                    let width = if i + 1 == ics.num_swb {
+                        NSHORT - table[i] as usize
+                    } else {
+                        (table[i + 1] - table[i]) as usize
+                    };
                     ics.sect_sfb_offset[g][i] = offset;
                     offset += width * ics.window_group_length[g];
                 }
@@ -539,7 +582,8 @@ fn window_grouping_info(ics: &mut Ics, sf: usize) -> Result<(), Error> {
 }
 
 fn section_data(ld: &mut BitReader, ics: &mut Ics) -> Result<(), Error> {
-    let (sect_bits, sect_lim) = if ics.window_sequence == EIGHT_SHORT_SEQUENCE { (3, MAX_SECTIONS) } else { (5, MAX_SFB) };
+    let (sect_bits, sect_lim) =
+        if ics.window_sequence == EIGHT_SHORT_SEQUENCE { (3, MAX_SECTIONS) } else { (5, MAX_SFB) };
     let sect_esc_val = (1 << sect_bits) - 1;
 
     for g in 0..ics.num_window_groups {
@@ -661,7 +705,8 @@ fn pulse_decode(ics: &Ics, spec_data: &mut [i32; FRAME_LENGTH]) -> Result<(), Er
 }
 
 fn tns_data(ld: &mut BitReader, ics: &mut Ics) {
-    let (n_filt_bits, length_bits, order_bits) = if ics.window_sequence == EIGHT_SHORT_SEQUENCE { (1, 4, 3) } else { (2, 6, 5) };
+    let (n_filt_bits, length_bits, order_bits) =
+        if ics.window_sequence == EIGHT_SHORT_SEQUENCE { (1, 4, 3) } else { (2, 6, 5) };
 
     for w in 0..ics.num_windows {
         let mut start_coef_bits = 3;
@@ -901,7 +946,8 @@ fn pow2sf_tab(i: usize) -> f32 {
 
 /// 2^(i/4), as FAAD2 writes it.
 #[allow(clippy::excessive_precision)]
-const POW2_TABLE: [f32; 4] = [1.0, 1.1892071150027210667174999705605, std::f32::consts::SQRT_2, 1.6817928305074290860622509524664];
+const POW2_TABLE: [f32; 4] =
+    [1.0, 1.1892071150027210667174999705605, std::f32::consts::SQRT_2, 1.6817928305074290860622509524664];
 
 fn iquant(q: i32, iq: &[f32; 8192]) -> Result<f32, Error> {
     match iq.get(q.unsigned_abs() as usize) {
@@ -931,7 +977,11 @@ fn invert_intensity(ics: &Ics, g: usize, sfb: usize) -> i32 {
 }
 
 /// quant_to_spec: dequantisation and scaling, and for short blocks the deinterleaving.
-fn quant_to_spec(ics: &Ics, quant_data: &[i32; FRAME_LENGTH], spec_data: &mut [f32; FRAME_LENGTH]) -> Result<(), Error> {
+fn quant_to_spec(
+    ics: &Ics,
+    quant_data: &[i32; FRAME_LENGTH],
+    spec_data: &mut [f32; FRAME_LENGTH],
+) -> Result<(), Error> {
     let iq = iq_table();
     let (mut k, mut gindex) = (0usize, 0usize);
     if ics.num_swb == 0 {
@@ -986,7 +1036,10 @@ fn ms_decode(ics: &Ics, icsr: &Ics, l_spec: &mut [f32; FRAME_LENGTH], r_spec: &m
     for g in 0..ics.num_window_groups {
         for _ in 0..ics.window_group_length[g] {
             for sfb in 0..ics.max_sfb {
-                if (ics.ms_used[g][sfb] != 0 || ics.ms_mask_present == 2) && !is_intensity_band(icsr, g, sfb) && !is_noise(ics, g, sfb) {
+                if (ics.ms_used[g][sfb] != 0 || ics.ms_mask_present == 2)
+                    && !is_intensity_band(icsr, g, sfb)
+                    && !is_noise(ics, g, sfb)
+                {
                     for i in ics.swb_offset[sfb]..ics.swb_offset[sfb + 1].min(ics.swb_offset_max) {
                         let k = group * NSHORT + i;
                         if k >= FRAME_LENGTH {
@@ -1056,7 +1109,15 @@ fn gen_rand_vector(spec: &mut [f32], scale_factor: i32, r1: &mut u32, r2: &mut u
     }
 }
 
-fn pns_decode(ics_left: &Ics, ics_right: Option<&Ics>, spec_left: &mut [f32; FRAME_LENGTH], mut spec_right: Option<&mut [f32; FRAME_LENGTH]>, channel_pair: bool, r1: &mut u32, r2: &mut u32) {
+fn pns_decode(
+    ics_left: &Ics,
+    ics_right: Option<&Ics>,
+    spec_left: &mut [f32; FRAME_LENGTH],
+    mut spec_right: Option<&mut [f32; FRAME_LENGTH]>,
+    channel_pair: bool,
+    r1: &mut u32,
+    r2: &mut u32,
+) {
     let mut group = 0;
     for g in 0..ics_left.num_window_groups {
         for _ in 0..ics_left.window_group_length[g] {
@@ -1075,9 +1136,18 @@ fn pns_decode(ics_left: &Ics, ics_right: Option<&Ics>, spec_left: &mut [f32; FRA
                 {
                     let begin = (base + icsr.swb_offset[sfb]).min(FRAME_LENGTH);
                     let end = (base + icsr.swb_offset[sfb + 1]).min(FRAME_LENGTH).max(begin);
-                    if channel_pair && is_noise(ics_left, g, sfb) && ((ics_left.ms_mask_present == 1 && ics_left.ms_used[g][sfb] != 0) || ics_left.ms_mask_present == 2) {
+                    if channel_pair
+                        && is_noise(ics_left, g, sfb)
+                        && ((ics_left.ms_mask_present == 1 && ics_left.ms_used[g][sfb] != 0)
+                            || ics_left.ms_mask_present == 2)
+                    {
                         // The same noise as the left (FAAD2: correlated by the M/S mask).
-                        gen_rand_vector(&mut spec_right[begin..end], icsr.scale_factors[g][sfb], &mut r1_dep, &mut r2_dep);
+                        gen_rand_vector(
+                            &mut spec_right[begin..end],
+                            icsr.scale_factors[g][sfb],
+                            &mut r1_dep,
+                            &mut r2_dep,
+                        );
                     } else {
                         gen_rand_vector(&mut spec_right[begin..end], icsr.scale_factors[g][sfb], r1, r2);
                     }
@@ -1090,7 +1160,21 @@ fn pns_decode(ics_left: &Ics, ics_right: Option<&Ics>, spec_left: &mut [f32; FRA
 
 // ------------------------------------------------------------ TNS
 
-const TNS_SBF_MAX: [[usize; 2]; 13] = [[31, 9], [31, 9], [34, 10], [40, 14], [42, 14], [51, 14], [46, 14], [46, 14], [42, 14], [42, 14], [42, 14], [39, 14], [39, 14]];
+const TNS_SBF_MAX: [[usize; 2]; 13] = [
+    [31, 9],
+    [31, 9],
+    [34, 10],
+    [40, 14],
+    [42, 14],
+    [51, 14],
+    [46, 14],
+    [46, 14],
+    [42, 14],
+    [42, 14],
+    [42, 14],
+    [39, 14],
+    [39, 14],
+];
 static ALL_TNS_COEFS: [&[f32; 16]; 4] = [&TNS_COEF0_3, &TNS_COEF0_4, &TNS_COEF1_3, &TNS_COEF1_4];
 
 fn tns_decode_frame(ics: &Ics, spec: &mut [f32; FRAME_LENGTH], sf_index: usize) {
@@ -1098,7 +1182,8 @@ fn tns_decode_frame(ics: &Ics, spec: &mut [f32; FRAME_LENGTH], sf_index: usize) 
         return;
     }
     let mut lpc = [0f32; TNS_MAX_ORDER + 1];
-    let max_tns = TNS_SBF_MAX.get(sf_index).map_or(0, |r| r[if ics.window_sequence == EIGHT_SHORT_SEQUENCE { 1 } else { 0 }]);
+    let max_tns =
+        TNS_SBF_MAX.get(sf_index).map_or(0, |r| r[if ics.window_sequence == EIGHT_SHORT_SEQUENCE { 1 } else { 0 }]);
     for w in 0..ics.num_windows {
         let mut bottom = ics.num_swb;
         for f in 0..ics.tns_n_filt[w] {
@@ -1108,7 +1193,13 @@ fn tns_decode_frame(ics: &Ics, spec: &mut [f32; FRAME_LENGTH], sf_index: usize) 
             if tns_order == 0 {
                 continue;
             }
-            tns_decode_coef(tns_order, ics.tns_coef_res[w] + 3, ics.tns_coef_compress[w][f], &ics.tns_coef[w][f], &mut lpc);
+            tns_decode_coef(
+                tns_order,
+                ics.tns_coef_res[w] + 3,
+                ics.tns_coef_compress[w][f],
+                &ics.tns_coef[w][f],
+                &mut lpc,
+            );
 
             let start = ics.swb_offset[bottom.min(max_tns).min(ics.max_sfb)].min(ics.swb_offset_max);
             let end = ics.swb_offset[top.min(max_tns).min(ics.max_sfb)].min(ics.swb_offset_max);
@@ -1124,7 +1215,13 @@ fn tns_decode_frame(ics: &Ics, spec: &mut [f32; FRAME_LENGTH], sf_index: usize) 
     }
 }
 
-fn tns_decode_coef(order: usize, coef_res_bits: usize, coef_compress: usize, coef: &[u8; 32], a: &mut [f32; TNS_MAX_ORDER + 1]) {
+fn tns_decode_coef(
+    order: usize,
+    coef_res_bits: usize,
+    coef_compress: usize,
+    coef: &[u8; 32],
+    a: &mut [f32; TNS_MAX_ORDER + 1],
+) {
     let mut tmp2 = [0f32; TNS_MAX_ORDER + 1];
     let mut b = [0f32; TNS_MAX_ORDER + 1];
     let table_index = 2 * usize::from(coef_compress != 0) + usize::from(coef_res_bits != 3);
@@ -1176,11 +1273,27 @@ struct FilterBank<'a> {
 }
 
 impl FilterBank<'_> {
-    fn ifilter_bank(mut self, window_sequence: usize, window_shape: usize, window_shape_prev: usize, freq_in: &[f32; FRAME_LENGTH], time_out: &mut [f32; FRAME_LENGTH], overlap: &mut [f32; FRAME_LENGTH]) {
+    fn ifilter_bank(
+        mut self,
+        window_sequence: usize,
+        window_shape: usize,
+        window_shape_prev: usize,
+        freq_in: &[f32; FRAME_LENGTH],
+        time_out: &mut [f32; FRAME_LENGTH],
+        overlap: &mut [f32; FRAME_LENGTH],
+    ) {
         self.ifilter_bank_mut(window_sequence, window_shape, window_shape_prev, freq_in, time_out, overlap);
     }
 
-    fn ifilter_bank_mut(&mut self, window_sequence: usize, window_shape: usize, window_shape_prev: usize, freq_in: &[f32; FRAME_LENGTH], time_out: &mut [f32; FRAME_LENGTH], overlap: &mut [f32; FRAME_LENGTH]) {
+    fn ifilter_bank_mut(
+        &mut self,
+        window_sequence: usize,
+        window_shape: usize,
+        window_shape_prev: usize,
+        freq_in: &[f32; FRAME_LENGTH],
+        time_out: &mut [f32; FRAME_LENGTH],
+        overlap: &mut [f32; FRAME_LENGTH],
+    ) {
         const NLONG: usize = FRAME_LENGTH;
         const TRANS: usize = NSHORT / 2;
         const NFLAT_LS: usize = (NLONG - NSHORT) / 2;
@@ -1221,20 +1334,32 @@ impl FilterBank<'_> {
                 let ws = window_short;
                 for i in 0..NSHORT {
                     time_out[NFLAT_LS + i] = overlap[NFLAT_LS + i] + tb[i] * window_short_prev[i];
-                    time_out[NFLAT_LS + NSHORT + i] = overlap[NFLAT_LS + NSHORT + i] + tb[NSHORT + i] * ws[NSHORT - 1 - i] + tb[NSHORT * 2 + i] * ws[i];
-                    time_out[NFLAT_LS + 2 * NSHORT + i] = overlap[NFLAT_LS + NSHORT * 2 + i] + tb[NSHORT * 3 + i] * ws[NSHORT - 1 - i] + tb[NSHORT * 4 + i] * ws[i];
-                    time_out[NFLAT_LS + 3 * NSHORT + i] = overlap[NFLAT_LS + NSHORT * 3 + i] + tb[NSHORT * 5 + i] * ws[NSHORT - 1 - i] + tb[NSHORT * 6 + i] * ws[i];
+                    time_out[NFLAT_LS + NSHORT + i] = overlap[NFLAT_LS + NSHORT + i]
+                        + tb[NSHORT + i] * ws[NSHORT - 1 - i]
+                        + tb[NSHORT * 2 + i] * ws[i];
+                    time_out[NFLAT_LS + 2 * NSHORT + i] = overlap[NFLAT_LS + NSHORT * 2 + i]
+                        + tb[NSHORT * 3 + i] * ws[NSHORT - 1 - i]
+                        + tb[NSHORT * 4 + i] * ws[i];
+                    time_out[NFLAT_LS + 3 * NSHORT + i] = overlap[NFLAT_LS + NSHORT * 3 + i]
+                        + tb[NSHORT * 5 + i] * ws[NSHORT - 1 - i]
+                        + tb[NSHORT * 6 + i] * ws[i];
                     if i < TRANS {
-                        time_out[NFLAT_LS + 4 * NSHORT + i] = overlap[NFLAT_LS + NSHORT * 4 + i] + tb[NSHORT * 7 + i] * ws[NSHORT - 1 - i] + tb[NSHORT * 8 + i] * ws[i];
+                        time_out[NFLAT_LS + 4 * NSHORT + i] = overlap[NFLAT_LS + NSHORT * 4 + i]
+                            + tb[NSHORT * 7 + i] * ws[NSHORT - 1 - i]
+                            + tb[NSHORT * 8 + i] * ws[i];
                     }
                 }
                 for i in 0..NSHORT {
                     if i >= TRANS {
-                        overlap[NFLAT_LS + 4 * NSHORT + i - NLONG] = tb[NSHORT * 7 + i] * ws[NSHORT - 1 - i] + tb[NSHORT * 8 + i] * ws[i];
+                        overlap[NFLAT_LS + 4 * NSHORT + i - NLONG] =
+                            tb[NSHORT * 7 + i] * ws[NSHORT - 1 - i] + tb[NSHORT * 8 + i] * ws[i];
                     }
-                    overlap[NFLAT_LS + 5 * NSHORT + i - NLONG] = tb[NSHORT * 9 + i] * ws[NSHORT - 1 - i] + tb[NSHORT * 10 + i] * ws[i];
-                    overlap[NFLAT_LS + 6 * NSHORT + i - NLONG] = tb[NSHORT * 11 + i] * ws[NSHORT - 1 - i] + tb[NSHORT * 12 + i] * ws[i];
-                    overlap[NFLAT_LS + 7 * NSHORT + i - NLONG] = tb[NSHORT * 13 + i] * ws[NSHORT - 1 - i] + tb[NSHORT * 14 + i] * ws[i];
+                    overlap[NFLAT_LS + 5 * NSHORT + i - NLONG] =
+                        tb[NSHORT * 9 + i] * ws[NSHORT - 1 - i] + tb[NSHORT * 10 + i] * ws[i];
+                    overlap[NFLAT_LS + 6 * NSHORT + i - NLONG] =
+                        tb[NSHORT * 11 + i] * ws[NSHORT - 1 - i] + tb[NSHORT * 12 + i] * ws[i];
+                    overlap[NFLAT_LS + 7 * NSHORT + i - NLONG] =
+                        tb[NSHORT * 13 + i] * ws[NSHORT - 1 - i] + tb[NSHORT * 14 + i] * ws[i];
                     overlap[NFLAT_LS + 8 * NSHORT + i - NLONG] = tb[NSHORT * 15 + i] * ws[NSHORT - 1 - i];
                 }
                 overlap[NFLAT_LS + NSHORT..].fill(0.0);
@@ -1430,7 +1555,13 @@ struct Mdct {
 
 impl Mdct {
     fn new(n: usize) -> Mdct {
-        Mdct { n, sincos: if n == 2048 { &MDCT_TAB2048 } else { &MDCT_TAB256 }, re: vec![0.0; n / 4], im: vec![0.0; n / 4], fft: Fft::new(n / 4) }
+        Mdct {
+            n,
+            sincos: if n == 2048 { &MDCT_TAB2048 } else { &MDCT_TAB256 },
+            re: vec![0.0; n / 4],
+            im: vec![0.0; n / 4],
+            fft: Fft::new(n / 4),
+        }
     }
 
     /// N/2 coefficients from `x_in` into N samples in `x_out`.
@@ -1498,7 +1629,12 @@ impl Fft {
             })
             .collect();
         let angle = |i: usize| 2.0 * std::f64::consts::PI * i as f64 / n as f64;
-        Fft { n, reverse, cos: (0..n / 2).map(|i| angle(i).cos() as f32).collect(), sin: (0..n / 2).map(|i| angle(i).sin() as f32).collect() }
+        Fft {
+            n,
+            reverse,
+            cos: (0..n / 2).map(|i| angle(i).cos() as f32).collect(),
+            sin: (0..n / 2).map(|i| angle(i).sin() as f32).collect(),
+        }
     }
 
     fn backward(&self, re: &mut [f32], im: &mut [f32]) {

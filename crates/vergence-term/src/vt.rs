@@ -123,7 +123,16 @@ impl Parser {
                 self.utf8.clear();
                 return;
             }
-            (State::Ground, 0x1b) | (State::Escape | State::EscapeIntermediate | State::CsiEntry | State::CsiParam | State::CsiIntermediate | State::CsiIgnore, 0x1b) => {
+            (State::Ground, 0x1b)
+            | (
+                State::Escape
+                | State::EscapeIntermediate
+                | State::CsiEntry
+                | State::CsiParam
+                | State::CsiIntermediate
+                | State::CsiIgnore,
+                0x1b,
+            ) => {
                 self.utf8.clear();
                 self.state = State::Escape;
                 self.clear();
@@ -277,7 +286,12 @@ mod tests {
             self.0.push(format!("x{b}"));
         }
         fn csi(&mut self, private: Option<u8>, params: &[u16], inter: &[u8], last: char) {
-            self.0.push(format!("csi{}{:?}{}{last}", private.map(|p| p as char).unwrap_or(' '), params, String::from_utf8_lossy(inter)));
+            self.0.push(format!(
+                "csi{}{:?}{}{last}",
+                private.map(|p| p as char).unwrap_or(' '),
+                params,
+                String::from_utf8_lossy(inter)
+            ));
         }
         fn esc(&mut self, inter: &[u8], last: u8) {
             self.0.push(format!("esc{}{}", String::from_utf8_lossy(inter), last as char));

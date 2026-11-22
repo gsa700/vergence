@@ -107,13 +107,19 @@ fn part(s: &str) -> Part {
     match s.split_once(':') {
         // A role is one word, or one of the toolkit's roles of two
         // ("text area"); anything else before a colon is part of a name.
-        Some((r, n)) if !r.trim().contains(' ') || ROLES_OF_TWO_WORDS.contains(&r.trim().to_lowercase().as_str()) => Part { role: Some(r.trim().to_lowercase()), name: (!n.trim().is_empty() && n.trim() != "*").then(|| n.trim().to_lowercase()) },
+        Some((r, n)) if !r.trim().contains(' ') || ROLES_OF_TWO_WORDS.contains(&r.trim().to_lowercase().as_str()) => {
+            Part {
+                role: Some(r.trim().to_lowercase()),
+                name: (!n.trim().is_empty() && n.trim() != "*").then(|| n.trim().to_lowercase()),
+            }
+        }
         _ => Part { role: None, name: Some(s.to_lowercase()) },
     }
 }
 
 fn matches(p: &Part, n: &Node) -> bool {
-    p.role.as_ref().is_none_or(|r| n.role.to_lowercase() == *r) && p.name.as_ref().is_none_or(|m| n.name.to_lowercase() == *m)
+    p.role.as_ref().is_none_or(|r| n.role.to_lowercase() == *r)
+        && p.name.as_ref().is_none_or(|m| n.name.to_lowercase() == *m)
 }
 
 /// The path split into its window part and its widget parts.
@@ -187,7 +193,14 @@ fn find_in(nodes: &[Node], parts: &[Part]) -> Vec<usize> {
 impl Server {
     /// A window's new meaning compared with its old: the log learns what
     /// changed. `origin` is the window's place on the screens.
-    pub fn meaning_changed(&mut self, client: u32, window: u32, old: Option<&WindowMeaning>, new: &WindowMeaning, origin: (f64, f64)) {
+    pub fn meaning_changed(
+        &mut self,
+        client: u32,
+        window: u32,
+        old: Option<&WindowMeaning>,
+        new: &WindowMeaning,
+        origin: (f64, f64),
+    ) {
         let (old_focus, old_caret, old_nodes) = match old {
             Some((f, c, n)) => (Some(*f), *c, Some(n)),
             None => (None, None, None),
@@ -197,7 +210,12 @@ impl Server {
         }
         // The magnifier follows the window with the keyboard's focus and
         // caret (zoom.rs): the focused control's middle, then the caret's.
-        let keyboard = self.input.keyboard_native.as_ref().and_then(|w| w.native()).is_some_and(|n| n.client == client && n.id == window);
+        let keyboard = self
+            .input
+            .keyboard_native
+            .as_ref()
+            .and_then(|w| w.native())
+            .is_some_and(|n| n.client == client && n.id == window);
         if keyboard
             && old_focus != Some(new.0)
             && let Some(n) = new.2.iter().find(|n| n.id == new.0)
@@ -224,21 +242,52 @@ impl Server {
             let Some(n) = w.native() else { continue };
             let Some(meaning) = n.meaning() else { continue };
             let origin = self.meaning_origin(w);
-            out.push(Listed { win: w.clone(), index: Some(i), title: n.title(), app_id: n.app_id.clone(), origin, meaning });
+            out.push(Listed {
+                win: w.clone(),
+                index: Some(i),
+                title: n.title(),
+                app_id: n.app_id.clone(),
+                origin,
+                meaning,
+            });
         }
         out
     }
 
-    fn found(&self, w: &Win, index: Option<usize>, title: &str, app_id: &str, origin: (f64, f64), node: &Node) -> Found {
+    fn found(
+        &self,
+        w: &Win,
+        index: Option<usize>,
+        title: &str,
+        app_id: &str,
+        origin: (f64, f64),
+        node: &Node,
+    ) -> Found {
         let at = (origin.0 + node.x, origin.1 + node.y, node.w, node.h);
         let (cx, cy) = (at.0 + at.2 / 2.0, at.1 + at.3 / 2.0);
         let screen = self
             .space
             .outputs()
-            .find(|o| self.space.output_geometry(o).is_some_and(|g| cx >= g.loc.x as f64 && cy >= g.loc.y as f64 && cx < (g.loc.x + g.size.w) as f64 && cy < (g.loc.y + g.size.h) as f64))
+            .find(|o| {
+                self.space.output_geometry(o).is_some_and(|g| {
+                    cx >= g.loc.x as f64
+                        && cy >= g.loc.y as f64
+                        && cx < (g.loc.x + g.size.w) as f64
+                        && cy < (g.loc.y + g.size.h) as f64
+                })
+            })
             .map(|o| o.name());
         let n = w.native();
-        Found { index, client: n.map_or(0, |n| n.client), window: n.map_or(0, |n| n.id), title: title.into(), app_id: app_id.into(), node: node.clone(), at, screen }
+        Found {
+            index,
+            client: n.map_or(0, |n| n.client),
+            window: n.map_or(0, |n| n.id),
+            title: title.into(),
+            app_id: app_id.into(),
+            node: node.clone(),
+            at,
+            screen,
+        }
     }
 
     /// The widgets a path leads to, in every window it names (see the top).
@@ -296,7 +345,8 @@ impl Server {
         match self.meaning_focus() {
             None => "no focused widget in a native window".into(),
             Some((f, caret)) => {
-                let caret = caret.map(|(x, y, w, h)| format!("\n  caret at {x:.0},{y:.0} {w:.0}x{h:.0}")).unwrap_or_default();
+                let caret =
+                    caret.map(|(x, y, w, h)| format!("\n  caret at {x:.0},{y:.0} {w:.0}x{h:.0}")).unwrap_or_default();
                 format!("{}{caret}", found_line(&f))
             }
         }
@@ -322,7 +372,11 @@ const REPLY_BUDGET: usize = 60 * 1024;
 
 /// A node's share of a frame, roughly (ids, bounds, its strings).
 fn node_size(n: &Node) -> usize {
-    64 + n.role.len() + n.name.len() + n.value.as_ref().map_or(0, String::len) + n.states.iter().map(|s| s.len() + 4).sum::<usize>() + n.items.iter().map(|s| s.len() + 4).sum::<usize>()
+    64 + n.role.len()
+        + n.name.len()
+        + n.value.as_ref().map_or(0, String::len)
+        + n.states.iter().map(|s| s.len() + 4).sum::<usize>()
+        + n.items.iter().map(|s| s.len() + 4).sum::<usize>()
 }
 
 /// A node moved onto the screens.
@@ -338,7 +392,14 @@ impl Server {
     fn screen_name_at(&self, x: f64, y: f64) -> String {
         self.space
             .outputs()
-            .find(|o| self.space.output_geometry(o).is_some_and(|g| x >= g.loc.x as f64 && y >= g.loc.y as f64 && x < (g.loc.x + g.size.w) as f64 && y < (g.loc.y + g.size.h) as f64))
+            .find(|o| {
+                self.space.output_geometry(o).is_some_and(|g| {
+                    x >= g.loc.x as f64
+                        && y >= g.loc.y as f64
+                        && x < (g.loc.x + g.size.w) as f64
+                        && y < (g.loc.y + g.size.h) as f64
+                })
+            })
             .map(|o| o.name())
             .unwrap_or_default()
     }
@@ -355,7 +416,10 @@ impl Server {
             .toplevel()
             .map(|t| {
                 smithay::wayland::compositor::with_states(t.wl_surface(), |s| {
-                    s.data_map.get::<smithay::wayland::shell::xdg::XdgToplevelSurfaceData>().and_then(|d| d.lock().unwrap().app_id.clone()).unwrap_or_default()
+                    s.data_map
+                        .get::<smithay::wayland::shell::xdg::XdgToplevelSurfaceData>()
+                        .and_then(|d| d.lock().unwrap().app_id.clone())
+                        .unwrap_or_default()
                 })
             })
             .unwrap_or_default();
@@ -365,7 +429,13 @@ impl Server {
     fn agent_found(&self, f: &Found) -> vergence_protocol::agent::AgentFound {
         let mut node = f.node.clone();
         (node.x, node.y) = (f.at.0, f.at.1);
-        vergence_protocol::agent::AgentFound { client: f.client, window: f.window, title: f.title.clone(), node, screen: f.screen.clone().unwrap_or_default() }
+        vergence_protocol::agent::AgentFound {
+            client: f.client,
+            window: f.window,
+            title: f.title.clone(),
+            node,
+            screen: f.screen.clone().unwrap_or_default(),
+        }
     }
 
     /// Where a native window's meaning is measured from on the desktop: its
@@ -380,13 +450,23 @@ impl Server {
     /// An app as grants know it: its id and the program the server saw run
     /// it (Fable's review: an app id alone is any program's word).
     pub fn agent_app_key(&self, app_client: u32, app_id: &str) -> String {
-        let program = self.bus_pid(app_client).and_then(vergence_dm::elevate::program_path).map(|p| p.display().to_string()).unwrap_or_default();
+        let program = self
+            .bus_pid(app_client)
+            .and_then(vergence_dm::elevate::program_path)
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
         format!("{app_id} @ {program}")
     }
 
     /// The native windows an agent may read and use now, asking nothing.
     fn agent_windows(&mut self, id: u32) -> std::collections::HashSet<(u32, u32)> {
-        let keys: Vec<((u32, u32), String)> = self.natives.keys().filter_map(|k| self.natives.get(k).and_then(|w| w.native()).map(|n| (*k, self.agent_app_key(n.client, &n.app_id)))).collect();
+        let keys: Vec<((u32, u32), String)> = self
+            .natives
+            .keys()
+            .filter_map(|k| {
+                self.natives.get(k).and_then(|w| w.native()).map(|n| (*k, self.agent_app_key(n.client, &n.app_id)))
+            })
+            .collect();
         keys.into_iter().filter(|(_, key)| self.agent_may_quietly(id, key)).map(|(k, _)| k).collect()
     }
 
@@ -395,7 +475,9 @@ impl Server {
         use vergence_protocol::agent::{AgentChange, AgentEvent, AgentRequest, AgentWindow, MAX_LISTED};
         use vergence_protocol::bus::{ErrorCode, ServerMsg};
         let reply = |s: &mut Server, e: AgentEvent| s.bus_send(id, ServerMsg::Agent(e));
-        let refuse = |s: &mut Server, serial: u32, code: ErrorCode, message: String| s.bus_send(id, ServerMsg::Error { serial, code, message });
+        let refuse = |s: &mut Server, serial: u32, code: ErrorCode, message: String| {
+            s.bus_send(id, ServerMsg::Error { serial, code, message })
+        };
         // Permission (agents.rs): the app a request is about must be
         // allowed; the person is asked first if nothing says yet, and the
         // request waits for the answer.
@@ -451,7 +533,8 @@ impl Server {
                 for w in &wins {
                     let g = self.space.element_geometry(w).unwrap_or_default();
                     let (kind, app_id) = self.window_kind_app(w);
-                    let (client, window, meaning) = w.native().map_or((0, 0, false), |n| (n.client, n.id, n.meaning().is_some()));
+                    let (client, window, meaning) =
+                        w.native().map_or((0, 0, false), |n| (n.client, n.id, n.meaning().is_some()));
                     let at = (g.loc.x as f64, g.loc.y as f64, g.size.w as f64, g.size.h as f64);
                     let screen = self.screen_name_at(at.0 + at.2 / 2.0, at.1 + at.3 / 2.0);
                     let key = w.native().map(|n| self.agent_app_key(n.client, &n.app_id)).unwrap_or_default();
@@ -460,7 +543,19 @@ impl Server {
                     // (Fable's review: titles are content); else its app's name.
                     let may = !allowed.is_empty() && allowed != "never";
                     let title = if may { self.window_title(w) } else { self.app_shown_name(&app_id) };
-                    windows.push(AgentWindow { client, window, title, app_id, kind: kind.into(), keyboard: keyboard.as_ref() == Some(w), meaning, at, screen, allowed, minutes_left });
+                    windows.push(AgentWindow {
+                        client,
+                        window,
+                        title,
+                        app_id,
+                        kind: kind.into(),
+                        keyboard: keyboard.as_ref() == Some(w),
+                        meaning,
+                        at,
+                        screen,
+                        allowed,
+                        minutes_left,
+                    });
                 }
                 reply(self, AgentEvent::Windows { serial, windows });
             }
@@ -474,7 +569,11 @@ impl Server {
                 };
                 let origin = self.meaning_origin(&w);
                 let mut used = 256;
-                let nodes: Vec<Node> = nodes.iter().map(|m| on_screens(m, origin)).take_while(|m| (used + node_size(m) <= REPLY_BUDGET).then(|| used += node_size(m)).is_some()).collect();
+                let nodes: Vec<Node> = nodes
+                    .iter()
+                    .map(|m| on_screens(m, origin))
+                    .take_while(|m| (used + node_size(m) <= REPLY_BUDGET).then(|| used += node_size(m)).is_some())
+                    .collect();
                 let caret = caret.map(|(x, y, cw, ch)| (origin.0 + x, origin.1 + y, cw, ch));
                 reply(self, AgentEvent::Tree { serial, client, window, title: n.title(), focus, caret, nodes });
             }
@@ -482,7 +581,16 @@ impl Server {
                 let only = self.agent_windows(id);
                 let allowed = self.meaning_find_in(&path, Some(&only));
                 let mut used = 256;
-                let found: Vec<_> = allowed.iter().map(|f| self.agent_found(f)).take(MAX_LISTED).take_while(|f| (used + node_size(&f.node) + f.title.len() + 32 <= REPLY_BUDGET).then(|| used += node_size(&f.node) + f.title.len() + 32).is_some()).collect();
+                let found: Vec<_> = allowed
+                    .iter()
+                    .map(|f| self.agent_found(f))
+                    .take(MAX_LISTED)
+                    .take_while(|f| {
+                        (used + node_size(&f.node) + f.title.len() + 32 <= REPLY_BUDGET)
+                            .then(|| used += node_size(&f.node) + f.title.len() + 32)
+                            .is_some()
+                    })
+                    .collect();
                 reply(self, AgentEvent::Found { serial, found });
             }
             AgentRequest::Focused { serial } => {
@@ -494,21 +602,42 @@ impl Server {
             }
             AgentRequest::Act { serial, client, window, node, action, role, name } => {
                 let Some(w) = self.natives.get(&(client, window)).cloned() else {
-                    return reply(self, AgentEvent::Acted { serial, ok: false, why: format!("no native window {client}/{window}") });
+                    return reply(
+                        self,
+                        AgentEvent::Acted { serial, ok: false, why: format!("no native window {client}/{window}") },
+                    );
                 };
                 // A secret field is never set, whatever its program would do.
-                let secret = w.native().and_then(|n| n.meaning()).is_some_and(|(_, _, nodes)| nodes.iter().any(|m| m.id == node && m.states.iter().any(|s| s == "secret")));
+                let secret = w.native().and_then(|n| n.meaning()).is_some_and(|(_, _, nodes)| {
+                    nodes.iter().any(|m| m.id == node && m.states.iter().any(|s| s == "secret"))
+                });
                 if secret && matches!(action, vergence_protocol::window::Action::Set(_)) {
-                    return reply(self, AgentEvent::Acted { serial, ok: false, why: "a secret field is not set by agents".into() });
+                    return reply(
+                        self,
+                        AgentEvent::Acted { serial, ok: false, why: "a secret field is not set by agents".into() },
+                    );
                 }
                 // The widget must still be what the agent meant: ids are by
                 // place, and a window that changed may have moved them.
-                let current = w.native().and_then(|n| n.meaning()).and_then(|(_, _, nodes)| nodes.into_iter().find(|m| m.id == node));
+                let current = w
+                    .native()
+                    .and_then(|n| n.meaning())
+                    .and_then(|(_, _, nodes)| nodes.into_iter().find(|m| m.id == node));
                 let Some(m) = current else {
-                    return reply(self, AgentEvent::Acted { serial, ok: false, why: "no such widget now (the window changed)".into() });
+                    return reply(
+                        self,
+                        AgentEvent::Acted { serial, ok: false, why: "no such widget now (the window changed)".into() },
+                    );
                 };
                 if (!role.is_empty() && m.role != role) || (!name.is_empty() && m.name != name) {
-                    return reply(self, AgentEvent::Acted { serial, ok: false, why: format!("the widget changed: it is now the {} {:?}", m.role, m.name) });
+                    return reply(
+                        self,
+                        AgentEvent::Acted {
+                            serial,
+                            ok: false,
+                            why: format!("the widget changed: it is now the {} {:?}", m.role, m.name),
+                        },
+                    );
                 }
                 let app = w.native().map(|n| n.app_id.clone()).unwrap_or_default();
                 self.agent_log(id, &app, &format!("{action:?} #{node} ({} {:?})", m.role, m.name));
@@ -537,14 +666,25 @@ impl Server {
                     out.push((
                         n,
                         match c {
-                            Change::Window { client, window } if seen(client, window) => AgentChange::Window { client, window },
+                            Change::Window { client, window } if seen(client, window) => {
+                                AgentChange::Window { client, window }
+                            }
                             Change::Window { .. } => AgentChange::Window { client: 0, window: 0 },
-                            Change::Focus { client, window, node } if seen(client, window) => AgentChange::Focus { client, window, node },
-                            Change::Caret { client, window, at } if seen(client, window) => AgentChange::Caret { client, window, at },
-                            Change::Tree { client, window } if seen(client, window) => AgentChange::Tree { client, window },
+                            Change::Focus { client, window, node } if seen(client, window) => {
+                                AgentChange::Focus { client, window, node }
+                            }
+                            Change::Caret { client, window, at } if seen(client, window) => {
+                                AgentChange::Caret { client, window, at }
+                            }
+                            Change::Tree { client, window } if seen(client, window) => {
+                                AgentChange::Tree { client, window }
+                            }
                             Change::Focus { .. } | Change::Caret { .. } | Change::Tree { .. } => continue,
                             // Only its own grants' time, by the app's id.
-                            Change::Time { agent, app, minutes_left } if agent == me => AgentChange::Time { app: app.split(" @ ").next().unwrap_or(&app).to_string(), minutes_left },
+                            Change::Time { agent, app, minutes_left } if agent == me => AgentChange::Time {
+                                app: app.split(" @ ").next().unwrap_or(&app).to_string(),
+                                minutes_left,
+                            },
                             Change::Time { .. } => continue,
                         },
                     ));
@@ -564,7 +704,10 @@ fn found_line(f: &Found) -> String {
     let items = if n.items.is_empty() { String::new() } else { format!(" items {:?}", n.items) };
     let index = f.index.map_or("-".to_string(), |i| i.to_string());
     let screen = f.screen.as_deref().unwrap_or("-");
-    format!("window {index} {:?} #{} {} {:?}{value}{states}{items} at {:.0},{:.0} {:.0}x{:.0} on {screen}", f.title, n.id, n.role, n.name, f.at.0, f.at.1, f.at.2, f.at.3)
+    format!(
+        "window {index} {:?} #{} {} {:?}{value}{states}{items} at {:.0},{:.0} {:.0}x{:.0} on {screen}",
+        f.title, n.id, n.role, n.name, f.at.0, f.at.1, f.at.2, f.at.3
+    )
 }
 
 #[cfg(test)]
@@ -572,7 +715,19 @@ mod tests {
     use super::*;
 
     fn node(id: u64, parent: u64, role: &str, name: &str) -> Node {
-        Node { id, parent, role: role.into(), name: name.into(), value: None, states: vec![], x: 0.0, y: 0.0, w: 1.0, h: 1.0, items: vec![] }
+        Node {
+            id,
+            parent,
+            role: role.into(),
+            name: name.into(),
+            value: None,
+            states: vec![],
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            items: vec![],
+        }
     }
 
     /// A settings window: a page with a group holding a switch and a button,
@@ -610,7 +765,11 @@ mod tests {
         assert_eq!(ids("W > button:*"), vec![5, 7], "a role with any name");
         assert_eq!(ids("W > scroll area:Page"), vec![1], "a role of two words");
         assert_eq!(ids("W > scroll area:*"), vec![1]);
-        assert_eq!(parse("W > Time left: 5 min").1[0].name.as_deref(), Some("time left: 5 min"), "words before a colon that are no role are a name");
+        assert_eq!(
+            parse("W > Time left: 5 min").1[0].name.as_deref(),
+            Some("time left: 5 min"),
+            "words before a colon that are no role are a name"
+        );
     }
 
     #[test]

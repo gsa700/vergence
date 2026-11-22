@@ -140,78 +140,201 @@ pub const SHAPE_COL_RESIZE: u32 = 30;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     /// The server refuses to go on: the object at fault, a code, and why.
-    Error { object: u32, code: u32, message: String },
+    Error {
+        object: u32,
+        code: u32,
+        message: String,
+    },
     /// Something the server offers: bind it with [`Client::bind`].
-    Global { name: u32, interface: String, version: u32 },
-    GlobalRemove { name: u32 },
+    Global {
+        name: u32,
+        interface: String,
+        version: u32,
+    },
+    GlobalRemove {
+        name: u32,
+    },
     /// A callback fired (a sync point reached, or time to draw a frame).
-    Done { callback: u32, data: u32 },
-    ShmFormat { format: u32 },
+    Done {
+        callback: u32,
+        data: u32,
+    },
+    ShmFormat {
+        format: u32,
+    },
     /// The server has finished with a buffer: it may be drawn into again.
-    BufferRelease { buffer: u32 },
-    Ping { serial: u32 },
+    BufferRelease {
+        buffer: u32,
+    },
+    Ping {
+        serial: u32,
+    },
     /// The window's new state is complete; acknowledge it, then draw.
-    Configure { xdg_surface: u32, serial: u32 },
+    Configure {
+        xdg_surface: u32,
+        serial: u32,
+    },
     /// The size the server suggests (0: the window's own choice) and its states.
-    ToplevelConfigure { toplevel: u32, width: i32, height: i32, states: Vec<u32> },
+    ToplevelConfigure {
+        toplevel: u32,
+        width: i32,
+        height: i32,
+        states: Vec<u32>,
+    },
     /// The user asked for the window to be closed.
-    Close { toplevel: u32 },
+    Close {
+        toplevel: u32,
+    },
     /// The scale to draw at, in 120ths.
-    PreferredScale { object: u32, scale120: u32 },
-    DecorationMode { decoration: u32, mode: u32 },
-    SurfaceEnter { surface: u32, output: u32 },
-    SurfaceLeave { surface: u32, output: u32 },
+    PreferredScale {
+        object: u32,
+        scale120: u32,
+    },
+    DecorationMode {
+        decoration: u32,
+        mode: u32,
+    },
+    SurfaceEnter {
+        surface: u32,
+        output: u32,
+    },
+    SurfaceLeave {
+        surface: u32,
+        output: u32,
+    },
     /// What the seat has: [`SEAT_POINTER`], [`SEAT_KEYBOARD`], [`SEAT_TOUCH`].
-    SeatCapabilities { seat: u32, capabilities: u32 },
+    SeatCapabilities {
+        seat: u32,
+        capabilities: u32,
+    },
     /// The pointer came onto a surface, at x, y in the surface's units.
-    PointerEnter { serial: u32, surface: u32, x: f64, y: f64 },
-    PointerLeave { serial: u32, surface: u32 },
-    PointerMotion { time: u32, x: f64, y: f64 },
+    PointerEnter {
+        serial: u32,
+        surface: u32,
+        x: f64,
+        y: f64,
+    },
+    PointerLeave {
+        serial: u32,
+        surface: u32,
+    },
+    PointerMotion {
+        time: u32,
+        x: f64,
+        y: f64,
+    },
     /// A button (a Linux input code: 0x110 left, 0x111 right, 0x112 middle).
-    PointerButton { serial: u32, time: u32, button: u32, pressed: bool },
+    PointerButton {
+        serial: u32,
+        time: u32,
+        button: u32,
+        pressed: bool,
+    },
     /// Scrolling: `axis` 0 is up and down, 1 is sideways.
-    PointerAxis { time: u32, axis: u32, value: f64 },
+    PointerAxis {
+        time: u32,
+        axis: u32,
+        value: f64,
+    },
     /// The pointer events since the last frame belong together.
     PointerFrame,
     /// A finger came down on a surface, at x, y in the surface's units. `id`
     /// tells it from the other fingers until it lifts.
-    TouchDown { serial: u32, time: u32, surface: u32, id: i32, x: f64, y: f64 },
-    TouchUp { serial: u32, time: u32, id: i32 },
-    TouchMotion { time: u32, id: i32, x: f64, y: f64 },
+    TouchDown {
+        serial: u32,
+        time: u32,
+        surface: u32,
+        id: i32,
+        x: f64,
+        y: f64,
+    },
+    TouchUp {
+        serial: u32,
+        time: u32,
+        id: i32,
+    },
+    TouchMotion {
+        time: u32,
+        id: i32,
+        x: f64,
+        y: f64,
+    },
     /// The touch events since the last frame belong together.
     TouchFrame,
     /// The server took every finger's touch back: what they began is dropped.
     TouchCancel,
     /// The keyboard's map: `size` bytes of text in the file descriptor that
     /// came with it ([`Client::take_fd`]). `format` 1 is xkb.
-    Keymap { format: u32, size: u32 },
-    KeyboardEnter { serial: u32, surface: u32 },
-    KeyboardLeave { serial: u32, surface: u32 },
+    Keymap {
+        format: u32,
+        size: u32,
+    },
+    KeyboardEnter {
+        serial: u32,
+        surface: u32,
+    },
+    KeyboardLeave {
+        serial: u32,
+        surface: u32,
+    },
     /// A key (a Linux input code; xkb's keycode is 8 more).
-    Key { serial: u32, time: u32, key: u32, pressed: bool },
-    Modifiers { depressed: u32, latched: u32, locked: u32, group: u32 },
+    Key {
+        serial: u32,
+        time: u32,
+        key: u32,
+        pressed: bool,
+    },
+    Modifiers {
+        depressed: u32,
+        latched: u32,
+        locked: u32,
+        group: u32,
+    },
     /// Held keys repeat `rate` times a second after `delay` milliseconds (0: never).
-    RepeatInfo { rate: i32, delay: i32 },
+    RepeatInfo {
+        rate: i32,
+        delay: i32,
+    },
     /// Something is on offer (a clipboard's contents, or a drag): its kinds
     /// of data follow as [`Event::OfferKind`].
-    DataOffer { offer: u32 },
+    DataOffer {
+        offer: u32,
+    },
     /// One kind of data an offer can give, a MIME type.
-    OfferKind { offer: u32, mime: String },
+    OfferKind {
+        offer: u32,
+        mime: String,
+    },
     /// What the clipboard holds now, for the program with the keyboard
     /// (None: nothing).
-    Selection { offer: Option<u32> },
+    Selection {
+        offer: Option<u32>,
+    },
     /// Another program wants what we put on the clipboard, as `mime`,
     /// written to the file descriptor that came with this ([`Client::take_fd`]).
-    SourceSend { source: u32, mime: String },
+    SourceSend {
+        source: u32,
+        mime: String,
+    },
     /// Our clipboard contents have been replaced: the source is finished.
-    SourceCancelled { source: u32 },
+    SourceCancelled {
+        source: u32,
+    },
     /// A pixel format (a fourcc code) and memory layout (modifier) the
     /// server can show from the GPU's memory.
-    DmabufFormat { format: u32, modifier: u64 },
+    DmabufFormat {
+        format: u32,
+        modifier: u64,
+    },
     /// The buffer asked for with [`Client::create_dmabuf`] exists.
-    DmabufCreated { params: u32, buffer: u32 },
+    DmabufCreated {
+        params: u32,
+        buffer: u32,
+    },
     /// The server could not take that buffer; draw into shared memory instead.
-    DmabufFailed { params: u32 },
+    DmabufFailed {
+        params: u32,
+    },
 }
 
 /// Object ids from here up are the server's to give out.
@@ -226,8 +349,12 @@ fn invalid(e: WireError) -> io::Error {
 pub fn decode(interface: Interface, object: u32, opcode: u16, arguments: &[u8]) -> Result<Option<Event>, WireError> {
     let mut r = Reader::new(arguments);
     Ok(Some(match (interface, opcode) {
-        (Interface::Display, 0) => Event::Error { object: r.uint()?, code: r.uint()?, message: r.string()?.unwrap_or_default() },
-        (Interface::Registry, 0) => Event::Global { name: r.uint()?, interface: r.string()?.unwrap_or_default(), version: r.uint()? },
+        (Interface::Display, 0) => {
+            Event::Error { object: r.uint()?, code: r.uint()?, message: r.string()?.unwrap_or_default() }
+        }
+        (Interface::Registry, 0) => {
+            Event::Global { name: r.uint()?, interface: r.string()?.unwrap_or_default(), version: r.uint()? }
+        }
         (Interface::Registry, 1) => Event::GlobalRemove { name: r.uint()? },
         (Interface::Callback, 0) => Event::Done { callback: object, data: r.uint()? },
         (Interface::Shm, 0) => Event::ShmFormat { format: r.uint()? },
@@ -236,18 +363,31 @@ pub fn decode(interface: Interface, object: u32, opcode: u16, arguments: &[u8]) 
         (Interface::Surface, 1) => Event::SurfaceLeave { surface: object, output: r.uint()? },
         (Interface::WmBase, 0) => Event::Ping { serial: r.uint()? },
         (Interface::XdgSurface, 0) => Event::Configure { xdg_surface: object, serial: r.uint()? },
-        (Interface::Toplevel, 0) => Event::ToplevelConfigure { toplevel: object, width: r.int()?, height: r.int()?, states: r.words()? },
+        (Interface::Toplevel, 0) => {
+            Event::ToplevelConfigure { toplevel: object, width: r.int()?, height: r.int()?, states: r.words()? }
+        }
         (Interface::Toplevel, 1) => Event::Close { toplevel: object },
         (Interface::FractionalScale, 0) => Event::PreferredScale { object, scale120: r.uint()? },
         (Interface::Decoration, 0) => Event::DecorationMode { decoration: object, mode: r.uint()? },
         (Interface::Seat, 0) => Event::SeatCapabilities { seat: object, capabilities: r.uint()? },
-        (Interface::Pointer, 0) => Event::PointerEnter { serial: r.uint()?, surface: r.uint()?, x: r.fixed()?, y: r.fixed()? },
+        (Interface::Pointer, 0) => {
+            Event::PointerEnter { serial: r.uint()?, surface: r.uint()?, x: r.fixed()?, y: r.fixed()? }
+        }
         (Interface::Pointer, 1) => Event::PointerLeave { serial: r.uint()?, surface: r.uint()? },
         (Interface::Pointer, 2) => Event::PointerMotion { time: r.uint()?, x: r.fixed()?, y: r.fixed()? },
-        (Interface::Pointer, 3) => Event::PointerButton { serial: r.uint()?, time: r.uint()?, button: r.uint()?, pressed: r.uint()? == 1 },
+        (Interface::Pointer, 3) => {
+            Event::PointerButton { serial: r.uint()?, time: r.uint()?, button: r.uint()?, pressed: r.uint()? == 1 }
+        }
         (Interface::Pointer, 4) => Event::PointerAxis { time: r.uint()?, axis: r.uint()?, value: r.fixed()? },
         (Interface::Pointer, 5) => Event::PointerFrame,
-        (Interface::Touch, 0) => Event::TouchDown { serial: r.uint()?, time: r.uint()?, surface: r.uint()?, id: r.int()?, x: r.fixed()?, y: r.fixed()? },
+        (Interface::Touch, 0) => Event::TouchDown {
+            serial: r.uint()?,
+            time: r.uint()?,
+            surface: r.uint()?,
+            id: r.int()?,
+            x: r.fixed()?,
+            y: r.fixed()?,
+        },
         (Interface::Touch, 1) => Event::TouchUp { serial: r.uint()?, time: r.uint()?, id: r.int()? },
         (Interface::Touch, 2) => Event::TouchMotion { time: r.uint()?, id: r.int()?, x: r.fixed()?, y: r.fixed()? },
         (Interface::Touch, 3) => Event::TouchFrame,
@@ -255,7 +395,9 @@ pub fn decode(interface: Interface, object: u32, opcode: u16, arguments: &[u8]) 
         (Interface::Keyboard, 0) => Event::Keymap { format: r.uint()?, size: r.uint()? },
         (Interface::Keyboard, 1) => Event::KeyboardEnter { serial: r.uint()?, surface: r.uint()? },
         (Interface::Keyboard, 2) => Event::KeyboardLeave { serial: r.uint()?, surface: r.uint()? },
-        (Interface::Keyboard, 3) => Event::Key { serial: r.uint()?, time: r.uint()?, key: r.uint()?, pressed: r.uint()? == 1 },
+        (Interface::Keyboard, 3) => {
+            Event::Key { serial: r.uint()?, time: r.uint()?, key: r.uint()?, pressed: r.uint()? == 1 }
+        }
         (Interface::Keyboard, 4) => {
             let _serial = r.uint()?;
             Event::Modifiers { depressed: r.uint()?, latched: r.uint()?, locked: r.uint()?, group: r.uint()? }
@@ -317,7 +459,11 @@ impl Client {
     /// file descriptors (a pipe the clipboard is being read from, a pipe
     /// that wakes the program): the events, and whether each of those
     /// descriptors is ready to be read.
-    pub fn dispatch_or(&mut self, others: [Option<RawFd>; 2], timeout: Option<Duration>) -> io::Result<(Vec<Event>, [bool; 2])> {
+    pub fn dispatch_or(
+        &mut self,
+        others: [Option<RawFd>; 2],
+        timeout: Option<Duration>,
+    ) -> io::Result<(Vec<Event>, [bool; 2])> {
         self.conn.flush()?;
         let (server, other_ready) = self.conn.wait_also(others, timeout)?;
         if !server {
@@ -392,7 +538,9 @@ impl Client {
     /// Takes up one of the server's offers. The version used is the older of
     /// the server's and this file's.
     pub fn bind(&mut self, registry: u32, name: u32, interface: Interface, offered: u32) -> io::Result<u32> {
-        let global = interface.global_name().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "not an interface that is bound"))?;
+        let global = interface
+            .global_name()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "not an interface that is bound"))?;
         let id = self.create(interface);
         self.send(Writer::new(registry, 0).uint(name).string(global).uint(offered.min(interface.version())).uint(id))?;
         Ok(id)
@@ -437,7 +585,15 @@ impl Client {
     }
 
     /// A picture in a pool: `width` x `height` pixels, `stride` bytes a row, from `offset`.
-    pub fn create_buffer(&mut self, pool: u32, offset: i32, width: i32, height: i32, stride: i32, format: u32) -> io::Result<u32> {
+    pub fn create_buffer(
+        &mut self,
+        pool: u32,
+        offset: i32,
+        width: i32,
+        height: i32,
+        stride: i32,
+        format: u32,
+    ) -> io::Result<u32> {
         let id = self.create(Interface::Buffer);
         self.send(Writer::new(pool, 0).uint(id).int(offset).int(width).int(height).int(stride).uint(format))?;
         Ok(id)
@@ -597,10 +753,28 @@ impl Client {
     /// says. The answer is [`Event::DmabufCreated`] or
     /// [`Event::DmabufFailed`], for the params object returned here.
     #[allow(clippy::too_many_arguments)]
-    pub fn create_dmabuf(&mut self, dmabuf: u32, fd: RawFd, width: i32, height: i32, format: u32, modifier: u64, offset: u32, stride: u32) -> io::Result<u32> {
+    pub fn create_dmabuf(
+        &mut self,
+        dmabuf: u32,
+        fd: RawFd,
+        width: i32,
+        height: i32,
+        format: u32,
+        modifier: u64,
+        offset: u32,
+        stride: u32,
+    ) -> io::Result<u32> {
         let params = self.create(Interface::DmabufParams);
         self.send(Writer::new(dmabuf, 1).uint(params))?;
-        self.send(Writer::new(params, 1).fd(fd).uint(0).uint(offset).uint(stride).uint((modifier >> 32) as u32).uint(modifier as u32))?;
+        self.send(
+            Writer::new(params, 1)
+                .fd(fd)
+                .uint(0)
+                .uint(offset)
+                .uint(stride)
+                .uint((modifier >> 32) as u32)
+                .uint(modifier as u32),
+        )?;
         self.send(Writer::new(params, 2).int(width).int(height).uint(format).uint(0))?;
         Ok(params)
     }
@@ -720,7 +894,14 @@ mod tests {
         assert_eq!((object, opcode, Reader::new(&args).string()), (top, 2, Ok(Some("Vergence".into()))));
         assert_eq!(next(&mut server), (surface, 6, vec![]));
         // The server configures the window; a ping; the user closes it.
-        server.send(Writer::new(top, 0).int(800).int(600).array(&[STATE_ACTIVATED.to_ne_bytes(), STATE_MAXIMIZED.to_ne_bytes()].concat())).unwrap();
+        server
+            .send(
+                Writer::new(top, 0)
+                    .int(800)
+                    .int(600)
+                    .array(&[STATE_ACTIVATED.to_ne_bytes(), STATE_MAXIMIZED.to_ne_bytes()].concat()),
+            )
+            .unwrap();
         server.send(Writer::new(xdg, 0).uint(41)).unwrap();
         server.send(Writer::new(wm, 0).uint(9)).unwrap();
         server.send(Writer::new(top, 1)).unwrap();
@@ -728,7 +909,12 @@ mod tests {
         assert_eq!(
             client.dispatch().unwrap(),
             [
-                Event::ToplevelConfigure { toplevel: top, width: 800, height: 600, states: vec![STATE_ACTIVATED, STATE_MAXIMIZED] },
+                Event::ToplevelConfigure {
+                    toplevel: top,
+                    width: 800,
+                    height: 600,
+                    states: vec![STATE_ACTIVATED, STATE_MAXIMIZED]
+                },
                 Event::Configure { xdg_surface: xdg, serial: 41 },
                 Event::Ping { serial: 9 },
                 Event::Close { toplevel: top },
@@ -778,7 +964,11 @@ mod tests {
             ]
         );
         let mut text = String::new();
-        std::io::Read::read_to_string(&mut std::fs::File::from(client.take_fd().expect("the keymap's file")), &mut text).unwrap();
+        std::io::Read::read_to_string(
+            &mut std::fs::File::from(client.take_fd().expect("the keymap's file")),
+            &mut text,
+        )
+        .unwrap();
         assert_eq!(text, "xkb_keymap {};");
         let _ = std::fs::remove_file(dir);
         // Moving and resizing answer a press by its serial.
@@ -787,7 +977,10 @@ mod tests {
         client.start_resize(top, seat, 71, EDGE_BOTTOM | EDGE_RIGHT).unwrap();
         client.flush().unwrap();
         assert_eq!(next(&mut server), (top, 5, [seat.to_ne_bytes(), 71u32.to_ne_bytes()].concat()));
-        assert_eq!(next(&mut server), (top, 6, [seat.to_ne_bytes(), 71u32.to_ne_bytes(), 10u32.to_ne_bytes()].concat()));
+        assert_eq!(
+            next(&mut server),
+            (top, 6, [seat.to_ne_bytes(), 71u32.to_ne_bytes(), 10u32.to_ne_bytes()].concat())
+        );
     }
 
     #[test]
@@ -802,12 +995,17 @@ mod tests {
         assert_eq!(next(&mut server), (manager, 1, [device.to_ne_bytes(), seat.to_ne_bytes()].concat()));
         assert_eq!(next(&mut server), (manager, 0, source.to_ne_bytes().to_vec()));
         let (object, opcode, args) = next(&mut server);
-        assert_eq!((object, opcode, Reader::new(&args).string()), (source, 0, Ok(Some("text/plain;charset=utf-8".into()))));
+        assert_eq!(
+            (object, opcode, Reader::new(&args).string()),
+            (source, 0, Ok(Some("text/plain;charset=utf-8".into())))
+        );
         assert_eq!(next(&mut server).1, 0);
         assert_eq!(next(&mut server), (device, 1, [source.to_ne_bytes(), 55u32.to_ne_bytes()].concat()));
         // Another program asks for it: the request comes with a pipe to write into.
         let (read_end, write_end) = crate::conn::pipe().unwrap();
-        server.send(Writer::new(source, 1).string("text/plain").fd(std::os::fd::AsRawFd::as_raw_fd(&write_end))).unwrap();
+        server
+            .send(Writer::new(source, 1).string("text/plain").fd(std::os::fd::AsRawFd::as_raw_fd(&write_end)))
+            .unwrap();
         // Then someone else copies: ours is canceled, and theirs is offered in two kinds.
         server.send(Writer::new(source, 2)).unwrap();
         let offer = 0xff00_0001u32;
@@ -829,7 +1027,11 @@ mod tests {
             ]
         );
         // What we write to the descriptor that came with the request is what the other end reads.
-        std::io::Write::write_all(&mut std::fs::File::from(client.take_fd().expect("the pipe to write into")), b"copied").unwrap();
+        std::io::Write::write_all(
+            &mut std::fs::File::from(client.take_fd().expect("the pipe to write into")),
+            b"copied",
+        )
+        .unwrap();
         let mut got = String::new();
         std::io::Read::read_to_string(&mut std::fs::File::from(read_end), &mut got).unwrap();
         assert_eq!(got, "copied");
@@ -840,7 +1042,10 @@ mod tests {
         client.destroy_offer(offer).unwrap();
         client.flush().unwrap();
         let (object, opcode, args) = next(&mut server);
-        assert_eq!((object, opcode, Reader::new(&args).string()), (offer, 1, Ok(Some("text/plain;charset=utf-8".into()))));
+        assert_eq!(
+            (object, opcode, Reader::new(&args).string()),
+            (offer, 1, Ok(Some("text/plain;charset=utf-8".into())))
+        );
         assert!(server.take_fd().is_some(), "the pipe went with the request");
         assert_eq!(next(&mut server), (offer, 2, vec![]));
         // The clipboard emptied; and an "offer" with an id that is ours to give out is not believed.
@@ -861,20 +1066,41 @@ mod tests {
         server.flush().unwrap();
         assert_eq!(
             client.dispatch().unwrap(),
-            [Event::DmabufFormat { format: 0x3432_5241, modifier: 0x0100_0000_0000_0002 }, Event::DmabufFormat { format: 0x3432_5241, modifier: 0x00ff_ffff_ffff_ffff }]
+            [
+                Event::DmabufFormat { format: 0x3432_5241, modifier: 0x0100_0000_0000_0002 },
+                Event::DmabufFormat { format: 0x3432_5241, modifier: 0x00ff_ffff_ffff_ffff }
+            ]
         );
         let (_r, w) = crate::conn::pipe().unwrap();
-        let params = client.create_dmabuf(dmabuf, std::os::fd::AsRawFd::as_raw_fd(&w), 1920, 1260, 0x3432_5241, 0x0100_0000_0000_0002, 0, 7680).unwrap();
+        let params = client
+            .create_dmabuf(
+                dmabuf,
+                std::os::fd::AsRawFd::as_raw_fd(&w),
+                1920,
+                1260,
+                0x3432_5241,
+                0x0100_0000_0000_0002,
+                0,
+                7680,
+            )
+            .unwrap();
         client.flush().unwrap();
         assert_eq!(next(&mut server), (dmabuf, 1, params.to_ne_bytes().to_vec()));
         let (object, opcode, args) = next(&mut server);
         let mut r = Reader::new(&args);
         assert_eq!((object, opcode), (params, 1));
-        assert_eq!((r.uint(), r.uint(), r.uint(), r.uint(), r.uint()), (Ok(0), Ok(0), Ok(7680), Ok(0x0100_0000), Ok(2)), "plane, offset, stride, modifier high and low");
+        assert_eq!(
+            (r.uint(), r.uint(), r.uint(), r.uint(), r.uint()),
+            (Ok(0), Ok(0), Ok(7680), Ok(0x0100_0000), Ok(2)),
+            "plane, offset, stride, modifier high and low"
+        );
         assert!(server.take_fd().is_some(), "the buffer's file descriptor went with it");
         let (object, opcode, args) = next(&mut server);
         let mut r = Reader::new(&args);
-        assert_eq!((object, opcode, r.int(), r.int(), r.uint(), r.uint()), (params, 2, Ok(1920), Ok(1260), Ok(0x3432_5241), Ok(0)));
+        assert_eq!(
+            (object, opcode, r.int(), r.int(), r.uint(), r.uint()),
+            (params, 2, Ok(1920), Ok(1260), Ok(0x3432_5241), Ok(0))
+        );
         // The server makes the buffer: it is ours to attach, and its release is heard.
         let buffer = 0xff00_0009u32;
         server.send(Writer::new(params, 0).uint(buffer)).unwrap();
@@ -884,7 +1110,14 @@ mod tests {
         server.send(Writer::new(second, 1)).unwrap();
         server.send(Writer::new(second, 0).uint(5)).unwrap();
         server.flush().unwrap();
-        assert_eq!(client.dispatch().unwrap(), [Event::DmabufCreated { params, buffer }, Event::BufferRelease { buffer }, Event::DmabufFailed { params: second }]);
+        assert_eq!(
+            client.dispatch().unwrap(),
+            [
+                Event::DmabufCreated { params, buffer },
+                Event::BufferRelease { buffer },
+                Event::DmabufFailed { params: second }
+            ]
+        );
     }
 
     #[test]
@@ -917,7 +1150,10 @@ mod tests {
         let (mut client, mut server) = pair();
         server.send(Writer::new(1, 0).uint(5).uint(2).string("invalid arguments for wl_surface@5.attach")).unwrap();
         server.flush().unwrap();
-        assert_eq!(client.dispatch().unwrap(), [Event::Error { object: 5, code: 2, message: "invalid arguments for wl_surface@5.attach".into() }]);
+        assert_eq!(
+            client.dispatch().unwrap(),
+            [Event::Error { object: 5, code: 2, message: "invalid arguments for wl_surface@5.attach".into() }]
+        );
         drop(server);
         assert_eq!(client.dispatch().unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
     }

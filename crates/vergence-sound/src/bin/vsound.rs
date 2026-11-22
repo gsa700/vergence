@@ -16,7 +16,9 @@ fn main() {
     let Some(mut sound) = vergence_sound::open() else {
         #[cfg(target_os = "linux")]
         if vergence_sound::pipewire_running() {
-            eprintln!("vsound: PipeWire (or PulseAudio) manages sound here; vergence-sound does not speak to it yet (a later milestone)");
+            eprintln!(
+                "vsound: PipeWire (or PulseAudio) manages sound here; vergence-sound does not speak to it yet (a later milestone)"
+            );
             std::process::exit(1);
         }
         eprintln!("vsound: no sound system we know here");
@@ -27,7 +29,14 @@ fn main() {
             println!("{}:", sound.system());
             for o in outs {
                 let volume = if o.adjustable { format!("{:>3}%", o.volume) } else { "   -".into() };
-                println!("{} {:<6} {:<22} {volume}{} ({})", if o.default { "*" } else { " " }, o.id, o.name, if o.muted { " muted" } else { "" }, o.detail);
+                println!(
+                    "{} {:<6} {:<22} {volume}{} ({})",
+                    if o.default { "*" } else { " " },
+                    o.id,
+                    o.name,
+                    if o.muted { " muted" } else { "" },
+                    o.detail
+                );
             }
         }),
         ["volume", id, v] => match v.parse::<u8>() {
@@ -38,10 +47,15 @@ fn main() {
         ["default", id] => sound.set_default(id),
         ["tone", id, rest @ ..] => {
             let channels = rest.first().and_then(|c| c.parse::<u32>().ok()).unwrap_or(2).clamp(1, 32);
-            let on: Vec<u32> = rest.get(1).map(|o| o.split(',').filter_map(|c| c.parse().ok()).filter(|c| (1..=channels).contains(c)).collect()).unwrap_or_else(|| vec![1, 2.min(channels)]);
+            let on: Vec<u32> = rest
+                .get(1)
+                .map(|o| o.split(',').filter_map(|c| c.parse().ok()).filter(|c| (1..=channels).contains(c)).collect())
+                .unwrap_or_else(|| vec![1, 2.min(channels)]);
             sound.tone(id, channels, &on).map(|said| println!("{said}"))
         }
-        _ => Err(std::io::Error::other("usage: vsound | volume <id> <0-100> | mute <id> on|off | default <id> | tone <id> [channels] [on]")),
+        _ => Err(std::io::Error::other(
+            "usage: vsound | volume <id> <0-100> | mute <id> on|off | default <id> | tone <id> [channels] [on]",
+        )),
     };
     if let Err(e) = result {
         eprintln!("vsound: {e}");

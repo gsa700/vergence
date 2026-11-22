@@ -66,14 +66,24 @@ impl Program for Dialog {
         "vdialog".into()
     }
     fn view(&self, _: &Theme) -> Element<Msg> {
-        column(vec![label(if self.modal { "Its window waits until this closes." } else { "Its window stays usable." }), label("Close it with its bar's button.").dim()])
-            .spacing(8.0)
-            .padding(20.0)
-            .into()
+        column(vec![
+            label(if self.modal { "Its window waits until this closes." } else { "Its window stays usable." }),
+            label("Close it with its bar's button.").dim(),
+        ])
+        .spacing(8.0)
+        .padding(20.0)
+        .into()
     }
     fn update(&mut self, _: Msg, _: &mut Window) {}
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: self.modal, min: (320.0, 140.0), max: (0.0, 0.0), alone: false, frosted: false }
+        vergence_ui::Style {
+            kind: vergence_ui::WinKind::Dialog,
+            modal: self.modal,
+            min: (320.0, 140.0),
+            max: (0.0, 0.0),
+            alone: false,
+            frosted: false,
+        }
     }
 }
 
@@ -90,11 +100,21 @@ impl Program for Palette {
         "vdialog".into()
     }
     fn view(&self, _: &Theme) -> Element<Msg> {
-        column(vec![label("A palette."), label("Hidden while another application is in front.").dim()]).spacing(6.0).padding(12.0).into()
+        column(vec![label("A palette."), label("Hidden while another application is in front.").dim()])
+            .spacing(6.0)
+            .padding(12.0)
+            .into()
     }
     fn update(&mut self, _: Msg, _: &mut Window) {}
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Palette, modal: false, min: (200.0, 100.0), max: (0.0, 0.0), alone: false, frosted: false }
+        vergence_ui::Style {
+            kind: vergence_ui::WinKind::Palette,
+            modal: false,
+            min: (200.0, 100.0),
+            max: (0.0, 0.0),
+            alone: false,
+            frosted: false,
+        }
     }
 }
 

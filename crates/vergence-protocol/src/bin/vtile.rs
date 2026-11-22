@@ -26,7 +26,6 @@
 
 use std::io::{BufRead, Write};
 
-
 use vergence_protocol::{
     Client,
     bus::{ClientMsg, ServerMsg},
@@ -80,7 +79,8 @@ fn run(args: &[String]) -> Result<(), String> {
         while let Some(m) = c.try_event().map_err(|e| e.to_string())? {
             event(&mut out, m);
         }
-        let ready = poll_readable(&[Some(c.raw_fd())], Some(std::time::Duration::from_millis(100))).map_err(|e| e.to_string())?;
+        let ready = poll_readable(&[Some(c.raw_fd())], Some(std::time::Duration::from_millis(100)))
+            .map_err(|e| e.to_string())?;
         if ready[0] && !c.read_ready().map_err(|e| e.to_string())? {
             return Err("the session ended".into());
         }
@@ -132,7 +132,11 @@ fn apply(tile: &mut Tile, args: &[String]) -> Result<(), String> {
     while i < args.len() {
         let flag = args[i].as_str();
         let value = args.get(i + 1).ok_or_else(|| format!("{flag} needs a value"))?.clone();
-        let pair = |v: &str| v.split_once('=').map(|(a, b)| (a.to_string(), b.to_string())).ok_or_else(|| format!("{flag} wants name=value, not {v:?}"));
+        let pair = |v: &str| {
+            v.split_once('=')
+                .map(|(a, b)| (a.to_string(), b.to_string()))
+                .ok_or_else(|| format!("{flag} wants name=value, not {v:?}"))
+        };
         match flag {
             "--value" => tile.value = value,
             "--label" => tile.label = value,
@@ -151,7 +155,11 @@ fn apply(tile: &mut Tile, args: &[String]) -> Result<(), String> {
             }
             "--row" => rows.get_or_insert_with(Vec::new).push(pair(&value)?),
             "--chart" => {
-                tile.card.chart = value.split(',').filter(|v| !v.trim().is_empty()).map(|v| v.trim().parse::<f32>().map_err(|_| format!("not a number: {v:?}"))).collect::<Result<_, _>>()?;
+                tile.card.chart = value
+                    .split(',')
+                    .filter(|v| !v.trim().is_empty())
+                    .map(|v| v.trim().parse::<f32>().map_err(|_| format!("not a number: {v:?}")))
+                    .collect::<Result<_, _>>()?;
             }
             "--push" => {
                 tile.card.chart.push(value.trim().parse::<f32>().map_err(|_| format!("not a number: {value:?}"))?);
@@ -168,14 +176,27 @@ fn apply(tile: &mut Tile, args: &[String]) -> Result<(), String> {
                 let (id, rest) = pair(&value)?;
                 let (label, on) = rest.rsplit_once('=').ok_or("--switch wants id=Label=on|off")?;
                 let on = matches!(on, "on" | "1" | "true");
-                controls.get_or_insert_with(Vec::new).push(Control { id, label: label.into(), kind: ControlKind::Switch(on) });
+                controls.get_or_insert_with(Vec::new).push(Control {
+                    id,
+                    label: label.into(),
+                    kind: ControlKind::Switch(on),
+                });
             }
             "--slider" => {
                 let (id, rest) = pair(&value)?;
                 let (label, nums) = rest.rsplit_once('=').ok_or("--slider wants id=Label=value,min,max,step")?;
-                let n: Vec<f64> = nums.split(',').map(|v| v.trim().parse::<f64>().map_err(|_| format!("not a number: {v:?}"))).collect::<Result<_, _>>()?;
-                let [value, min, max, step] = n[..] else { return Err("--slider wants four numbers: value,min,max,step".into()) };
-                controls.get_or_insert_with(Vec::new).push(Control { id, label: label.into(), kind: ControlKind::Slider { value, min, max, step } });
+                let n: Vec<f64> = nums
+                    .split(',')
+                    .map(|v| v.trim().parse::<f64>().map_err(|_| format!("not a number: {v:?}")))
+                    .collect::<Result<_, _>>()?;
+                let [value, min, max, step] = n[..] else {
+                    return Err("--slider wants four numbers: value,min,max,step".into());
+                };
+                controls.get_or_insert_with(Vec::new).push(Control {
+                    id,
+                    label: label.into(),
+                    kind: ControlKind::Slider { value, min, max, step },
+                });
             }
             other => return Err(format!("no option {other:?}")),
         }
@@ -200,7 +221,9 @@ fn split(line: &str) -> Result<Vec<String>, String> {
     while let Some(ch) = chars.next() {
         match (quote, ch) {
             (Some(q), c) if c == q => quote = None,
-            (Some('"') | None, '\\') => word.get_or_insert_with(String::new).push(chars.next().ok_or("a backslash at the end")?),
+            (Some('"') | None, '\\') => {
+                word.get_or_insert_with(String::new).push(chars.next().ok_or("a backslash at the end")?)
+            }
             (Some(_), c) => word.get_or_insert_with(String::new).push(c),
             (None, '"' | '\'') => {
                 quote = Some(ch);
@@ -223,7 +246,10 @@ mod tests {
 
     #[test]
     fn lines_split_as_a_shell_would() {
-        assert_eq!(split(r#"--value "23 m" --row 'Load=27 %' --note a\ b"#).unwrap(), ["--value", "23 m", "--row", "Load=27 %", "--note", "a b"]);
+        assert_eq!(
+            split(r#"--value "23 m" --row 'Load=27 %' --note a\ b"#).unwrap(),
+            ["--value", "23 m", "--row", "Load=27 %", "--note", "a b"]
+        );
         assert_eq!(split(r#"--label """#).unwrap(), ["--label", ""]);
         assert!(split("--value \"open").is_err());
         assert!(split("  ").unwrap().is_empty());
@@ -233,7 +259,24 @@ mod tests {
     fn options_change_the_tile() {
         let mut t = Tile { id: "ups".into(), ..Tile::default() };
         let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        apply(&mut t, &a(&["--value", "23 m", "--label", "UPS", "--state", "warning", "--row", "Load=27 %", "--row", "On=mains", "--switch", "beep=Beeper=on"])).unwrap();
+        apply(
+            &mut t,
+            &a(&[
+                "--value",
+                "23 m",
+                "--label",
+                "UPS",
+                "--state",
+                "warning",
+                "--row",
+                "Load=27 %",
+                "--row",
+                "On=mains",
+                "--switch",
+                "beep=Beeper=on",
+            ]),
+        )
+        .unwrap();
         assert_eq!((t.value.as_str(), t.state), ("23 m", TileState::Warning));
         assert_eq!(t.card.rows.len(), 2);
         assert_eq!(t.card.controls[0].kind, ControlKind::Switch(true));

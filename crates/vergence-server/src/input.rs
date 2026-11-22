@@ -5,18 +5,14 @@
 // (dispatch.rs).
 use smithay::{
     backend::input::{
-        AbsolutePositionEvent, Axis, AxisSource, Event, InputBackend, InputEvent,
-        KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+        AbsolutePositionEvent, Axis, AxisSource, Event, InputBackend, InputEvent, KeyboardKeyEvent, PointerAxisEvent,
+        PointerButtonEvent,
     },
-    input::{
-        keyboard::FilterResult,
-        pointer::AxisFrame,
-    },
+    input::{keyboard::FilterResult, pointer::AxisFrame},
     utils::SERIAL_COUNTER,
 };
 
 use crate::{focus::KeyboardFocus, state::Server};
-
 
 impl Server {
     /// A key went down or up: the keyboard, and the control socket's `key` and
@@ -25,7 +21,12 @@ impl Server {
     /// Smithay's keyboard is fed it in every case, so its state stays right,
     /// and delivers it only to a Wayland or X11 window that has the keyboard;
     /// a native window has it from us over the bus.
-    pub fn handle_key(&mut self, code: smithay::input::keyboard::Keycode, state: smithay::backend::input::KeyState, time: smithay::backend::input::InputTime) {
+    pub fn handle_key(
+        &mut self,
+        code: smithay::input::keyboard::Keycode,
+        state: smithay::backend::input::KeyState,
+        time: smithay::backend::input::InputTime,
+    ) {
         use vergence_seat::keyboard::KeyOut;
         let pressed = state == smithay::backend::input::KeyState::Pressed;
         // The seat knows which menu is open (the popup may have opened from the keyboard).
@@ -42,10 +43,15 @@ impl Server {
         // The elevation prompt takes every key while it shows (elevate.rs).
         if self.elevating() {
             if let Some(k) = self.seat.get_keyboard() {
-                k.input::<(), _>(self, code, state, SERIAL_COUNTER.next_serial(), time, |_, _, _| FilterResult::Intercept(()));
+                k.input::<(), _>(self, code, state, SERIAL_COUNTER.next_serial(), time, |_, _, _| {
+                    FilterResult::Intercept(())
+                });
             }
             // Super+L still locks (the lock is in front of the prompt).
-            if pressed && mods.logo && matches!(key.sym, xkbcommon::xkb::keysyms::KEY_l | xkbcommon::xkb::keysyms::KEY_L) {
+            if pressed
+                && mods.logo
+                && matches!(key.sym, xkbcommon::xkb::keysyms::KEY_l | xkbcommon::xkb::keysyms::KEY_L)
+            {
                 self.lock_request("Super+L");
                 return;
             }
@@ -54,29 +60,41 @@ impl Server {
         // An agent's question takes every key while it shows (agents.rs).
         if self.agents_asking() && !self.lock.on {
             if let Some(k) = self.seat.get_keyboard() {
-                k.input::<(), _>(self, code, state, SERIAL_COUNTER.next_serial(), time, |_, _, _| FilterResult::Intercept(()));
+                k.input::<(), _>(self, code, state, SERIAL_COUNTER.next_serial(), time, |_, _, _| {
+                    FilterResult::Intercept(())
+                });
             }
             return self.agent_dialog_key(key.sym, pressed);
         }
         // A program's screenshot question takes every key while it shows (portal_shot.rs).
         if self.portal_asking() && !self.lock.on {
             if let Some(k) = self.seat.get_keyboard() {
-                k.input::<(), _>(self, code, state, SERIAL_COUNTER.next_serial(), time, |_, _, _| FilterResult::Intercept(()));
+                k.input::<(), _>(self, code, state, SERIAL_COUNTER.next_serial(), time, |_, _, _| {
+                    FilterResult::Intercept(())
+                });
             }
             return self.portal_ask_key(key.sym, pressed);
         }
         // The log out dialog takes every key while it is open (session_dialog.rs).
         if self.session_dialog.open && !self.lock.on {
             if let Some(k) = self.seat.get_keyboard() {
-                k.input::<(), _>(self, code, state, SERIAL_COUNTER.next_serial(), time, |_, _, _| FilterResult::Intercept(()));
+                k.input::<(), _>(self, code, state, SERIAL_COUNTER.next_serial(), time, |_, _, _| {
+                    FilterResult::Intercept(())
+                });
             }
             return self.session_dialog_key(key.sym, pressed);
         }
         // Escape during a drag on the dock (an icon lifted, the dock dragged or
         // "Move dock"): everything goes back, and no program hears the key.
-        if pressed && !self.lock.on && self.shelf_busy() && crate::keys::seat_key(key.sym, code.raw()) == vergence_seat::keyboard::Key::Escape {
+        if pressed
+            && !self.lock.on
+            && self.shelf_busy()
+            && crate::keys::seat_key(key.sym, code.raw()) == vergence_seat::keyboard::Key::Escape
+        {
             if let Some(k) = self.seat.get_keyboard() {
-                k.input::<(), _>(self, code, state, SERIAL_COUNTER.next_serial(), time, |_, _, _| FilterResult::Intercept(()));
+                k.input::<(), _>(self, code, state, SERIAL_COUNTER.next_serial(), time, |_, _, _| {
+                    FilterResult::Intercept(())
+                });
             }
             self.shelf_cancel();
             return;
@@ -89,7 +107,9 @@ impl Server {
         let to_smithay = matches!(out, KeyOut::Forward(_)) && native.is_none();
         let serial = SERIAL_COUNTER.next_serial();
         if let Some(k) = self.seat.get_keyboard() {
-            k.input::<(), _>(self, code, state, serial, time, |_, _, _| if to_smithay { FilterResult::Forward } else { FilterResult::Intercept(()) });
+            k.input::<(), _>(self, code, state, serial, time, |_, _, _| {
+                if to_smithay { FilterResult::Forward } else { FilterResult::Intercept(()) }
+            });
         }
         // Ctrl pressed while a window is moved: with the "ctrl" setting it may now
         // snap, and the preview shows without waiting for the pointer to move.
@@ -192,8 +212,20 @@ impl Server {
         // Only what a person does counts: a device coming or going is not input
         // (2026-11-11, Hubble: the 14" monitor's USB touchscreen dropped off when the
         // screens went off and came back ~14 s later, waking them every 10 min all night).
-        let by_hand = !matches!(event, InputEvent::DeviceAdded { .. } | InputEvent::DeviceRemoved { .. } | InputEvent::TouchCancel { .. } | InputEvent::Special(_));
-        if by_hand && self.energy_activity() && matches!(event, InputEvent::Keyboard { .. } | InputEvent::PointerButton { .. } | InputEvent::TouchDown { .. }) {
+        let by_hand = !matches!(
+            event,
+            InputEvent::DeviceAdded { .. }
+                | InputEvent::DeviceRemoved { .. }
+                | InputEvent::TouchCancel { .. }
+                | InputEvent::Special(_)
+        );
+        if by_hand
+            && self.energy_activity()
+            && matches!(
+                event,
+                InputEvent::Keyboard { .. } | InputEvent::PointerButton { .. } | InputEvent::TouchDown { .. }
+            )
+        {
             return;
         }
         match event {
@@ -276,7 +308,9 @@ impl Server {
                     self.inputs_touchpad_used();
                 }
                 let k = self.scroll_factor(source);
-                let amount = |axis| k * event.amount(axis).unwrap_or_else(|| event.amount_v120(axis).unwrap_or(0.0) * 15.0 / 120.0);
+                let amount = |axis| {
+                    k * event.amount(axis).unwrap_or_else(|| event.amount_v120(axis).unwrap_or(0.0) * 15.0 / 120.0)
+                };
                 let notches = |axis| event.amount_v120(axis).map(|v| v * k);
                 let mut frame = AxisFrame::new(event.time()).source(source);
                 for axis in [Axis::Horizontal, Axis::Vertical] {
@@ -300,7 +334,15 @@ impl Server {
                     AxisSource::WheelTilt => 3,
                 };
                 let v120 = |axis| notches(axis).unwrap_or(0.0) as i32;
-                self.pointer_axis(frame, wire, amount(Axis::Horizontal), amount(Axis::Vertical), v120(Axis::Horizontal), v120(Axis::Vertical), Event::time(&event));
+                self.pointer_axis(
+                    frame,
+                    wire,
+                    amount(Axis::Horizontal),
+                    amount(Axis::Vertical),
+                    v120(Axis::Horizontal),
+                    v120(Axis::Vertical),
+                    Event::time(&event),
+                );
             }
             _ => {}
         }
@@ -365,7 +407,12 @@ impl Server {
                 self.input.keyboard_native = Some(new);
             }
             // The meaning's readers follow the keyboard (meaning.rs).
-            let (client, window) = self.input.keyboard_native.as_ref().and_then(crate::win::Win::native).map_or((0, 0), |n| (n.client, n.id));
+            let (client, window) = self
+                .input
+                .keyboard_native
+                .as_ref()
+                .and_then(crate::win::Win::native)
+                .map_or((0, 0), |n| (n.client, n.id));
             self.meaning_log.push(crate::meaning::Change::Window { client, window });
         }
         let id = self.win_id(window);
@@ -396,7 +443,10 @@ impl Server {
     }
 
     /// A point kept on the screens (the pointer cannot leave the desktop).
-    fn on_screens(&self, mut pos: smithay::utils::Point<f64, smithay::utils::Logical>) -> smithay::utils::Point<f64, smithay::utils::Logical> {
+    fn on_screens(
+        &self,
+        mut pos: smithay::utils::Point<f64, smithay::utils::Logical>,
+    ) -> smithay::utils::Point<f64, smithay::utils::Logical> {
         let all = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).reduce(|a, b| a.merge(b));
         if let Some(b) = all {
             pos.x = pos.x.clamp(b.loc.x as f64, (b.loc.x + b.size.w) as f64 - 1.0);
@@ -407,6 +457,10 @@ impl Server {
 
     /// The window that has the keyboard, any kind.
     pub fn keyboard_window(&self) -> Option<crate::win::Win> {
-        self.input.seat.keyboard_focus().and_then(|id| self.input.window(id)).filter(|w| smithay::utils::IsAlive::alive(w))
+        self.input
+            .seat
+            .keyboard_focus()
+            .and_then(|id| self.input.window(id))
+            .filter(|w| smithay::utils::IsAlive::alive(w))
     }
 }

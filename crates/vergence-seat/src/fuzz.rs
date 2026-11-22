@@ -38,11 +38,36 @@ fn target(rng: &mut Rng) -> Option<Target> {
         4..=5 => Target::Native(w),
         6 => Target::Server(Part::Title(w)),
         7 => Target::Server(Part::Edge(w, Edges::RIGHT)),
-        8 => Target::Server([Part::Close(w), Part::Maximize(w), Part::Minimize(w), Part::Tab(w, 1), Part::CloseTab(w, 0), Part::Plus(w), Part::AppMenu(w), Part::AppList][rng.below(8)]),
+        8 => Target::Server(
+            [
+                Part::Close(w),
+                Part::Maximize(w),
+                Part::Minimize(w),
+                Part::Tab(w, 1),
+                Part::CloseTab(w, 0),
+                Part::Plus(w),
+                Part::AppMenu(w),
+                Part::AppList,
+            ][rng.below(8)],
+        ),
         9 => Target::Server(Part::Dock),
         10 => Target::Server(Part::Menu),
         11 => Target::Server(Part::Popup),
-        12 => Target::Server([Part::Note, Part::Card, Part::Drawer, Part::Lock, Part::Session, Part::Switcher, Part::Blocked(w), Part::Picker, Part::Overview, Part::Capture, Part::Shot][rng.below(11)]),
+        12 => Target::Server(
+            [
+                Part::Note,
+                Part::Card,
+                Part::Drawer,
+                Part::Lock,
+                Part::Session,
+                Part::Switcher,
+                Part::Blocked(w),
+                Part::Picker,
+                Part::Overview,
+                Part::Capture,
+                Part::Shot,
+            ][rng.below(11)],
+        ),
         _ => Target::Server(Part::Desktop),
     })
 }
@@ -70,13 +95,19 @@ impl Watch {
                 // A long press on the dock ends the left press with no release on
                 // purpose: it is the icon's menu, not a click (touch.rs).
                 Out::DockMenu => self.pressed.retain(|(b, t)| !(*b == BTN_LEFT && *t == Target::Server(Part::Dock))),
-                Out::Motion(t) => assert_eq!(self.entered, Some(t), "step {step}: motion to {t:?}, not the entered one"),
+                Out::Motion(t) => {
+                    assert_eq!(self.entered, Some(t), "step {step}: motion to {t:?}, not the entered one")
+                }
                 Out::Press(t, b) => {
                     assert!(!self.pressed.iter().any(|(x, _)| *x == b), "step {step}: {b:#x} pressed twice");
                     self.pressed.push((b, t));
                 }
                 Out::Release(t, b) => {
-                    let i = self.pressed.iter().position(|(x, _)| *x == b).unwrap_or_else(|| panic!("step {step}: release of {b:#x} with no press"));
+                    let i = self
+                        .pressed
+                        .iter()
+                        .position(|(x, _)| *x == b)
+                        .unwrap_or_else(|| panic!("step {step}: release of {b:#x} with no press"));
                     assert_eq!(self.pressed[i].1, t, "step {step}: {b:#x} released somewhere other than its press");
                     self.pressed.remove(i);
                 }
@@ -108,10 +139,26 @@ fn fuzz_the_seat() {
     let mut keys_seen = [0usize; 3];
     // The last long-press timer the seat asked for: firing it is the case that matters.
     let mut timer = 0u64;
-    let keys = [Key::BackSpace, Key::Escape, Key::Super, Key::VolumeUp, Key::Mute, Key::Vt(2), Key::Vt(0), Key::Tab, Key::Grave, Key::Alt, Key::Left, Key::Up, Key::Space, Key::Other];
+    let keys = [
+        Key::BackSpace,
+        Key::Escape,
+        Key::Super,
+        Key::VolumeUp,
+        Key::Mute,
+        Key::Vt(2),
+        Key::Vt(0),
+        Key::Tab,
+        Key::Grave,
+        Key::Alt,
+        Key::Left,
+        Key::Up,
+        Key::Space,
+        Key::Other,
+    ];
     for step in 0..iters() {
         now += rng.below(500) as u64;
-        let mods = Mods { ctrl: rng.below(8) == 0, alt: rng.below(3) == 0, shift: rng.below(6) == 0, logo: rng.below(8) == 0 };
+        let mods =
+            Mods { ctrl: rng.below(8) == 0, alt: rng.below(3) == 0, shift: rng.below(6) == 0, logo: rng.below(8) == 0 };
         let out = match rng.below(20) {
             0..=4 => seat.motion(target(&mut rng)),
             5..=8 => {
@@ -159,8 +206,19 @@ fn fuzz_the_seat() {
                     seat.edge_end(target(&mut rng))
                 }
             }
-            14 => seat.touch_down(rng.below(3) as Slot, rng.below(2000) as f64, rng.below(1200) as f64, target(&mut rng), now),
-            15 => seat.touch_motion(rng.below(3) as Slot, rng.below(2000) as f64, rng.below(1200) as f64, target(&mut rng)),
+            14 => seat.touch_down(
+                rng.below(3) as Slot,
+                rng.below(2000) as f64,
+                rng.below(1200) as f64,
+                target(&mut rng),
+                now,
+            ),
+            15 => seat.touch_motion(
+                rng.below(3) as Slot,
+                rng.below(2000) as f64,
+                rng.below(1200) as f64,
+                target(&mut rng),
+            ),
             16 => seat.touch_up(rng.below(3) as Slot, target(&mut rng), now),
             17 => {
                 let press = if rng.below(4) == 0 { rng.below(40) as u64 } else { timer };
@@ -213,14 +271,34 @@ fn fuzz_the_seat() {
         assert_eq!(seat.pointer_focus(), watch.entered, "step {step}: the seat's focus and its enters disagree");
         // The order of use: no window twice, and the focused one first.
         let used = seat.order_of_use();
-        assert!(used.iter().enumerate().all(|(i, w)| !used[..i].contains(w)), "step {step}: a window twice in the order of use: {used:?}");
+        assert!(
+            used.iter().enumerate().all(|(i, w)| !used[..i].contains(w)),
+            "step {step}: a window twice in the order of use: {used:?}"
+        );
         if let Some(f) = seat.keyboard_focus() {
             assert_eq!(used.first(), Some(&f), "step {step}: the focused window is not the most recently used");
         }
     }
     if iters() >= 100_000 {
-        assert!(seen.iter().all(|n| *n > 0), "some rules never ran: {seen:?} (enter, press, release, grab, grab end, close menu, touch down, long press)");
-        assert!(keys_seen.iter().all(|n| *n > 0), "some key rules never ran: {keys_seen:?} (switch begin, switch end, window key)");
+        assert!(
+            seen.iter().all(|n| *n > 0),
+            "some rules never ran: {seen:?} (enter, press, release, grab, grab end, close menu, touch down, long press)"
+        );
+        assert!(
+            keys_seen.iter().all(|n| *n > 0),
+            "some key rules never ran: {keys_seen:?} (switch begin, switch end, window key)"
+        );
     }
-    eprintln!("fuzz: {} events; enter {}, press {}, release {}, grab {}, grab end {}, close menu {}, touch down {}, long press {}", iters(), seen[0], seen[1], seen[2], seen[3], seen[4], seen[5], seen[6], seen[7]);
+    eprintln!(
+        "fuzz: {} events; enter {}, press {}, release {}, grab {}, grab end {}, close menu {}, touch down {}, long press {}",
+        iters(),
+        seen[0],
+        seen[1],
+        seen[2],
+        seen[3],
+        seen[4],
+        seen[5],
+        seen[6],
+        seen[7]
+    );
 }

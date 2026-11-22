@@ -207,14 +207,23 @@ impl Path {
                     let p0 = *line.points.last().expect("a polyline starts with a point");
                     let (c1, c2, p3) = (t.apply(c1), t.apply(c2), t.apply(p));
                     // Wang's bound: steps so that each line is within tol of the curve.
-                    let dd = |a: Point, b: Point, c: Point| ((a.x - 2.0 * b.x + c.x).powi(2) + (a.y - 2.0 * b.y + c.y).powi(2)).sqrt();
+                    let dd = |a: Point, b: Point, c: Point| {
+                        ((a.x - 2.0 * b.x + c.x).powi(2) + (a.y - 2.0 * b.y + c.y).powi(2)).sqrt()
+                    };
                     let m = dd(p0, c1, c2).max(dd(c1, c2, p3));
-                    let steps = if m.is_finite() { ((3.0 * m / (4.0 * tol)).sqrt().ceil() as usize).clamp(1, MAX_CURVE_STEPS) } else { 1 };
+                    let steps = if m.is_finite() {
+                        ((3.0 * m / (4.0 * tol)).sqrt().ceil() as usize).clamp(1, MAX_CURVE_STEPS)
+                    } else {
+                        1
+                    };
                     for i in 1..=steps {
                         let s = i as f64 / steps as f64;
                         let u = 1.0 - s;
                         let (w0, w1, w2, w3) = (u * u * u, 3.0 * u * u * s, 3.0 * u * s * s, s * s * s);
-                        line.points.push(Point::new(w0 * p0.x + w1 * c1.x + w2 * c2.x + w3 * p3.x, w0 * p0.y + w1 * c1.y + w2 * c2.y + w3 * p3.y));
+                        line.points.push(Point::new(
+                            w0 * p0.x + w1 * c1.x + w2 * c2.x + w3 * p3.x,
+                            w0 * p0.y + w1 * c1.y + w2 * c2.y + w3 * p3.y,
+                        ));
                     }
                     total += steps;
                 }

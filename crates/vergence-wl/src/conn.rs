@@ -25,8 +25,8 @@ use crate::wire::{self, Header, WireError, Writer};
 /// The most kept waiting to be claimed.
 const MAX_WAITING_FDS: usize = 256;
 
-use vergence_protocol::sock::{self, MAX_FDS};
 pub use vergence_protocol::sock::pipe;
+use vergence_protocol::sock::{self, MAX_FDS};
 
 pub struct Connection {
     stream: UnixStream,
@@ -46,7 +46,8 @@ impl Connection {
         let name = std::env::var_os("WAYLAND_DISPLAY").unwrap_or_else(|| "wayland-0".into());
         let mut path = PathBuf::from(&name);
         if !path.is_absolute() {
-            let dir = std::env::var_os("XDG_RUNTIME_DIR").ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "XDG_RUNTIME_DIR is not set"))?;
+            let dir = std::env::var_os("XDG_RUNTIME_DIR")
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "XDG_RUNTIME_DIR is not set"))?;
             path = PathBuf::from(dir).join(name);
         }
         Ok(Connection::from_stream(UnixStream::connect(path)?))
@@ -54,7 +55,15 @@ impl Connection {
 
     pub fn from_stream(stream: UnixStream) -> Connection {
         // Id 1 is the display itself.
-        Connection { stream, incoming: Vec::new(), fds: VecDeque::new(), outgoing: Vec::new(), outgoing_fds: Vec::new(), next_id: 2, free_ids: Vec::new() }
+        Connection {
+            stream,
+            incoming: Vec::new(),
+            fds: VecDeque::new(),
+            outgoing: Vec::new(),
+            outgoing_fds: Vec::new(),
+            next_id: 2,
+            free_ids: Vec::new(),
+        }
     }
 
     /// An id for a new object.
@@ -107,7 +116,11 @@ impl Connection {
     /// descriptors (a pipe being read, a pipe that wakes the program):
     /// whether the server has input, and whether each of the others has (or
     /// has been closed at its far end).
-    pub fn wait_also(&mut self, others: [Option<RawFd>; 2], timeout: Option<std::time::Duration>) -> io::Result<(bool, [bool; 2])> {
+    pub fn wait_also(
+        &mut self,
+        others: [Option<RawFd>; 2],
+        timeout: Option<std::time::Duration>,
+    ) -> io::Result<(bool, [bool; 2])> {
         let buffered = wire::split(&self.incoming).is_ok_and(|m| m.is_some());
         // With a message already in hand, only look at what is ready now.
         let wait = if buffered { Some(std::time::Duration::ZERO) } else { timeout };
@@ -176,7 +189,13 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let mut files = Vec::new();
         for i in 0..3 {
-            let mut f = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(dir.join(format!("f{i}"))).unwrap();
+            let mut f = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(dir.join(format!("f{i}")))
+                .unwrap();
             write!(f, "file number {i}").unwrap();
             files.push(f);
         }

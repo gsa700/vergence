@@ -147,7 +147,9 @@ impl Server {
         // (Dave, 2026-11-18: it no longer kept its size or place).
         use crate::style::Kind;
         let style = self.window_style(w);
-        let lone_dialog = style.kind == Kind::Dialog && style.parent.is_none() && w.native().is_some_and(|n| n.style().0 == 0 && n.role != "main");
+        let lone_dialog = style.kind == Kind::Dialog
+            && style.parent.is_none()
+            && w.native().is_some_and(|n| n.style().0 == 0 && n.role != "main");
         if matches!(style.kind, Kind::Dialog | Kind::Palette | Kind::Splash | Kind::Desktop) && !lone_dialog {
             return None;
         }
@@ -165,7 +167,13 @@ impl Server {
             // A native window says who it is (Contract 2): its application id and
             // role, and, if its program keeps tokens, its token (no numbering then).
             if n.keeps_token {
-                let id = WindowId { instance: n.app_id.clone(), class: n.app_id.clone(), role: n.role.clone(), index: 0, token: n.token.clone() };
+                let id = WindowId {
+                    instance: n.app_id.clone(),
+                    class: n.app_id.clone(),
+                    role: n.role.clone(),
+                    index: 0,
+                    token: n.token.clone(),
+                };
                 if id.instance.is_empty() || self.memory.store.skips(&id) {
                     return None;
                 }
@@ -190,7 +198,8 @@ impl Server {
             // No app_id (iced and Slint set none on FreeBSD): the program's name,
             // from the client's process (2026-11-08: the terminal and the settings
             // app had no memory).
-            let app = if app.is_empty() { program_of(&self.display_handle, t.wl_surface()).unwrap_or_default() } else { app };
+            let app =
+                if app.is_empty() { program_of(&self.display_handle, t.wl_surface()).unwrap_or_default() } else { app };
             (app.clone(), app)
         };
         if instance.is_empty() && class.is_empty() {
@@ -217,10 +226,16 @@ impl Server {
     /// whose corner is exactly there: down and right by a bar's height until
     /// the corner is free; where that runs off monitor `og` (a window in the
     /// bottom-right corner), up and left; else `r` itself.
-    pub fn clear_of_siblings(&self, w: &Win, mut r: Rectangle<i32, Logical>, og: Rectangle<i32, Logical>) -> Rectangle<i32, Logical> {
+    pub fn clear_of_siblings(
+        &self,
+        w: &Win,
+        mut r: Rectangle<i32, Logical>,
+        og: Rectangle<i32, Logical>,
+    ) -> Rectangle<i32, Logical> {
         // Its program: a native window's application id, else the class memory
         // knows it by (Wayland app_id, X11 WM_CLASS).
-        let class = |x: &Win| x.native().map(|n| n.app_id.clone()).or_else(|| self.memory.ids.get(x).map(|i| i.class.clone()));
+        let class =
+            |x: &Win| x.native().map(|n| n.app_id.clone()).or_else(|| self.memory.ids.get(x).map(|i| i.class.clone()));
         let mine = class(w);
         let taken: Vec<Point<i32, Logical>> = self
             .space
@@ -229,7 +244,12 @@ impl Server {
             .filter_map(|o| self.space.element_location(o))
             .collect();
         let start = r.loc;
-        let on = |p: Point<i32, Logical>| p.x >= og.loc.x && p.y >= og.loc.y && p.x + r.size.w <= og.loc.x + og.size.w && p.y + r.size.h <= og.loc.y + og.size.h;
+        let on = |p: Point<i32, Logical>| {
+            p.x >= og.loc.x
+                && p.y >= og.loc.y
+                && p.x + r.size.w <= og.loc.x + og.size.w
+                && p.y + r.size.h <= og.loc.y + og.size.h
+        };
         let free = |dir: i32| {
             let mut p = start;
             for _ in 0..32 {
@@ -257,8 +277,13 @@ impl Server {
         // tab's own window asks for its drop point and has no memory: that wins).
         let find = |profile: &vergence_profile::windows::WindowProfile| match profile.get(&id) {
             Some(s) => Some((s.clone(), false)),
-            None if !id.token.is_empty() => profile.get(&id.untokened()).or_else(|| profile.get(&WindowId { role: String::new(), ..id.untokened() })).map(|s| (s.clone(), true)),
-            None if !id.role.is_empty() => profile.get(&WindowId { role: String::new(), ..id.clone() }).map(|s| (s.clone(), false)),
+            None if !id.token.is_empty() => profile
+                .get(&id.untokened())
+                .or_else(|| profile.get(&WindowId { role: String::new(), ..id.untokened() }))
+                .map(|s| (s.clone(), true)),
+            None if !id.role.is_empty() => {
+                profile.get(&WindowId { role: String::new(), ..id.clone() }).map(|s| (s.clone(), false))
+            }
             None => None,
         };
         // This size of the setup first; else the most recent other size of the
@@ -277,7 +302,14 @@ impl Server {
                         // The same pixels at another scale: points kept (Dave,
                         // 2026-11-18); another resolution: in proportion.
                         // (Pixels from points and scale may be a few off at a scale off the grid.)
-                        (Some(from), Some(to)) if from.pixels().zip(to.pixels()).is_some_and(|(a, b)| a.0.abs_diff(b.0) <= 4 && a.1.abs_diff(b.1) <= 4) => s.kept((to.width, to.height)),
+                        (Some(from), Some(to))
+                            if from
+                                .pixels()
+                                .zip(to.pixels())
+                                .is_some_and(|(a, b)| a.0.abs_diff(b.0) <= 4 && a.1.abs_diff(b.1) <= 4) =>
+                        {
+                            s.kept((to.width, to.height))
+                        }
                         (Some(from), Some(to)) => s.scaled((from.width, from.height), (to.width, to.height)),
                         _ => s,
                     };
@@ -324,7 +356,9 @@ impl Server {
         let maximized = self.restore.get(w).copied();
         // A snapped window (snap.rs) is kept by where it was before, and its part.
         let snapped = self.snap.snapped.get(w).copied();
-        let Some(geo) = maximized.or(snapped.map(|s| s.before)).or_else(|| self.space.element_geometry(w)) else { return };
+        let Some(geo) = maximized.or(snapped.map(|s| s.before)).or_else(|| self.space.element_geometry(w)) else {
+            return;
+        };
         // A window that hasn't got its size yet (1x1 before its first commit),
         // or was squeezed to it, is not a place to remember.
         if geo.size.w < MIN_W || geo.size.h < MIN_H {
@@ -380,7 +414,9 @@ impl Server {
         let sizes: Vec<(String, u32, u32, u32)> = self
             .space
             .outputs()
-            .filter_map(|o| Some((monitor_id_of(o)?, self.space.output_geometry(o)?.size, o.current_scale().fractional_scale())))
+            .filter_map(|o| {
+                Some((monitor_id_of(o)?, self.space.output_geometry(o)?.size, o.current_scale().fractional_scale()))
+            })
             .map(|(id, s, scale)| (id, s.w.max(0) as u32, s.h.max(0) as u32, (scale * 120.0).round() as u32))
             .collect();
         vergence_profile::windows::sized_key_scaled(&self.memory.setup, &sizes)
@@ -397,7 +433,10 @@ impl Server {
 }
 
 /// The name of the program a surface's client runs, from its process id.
-fn program_of(dh: &smithay::reexports::wayland_server::DisplayHandle, surface: &smithay::reexports::wayland_server::protocol::wl_surface::WlSurface) -> Option<String> {
+fn program_of(
+    dh: &smithay::reexports::wayland_server::DisplayHandle,
+    surface: &smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
+) -> Option<String> {
     use smithay::reexports::wayland_server::Resource;
     let client = surface.client()?;
     let pid = client.get_credentials(dh).ok()?.pid;

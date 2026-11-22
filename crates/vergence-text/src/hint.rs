@@ -47,7 +47,11 @@ pub fn x_height_scale(x_height_px: f32, em_px: f32) -> f32 {
 pub fn darkening(em_px: f32) -> f32 {
     static AMOUNT: OnceLock<f32> = OnceLock::new();
     let full = *AMOUNT.get_or_init(|| {
-        std::env::var("VERGENCE_TEXT_DARKEN").ok().and_then(|v| v.trim().parse::<f32>().ok()).filter(|v| v.is_finite()).map_or(DARKEN, |v| v.clamp(0.0, 1.0))
+        std::env::var("VERGENCE_TEXT_DARKEN")
+            .ok()
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .filter(|v| v.is_finite())
+            .map_or(DARKEN, |v| v.clamp(0.0, 1.0))
     });
     darkening_of(full, em_px)
 }

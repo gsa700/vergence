@@ -35,8 +35,8 @@ mod flac;
 pub mod helper;
 mod md5;
 mod mp3;
-mod mp4;
 mod mp3_tables;
+mod mp4;
 mod replaygain;
 mod tags;
 mod wav;
@@ -67,7 +67,9 @@ impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::Unsupported(m) | Error::Damaged(m) | Error::Io(m) => f.write_str(m),
-            Error::NeedsAac => f.write_str("AAC in an MP4 is played by the AAC helper (libexec/vergence/vergence-hymie-aac)."),
+            Error::NeedsAac => {
+                f.write_str("AAC in an MP4 is played by the AAC helper (libexec/vergence/vergence-hymie-aac).")
+            }
         }
     }
 }

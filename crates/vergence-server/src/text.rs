@@ -137,7 +137,9 @@ fn desktop_font() -> (String, f32) {
 fn parse_font_name(name: &str) -> (String, f32) {
     let name = name.trim();
     match name.rsplit_once(' ') {
-        Some((family, size)) if size.parse::<f32>().is_ok_and(|s| s > 0.0) => (family.to_string(), size.parse().unwrap()),
+        Some((family, size)) if size.parse::<f32>().is_ok_and(|s| s > 0.0) => {
+            (family.to_string(), size.parse().unwrap())
+        }
         _ => (name.to_string(), 10.0),
     }
 }

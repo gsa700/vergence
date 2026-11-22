@@ -16,13 +16,13 @@ fn main() {
         println!("vergence-screenshot {}", env!("CARGO_PKG_VERSION"));
         return;
     }
-    let result = Client::connect("vergence-screenshot").map_err(|e| format!("no Vergence session: {e}")).and_then(|mut c| {
-        match c.request(|serial| ClientMsg::ScreenshotBar { serial }).map_err(|e| e.to_string())? {
+    let result = Client::connect("vergence-screenshot").map_err(|e| format!("no Vergence session: {e}")).and_then(
+        |mut c| match c.request(|serial| ClientMsg::ScreenshotBar { serial }).map_err(|e| e.to_string())? {
             ServerMsg::Done { .. } => Ok(()),
             ServerMsg::Error { message, .. } => Err(message),
             other => Err(format!("unexpected {other:?}")),
-        }
-    });
+        },
+    );
     if let Err(e) = result {
         eprintln!("vergence-screenshot: {e}");
         std::process::exit(1);

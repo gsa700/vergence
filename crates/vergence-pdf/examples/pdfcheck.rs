@@ -96,7 +96,8 @@ fn render(args: &[String], out: Option<&Path>) {
     let scale: f64 = arg(args, "--scale", 1.5);
     let want: usize = arg(args, "--pages", 3);
     let skip_value = |i: usize| i > 0 && matches!(args[i - 1].as_str(), "--out" | "--scale" | "--pages");
-    let roots: Vec<&String> = args.iter().enumerate().filter(|(i, a)| !a.starts_with("--") && !skip_value(*i)).map(|(_, a)| a).collect();
+    let roots: Vec<&String> =
+        args.iter().enumerate().filter(|(i, a)| !a.starts_with("--") && !skip_value(*i)).map(|(_, a)| a).collect();
     let mut files = Vec::new();
     for r in &roots {
         let before = files.len();
@@ -151,7 +152,8 @@ fn render(args: &[String], out: Option<&Path>) {
                     slowest.push((ms, format!("page {n}  {}", rel.display())));
                     if let (Some(d), Some(ix)) = (out, index.as_mut()) {
                         write_ppm(&d.join(format!("{k}-p{n}.ppm")), &c).expect("a picture");
-                        writeln!(ix, "{k}\t{n}\t{ms:.1}\t{}\t{}\t{}\t{s}", c.width, c.height, f.display()).expect("index.tsv");
+                        writeln!(ix, "{k}\t{n}\t{ms:.1}\t{}\t{}\t{}\t{s}", c.width, c.height, f.display())
+                            .expect("index.tsv");
                     }
                 }
                 slowest.sort_by(|a, b| b.0.total_cmp(&a.0));
@@ -161,10 +163,18 @@ fn render(args: &[String], out: Option<&Path>) {
     }
     times.sort_by(f64::total_cmp);
     let at = |q: f64| times.get(((times.len() as f64 - 1.0) * q).round() as usize).copied().unwrap_or(0.0);
-    println!("\n{} files, {} pages drawn at {scale}x in {:.1} s", files.len(), times.len(), started.elapsed().as_secs_f64());
+    println!(
+        "\n{} files, {} pages drawn at {scale}x in {:.1} s",
+        files.len(),
+        times.len(),
+        started.elapsed().as_secs_f64()
+    );
     println!("not opened {failed}  need a password {locked}  PANICS {panics}");
     println!("ms per page: median {:.1}  90% {:.1}  99% {:.1}  max {:.1}", at(0.5), at(0.9), at(0.99), at(1.0));
-    println!("pages under 100 ms: {:.1}%", 100.0 * times.iter().filter(|t| **t < 100.0).count() as f64 / times.len().max(1) as f64);
+    println!(
+        "pages under 100 ms: {:.1}%",
+        100.0 * times.iter().filter(|t| **t < 100.0).count() as f64 / times.len().max(1) as f64
+    );
     println!("slowest:");
     for (ms, what) in &slowest {
         println!("  {ms:.0} ms  {what}");
@@ -173,7 +183,8 @@ fn render(args: &[String], out: Option<&Path>) {
 
 fn compare(reference: &Path, new: &Path) {
     let (mut same, mut changed, mut missing) = (0, Vec::new(), 0);
-    let mut names: Vec<_> = std::fs::read_dir(reference).expect("the reference folder").flatten().map(|e| e.file_name()).collect();
+    let mut names: Vec<_> =
+        std::fs::read_dir(reference).expect("the reference folder").flatten().map(|e| e.file_name()).collect();
     names.sort();
     for name in names.iter().filter(|n| n.to_string_lossy().ends_with(".ppm")) {
         let (Some(a), Some(b)) = (read_ppm(&reference.join(name)), read_ppm(&new.join(name))) else {
@@ -186,7 +197,13 @@ fn compare(reference: &Path, new: &Path) {
             continue;
         }
         // Pixels whose color moved by more than a rounding step.
-        let moved = a.2.as_chunks::<3>().0.iter().zip(b.2.as_chunks::<3>().0).filter(|(p, q)| p.iter().zip(q.iter()).any(|(x, y)| x.abs_diff(*y) > 2)).count();
+        let moved =
+            a.2.as_chunks::<3>()
+                .0
+                .iter()
+                .zip(b.2.as_chunks::<3>().0)
+                .filter(|(p, q)| p.iter().zip(q.iter()).any(|(x, y)| x.abs_diff(*y) > 2))
+                .count();
         if moved == 0 {
             same += 1;
         } else {
@@ -217,6 +234,8 @@ fn main() {
         }
         Some("time") => render(&args[1..], None),
         Some("compare") if args.len() == 3 => compare(Path::new(&args[1]), Path::new(&args[2])),
-        _ => eprintln!("pdfcheck render FOLDER... --out DIR [--scale S] [--pages N] | time FOLDER... | compare REF NEW"),
+        _ => {
+            eprintln!("pdfcheck render FOLDER... --out DIR [--scale S] [--pages N] | time FOLDER... | compare REF NEW")
+        }
     }
 }

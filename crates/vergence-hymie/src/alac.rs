@@ -142,7 +142,16 @@ fn be32(b: &[u8], i: usize) -> u32 {
 }
 
 impl AlacDecoder {
-    fn new(frame_length: usize, bit_depth: u32, pb: u32, mb: u32, kb: u32, channels: usize, max_run: u32, sample_rate: u32) -> AlacDecoder {
+    fn new(
+        frame_length: usize,
+        bit_depth: u32,
+        pb: u32,
+        mb: u32,
+        kb: u32,
+        channels: usize,
+        max_run: u32,
+        sample_rate: u32,
+    ) -> AlacDecoder {
         // The predictor writes its first coefficients' worth of samples
         // whatever the frame's length, so the buffers hold at least that.
         let size = frame_length.max(32);
@@ -295,7 +304,15 @@ impl AlacDecoder {
                             // the special "numActive == 31" mode, in place
                             unpc_block_31_in_place(&mut self.predictor, num_samples, chan_bits);
                         }
-                        unpc_block(&self.predictor, &mut self.mix_buffer_u, num_samples, &mut self.coefs_u, num_u, chan_bits, den_shift_u);
+                        unpc_block(
+                            &self.predictor,
+                            &mut self.mix_buffer_u,
+                            num_samples,
+                            &mut self.coefs_u,
+                            num_u,
+                            chan_bits,
+                            den_shift_u,
+                        );
                     } else {
                         // uncompressed frame, copied into the mix buffer to use the common output code
                         uncompressed(input, bits, &mut self.mix_buffer_u, None, num_samples, chan_bits);
@@ -389,7 +406,15 @@ impl AlacDecoder {
                         if mode_u != 0 {
                             unpc_block_31_in_place(&mut self.predictor, num_samples, chan_bits);
                         }
-                        unpc_block(&self.predictor, &mut self.mix_buffer_u, num_samples, &mut self.coefs_u, num_u, chan_bits, den_shift_u);
+                        unpc_block(
+                            &self.predictor,
+                            &mut self.mix_buffer_u,
+                            num_samples,
+                            &mut self.coefs_u,
+                            num_u,
+                            chan_bits,
+                            den_shift_u,
+                        );
 
                         // decompress and run predictor for "right" channel
                         let ag = AgParams::new(self.mb, pb.wrapping_mul(pb_factor_v) / 4, self.kb, self.max_run);
@@ -397,10 +422,25 @@ impl AlacDecoder {
                         if mode_v != 0 {
                             unpc_block_31_in_place(&mut self.predictor, num_samples, chan_bits);
                         }
-                        unpc_block(&self.predictor, &mut self.mix_buffer_v, num_samples, &mut self.coefs_v, num_v, chan_bits, den_shift_v);
+                        unpc_block(
+                            &self.predictor,
+                            &mut self.mix_buffer_v,
+                            num_samples,
+                            &mut self.coefs_v,
+                            num_v,
+                            chan_bits,
+                            den_shift_v,
+                        );
                     } else {
                         // uncompressed frame, copied into the mix buffers to use the common output code
-                        uncompressed(input, bits, &mut self.mix_buffer_u, Some(&mut self.mix_buffer_v), num_samples, self.bit_depth as i32);
+                        uncompressed(
+                            input,
+                            bits,
+                            &mut self.mix_buffer_u,
+                            Some(&mut self.mix_buffer_v),
+                            num_samples,
+                            self.bit_depth as i32,
+                        );
                         mix_bits = 0;
                         mix_res = 0;
                         bytes_shifted = 0;
@@ -445,7 +485,10 @@ impl AlacDecoder {
 
                 ID_CCE | ID_PCE => {
                     // unsupported element: Apple's decoder bails
-                    return Err(damaged(format!("An ALAC frame with a {} element.", if tag == ID_CCE { "coupling channel" } else { "program config" })));
+                    return Err(damaged(format!(
+                        "An ALAC frame with a {} element.",
+                        if tag == ID_CCE { "coupling channel" } else { "program config" }
+                    )));
                 }
 
                 ID_DSE => {
@@ -499,7 +542,14 @@ impl AlacDecoder {
 /// An escaped (uncompressed) element's samples, one channel or a pair
 /// interleaved, `chan_bits` each: bit_buffer_read reads at most 16 bits at a
 /// time, so a wider sample is read in two.
-fn uncompressed(input: &Input, bits: &mut BitBuffer, u: &mut [i32], mut v: Option<&mut [i32]>, num_samples: usize, chan_bits: i32) {
+fn uncompressed(
+    input: &Input,
+    bits: &mut BitBuffer,
+    u: &mut [i32],
+    mut v: Option<&mut [i32]>,
+    num_samples: usize,
+    chan_bits: i32,
+) {
     let shift = (32 - chan_bits) as u32;
     if chan_bits <= 16 {
         let n = chan_bits.max(0) as u32;
@@ -589,7 +639,10 @@ fn lg3a(x: u32) -> i32 {
 }
 
 fn read32bit(input: &Input, at: usize) -> u32 {
-    (input.at(at) as u32) << 24 | (input.at(at.saturating_add(1)) as u32) << 16 | (input.at(at.saturating_add(2)) as u32) << 8 | input.at(at.saturating_add(3)) as u32
+    (input.at(at) as u32) << 24
+        | (input.at(at.saturating_add(1)) as u32) << 16
+        | (input.at(at.saturating_add(2)) as u32) << 8
+        | input.at(at.saturating_add(3)) as u32
 }
 
 fn get_stream_bits(input: &Input, in_at: usize, bit_offset: u32, num_bits: u32) -> u32 {
@@ -677,7 +730,14 @@ fn dyn_get_32bit(input: &Input, in_at: usize, bit_pos: &mut u32, m: u32, k: u32,
 
 /// dyn_decomp: one channel's prediction residuals, adaptive Golomb coded,
 /// with runs of zeros.
-fn dyn_decomp(p: &AgParams, input: &Input, bitstream: &mut BitBuffer, pc: &mut [i32], num_samples: usize, max_size: i32) -> Result<(), Error> {
+fn dyn_decomp(
+    p: &AgParams,
+    input: &Input,
+    bitstream: &mut BitBuffer,
+    pc: &mut [i32],
+    num_samples: usize,
+    max_size: i32,
+) -> Result<(), Error> {
     let in_at = bitstream.cur;
     let start_pos = bitstream.bit_index;
     let max_pos = (bitstream.byte_size as u64 * 8).min(u32::MAX as u64) as u32;
@@ -782,7 +842,15 @@ fn unpc_block_31_in_place(buf: &mut [i32], num: usize, chan_bits: i32) {
 /// samples `output`, adapting its coefficients as it goes. Apple's unrolled
 /// cases for 4 and 8 coefficients are this loop, written out. (Its in-place
 /// use, numActive 31, is unpc_block_31_in_place.)
-fn unpc_block(pc1: &[i32], output: &mut [i32], num: usize, coefs: &mut [i16; 32], num_active: usize, chan_bits: i32, den_shift: u32) {
+fn unpc_block(
+    pc1: &[i32],
+    output: &mut [i32],
+    num: usize,
+    coefs: &mut [i16; 32],
+    num_active: usize,
+    chan_bits: i32,
+    den_shift: u32,
+) {
     let chan_shift = (32 - chan_bits) as u32;
     let den_half = 1i32.wrapping_shl(den_shift.wrapping_sub(1));
 
@@ -833,7 +901,8 @@ fn unpc_block(pc1: &[i32], output: &mut [i32], num: usize, coefs: &mut [i16; 32]
                 let dd = top.wrapping_sub(output[pout - k]);
                 let sgn = sign_of_int(dd);
                 coefs[k] = coefs[k].wrapping_sub(sgn as i16);
-                del0 = del0.wrapping_sub(((num_active - k) as i32).wrapping_mul(sgn.wrapping_mul(dd).wrapping_shr(den_shift)));
+                del0 = del0
+                    .wrapping_sub(((num_active - k) as i32).wrapping_mul(sgn.wrapping_mul(dd).wrapping_shr(den_shift)));
                 if del0 <= 0 {
                     break;
                 }
@@ -843,7 +912,9 @@ fn unpc_block(pc1: &[i32], output: &mut [i32], num: usize, coefs: &mut [i16; 32]
                 let dd = top.wrapping_sub(output[pout - k]);
                 let sgn = sign_of_int(dd);
                 coefs[k] = coefs[k].wrapping_add(sgn as i16);
-                del0 = del0.wrapping_sub(((num_active - k) as i32).wrapping_mul(sgn.wrapping_neg().wrapping_mul(dd).wrapping_shr(den_shift)));
+                del0 = del0.wrapping_sub(
+                    ((num_active - k) as i32).wrapping_mul(sgn.wrapping_neg().wrapping_mul(dd).wrapping_shr(den_shift)),
+                );
                 if del0 >= 0 {
                     break;
                 }
@@ -857,7 +928,8 @@ fn unpc_block(pc1: &[i32], output: &mut [i32], num: usize, coefs: &mut [i16; 32]
 /// Up to 16 bits.
 fn bit_buffer_read(input: &Input, bits: &mut BitBuffer, num_bits: u32) -> u32 {
     let c = bits.cur;
-    let mut return_bits = (input.at(c) as u32) << 16 | (input.at(c.saturating_add(1)) as u32) << 8 | input.at(c.saturating_add(2)) as u32;
+    let mut return_bits =
+        (input.at(c) as u32) << 16 | (input.at(c.saturating_add(1)) as u32) << 8 | input.at(c.saturating_add(2)) as u32;
     return_bits <<= bits.bit_index;
     return_bits &= 0x00FF_FFFF;
     bits.bit_index += num_bits;

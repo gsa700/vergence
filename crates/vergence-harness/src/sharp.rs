@@ -50,7 +50,11 @@ pub fn run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
         return Ok(false);
     }
     let ok = sa >= by * sb;
-    println!("{} sharpness {sa:.1} against {sb:.1} ({:.2}x, {by:.2}x wanted)", if ok { "PASS" } else { "FAIL" }, sa / sb.max(1e-9));
+    println!(
+        "{} sharpness {sa:.1} against {sb:.1} ({:.2}x, {by:.2}x wanted)",
+        if ok { "PASS" } else { "FAIL" },
+        sa / sb.max(1e-9)
+    );
     Ok(ok)
 }
 

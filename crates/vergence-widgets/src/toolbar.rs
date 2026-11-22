@@ -271,7 +271,12 @@ pub fn icon<M: 'static>(which: Icon, size: f32, dim: bool) -> Element<M> {
 /// hover word; None for a tool that cannot be used now (drawn faint).
 pub fn tool<M: Clone + 'static>(which: Icon, name: &str, on: Option<M>) -> Element<M> {
     let enabled = on.is_some();
-    let b = button(icon(which, 16.0, !enabled)).look(ButtonLook::Plain).padding(Padding::all(0.0)).width(Length::Fixed(TOOL)).height(Length::Fixed(TOOL)).name(name);
+    let b = button(icon(which, 16.0, !enabled))
+        .look(ButtonLook::Plain)
+        .padding(Padding::all(0.0))
+        .width(Length::Fixed(TOOL))
+        .height(Length::Fixed(TOOL))
+        .name(name);
     match on {
         Some(m) => b.on_press(m),
         None => b,
@@ -280,7 +285,13 @@ pub fn tool<M: Clone + 'static>(which: Icon, name: &str, on: Option<M>) -> Eleme
 
 /// A tool that is on or off (the list or icon view, the preview pane): shaded while on.
 pub fn toggle<M: Clone + 'static>(which: Icon, name: &str, on: bool, press: M) -> Element<M> {
-    button(icon(which, 16.0, false)).look(if on { ButtonLook::Chosen } else { ButtonLook::Plain }).padding(Padding::all(0.0)).width(Length::Fixed(TOOL)).height(Length::Fixed(TOOL)).on_press(press).name(name)
+    button(icon(which, 16.0, false))
+        .look(if on { ButtonLook::Chosen } else { ButtonLook::Plain })
+        .padding(Padding::all(0.0))
+        .width(Length::Fixed(TOOL))
+        .height(Length::Fixed(TOOL))
+        .on_press(press)
+        .name(name)
 }
 
 /// Tools that belong together, close side by side.

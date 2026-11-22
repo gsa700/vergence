@@ -5,12 +5,22 @@
 
 use super::*;
 
-pub const SECONDS: [(&str, i64); 5] = [("5 seconds", 5), ("10 seconds", 10), ("20 seconds", 20), ("30 seconds", 30), ("1 minute", 60)];
-pub const CORNERS: [(&str, &str); 4] = [("Top right", "top-right"), ("Top left", "top-left"), ("Bottom right", "bottom-right"), ("Bottom left", "bottom-left")];
+pub const SECONDS: [(&str, i64); 5] =
+    [("5 seconds", 5), ("10 seconds", 10), ("20 seconds", 20), ("30 seconds", 30), ("1 minute", 60)];
+pub const CORNERS: [(&str, &str); 4] = [
+    ("Top right", "top-right"),
+    ("Top left", "top-left"),
+    ("Bottom right", "bottom-right"),
+    ("Bottom left", "bottom-left"),
+];
 
 /// The apps the server has seen send cards (its notify-apps.toml), newest first.
 pub fn read_apps() -> Vec<(String, u64)> {
-    let Some(state) = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state"))) else {
+    let Some(state) = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
+    else {
         return Vec::new();
     };
     let text = std::fs::read_to_string(state.join("vergence/notify-apps.toml")).unwrap_or_default();
@@ -30,7 +40,11 @@ fn parse_apps(text: &str) -> Vec<(String, u64)> {
 
 /// The apps switched off, in lower case.
 fn off_list(d: &toml::Table) -> Vec<String> {
-    table(d).and_then(|t| t.get("off")).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str()).map(|s| s.trim().to_lowercase()).collect()).unwrap_or_default()
+    table(d)
+        .and_then(|t| t.get("off"))
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str()).map(|s| s.trim().to_lowercase()).collect())
+        .unwrap_or_default()
 }
 
 fn table(d: &toml::Table) -> Option<&toml::Table> {
@@ -161,7 +175,14 @@ impl App {
     fn notify_apps_group(&self) -> Element<Message> {
         let off = off_list(&self.desktop);
         if self.notify_apps.is_empty() {
-            return self.group(Some("Apps"), vec![setting("No app has shown a card yet", "Each app that does is listed here, to turn its cards off.", space())]);
+            return self.group(
+                Some("Apps"),
+                vec![setting(
+                    "No app has shown a card yet",
+                    "Each app that does is listed here, to turn its cards off.",
+                    space(),
+                )],
+            );
         }
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
         let rows = self
@@ -170,9 +191,18 @@ impl App {
             .map(|(app, t)| {
                 let on = !off.contains(&app.to_lowercase());
                 let name = self.notify_app_name(app);
-                let detail = if on { format!("Last card {}.", ago(now.saturating_sub(*t))) } else { "Its cards are not shown.".to_string() };
+                let detail = if on {
+                    format!("Last card {}.", ago(now.saturating_sub(*t)))
+                } else {
+                    "Its cards are not shown.".to_string()
+                };
                 let app = app.clone();
-                setting(&name, &detail, switch(on, move |on| Message::Notify(NotifyMsg::App(app.clone(), on))).name(&format!("Cards from {name}")))
+                setting(
+                    &name,
+                    &detail,
+                    switch(on, move |on| Message::Notify(NotifyMsg::App(app.clone(), on)))
+                        .name(&format!("Cards from {name}")),
+                )
             })
             .collect();
         self.group(Some("Apps"), rows)
@@ -184,7 +214,11 @@ impl App {
         let low = app.to_lowercase();
         self.apps
             .iter()
-            .find(|e| e.id.to_lowercase() == low || e.name.to_lowercase() == low || e.id.to_lowercase().trim_end_matches(".desktop") == low)
+            .find(|e| {
+                e.id.to_lowercase() == low
+                    || e.name.to_lowercase() == low
+                    || e.id.to_lowercase().trim_end_matches(".desktop") == low
+            })
             .map(|e| e.name.clone())
             .unwrap_or_else(|| app.to_string())
     }
@@ -225,7 +259,10 @@ mod tests {
     #[test]
     fn apps_newest_first() {
         let a = parse_apps("[apps]\nFirefox = 100\nnotify-send = 300\nvergence-settings = 200\n");
-        assert_eq!(a.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["notify-send", "vergence-settings", "Firefox"]);
+        assert_eq!(
+            a.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+            ["notify-send", "vergence-settings", "Firefox"]
+        );
         assert!(parse_apps("").is_empty());
         assert_eq!(ago(10), "within the hour");
         assert_eq!(ago(7200), "2 hours ago");

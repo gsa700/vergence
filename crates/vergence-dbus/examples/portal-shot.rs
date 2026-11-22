@@ -22,7 +22,13 @@ fn main() {
         opts.push(entry("interactive", Value::Bool(true)));
     }
     let member = if what == "color" { "PickColor" } else { "Screenshot" };
-    let m = Message::method_call("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop", "org.freedesktop.portal.Screenshot", member, &[Value::Str(String::new()), Value::Array("{sv}".into(), opts)]);
+    let m = Message::method_call(
+        "org.freedesktop.portal.Desktop",
+        "/org/freedesktop/portal/desktop",
+        "org.freedesktop.portal.Screenshot",
+        member,
+        &[Value::Str(String::new()), Value::Array("{sv}".into(), opts)],
+    );
     let reply = c.call(m, Duration::from_secs(10)).expect("call");
     println!("handle {:?}", reply.args());
     // Other signals (the bus's NameAcquired) are not the answer.

@@ -795,7 +795,9 @@ pub fn atan(x: &Dec, degrees: bool) -> Result<Dec> {
 pub fn asin(x: &Dec, degrees: bool) -> Result<Dec> {
     match x.abs().cmp(&one()) {
         Ordering::Greater => Err(CalcError::Domain),
-        Ordering::Equal => angle_out(if x.is_neg() { pi().mul_p(&half(), WORK).neg() } else { pi().mul_p(&half(), WORK) }, degrees),
+        Ordering::Equal => {
+            angle_out(if x.is_neg() { pi().mul_p(&half(), WORK).neg() } else { pi().mul_p(&half(), WORK) }, degrees)
+        }
         Ordering::Less => {
             let c = sqrt_work(&one().add_p(&x.mul_p(x, WORK).neg(), WORK));
             angle_out(atan_work(&x.div_p(&c, WORK)?), degrees)
@@ -825,7 +827,11 @@ pub fn acos(x: &Dec, degrees: bool) -> Result<Dec> {
 
 /// n!, for whole numbers from 0 to 3000.
 pub fn factorial(x: &Dec) -> Result<Dec> {
-    let n = x.to_i64().filter(|n| (0..=3000).contains(n)).ok_or(if x.is_integer() && !x.is_neg() { CalcError::TooLarge } else { CalcError::Domain })?;
+    let n = x.to_i64().filter(|n| (0..=3000).contains(n)).ok_or(if x.is_integer() && !x.is_neg() {
+        CalcError::TooLarge
+    } else {
+        CalcError::Domain
+    })?;
     let mut acc = one();
     for k in 2..=n {
         acc = acc.mul_p(&int(k), WORK);

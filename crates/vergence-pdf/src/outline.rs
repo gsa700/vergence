@@ -65,7 +65,10 @@ pub fn text_string(b: &[u8]) -> String {
 
 fn pdf_doc_char(c: u8) -> char {
     const LOW: [char; 8] = ['˘', 'ˇ', 'ˆ', '˙', '˝', '˛', '˚', '˜'];
-    const HIGH: [char; 33] = ['•', '†', '‡', '…', '—', '–', 'ƒ', '⁄', '‹', '›', '−', '‰', '„', '“', '”', '‘', '’', '‚', '™', 'ﬁ', 'ﬂ', 'Ł', 'Œ', 'Š', 'Ÿ', 'Ž', 'ı', 'ł', 'œ', 'š', 'ž', '\u{FFFD}', '€'];
+    const HIGH: [char; 33] = [
+        '•', '†', '‡', '…', '—', '–', 'ƒ', '⁄', '‹', '›', '−', '‰', '„', '“', '”', '‘', '’', '‚', '™', 'ﬁ', 'ﬂ', 'Ł',
+        'Œ', 'Š', 'Ÿ', 'Ž', 'ı', 'ł', 'œ', 'š', 'ž', '\u{FFFD}', '€',
+    ];
     match c {
         0x18..=0x1F => LOW[(c - 0x18) as usize],
         0x80..=0xA0 => HIGH[(c - 0x80) as usize],
@@ -188,7 +191,10 @@ impl<'a> Resolver<'a> {
             // Limits, when given, skip kids that cannot hold the key.
             let kd = self.doc.resolve(kid);
             if let Some(l) = kd.as_dict().and_then(|k| self.doc.get_in(k, "Limits").as_array().map(|a| a.to_vec()))
-                && let (Some(lo), Some(hi)) = (l.first().and_then(|o| self.doc.resolve(o).as_bytes().map(<[u8]>::to_vec)), l.get(1).and_then(|o| self.doc.resolve(o).as_bytes().map(<[u8]>::to_vec)))
+                && let (Some(lo), Some(hi)) = (
+                    l.first().and_then(|o| self.doc.resolve(o).as_bytes().map(<[u8]>::to_vec)),
+                    l.get(1).and_then(|o| self.doc.resolve(o).as_bytes().map(<[u8]>::to_vec)),
+                )
                 && (key < lo.as_slice() || key > hi.as_slice())
             {
                 continue;
@@ -256,7 +262,8 @@ pub fn links(doc: &Document, pages: &[Page], index: usize) -> Vec<Link> {
         if doc.get_in(d, "Subtype").as_name() != Some(b"Link") {
             continue;
         }
-        let rect: Vec<f64> = doc.get_in(d, "Rect").as_array().unwrap_or(&[]).iter().filter_map(|v| doc.resolve(v).as_f64()).collect();
+        let rect: Vec<f64> =
+            doc.get_in(d, "Rect").as_array().unwrap_or(&[]).iter().filter_map(|v| doc.resolve(v).as_f64()).collect();
         let [x0, y0, x1, y1] = rect[..] else { continue };
         let p0 = t.apply(vergence_raster::geom::Point { x: x0, y: y0 });
         let p1 = t.apply(vergence_raster::geom::Point { x: x1, y: y1 });
@@ -269,7 +276,11 @@ pub fn links(doc: &Document, pages: &[Page], index: usize) -> Vec<Link> {
         } else if let Some(a) = doc.get_in(d, "A").as_dict() {
             match doc.get_in(a, "S").as_name() {
                 Some(b"GoTo") => r.goto(a).map(Action::GoTo),
-                Some(b"URI") => doc.get_in(a, "URI").as_bytes().map(|u| Action::Uri(cut(String::from_utf8_lossy(u).trim().to_string(), MAX_URI))).filter(|a| !matches!(a, Action::Uri(u) if u.is_empty())),
+                Some(b"URI") => doc
+                    .get_in(a, "URI")
+                    .as_bytes()
+                    .map(|u| Action::Uri(cut(String::from_utf8_lossy(u).trim().to_string(), MAX_URI)))
+                    .filter(|a| !matches!(a, Action::Uri(u) if u.is_empty())),
                 Some(b"Named") => {
                     let to = match doc.get_in(a, "N").as_name() {
                         Some(b"NextPage") => Some(index + 1),
@@ -323,7 +334,9 @@ mod tests {
         for o in offsets {
             out.extend(format!("{o:010} 00000 n \n").as_bytes());
         }
-        out.extend(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+        out.extend(
+            format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes(),
+        );
         out
     }
 
@@ -340,10 +353,16 @@ mod tests {
         let pages = doc.pages();
         let o = outline(&doc, &pages);
         assert_eq!(o.len(), 3);
-        assert_eq!(o[0], Entry { level: 0, title: "Intro — start".into(), target: Some(Target { page: 0, top: None }) });
+        assert_eq!(
+            o[0],
+            Entry { level: 0, title: "Intro — start".into(), target: Some(Target { page: 0, top: None }) }
+        );
         assert_eq!(o[1], Entry { level: 1, title: "Nested".into(), target: Some(Target { page: 1, top: Some(0.0) }) });
         // By name, through the Names tree: y 700 is 92 points down.
-        assert_eq!(o[2], Entry { level: 0, title: "Chapter 2".into(), target: Some(Target { page: 1, top: Some(92.0) }) });
+        assert_eq!(
+            o[2],
+            Entry { level: 0, title: "Chapter 2".into(), target: Some(Target { page: 1, top: Some(92.0) }) }
+        );
     }
 
     #[test]
@@ -352,7 +371,10 @@ mod tests {
         let pages = doc.pages();
         let l = links(&doc, &pages, 0);
         assert_eq!(l.len(), 3);
-        assert_eq!(l[0], Link { rect: [72.0, 72.0, 172.0, 92.0], action: Action::GoTo(Target { page: 1, top: Some(292.0) }) });
+        assert_eq!(
+            l[0],
+            Link { rect: [72.0, 72.0, 172.0, 92.0], action: Action::GoTo(Target { page: 1, top: Some(292.0) }) }
+        );
         assert_eq!(l[1].action, Action::Uri("https://example.org/".into()));
         assert_eq!(l[2].action, Action::GoTo(Target { page: 1, top: None }));
         assert!(links(&doc, &pages, 1).is_empty());

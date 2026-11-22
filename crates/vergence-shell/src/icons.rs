@@ -44,8 +44,12 @@ fn index(text: &str) -> (Vec<Dir>, Vec<String>) {
         let (key, value) = (key.trim(), value.trim());
         if group == "Icon Theme" {
             match key {
-                "Directories" | "ScaledDirectories" => listed.extend(value.split(',').map(str::trim).filter(|d| !d.is_empty() && !d.contains("..")).map(str::to_string)),
-                "Inherits" => inherits.extend(value.split(',').map(str::trim).filter(|t| !t.is_empty()).map(str::to_string)),
+                "Directories" | "ScaledDirectories" => listed.extend(
+                    value.split(',').map(str::trim).filter(|d| !d.is_empty() && !d.contains("..")).map(str::to_string),
+                ),
+                "Inherits" => {
+                    inherits.extend(value.split(',').map(str::trim).filter(|t| !t.is_empty()).map(str::to_string))
+                }
                 _ => {}
             }
         } else if let Some(dir) = dirs.last_mut().filter(|d| d.path == group) {
@@ -71,7 +75,8 @@ fn theme_roots(data_dirs: &[PathBuf], home: Option<&Path>) -> Vec<PathBuf> {
 /// root (a package may add icons to a theme whose index another directory
 /// holds: `/usr/local/share/icons/hicolor` beside `/usr/share`'s).
 fn in_theme(roots: &[PathBuf], theme: &str, name: &str, pixels: u32) -> (Option<PathBuf>, Vec<String>) {
-    let Some(text) = roots.iter().find_map(|root| std::fs::read_to_string(root.join(theme).join("index.theme")).ok()) else {
+    let Some(text) = roots.iter().find_map(|root| std::fs::read_to_string(root.join(theme).join("index.theme")).ok())
+    else {
         return (None, Vec::new());
     };
     let (dirs, inherits) = index(&text);
@@ -90,7 +95,13 @@ fn in_theme(roots: &[PathBuf], theme: &str, name: &str, pixels: u32) -> (Option<
                 // scalable: hicolor's 256x256 is one, and a 256-pixel picture is not what
                 // a 32-pixel icon wants when there is a 32.
                 let real = dir.size * dir.scale;
-                let rank = if vector { 0 } else if real >= pixels { 1 + (real - pixels) as u64 } else { 100_000 + (pixels - real) as u64 };
+                let rank = if vector {
+                    0
+                } else if real >= pixels {
+                    1 + (real - pixels) as u64
+                } else {
+                    100_000 + (pixels - real) as u64
+                };
                 if best.as_ref().is_none_or(|(r, _)| rank < *r) {
                     best = Some((rank, file));
                 }
@@ -208,7 +219,10 @@ pub fn freedesktop_name(group: &str, name: &str) -> Option<&'static str> {
 /// The icon theme chosen in Settings (settings.toml's "Net/IconThemeName",
 /// what the server tells programs as XSETTINGS), else Vergence's.
 pub fn chosen_theme() -> String {
-    let dir = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
+    let dir = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
     let text = dir.and_then(|d| std::fs::read_to_string(d.join("vergence/settings.toml")).ok()).unwrap_or_default();
     theme_in(&text)
 }
@@ -275,9 +289,15 @@ mod tests {
         s.write("share/icons/hicolor/32x32@2/apps/retina.png", "png");
         s.write("share/icons/hicolor/16x16/apps/retina.png", "png");
         s.write("share/icons/hicolor/48x48/actions/firefox-action.png", "png");
-        s.write("share/icons/Fancy/index.theme", "[Icon Theme]\nName=Fancy\nInherits=Plain,hicolor\nDirectories=48/apps\n\n[48/apps]\nSize=48\n");
+        s.write(
+            "share/icons/Fancy/index.theme",
+            "[Icon Theme]\nName=Fancy\nInherits=Plain,hicolor\nDirectories=48/apps\n\n[48/apps]\nSize=48\n",
+        );
         s.write("share/icons/Fancy/48/apps/firefox.png", "png");
-        s.write("share/icons/Plain/index.theme", "[Icon Theme]\nName=Plain\nDirectories=64/apps\n\n[64/apps]\nSize=64\n");
+        s.write(
+            "share/icons/Plain/index.theme",
+            "[Icon Theme]\nName=Plain\nDirectories=64/apps\n\n[64/apps]\nSize=64\n",
+        );
         s.write("share/icons/Plain/64/apps/files.png", "png");
         s.write("share/pixmaps/oldapp.png", "png");
         s.write("share/pixmaps/direct.png", "png");
@@ -288,7 +308,9 @@ mod tests {
     fn the_nearest_size_and_the_scalable_first() {
         let s = system();
         let dirs = [s.0.join("share")];
-        let find = |theme: &str, name: &str, px: u32| find_in(&dirs, None, theme, name, px).map(|p| p.strip_prefix(&s.0).unwrap().to_string_lossy().into_owned());
+        let find = |theme: &str, name: &str, px: u32| {
+            find_in(&dirs, None, theme, name, px).map(|p| p.strip_prefix(&s.0).unwrap().to_string_lossy().into_owned())
+        };
         // Fixed sizes: the nearest that is large enough; the largest when none is.
         assert_eq!(find("", "firefox", 32).as_deref(), Some("share/icons/hicolor/48x48/apps/firefox.png"));
         assert_eq!(find("", "firefox", 96).as_deref(), Some("share/icons/hicolor/256x256/apps/firefox.png"));
@@ -308,9 +330,15 @@ mod tests {
         s.write("local/icons/hicolor/scalable/apps/ours.svg", "svg");
         let both = [s.0.join("local"), s.0.join("share")];
         assert_eq!(find_in(&both, None, "", "ours", 32), Some(s.0.join("local/icons/hicolor/scalable/apps/ours.svg")));
-        assert_eq!(find_in(&both, None, "", "firefox", 32), Some(s.0.join("share/icons/hicolor/48x48/apps/firefox.png")));
+        assert_eq!(
+            find_in(&both, None, "", "firefox", 32),
+            Some(s.0.join("share/icons/hicolor/48x48/apps/firefox.png"))
+        );
         // An icon of another kind than an application's is an icon all the same.
-        assert_eq!(find("", "firefox-action", 32).as_deref(), Some("share/icons/hicolor/48x48/actions/firefox-action.png"));
+        assert_eq!(
+            find("", "firefox-action", 32).as_deref(),
+            Some("share/icons/hicolor/48x48/actions/firefox-action.png")
+        );
         // Not there at all, not a name.
         assert_eq!(find("", "nothing", 32), None);
         assert_eq!(find("", "", 32), None);
@@ -338,7 +366,9 @@ mod tests {
         assert!(dirs.iter().any(|d| d.path == "32x32@2/apps" && d.scale == 2));
         assert!(inherits.is_empty());
         // Directories the index does not list, sizes that are not numbers, paths that climb out.
-        let (dirs, inherits) = index("[Icon Theme]\nInherits= a , b\nDirectories=ok,../up,nosize\n[ok]\nSize=24\n[unlisted]\nSize=24\n[nosize]\nSize=big\n[../up]\nSize=24\n");
+        let (dirs, inherits) = index(
+            "[Icon Theme]\nInherits= a , b\nDirectories=ok,../up,nosize\n[ok]\nSize=24\n[unlisted]\nSize=24\n[nosize]\nSize=big\n[../up]\nSize=24\n",
+        );
         assert_eq!(dirs.iter().map(|d| d.path.as_str()).collect::<Vec<_>>(), ["ok"]);
         assert_eq!(inherits, ["a", "b"]);
         assert_eq!(index(""), (Vec::new(), Vec::new()));

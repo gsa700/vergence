@@ -68,7 +68,10 @@ mod tests {
         assert_eq!(parse("close,minimize,maximize:"), Layout { left: true, minimize: true, maximize: true });
         assert_eq!(parse(":close"), Layout { left: false, minimize: false, maximize: false });
         assert_eq!(parse("nonsense"), Layout::default());
-        for l in [Layout { left: true, minimize: false, maximize: true }, Layout { left: false, minimize: true, maximize: false }] {
+        for l in [
+            Layout { left: true, minimize: false, maximize: true },
+            Layout { left: false, minimize: true, maximize: false },
+        ] {
             assert_eq!(parse(&format(l)), l);
         }
         assert_eq!(format(Layout::default()), "close,minimize,maximize:");

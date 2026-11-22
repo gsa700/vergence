@@ -108,7 +108,8 @@ impl Scenes {
     /// Copies for other scales: none unused past ALT_IDLE, at most
     /// ALTS_PER_WINDOW a window, ALT_BYTES in all (the oldest go first).
     fn trim_alts(&mut self, now: Instant) {
-        let mut keys: Vec<((u32, u32, u64), Instant, usize)> = self.alts.iter().map(|(k, e)| (*k, e.used, e.bytes())).collect();
+        let mut keys: Vec<((u32, u32, u64), Instant, usize)> =
+            self.alts.iter().map(|(k, e)| (*k, e.used, e.bytes())).collect();
         keys.sort_by_key(|k| std::cmp::Reverse(k.1));
         let (mut total, mut per) = (0usize, HashMap::<(u32, u32), usize>::new());
         let mut gone = Vec::new();
@@ -146,7 +147,8 @@ impl AltEntry {
 /// A window's picture drawn again at another screen's scale.
 #[derive(Clone)]
 pub struct Alt {
-    pub texture: smithay::backend::renderer::element::texture::TextureBuffer<smithay::backend::renderer::gles::GlesTexture>,
+    pub texture:
+        smithay::backend::renderer::element::texture::TextureBuffer<smithay::backend::renderer::gles::GlesTexture>,
     pub gles: smithay::backend::renderer::gles::GlesTexture,
     pub px: Size<i32, BufferCoords>,
     /// Counted apart from the pictures' serials (backdrop.rs tells frames apart by it).
@@ -205,7 +207,9 @@ impl Server {
                 Ok(()) => {
                     let b = &bufs[*next];
                     *next = (*next + 1) % BUFFERS;
-                    let fd = vergence_protocol::window::Fd(std::sync::Arc::new(b.fd.try_clone().map_err(|e| e.to_string())?));
+                    let fd = vergence_protocol::window::Fd(std::sync::Arc::new(
+                        b.fd.try_clone().map_err(|e| e.to_string())?,
+                    ));
                     let plane = vergence_protocol::window::Plane { fd, offset: b.offset, stride: b.stride };
                     let (w, h, format, modifier) = (b.width, b.height, b.format, b.modifier);
                     self.native_attach_gpu(n, vec![plane], w, h, format, modifier)?;
@@ -215,7 +219,13 @@ impl Server {
                 }
                 Err(e) => {
                     tracing::warn!("scenes: the GPU renderer failed ({e}): scenes drawn on the CPU from now");
-                    let all: Vec<GpuBuffer> = self.scenes.buffers.drain().flat_map(|(_, (b, _))| b).chain(self.scenes.alts.drain().flat_map(|(_, e)| e.bufs)).collect();
+                    let all: Vec<GpuBuffer> = self
+                        .scenes
+                        .buffers
+                        .drain()
+                        .flat_map(|(_, (b, _))| b)
+                        .chain(self.scenes.alts.drain().flat_map(|(_, e)| e.bufs))
+                        .collect();
                     self.scenes.release(all);
                     self.scenes.gpu = None;
                     self.scenes.no_gpu = true;
@@ -241,7 +251,13 @@ impl Server {
         }
         let strikes = self.scenes.strikes.entry((n.client, n.id)).or_default();
         *strikes += 1;
-        tracing::warn!("scenes: client {} window {} took {} ms to draw (strike {})", n.client, n.id, took.as_millis(), strikes);
+        tracing::warn!(
+            "scenes: client {} window {} took {} ms to draw (strike {})",
+            n.client,
+            n.id,
+            took.as_millis(),
+            strikes
+        );
         if took >= TOO_SLOW || *strikes >= STRIKES {
             self.scenes_off(n, &format!("its scenes were too slow to draw ({} ms)", took.as_millis()));
         }
@@ -258,12 +274,19 @@ impl Server {
         self.scenes_forget(n.client, n.id);
         self.scenes.switched_off += 1;
         let why: String = why.chars().take(200).collect();
-        self.bus_send(n.client, vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::ScenesOff { window: n.id, why }));
+        self.bus_send(
+            n.client,
+            vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::ScenesOff {
+                window: n.id,
+                why,
+            }),
+        );
     }
 
     /// A window gone: its buffers let go.
     pub fn scenes_forget(&mut self, client: u32, window: u32) {
-        let mut gone: Vec<GpuBuffer> = self.scenes.buffers.remove(&(client, window)).map(|(b, _)| b).unwrap_or_default();
+        let mut gone: Vec<GpuBuffer> =
+            self.scenes.buffers.remove(&(client, window)).map(|(b, _)| b).unwrap_or_default();
         let keys: Vec<_> = self.scenes.alts.keys().filter(|k| (k.0, k.1) == (client, window)).copied().collect();
         for k in keys {
             gone.extend(self.scenes.alts.remove(&k).map(|e| e.bufs).unwrap_or_default());
@@ -275,7 +298,12 @@ impl Server {
 
     /// Window `n` drawn from its scene at `scale` (another screen's), for
     /// that screen; None if it has no scene or scenes are drawn on the CPU.
-    pub fn scene_alt(&mut self, renderer: &mut smithay::backend::renderer::gles::GlesRenderer, n: &NativeWindow, scale: f64) -> Option<Alt> {
+    pub fn scene_alt(
+        &mut self,
+        renderer: &mut smithay::backend::renderer::gles::GlesRenderer,
+        n: &NativeWindow,
+        scale: f64,
+    ) -> Option<Alt> {
         use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
         use smithay::backend::renderer::ImportDma;
         let scene = n.scene()?;
@@ -294,11 +322,21 @@ impl Server {
         let (pw, ph) = vergence_render::pixel_size(&scene, scale as f32).ok()?;
         // Beyond this a window is enlarged instead (a magnified big window
         // would need a picture larger than a GPU keeps; tiles come later).
-        if pw > 8192 || ph > 8192 || pw as u64 * ph as u64 > 40_000_000 || vergence_render::cost(&scene, scale as f32) > budget() {
+        if pw > 8192
+            || ph > 8192
+            || pw as u64 * ph as u64 > 40_000_000
+            || vergence_render::cost(&scene, scale as f32) > budget()
+        {
             return None;
         }
         self.scenes.gpu.as_ref()?;
-        self.scenes.alts.entry(key).or_insert_with(|| AltEntry { scene: 0, bufs: Vec::new(), next: 0, alt: None, used: now });
+        self.scenes.alts.entry(key).or_insert_with(|| AltEntry {
+            scene: 0,
+            bufs: Vec::new(),
+            next: 0,
+            alt: None,
+            used: now,
+        });
         self.scenes.trim_alts(now);
         let gpu = self.scenes.gpu.as_mut()?;
         let entry = self.scenes.alts.get_mut(&key)?;
@@ -318,7 +356,12 @@ impl Server {
             return None;
         }
         let fourcc = smithay::backend::allocator::Fourcc::try_from(b.format).ok()?;
-        let mut d = Dmabuf::builder((b.width as i32, b.height as i32), fourcc, smithay::backend::allocator::Modifier::from(b.modifier), DmabufFlags::empty());
+        let mut d = Dmabuf::builder(
+            (b.width as i32, b.height as i32),
+            fourcc,
+            smithay::backend::allocator::Modifier::from(b.modifier),
+            DmabufFlags::empty(),
+        );
         d.add_plane(b.fd.try_clone().ok()?, b.offset, b.stride);
         let dmabuf = d.build()?;
         let gles = match renderer.import_dmabuf(&dmabuf, None) {
@@ -328,7 +371,13 @@ impl Server {
                 return None;
             }
         };
-        let texture = smithay::backend::renderer::element::texture::TextureBuffer::from_texture(renderer, gles.clone(), 1, smithay::utils::Transform::Normal, None);
+        let texture = smithay::backend::renderer::element::texture::TextureBuffer::from_texture(
+            renderer,
+            gles.clone(),
+            1,
+            smithay::utils::Transform::Normal,
+            None,
+        );
         let serial = ALT_SERIALS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let alt = Alt { texture, gles, px: (pw as i32, ph as i32).into(), serial };
         entry.next = (entry.next + 1) % 2;
@@ -336,7 +385,12 @@ impl Server {
         entry.alt = Some(alt.clone());
         self.scenes.drawn_alt += 1;
         if now.elapsed() >= SLOW {
-            tracing::warn!("scenes: client {} window {} took {} ms to draw at {scale:.2}: enlarged from now", n.client, n.id, now.elapsed().as_millis());
+            tracing::warn!(
+                "scenes: client {} window {} took {} ms to draw at {scale:.2}: enlarged from now",
+                n.client,
+                n.id,
+                now.elapsed().as_millis()
+            );
             self.scenes.no_alts.insert((n.client, n.id));
         }
         Some(alt)
@@ -352,7 +406,20 @@ impl Server {
             "not yet"
         };
         let drawn = (self.scenes.drawn_gpu + self.scenes.drawn_cpu).max(1);
-        let times = format!("; {:.2} ms a draw on average, slowest {:.1} ms", self.scenes.draw_time.as_secs_f64() * 1e3 / drawn as f64, self.scenes.slowest.as_secs_f64() * 1e3);
-        format!("scenes drawn {how}: {} on the GPU, {} on the CPU, {} windows with buffers; {} drawn again for another screen's scale ({} kept, {} MB); {} switched to pixels", self.scenes.drawn_gpu, self.scenes.drawn_cpu, self.scenes.buffers.len(), self.scenes.drawn_alt, self.scenes.alts.len(), self.scenes.alts.values().map(AltEntry::bytes).sum::<usize>() >> 20, self.scenes.switched_off) + &times
+        let times = format!(
+            "; {:.2} ms a draw on average, slowest {:.1} ms",
+            self.scenes.draw_time.as_secs_f64() * 1e3 / drawn as f64,
+            self.scenes.slowest.as_secs_f64() * 1e3
+        );
+        format!(
+            "scenes drawn {how}: {} on the GPU, {} on the CPU, {} windows with buffers; {} drawn again for another screen's scale ({} kept, {} MB); {} switched to pixels",
+            self.scenes.drawn_gpu,
+            self.scenes.drawn_cpu,
+            self.scenes.buffers.len(),
+            self.scenes.drawn_alt,
+            self.scenes.alts.len(),
+            self.scenes.alts.values().map(AltEntry::bytes).sum::<usize>() >> 20,
+            self.scenes.switched_off
+        ) + &times
     }
 }

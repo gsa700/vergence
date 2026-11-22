@@ -258,7 +258,13 @@ impl<'a> Get<'a> {
                     T_SPEC => 6,
                     T_TRUE | T_FALSE => 0,
                     T_MAP => self.b.get(self.at).map(|c| 1 + *c as usize).ok_or_else(|| bad("message cut short"))?,
-                    T_ARB => 4 + self.b.get(self.at..self.at + 4).map(|l| u32::from_be_bytes(l.try_into().unwrap()) as usize).ok_or_else(|| bad("message cut short"))?,
+                    T_ARB => {
+                        4 + self
+                            .b
+                            .get(self.at..self.at + 4)
+                            .map(|l| u32::from_be_bytes(l.try_into().unwrap()) as usize)
+                            .ok_or_else(|| bad("message cut short"))?
+                    }
                     other => return Err(bad(&format!("unknown tag {:?}", other as char))),
                 };
                 self.take(n)?;
@@ -338,8 +344,16 @@ fn socket_path() -> Option<PathBuf> {
 
 fn cookie() -> Vec<u8> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
-    let places = [std::env::var_os("PULSE_COOKIE").map(PathBuf::from), home.as_ref().map(|h| h.join(".config/pulse/cookie")), home.as_ref().map(|h| h.join(".pulse-cookie"))];
-    places.into_iter().flatten().find_map(|p| std::fs::read(p).ok().filter(|c| c.len() == 256)).unwrap_or_else(|| vec![0; 256])
+    let places = [
+        std::env::var_os("PULSE_COOKIE").map(PathBuf::from),
+        home.as_ref().map(|h| h.join(".config/pulse/cookie")),
+        home.as_ref().map(|h| h.join(".pulse-cookie")),
+    ];
+    places
+        .into_iter()
+        .flatten()
+        .find_map(|p| std::fs::read(p).ok().filter(|c| c.len() == 256))
+        .unwrap_or_else(|| vec![0; 256])
 }
 
 impl Pulse {
@@ -404,7 +418,12 @@ impl Pulse {
 
     /// A command and its reply's values (after the command and tag); the
     /// server's own messages in between (requests, events) go to `other`.
-    fn ask_with(&mut self, command: u32, args: impl FnOnce(&mut Put), mut other: impl FnMut(&mut Pulse, u32, &[u8]) -> io::Result<()>) -> io::Result<Vec<u8>> {
+    fn ask_with(
+        &mut self,
+        command: u32,
+        args: impl FnOnce(&mut Put),
+        mut other: impl FnMut(&mut Pulse, u32, &[u8]) -> io::Result<()>,
+    ) -> io::Result<Vec<u8>> {
         self.tag = self.tag.wrapping_add(1) & 0x7fff_ffff;
         let tag = self.tag;
         let mut t = Put::default();
@@ -558,9 +577,13 @@ impl Sound for Pulse {
             missing = missing.saturating_sub(n);
         }
         self.sock.set_read_timeout(Some(Duration::from_secs(5)))?;
-        let drained = self.ask_with(DRAIN_PLAYBACK_STREAM, |t| {
-            t.u32(channel);
-        }, |_, _, _| Ok(()));
+        let drained = self.ask_with(
+            DRAIN_PLAYBACK_STREAM,
+            |t| {
+                t.u32(channel);
+            },
+            |_, _, _| Ok(()),
+        );
         let _ = self.ask(DELETE_PLAYBACK_STREAM, |t| {
             t.u32(channel);
         });
@@ -722,7 +745,8 @@ impl crate::Stream for PulseStream {
                 }
                 continue;
             }
-            let n = (self.missing.min(bytes.len() - sent).min(64 * 1024) / frame * frame).max(frame.min(bytes.len() - sent));
+            let n = (self.missing.min(bytes.len() - sent).min(64 * 1024) / frame * frame)
+                .max(frame.min(bytes.len() - sent));
             self.p.send(self.channel, &bytes[sent..sent + n])?;
             sent += n;
             self.missing = self.missing.saturating_sub(n);

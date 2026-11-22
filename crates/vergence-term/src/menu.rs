@@ -75,7 +75,13 @@ pub fn server_lines(can_copy: bool, id: impl Fn(Item) -> u32) -> Vec<vergence_ui
             None => vergence_ui::MenuLine::Separator,
             Some(item) => {
                 let (label, keys) = item.words();
-                vergence_ui::MenuLine::Item { id: id(*item), label: label.into(), keys: keys.into(), enabled: *item != Item::Copy || can_copy, checked: None }
+                vergence_ui::MenuLine::Item {
+                    id: id(*item),
+                    label: label.into(),
+                    keys: keys.into(),
+                    enabled: *item != Item::Copy || can_copy,
+                    checked: None,
+                }
             }
         })
         .collect()
@@ -124,12 +130,23 @@ impl Menu {
     }
 
     /// Draws the menu; `hover` is the line under the pointer.
-    pub fn draw(&self, scene: &mut Scene, fonts: &mut Fonts, face: Option<FaceId>, size: f32, accent: Color, hover: Option<Item>) {
+    pub fn draw(
+        &self,
+        scene: &mut Scene,
+        fonts: &mut Fonts,
+        face: Option<FaceId>,
+        size: f32,
+        accent: Color,
+        hover: Option<Item>,
+    ) {
         scene.fill_rounded(self.area, RADIUS, GROUND);
         scene.stroke(self.area, RADIUS, 1.0, Color::rgba(255, 255, 255, 38));
         for (line, row) in &self.rows {
             let Some(item) = line else {
-                scene.fill(Rect::new(row.x + 4.0, row.y + (row.h - 1.0) / 2.0, row.w - 8.0, 1.0), Color::rgba(255, 255, 255, 31));
+                scene.fill(
+                    Rect::new(row.x + 4.0, row.y + (row.h - 1.0) / 2.0, row.w - 8.0, 1.0),
+                    Color::rgba(255, 255, 255, 31),
+                );
                 continue;
             };
             let chosen = hover == Some(*item) && self.enabled(*item);
@@ -151,7 +168,15 @@ impl Menu {
             // The keys, smaller, against the right edge.
             let small = size - 2.0;
             let width = fonts.layout(face, small, keys).1;
-            text(scene, fonts, face, small, if chosen { ink } else { INK_OFF }, Point::new(row.x + row.w - 10.0 - width, baseline), keys);
+            text(
+                scene,
+                fonts,
+                face,
+                small,
+                if chosen { ink } else { INK_OFF },
+                Point::new(row.x + row.w - 10.0 - width, baseline),
+                keys,
+            );
         }
     }
 }
@@ -163,7 +188,11 @@ mod tests {
     #[test]
     fn the_menu_stays_in_the_window() {
         let m = Menu::new(100.0, 80.0, (800.0, 600.0), true);
-        assert_eq!((m.area.x, m.area.y, m.area.w, m.area.h), (100.0, 80.0, 236.0, 259.0), "at the pointer where there is room");
+        assert_eq!(
+            (m.area.x, m.area.y, m.area.w, m.area.h),
+            (100.0, 80.0, 236.0, 259.0),
+            "at the pointer where there is room"
+        );
         let m = Menu::new(790.0, 590.0, (800.0, 600.0), true);
         assert_eq!((m.area.x + m.area.w, m.area.y + m.area.h), (800.0, 600.0), "moved in from the corner");
         let m = Menu::new(50.0, 20.0, (120.0, 100.0), true);

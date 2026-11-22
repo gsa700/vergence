@@ -20,7 +20,10 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use vergence_widgets::files::{self, Entry};
-use vergence_widgets::{Align, ButtonLook, Element, Length, Padding, Program, Theme, Waker, Window, button, choice, column, field, label, panel, row, rule, space, switch};
+use vergence_widgets::{
+    Align, ButtonLook, Element, Length, Padding, Program, Theme, Waker, Window, button, choice, column, field, label,
+    panel, row, rule, space, switch,
+};
 
 use crate::{SharedRef, ops};
 
@@ -61,7 +64,10 @@ pub struct Properties {
 
 impl Properties {
     pub fn new(path: PathBuf, shared: SharedRef, theme: Theme) -> Properties {
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string_lossy().into_owned());
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.to_string_lossy().into_owned());
         let mime = vergence_types::of_file(&path).to_string();
         let (apps, default) = if path.is_dir() {
             (Vec::new(), None)
@@ -73,17 +79,38 @@ impl Properties {
                 .into_iter()
                 .take(24)
                 .map(|id| {
-                    let n = entries.iter().find(|e| vergence_shell::open::desktop_id(&e.id) == id).map(|e| e.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| id.trim_end_matches(".desktop").to_string());
+                    let n = entries
+                        .iter()
+                        .find(|e| vergence_shell::open::desktop_id(&e.id) == id)
+                        .map(|e| e.name.clone())
+                        .filter(|n| !n.is_empty())
+                        .unwrap_or_else(|| id.trim_end_matches(".desktop").to_string());
                     (id, n)
                 })
                 .collect();
             let known: Vec<String> = entries.iter().map(|e| vergence_shell::open::desktop_id(&e.id)).collect();
-            let apps: Vec<vergence_types::App> = entries.iter().zip(&known).filter(|(e, _)| !e.hidden).map(|(e, id)| vergence_types::App { id, types: &e.mime_types }).collect();
+            let apps: Vec<vergence_types::App> = entries
+                .iter()
+                .zip(&known)
+                .filter(|(e, _)| !e.hidden)
+                .map(|(e, id)| vergence_types::App { id, types: &e.mime_types })
+                .collect();
             let def = vergence_types::default_for(&mime, &apps, &lists);
             let default = def.and_then(|d| named.iter().position(|(id, _)| *id == d));
             (named, default)
         };
-        Properties { path, shared, theme, page: Page::General, name, problem: None, count: Arc::default(), apps, default, mime }
+        Properties {
+            path,
+            shared,
+            theme,
+            page: Page::General,
+            name,
+            problem: None,
+            count: Arc::default(),
+            apps,
+            default,
+            mime,
+        }
     }
 
     fn general(&self) -> Vec<Element<Msg>> {
@@ -101,7 +128,13 @@ impl Properties {
             .width(Length::FILL),
         );
         if let Some(p) = &self.problem {
-            out.push(label(p.clone()).size(11.0).color(vergence_scene::Color { r: 214, g: 64, b: 64, a: 255 }).wrap().width(Length::FILL));
+            out.push(
+                label(p.clone())
+                    .size(11.0)
+                    .color(vergence_scene::Color { r: 214, g: 64, b: 64, a: 255 })
+                    .wrap()
+                    .width(Length::FILL),
+            );
         }
         out.push(rule());
         let Ok(m) = m else {
@@ -118,13 +151,18 @@ impl Properties {
             out.push(fact("Where", files::tilde(dir)));
         }
         if m.file_type().is_symlink() {
-            out.push(fact("Points to", std::fs::read_link(&self.path).map(|t| t.to_string_lossy().into_owned()).unwrap_or_default()));
+            out.push(fact(
+                "Points to",
+                std::fs::read_link(&self.path).map(|t| t.to_string_lossy().into_owned()).unwrap_or_default(),
+            ));
         }
         if m.is_dir() {
             let (size, items) = match *self.count.lock().unwrap_or_else(|e| e.into_inner()) {
                 None => ("Counting…".to_string(), None),
                 Some(None) => ("Too much to count".to_string(), None),
-                Some(Some((bytes, items))) => (with_bytes(bytes), Some(format!("{} item{}", grouped(items), if items == 1 { "" } else { "s" }))),
+                Some(Some((bytes, items))) => {
+                    (with_bytes(bytes), Some(format!("{} item{}", grouped(items), if items == 1 { "" } else { "s" })))
+                }
             };
             out.push(fact("Size", size));
             if let Some(i) = items {
@@ -141,10 +179,25 @@ impl Properties {
         if !m.is_dir() {
             out.push(rule());
             let names: Vec<String> = self.apps.iter().map(|(_, n)| n.clone()).collect();
-            let opens: Element<Msg> = if names.is_empty() { label("Nothing installed opens this kind of file.").size(12.0).dim().wrap().width(Length::FILL) } else { choice(names, self.default, Msg::OpensWith).name("Opens with") };
-            out.push(row(vec![label("Opens with").size(12.0).dim().width(Length::Fixed(LABEL_W)), opens]).spacing(8.0).align(Align::Center).width(Length::FILL));
+            let opens: Element<Msg> = if names.is_empty() {
+                label("Nothing installed opens this kind of file.").size(12.0).dim().wrap().width(Length::FILL)
+            } else {
+                choice(names, self.default, Msg::OpensWith).name("Opens with")
+            };
+            out.push(
+                row(vec![label("Opens with").size(12.0).dim().width(Length::Fixed(LABEL_W)), opens])
+                    .spacing(8.0)
+                    .align(Align::Center)
+                    .width(Length::FILL),
+            );
             if !self.apps.is_empty() {
-                out.push(label(format!("Changing it changes it for every {} file.", vergence_types::describe(&self.mime))).size(11.0).dim().wrap().width(Length::FILL));
+                out.push(
+                    label(format!("Changing it changes it for every {} file.", vergence_types::describe(&self.mime)))
+                        .size(11.0)
+                        .dim()
+                        .wrap()
+                        .width(Length::FILL),
+                );
             }
         }
         out
@@ -169,17 +222,41 @@ impl Properties {
                 (true, false) => 1,
                 (false, _) => 2,
             };
-            let c: Element<Msg> = if mine { choice(options.clone(), Some(now), move |k| Msg::Access(who, k)).name(format!("{name} access")) } else { label(options[now].clone()).size(12.0) };
-            out.push(row(vec![label(name).size(12.0).dim().width(Length::Fixed(LABEL_W)), c]).spacing(8.0).align(Align::Center).width(Length::FILL));
+            let c: Element<Msg> = if mine {
+                choice(options.clone(), Some(now), move |k| Msg::Access(who, k)).name(format!("{name} access"))
+            } else {
+                label(options[now].clone()).size(12.0)
+            };
+            out.push(
+                row(vec![label(name).size(12.0).dim().width(Length::Fixed(LABEL_W)), c])
+                    .spacing(8.0)
+                    .align(Align::Center)
+                    .width(Length::FILL),
+            );
         }
         if m.is_file() {
             out.push(rule());
             let runs = mode & 0o100 != 0;
-            let s: Element<Msg> = if mine { switch(runs, Msg::Runs).name("Allow running as a program") } else { label(if runs { "Yes" } else { "No" }).size(12.0) };
-            out.push(row(vec![label("Allow running as a program").size(12.0).width(Length::FILL), s]).spacing(8.0).align(Align::Center).width(Length::FILL));
+            let s: Element<Msg> = if mine {
+                switch(runs, Msg::Runs).name("Allow running as a program")
+            } else {
+                label(if runs { "Yes" } else { "No" }).size(12.0)
+            };
+            out.push(
+                row(vec![label("Allow running as a program").size(12.0).width(Length::FILL), s])
+                    .spacing(8.0)
+                    .align(Align::Center)
+                    .width(Length::FILL),
+            );
         }
         if !mine {
-            out.push(label(format!("Only {} can change these.", owner_name(m.uid()))).size(11.0).color(t.dim).wrap().width(Length::FILL));
+            out.push(
+                label(format!("Only {} can change these.", owner_name(m.uid())))
+                    .size(11.0)
+                    .color(t.dim)
+                    .wrap()
+                    .width(Length::FILL),
+            );
         }
         out
     }
@@ -197,7 +274,12 @@ const LABEL_W: f32 = 90.0;
 
 /// A line of facts: what, then its value.
 fn fact(what: &str, value: String) -> Element<Msg> {
-    row(vec![label(what.to_string()).size(12.0).dim().width(Length::Fixed(LABEL_W)), label(value).size(12.0).wrap().width(Length::FILL)]).spacing(8.0).width(Length::FILL)
+    row(vec![
+        label(what.to_string()).size(12.0).dim().width(Length::Fixed(LABEL_W)),
+        label(value).size(12.0).wrap().width(Length::FILL),
+    ])
+    .spacing(8.0)
+    .width(Length::FILL)
 }
 
 /// "4.8 MB (4,812,345 bytes)".
@@ -270,7 +352,13 @@ impl Program for Properties {
     type Message = Msg;
 
     fn title(&self) -> String {
-        format!("{} Properties", self.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| self.path.to_string_lossy().into_owned()))
+        format!(
+            "{} Properties",
+            self.path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| self.path.to_string_lossy().into_owned())
+        )
     }
 
     fn app_id(&self) -> String {
@@ -295,7 +383,12 @@ impl Program for Properties {
     fn style(&self) -> vergence_ui::Style {
         // A window of its own with only a close button (Dave, 2026-11-16: no
         // app menu or settings on a Properties window).
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, alone: true, min: (360.0, 380.0), ..Default::default() }
+        vergence_ui::Style {
+            kind: vergence_ui::WinKind::Dialog,
+            alone: true,
+            min: (360.0, 380.0),
+            ..Default::default()
+        }
     }
 
     fn waker(&mut self, waker: Waker) {
@@ -318,14 +411,34 @@ impl Program for Properties {
     }
 
     fn view(&self, t: &Theme) -> Element<Msg> {
-        let tab = |text: &str, p: Page| -> Element<Msg> { button(label(text).size(12.0)).look(if self.page == p { ButtonLook::Chosen } else { ButtonLook::Plain }).padding(Padding::hv(4.0, 14.0)).on_press(Msg::Page(p)).name(text) };
-        let tabs = row(vec![tab("General", Page::General), tab("Permissions", Page::Permissions), space().width(Length::FILL)]).spacing(4.0).width(Length::FILL);
+        let tab = |text: &str, p: Page| -> Element<Msg> {
+            button(label(text).size(12.0))
+                .look(if self.page == p { ButtonLook::Chosen } else { ButtonLook::Plain })
+                .padding(Padding::hv(4.0, 14.0))
+                .on_press(Msg::Page(p))
+                .name(text)
+        };
+        let tabs = row(vec![
+            tab("General", Page::General),
+            tab("Permissions", Page::Permissions),
+            space().width(Length::FILL),
+        ])
+        .spacing(4.0)
+        .width(Length::FILL);
         let body = match self.page {
             Page::General => self.general(),
             Page::Permissions => self.permissions(t),
         };
-        let card = panel(column(body).spacing(10.0).width(Length::FILL)).color(t.card).radius(8.0).padding(14.0).width(Length::FILL);
-        panel(column(vec![tabs, card]).spacing(10.0).width(Length::FILL)).padding(Padding { top: t.top + 12.0, bottom: 14.0, left: 14.0, right: 14.0 }).radius(0.0).width(Length::FILL).height(Length::FILL)
+        let card = panel(column(body).spacing(10.0).width(Length::FILL))
+            .color(t.card)
+            .radius(8.0)
+            .padding(14.0)
+            .width(Length::FILL);
+        panel(column(vec![tabs, card]).spacing(10.0).width(Length::FILL))
+            .padding(Padding { top: t.top + 12.0, bottom: 14.0, left: 14.0, right: 14.0 })
+            .radius(0.0)
+            .width(Length::FILL)
+            .height(Length::FILL)
     }
 
     fn update(&mut self, m: Msg, window: &mut Window) {

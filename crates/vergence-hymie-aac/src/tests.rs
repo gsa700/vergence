@@ -12,7 +12,12 @@ const BURST: &[u8] = include_bytes!("../../vergence-hymie/fixtures/aacburst.m4a"
 const TAGGED: &[u8] = include_bytes!("../../vergence-hymie/fixtures/aac.m4a");
 
 /// The fixtures: name, bytes, rate, channels, the samples given to the encoder.
-const FIXTURES: [(&str, &[u8], u32, u16, u64); 4] = [("aac44", AAC44, 44_100, 2, 66_150), ("aac48", AAC48, 48_000, 1, 48_000), ("aacburst", BURST, 48_000, 2, 48_000), ("aac", TAGGED, 44_100, 1, 22_050)];
+const FIXTURES: [(&str, &[u8], u32, u16, u64); 4] = [
+    ("aac44", AAC44, 44_100, 2, 66_150),
+    ("aac48", AAC48, 48_000, 1, 48_000),
+    ("aacburst", BURST, 48_000, 2, 48_000),
+    ("aac", TAGGED, 44_100, 1, 22_050),
+];
 
 /// All the samples of a track, read in pieces of `chunk` frames.
 fn all(t: &mut dyn Track, chunk: usize) -> Vec<f32> {
@@ -65,7 +70,9 @@ fn crossings(s: &[f32], ch: usize, c: usize) -> usize {
 fn aac_decodes_the_tones_in_place() {
     // (fixture, channels, channel, frequency, rate); every tone is a sine at
     // 0.5 starting at sample 0 (fixtures/README.md).
-    for (data, ch, c, hz, rate) in [(AAC44, 2, 0, 440.0, 44_100.0), (AAC44, 2, 1, 660.0, 44_100.0), (AAC48, 1, 0, 1000.0, 48_000.0)] {
+    for (data, ch, c, hz, rate) in
+        [(AAC44, 2, 0, 440.0, 44_100.0), (AAC44, 2, 1, 660.0, 44_100.0), (AAC48, 1, 0, 1000.0, 48_000.0)]
+    {
         let mut t = open(data.to_vec()).unwrap();
         let s = all(t.as_mut(), 4096);
         let n = s.len() / ch;
@@ -73,14 +80,24 @@ fn aac_decodes_the_tones_in_place() {
         // at the 440 Hz onset, 0.62 within the 660 Hz tone), and FFmpeg's own
         // decoder gives the same samples. A sine at 0.5 is 0.354 RMS.
         let middle = &s[2048 * ch..(n - 2048) * ch];
-        let level = (middle.chunks_exact(ch).map(|f| (f[c] as f64).powi(2)).sum::<f64>() / (middle.len() / ch) as f64).sqrt();
+        let level =
+            (middle.chunks_exact(ch).map(|f| (f[c] as f64).powi(2)).sum::<f64>() / (middle.len() / ch) as f64).sqrt();
         assert!((level - 0.5 / 2f64.sqrt()).abs() < 0.01, "{hz} Hz: RMS level {level}");
         let seconds = n as f64 / rate;
         let k = crossings(&s, ch, c) as f64;
         assert!((k - hz * seconds).abs() <= 2.0, "{hz} Hz: {k} crossings in {seconds} s");
         // Gapless puts every sample where it was: the decoded sound is
         // closest to the sine as it was given, not to it a sample early or late.
-        let rms = |shift: f64| ((0..n).map(|i| (s[i * ch + c] as f64 - 0.5 * (std::f64::consts::TAU * hz * (i as f64 + shift) / rate).sin()).powi(2)).sum::<f64>() / n as f64).sqrt();
+        let rms = |shift: f64| {
+            ((0..n)
+                .map(|i| {
+                    (s[i * ch + c] as f64 - 0.5 * (std::f64::consts::TAU * hz * (i as f64 + shift) / rate).sin())
+                        .powi(2)
+                })
+                .sum::<f64>()
+                / n as f64)
+                .sqrt()
+        };
         let (early, here, late) = (rms(-1.0), rms(0.0), rms(1.0));
         eprintln!("{hz} Hz: RMS level {level:.4}, RMS from the sine {early:.2e} / {here:.2e} / {late:.2e}");
         assert!(here < 0.03 && here < early && here < late, "{hz} Hz: RMS from the sine {early} / {here} / {late}");
@@ -136,7 +153,9 @@ fn aac_matches_ffmpeg_when_given_its_decode() {
         let n = ours.len() as f64;
         let rms = (diff / n).sqrt();
         let (dbfs, below) = (20.0 * rms.max(1e-30).log10(), 10.0 * (sig / diff.max(1e-30)).log10());
-        eprintln!("{name}: RMS difference {rms:.2e} ({dbfs:.1} dBFS), largest {worst:.2e}, {below:.1} dB below the signal");
+        eprintln!(
+            "{name}: RMS difference {rms:.2e} ({dbfs:.1} dBFS), largest {worst:.2e}, {below:.1} dB below the signal"
+        );
         assert!(dbfs < -60.0, "{name}: RMS difference {rms} ({dbfs:.1} dBFS)");
     }
 }
@@ -152,7 +171,8 @@ fn tools_used(data: &[u8], asc: [u8; 2]) -> [usize; 5] {
     let sizes: Vec<usize> = (0..be(stsz + 8)).map(|i| be(stsz + 12 + i * 4)).collect();
     let stco = find(b"stco");
     let stsc = find(b"stsc");
-    let runs: Vec<(usize, usize)> = (0..be(stsc + 4)).map(|i| (be(stsc + 8 + i * 12), be(stsc + 12 + i * 12))).collect();
+    let runs: Vec<(usize, usize)> =
+        (0..be(stsc + 4)).map(|i| (be(stsc + 8 + i * 12), be(stsc + 12 + i * 12))).collect();
     let chunks: Vec<usize> = (0..be(stco + 4)).map(|i| be(stco + 8 + i * 4)).collect();
     let mut dec = AacDecoder::from_config(&asc).unwrap();
     let mut pcm = vec![0f32; 2048];
@@ -191,7 +211,9 @@ fn only_aac_lc_is_taken() {
     };
     assert!(AacDecoder::from_config(&asc(2, 4, 2)).is_ok());
     assert!(AacDecoder::from_config(&asc(2, 3, 1)).is_ok());
-    for (object, rate, channels) in [(5, 4, 2), (29, 4, 2), (1, 4, 2), (4, 4, 2), (2, 4, 6), (2, 4, 0), (2, 12, 2), (2, 15, 2)] {
+    for (object, rate, channels) in
+        [(5, 4, 2), (29, 4, 2), (1, 4, 2), (4, 4, 2), (2, 4, 6), (2, 4, 0), (2, 12, 2), (2, 15, 2)]
+    {
         assert!(AacDecoder::from_config(&asc(object, rate, channels)).is_err(), "{object} {rate} {channels}");
     }
     // Implicit SBR signalled after the config (0x2b7, type 5, flag 1).

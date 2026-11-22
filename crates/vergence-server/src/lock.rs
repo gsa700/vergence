@@ -53,10 +53,16 @@ use crate::{Server, decor::SceneElement, win::Win};
 
 /// What the thread talking to vdm heard.
 pub(crate) enum Heard {
-    Prompt { echo: bool, text: String },
+    Prompt {
+        echo: bool,
+        text: String,
+    },
     Info(String),
     Error(String),
-    Done { ok: bool, wait: u16 },
+    Done {
+        ok: bool,
+        wait: u16,
+    },
     /// vdm could not be reached, or the connection broke.
     Gone(String),
     /// No answer came in time, so the conversation was ended before vdm
@@ -65,7 +71,11 @@ pub(crate) enum Heard {
     /// vdm, on the session socket: the machine is about to sleep (step 2).
     LockNow,
     /// vdm, on the session socket: show the elevation prompt (elevate.rs).
-    Ask { id: u128, what: String, who: String },
+    Ask {
+        id: u128,
+        what: String,
+        who: String,
+    },
     /// vdm: that prompt is over.
     Withdrawn(u128),
     /// vdm, on the session socket: the power button was pressed where it is
@@ -142,7 +152,8 @@ const SAFE_PARENTS: [&str; 6] = ["login", "vdm", "gdm-wayland-ses", "gdm-x-sessi
 const PASS_THROUGH: [&str; 1] = ["dbus-run-sessio"];
 
 fn ps(field: &str, pid: u32) -> Option<String> {
-    let out = std::process::Command::new("ps").args(["-o", &format!("{field}="), "-p", &pid.to_string()]).output().ok()?;
+    let out =
+        std::process::Command::new("ps").args(["-o", &format!("{field}="), "-p", &pid.to_string()]).output().ok()?;
     let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
     (!s.is_empty()).then_some(s)
 }
@@ -153,7 +164,8 @@ fn ps(field: &str, pid: u32) -> Option<String> {
 /// parent is what is asked about.
 fn no_shell_above() -> Result<(), String> {
     let script = std::os::unix::process::parent_id();
-    let mut above = ps("ppid", script).and_then(|p| p.parse::<u32>().ok()).ok_or("the session's parent is not known")?;
+    let mut above =
+        ps("ppid", script).and_then(|p| p.parse::<u32>().ok()).ok_or("the session's parent is not known")?;
     for _ in 0..4 {
         let name = ps("comm", above).unwrap_or_default();
         let name = name.rsplit('/').next().unwrap_or(&name).trim_start_matches('-').to_string();
@@ -197,7 +209,11 @@ fn session(heard: channel::Sender<Heard>, replies: std::sync::mpsc::Receiver<Rep
                         Err(_) => continue,
                     };
                     // Through the shared writer, so it never interleaves with the main thread's.
-                    let sent = out.lock().unwrap_or_else(|e| e.into_inner()).as_mut().is_some_and(|w| proto::send_to_vdm(w, &msg).is_ok());
+                    let sent = out
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .as_mut()
+                        .is_some_and(|w| proto::send_to_vdm(w, &msg).is_ok());
                     if !sent {
                         break;
                     }
@@ -230,13 +246,23 @@ fn session(heard: channel::Sender<Heard>, replies: std::sync::mpsc::Receiver<Rep
 const ANSWER_LIMIT: Duration = Duration::from_secs(75);
 
 fn talk(heard: channel::Sender<Heard>, answers: std::sync::mpsc::Receiver<Option<Secret>>) {
-    converse(heard, answers, vergence_dm::paths::UNLOCK_SOCKET, vec![ToVdm::Hello { version: proto::VERSION, service: Service::Unlock }]);
+    converse(
+        heard,
+        answers,
+        vergence_dm::paths::UNLOCK_SOCKET,
+        vec![ToVdm::Hello { version: proto::VERSION, service: Service::Unlock }],
+    );
 }
 
 /// One PAM conversation with vdm on `socket`, opened with `first` (the lock's
 /// Hello; the login screen's Hello and Login): PAM's prompts and messages go
 /// to the main loop through `heard`, the answers come back through `answers`.
-pub(crate) fn converse(heard: channel::Sender<Heard>, answers: std::sync::mpsc::Receiver<Option<Secret>>, socket: &str, first: Vec<ToVdm>) {
+pub(crate) fn converse(
+    heard: channel::Sender<Heard>,
+    answers: std::sync::mpsc::Receiver<Option<Secret>>,
+    socket: &str,
+    first: Vec<ToVdm>,
+) {
     let mut s = match UnixStream::connect(socket) {
         Ok(s) => s,
         Err(e) => {
@@ -321,7 +347,8 @@ impl Server {
         let heard = tx.clone();
         let out = self.lock.vdm_out.clone();
         if std::env::args().any(|a| a == "--drm")
-            && let Err(e) = std::thread::Builder::new().name("lock-session".into()).spawn(move || session(heard, rrx, out))
+            && let Err(e) =
+                std::thread::Builder::new().name("lock-session".into()).spawn(move || session(heard, rrx, out))
         {
             tracing::warn!("lock: {e}");
         }
@@ -347,11 +374,19 @@ impl Server {
             return;
         }
         let ids: Vec<String> = self.bus_outputs().iter().map(|o| o.id.clone()).collect();
-        let Some(main) = vergence_profile::primary(self.shelf.primary.as_deref(), &ids).map(str::to_string) else { return };
+        let Some(main) = vergence_profile::primary(self.shelf.primary.as_deref(), &ids).map(str::to_string) else {
+            return;
+        };
         if self.lock.main_told.as_deref() == Some(main.as_str()) || !vergence_dm::proto::is_monitor_id(&main) {
             return;
         }
-        let sent = self.lock.vdm_out.lock().unwrap_or_else(|e| e.into_inner()).as_mut().is_some_and(|w| proto::send_to_vdm(w, &ToVdm::MainScreen(main.clone())).is_ok());
+        let sent = self
+            .lock
+            .vdm_out
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_mut()
+            .is_some_and(|w| proto::send_to_vdm(w, &ToVdm::MainScreen(main.clone())).is_ok());
         if sent {
             tracing::info!("lock: told vdm the main screen is {main}");
             self.lock.main_told = Some(main);
@@ -363,11 +398,14 @@ impl Server {
         use std::os::unix::fs::FileTypeExt;
         // vdm answering, not only its socket's file (finding 9: a stopped vdm
         // left the file, and a lock no one could open).
-        let vdm = std::fs::symlink_metadata(vergence_dm::paths::UNLOCK_SOCKET).is_ok_and(|m| m.file_type().is_socket()) && std::os::unix::net::UnixStream::connect(vergence_dm::paths::POWER_SOCKET).is_ok();
+        let vdm = std::fs::symlink_metadata(vergence_dm::paths::UNLOCK_SOCKET).is_ok_and(|m| m.file_type().is_socket())
+            && std::os::unix::net::UnixStream::connect(vergence_dm::paths::POWER_SOCKET).is_ok();
         if !vdm {
             return Some("vdm is not running, so nothing could check the password".into());
         }
-        no_shell_above().err().map(|why| format!("{why}. Start Vergence with `exec vergence`, or from the login screen"))
+        no_shell_above()
+            .err()
+            .map(|why| format!("{why}. Start Vergence with `exec vergence`, or from the login screen"))
     }
 
     /// Asked to lock (Super+L, the named action, idle, sleep): it locks, or
@@ -422,7 +460,9 @@ impl Server {
         let after = self.energy.config.lock_after;
         let idle = self.energy.last_input.elapsed();
         let grace = self.energy.config.lock_grace;
-        if (self.energy.config.lock_on_screens_off && !off.is_zero() && idle >= off + grace) || (!after.is_zero() && idle >= after) {
+        if (self.energy.config.lock_on_screens_off && !off.is_zero() && idle >= off + grace)
+            || (!after.is_zero() && idle >= after)
+        {
             self.lock_for_idle("back after the idle time");
         }
     }
@@ -488,7 +528,12 @@ impl Server {
         self.lock.queued.clear();
         self.lock.shown.clear();
         if let Some(m) = marker() {
-            let _ = std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(&m).and_then(|mut f| f.write_all(b"locked\n"));
+            let _ = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&m)
+                .and_then(|mut f| f.write_all(b"locked\n"));
         }
         self.lock.field = Secret::new();
         self.lock.prompt = "Password".into();
@@ -701,15 +746,28 @@ impl Server {
 
     /// While locked, all a screen shows: the lock (on the screen the
     /// pointer is on), a dimming over the wallpaper, the wallpaper.
-    pub fn lock_elements(&mut self, renderer: &mut GlesRenderer, output: &Output, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
+    pub fn lock_elements(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        output: &Output,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Vec<SceneElement> {
         let mut elements = Vec::new();
         let here = out.to_f64().contains(self.pointer_location());
         if here && let Some(e) = self.lock_panel(renderer, out, scale) {
             elements.push(e);
         }
         let (id, commit) = self.lock.dim.get_or_insert_with(|| (Id::new(), CommitCounter::default())).clone();
-        let phys = Rectangle::<i32, smithay::utils::Physical>::from_size(out.size.to_f64().to_physical(scale).to_i32_round());
-        elements.push(SceneElement::Solid(SolidColorRenderElement::new(id, phys, commit, [0.0, 0.0, 0.0, 0.55], Kind::Unspecified)));
+        let phys =
+            Rectangle::<i32, smithay::utils::Physical>::from_size(out.size.to_f64().to_physical(scale).to_i32_round());
+        elements.push(SceneElement::Solid(SolidColorRenderElement::new(
+            id,
+            phys,
+            commit,
+            [0.0, 0.0, 0.0, 0.55],
+            Kind::Unspecified,
+        )));
         if let Some(mode) = output.current_mode()
             && let Some(e) = self.wallpaper_element(renderer, &output.name(), mode.size, out.size)
         {
@@ -718,16 +776,26 @@ impl Server {
         elements
     }
 
-    fn lock_panel(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Option<SceneElement> {
+    fn lock_panel(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Option<SceneElement> {
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
         let (local, _) = vergence_shell::tiles::now_at(secs)?;
         let time = format!("{:02}:{:02}", local.hour, local.min);
         let user = std::env::var("USER").unwrap_or_default();
         let dots = self.lock.field.as_ref().map_or(0, |f| f.chars());
         let paused = self.lock_pause_left();
-        let shown = if self.lock.echo { self.lock.field.as_ref().map(|f| String::from_utf8_lossy(f.as_bytes()).into_owned()) } else { None };
+        let shown = if self.lock.echo {
+            self.lock.field.as_ref().map(|f| String::from_utf8_lossy(f.as_bytes()).into_owned())
+        } else {
+            None
+        };
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (&time, &user, dots, &shown, &self.lock.prompt, &self.lock.message, self.lock.waiting, paused, scale.to_bits()).hash(&mut h);
+        (&time, &user, dots, &shown, &self.lock.prompt, &self.lock.message, self.lock.waiting, paused, scale.to_bits())
+            .hash(&mut h);
         let key = h.finish();
         if self.lock.picture.as_ref().map(|(k, ..)| *k) != Some(key) {
             let s = vergence_look::shelf_look(false);
@@ -737,13 +805,31 @@ impl Server {
             let bold = fonts.face("sans-serif", 600, false).unwrap_or(face);
             let (w, hgt) = (380.0f32, 250.0f32);
             let mut scene = Scene::new(w, hgt);
-            scene.fill_rounded(SceneRect::new(0.0, 0.0, w, hgt), vergence_look::RADIUS * 2.0, Color::rgba(s.menu.0, s.menu.1, s.menu.2, 235));
-            scene.stroke(SceneRect::new(0.0, 0.0, w, hgt), vergence_look::RADIUS * 2.0, vergence_look::EDGE, ink(s.edge));
-            let centered = |fonts: &mut vergence_text::Fonts, scene: &mut Scene, f, size: f32, color, y: f32, t: &str| {
-                let m = fonts.metrics(f, size);
-                let tw = fonts.layout(f, size, t).1;
-                vergence_render::text(scene, fonts, f, size, color, ScenePoint::new(((w - tw) / 2.0).round(), (y + m.ascent).round()), t);
-            };
+            scene.fill_rounded(
+                SceneRect::new(0.0, 0.0, w, hgt),
+                vergence_look::RADIUS * 2.0,
+                Color::rgba(s.menu.0, s.menu.1, s.menu.2, 235),
+            );
+            scene.stroke(
+                SceneRect::new(0.0, 0.0, w, hgt),
+                vergence_look::RADIUS * 2.0,
+                vergence_look::EDGE,
+                ink(s.edge),
+            );
+            let centered =
+                |fonts: &mut vergence_text::Fonts, scene: &mut Scene, f, size: f32, color, y: f32, t: &str| {
+                    let m = fonts.metrics(f, size);
+                    let tw = fonts.layout(f, size, t).1;
+                    vergence_render::text(
+                        scene,
+                        fonts,
+                        f,
+                        size,
+                        color,
+                        ScenePoint::new(((w - tw) / 2.0).round(), (y + m.ascent).round()),
+                        t,
+                    );
+                };
             centered(fonts, &mut scene, face, 52.0, ink(s.menu_ink), 18.0, &time);
             centered(fonts, &mut scene, bold, 15.0, ink(s.menu_ink), 92.0, &user);
             centered(fonts, &mut scene, face, 12.0, ink(s.menu_ink_off), 118.0, &self.lock.prompt);
@@ -760,11 +846,26 @@ impl Server {
             match &shown {
                 Some(t) => {
                     let m = fonts.metrics(face, 14.0);
-                    vergence_render::text(&mut scene, fonts, face, 14.0, ink(s.menu_ink), ScenePoint::new(field.x + 12.0, (field.y + (field.h - m.ascent - m.descent) / 2.0 + m.ascent).round()), t);
+                    vergence_render::text(
+                        &mut scene,
+                        fonts,
+                        face,
+                        14.0,
+                        ink(s.menu_ink),
+                        ScenePoint::new(
+                            field.x + 12.0,
+                            (field.y + (field.h - m.ascent - m.descent) / 2.0 + m.ascent).round(),
+                        ),
+                        t,
+                    );
                 }
                 None => {
                     for i in 0..dots.min(24) {
-                        scene.fill_rounded(SceneRect::new(field.x + 14.0 + i as f32 * 12.0, field.y + field.h / 2.0 - 4.0, 8.0, 8.0), 4.0, ink(s.menu_ink));
+                        scene.fill_rounded(
+                            SceneRect::new(field.x + 14.0 + i as f32 * 12.0, field.y + field.h / 2.0 - 4.0, 8.0, 8.0),
+                            4.0,
+                            ink(s.menu_ink),
+                        );
                     }
                 }
             }
@@ -777,7 +878,14 @@ impl Server {
             let color = if bad { Color::rgb(0xff, 0x8a, 0x80) } else { ink(s.menu_ink_off) };
             centered(fonts, &mut scene, face, 12.0, color, 196.0, &msg);
             let p = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)).ok()?;
-            let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+            let buffer = MemoryRenderBuffer::from_slice(
+                &p.data,
+                Fourcc::Abgr8888,
+                (p.width as i32, p.height as i32),
+                1,
+                Transform::Normal,
+                None,
+            );
             self.lock.picture = Some((key, buffer, w as i32, hgt as i32));
         }
         let (_, buffer, w, hgt) = self.lock.picture.as_ref()?;
@@ -786,7 +894,17 @@ impl Server {
         let a = (area.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let b = (area.loc + area.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
-        MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(area.size), Kind::Unspecified).ok().map(SceneElement::Memory)
+        MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            a.to_f64(),
+            buffer,
+            None,
+            Some(src),
+            Some(area.size),
+            Kind::Unspecified,
+        )
+        .ok()
+        .map(SceneElement::Memory)
     }
 }
 

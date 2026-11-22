@@ -54,10 +54,7 @@ use std::{
 };
 
 use smithay::{
-    backend::{
-        allocator::Fourcc,
-        renderer::element::memory::MemoryRenderBuffer,
-    },
+    backend::{allocator::Fourcc, renderer::element::memory::MemoryRenderBuffer},
     output::Output,
     utils::{Buffer as BufferCoords, Logical, Point, Rectangle, Size, Transform, user_data::UserDataMap},
 };
@@ -210,7 +207,12 @@ struct State {
 /// bytes in `kept`): keys to forget dropped first, new pictures kept (at
 /// most SCENE_KEPT_BYTES in all), the scene decoded and checked. On a
 /// refusal the pictures kept stay as they were, but for those forgotten.
-pub(crate) fn take_keyed(images: &mut std::collections::HashMap<u64, Arc<vergence_scene::Image>>, kept: &mut usize, bytes: &[u8], forget: &[u64]) -> Result<vergence_scene::Scene, String> {
+pub(crate) fn take_keyed(
+    images: &mut std::collections::HashMap<u64, Arc<vergence_scene::Image>>,
+    kept: &mut usize,
+    bytes: &[u8],
+    forget: &[u64],
+) -> Result<vergence_scene::Scene, String> {
     for k in forget {
         if let Some(im) = images.remove(k) {
             *kept -= im.rgba.len();
@@ -320,7 +322,9 @@ pub enum Content {
 
 pub struct GpuPicture {
     pub dmabuf: smithay::backend::allocator::dmabuf::Dmabuf,
-    pub texture: Option<smithay::backend::renderer::element::texture::TextureBuffer<smithay::backend::renderer::gles::GlesTexture>>,
+    pub texture: Option<
+        smithay::backend::renderer::element::texture::TextureBuffer<smithay::backend::renderer::gles::GlesTexture>,
+    >,
     /// The same texture as GL knows it, for our shaders (backdrop.rs Shaded).
     pub gles: Option<smithay::backend::renderer::gles::GlesTexture>,
     /// The renderer refused it: not tried again (the window keeps its last picture).
@@ -338,7 +342,11 @@ pub struct GpuPicture {
 /// frosted window's (bus v36; preview milestone 1, step 6b): the frost the
 /// server draws behind it must show through wherever it leaves its pixels
 /// clear, and an opaque region would let the renderer skip what is behind.
-fn opaque_region(fourcc: Fourcc, frosted: bool, px: Size<i32, BufferCoords>) -> Option<Vec<Rectangle<i32, BufferCoords>>> {
+fn opaque_region(
+    fourcc: Fourcc,
+    frosted: bool,
+    px: Size<i32, BufferCoords>,
+) -> Option<Vec<Rectangle<i32, BufferCoords>>> {
     (fourcc == Fourcc::Xrgb8888 && !frosted).then(|| vec![Rectangle::from_size(px)])
 }
 
@@ -395,10 +403,19 @@ impl NativeWindow {
         if st.scenes == 0 && st.scene_refused.is_none() {
             return None;
         }
-        let last = st.scene.as_ref().map_or(String::new(), |s| format!(", {} commands, {:.0}x{:.0}", s.commands.len(), s.width, s.height));
-        let refused = st.scene_refused.as_ref().map_or(String::new(), |(n, why)| format!(", {n} refused (last: {why})"));
+        let last = st
+            .scene
+            .as_ref()
+            .map_or(String::new(), |s| format!(", {} commands, {:.0}x{:.0}", s.commands.len(), s.width, s.height));
+        let refused =
+            st.scene_refused.as_ref().map_or(String::new(), |(n, why)| format!(", {n} refused (last: {why})"));
         let off = st.scenes_off.as_ref().map_or(String::new(), |why| format!(", drawn by the app now ({why})"));
-        Some(format!("scenes {}{last}, {} pictures kept ({} KB){refused}{off}", st.scenes, st.scene_images.len(), st.scene_image_bytes >> 10))
+        Some(format!(
+            "scenes {}{last}, {} pictures kept ({} KB){refused}{off}",
+            st.scenes,
+            st.scene_images.len(),
+            st.scene_image_bytes >> 10
+        ))
     }
 
     /// Its scenes no longer drawn (step 6): what it kept for them let go.
@@ -549,10 +566,20 @@ impl Server {
         match req {
             WinRequest::Create { serial, window, role, token, title, width, height, parent, place } => {
                 if window == 0 || self.natives.contains_key(&(client, window)) {
-                    return self.native_refuse(client, serial, ErrorCode::BadMessage, format!("window id {window} is 0 or in use"));
+                    return self.native_refuse(
+                        client,
+                        serial,
+                        ErrorCode::BadMessage,
+                        format!("window id {window} is 0 or in use"),
+                    );
                 }
                 if self.natives.keys().filter(|(c, _)| *c == client).count() >= MAX_WINDOWS {
-                    return self.native_refuse(client, serial, ErrorCode::Denied, format!("at most {MAX_WINDOWS} windows"));
+                    return self.native_refuse(
+                        client,
+                        serial,
+                        ErrorCode::Denied,
+                        format!("at most {MAX_WINDOWS} windows"),
+                    );
                 }
                 let side = |v: f64| if v.is_finite() { (v.round() as i32).clamp(MIN_SIDE, 16_384) } else { 640 };
                 let asked: Size<i32, Logical> = (side(width), side(height)).into();
@@ -564,8 +591,10 @@ impl Server {
                 // the place it asks for wins); nothing presented, the program keeps
                 // none and its windows go by numbering.
                 let keeps_token = !token.is_empty();
-                let presented = token.len() == 32 && token.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase());
-                let taken = self.natives.values().any(|w| w.native().is_some_and(|m| m.app_id == app_id && m.token == token));
+                let presented =
+                    token.len() == 32 && token.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase());
+                let taken =
+                    self.natives.values().any(|w| w.native().is_some_and(|m| m.app_id == app_id && m.token == token));
                 // A fresh token has no memory of its own: a place it asks for (a
                 // torn-off tab's drop point) wins over its program's last-closed one.
                 let fresh = !(presented && !taken);
@@ -623,15 +652,21 @@ impl Server {
                 let remembered = if fresh && asked_place.is_some() { None } else { self.remembered_place(&w) };
                 // Nor on top of another of its program's windows (a tab dropped
                 // where the window it left is).
-                let asked_place = asked_place.map(|r| match self.space.outputs().find_map(|o| self.space.output_geometry(o).filter(|g| g.contains(r.loc))) {
-                    Some(og) if fresh => self.clear_of_siblings(&w, r, og),
-                    _ => r,
+                let asked_place = asked_place.map(|r| {
+                    match self.space.outputs().find_map(|o| self.space.output_geometry(o).filter(|g| g.contains(r.loc)))
+                    {
+                        Some(og) if fresh => self.clear_of_siblings(&w, r, og),
+                        _ => r,
+                    }
                 });
                 let (rect, maximized) = match remembered.or(asked_place.map(|r| (r, false))) {
                     Some(r) => r,
                     None => {
                         let out = self.output_at_pointer().unwrap_or_default();
-                        let area = crate::place::content_area(self.work_area(out), if self.has_title(&w) { self.bar_h_in(out) } else { 0 });
+                        let area = crate::place::content_area(
+                            self.work_area(out),
+                            if self.has_title(&w) { self.bar_h_in(out) } else { 0 },
+                        );
                         let size = crate::place::fit(asked, area.size, Some((MIN_SIDE, MIN_SIDE).into()));
                         // Not exactly on another window of its program.
                         (self.clear_of_siblings(&w, Rectangle::new(crate::place::center(area, size), size), out), false)
@@ -645,11 +680,18 @@ impl Server {
                 }
                 {
                     let mut s = n.state.lock().unwrap();
-                    (s.size, s.scale, s.text, s.place, s.place_maximized) = (rect.size, scale, text, rect.loc, maximized);
+                    (s.size, s.scale, s.text, s.place, s.place_maximized) =
+                        (rect.size, scale, text, rect.loc, maximized);
                 }
                 self.natives.insert((client, window), w.clone());
                 let _ = self.window_identity(&w);
-                tracing::info!("native: {app_id:?} window {window} ({role:?}) asked {}x{}, given {}x{} at scale {scale:.4}", asked.w, asked.h, rect.size.w, rect.size.h);
+                tracing::info!(
+                    "native: {app_id:?} window {window} ({role:?}) asked {}x{}, given {}x{} at scale {scale:.4}",
+                    asked.w,
+                    asked.h,
+                    rect.size.w,
+                    rect.size.h
+                );
                 self.bus_send(client, ServerMsg::Window(WinEvent::Created { serial, window, token }));
                 self.native_send_configure(&n);
                 // What is on the clipboard now, for a client that came after it was put there.
@@ -713,13 +755,26 @@ impl Server {
                     let parent = n.state.lock().unwrap().parent;
                     // A portal's dialog belongs to another program's window (portal.rs).
                     let adopted = self.portal.adopted.contains_key(&Win::Native(n.clone()));
-                    let owned = adopted || (parent != 0 && parent != window && self.natives.contains_key(&(client, parent)));
+                    let owned =
+                        adopted || (parent != 0 && parent != window && self.natives.contains_key(&(client, parent)));
                     let kind = match kind {
-                        vergence_protocol::window::WinKind::Dialog if parent == 0 && !adopted => vergence_protocol::window::WinKind::Dialog,
-                        vergence_protocol::window::WinKind::Dialog | vergence_protocol::window::WinKind::Palette if !owned => vergence_protocol::window::WinKind::Normal,
+                        vergence_protocol::window::WinKind::Dialog if parent == 0 && !adopted => {
+                            vergence_protocol::window::WinKind::Dialog
+                        }
+                        vergence_protocol::window::WinKind::Dialog | vergence_protocol::window::WinKind::Palette
+                            if !owned =>
+                        {
+                            vergence_protocol::window::WinKind::Normal
+                        }
                         k => k,
                     };
-                    let style = NativeStyle { kind, modal: modal && kind == vergence_protocol::window::WinKind::Dialog, min, max, frosted };
+                    let style = NativeStyle {
+                        kind,
+                        modal: modal && kind == vergence_protocol::window::WinKind::Dialog,
+                        min,
+                        max,
+                        frosted,
+                    };
                     tracing::info!("native: window {window} of {:?} is {style:?}", n.app_id);
                     n.state.lock().unwrap().style = Some(style);
                     // The desktop's icons: in their place, under every window (desktop.rs).
@@ -750,7 +805,10 @@ impl Server {
             WinRequest::ContextMenu { window, x, y } => {
                 if let Some(w) = self.natives.get(&(client, window)).cloned() {
                     let loc = self.space.element_location(&w).unwrap_or_default();
-                    let at = smithay::utils::Point::<f64, smithay::utils::Logical>::from((loc.x as f64 + x, loc.y as f64 + y));
+                    let at = smithay::utils::Point::<f64, smithay::utils::Logical>::from((
+                        loc.x as f64 + x,
+                        loc.y as f64 + y,
+                    ));
                     self.open_context_menu(&w, at);
                 }
             }
@@ -767,7 +825,10 @@ impl Server {
             WinRequest::Menu { window, x, y, lines } => {
                 if let Some(w) = self.natives.get(&(client, window)).cloned() {
                     let loc = self.space.element_location(&w).unwrap_or_default();
-                    let at = smithay::utils::Point::<f64, smithay::utils::Logical>::from((loc.x as f64 + x, loc.y as f64 + y));
+                    let at = smithay::utils::Point::<f64, smithay::utils::Logical>::from((
+                        loc.x as f64 + x,
+                        loc.y as f64 + y,
+                    ));
                     self.app_menu_lines(&w, at, lines);
                 }
             }
@@ -795,7 +856,12 @@ impl Server {
                     return;
                 }
                 let Some(loc) = self.space.element_location(&w) else { return };
-                let screen = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).find(|g| g.contains(loc)).or_else(|| self.output_at_pointer());
+                let screen = self
+                    .space
+                    .outputs()
+                    .filter_map(|o| self.space.output_geometry(o))
+                    .find(|g| g.contains(loc))
+                    .or_else(|| self.output_at_pointer());
                 let mut size = self.within_limits(&w, Size::from((width.round() as i32, height.round() as i32)));
                 let mut at = loc;
                 // A dialog keeps its center (preview milestone 1: a preview shaped
@@ -804,12 +870,12 @@ impl Server {
                 // No bigger than 80% of the screen's work area, both sides shrunk
                 // alike, so a picture's preview keeps its proportions.
                 if dialog && let Some(area) = screen.map(|s| self.work_area(s)) {
-                    let f = (0.8 * area.size.w as f64 / size.w.max(1) as f64).min(0.8 * (area.size.h - self.bar_h(&w)) as f64 / size.h.max(1) as f64).min(1.0);
+                    let f = (0.8 * area.size.w as f64 / size.w.max(1) as f64)
+                        .min(0.8 * (area.size.h - self.bar_h(&w)) as f64 / size.h.max(1) as f64)
+                        .min(1.0);
                     size = Size::from(((size.w as f64 * f).round() as i32, (size.h as f64 * f).round() as i32));
                 }
-                if dialog
-                    && let Some(g) = self.space.element_geometry(&w)
-                {
+                if dialog && let Some(g) = self.space.element_geometry(&w) {
                     at.x += (g.size.w - size.w) / 2;
                     at.y += (g.size.h - size.h) / 2;
                 }
@@ -820,7 +886,14 @@ impl Server {
                     at.x = at.x.min(area.loc.x + area.size.w - size.w).max(area.loc.x);
                     at.y = at.y.min(area.loc.y + area.size.h - size.h).max(area.loc.y + bar);
                 }
-                tracing::info!("native: {:?} window {window} asks {width}x{height}, given {}x{} at {},{}", n.app_id, size.w, size.h, at.x, at.y);
+                tracing::info!(
+                    "native: {:?} window {window} asks {width}x{height}, given {}x{} at {},{}",
+                    n.app_id,
+                    size.w,
+                    size.h,
+                    at.x,
+                    at.y
+                );
                 if at != loc {
                     self.put(w.clone(), at, false);
                 }
@@ -857,7 +930,8 @@ impl Server {
                     // Shown at once if the pointer is on it.
                     let id = self.win_id(&Win::Native(n.clone()));
                     if self.input.seat.pointer_focus() == Some(vergence_seat::Target::Native(id)) {
-                        self.pointer_image.status = smithay::input::pointer::CursorImageStatus::Named(cursor_icon(shape));
+                        self.pointer_image.status =
+                            smithay::input::pointer::CursorImageStatus::Named(cursor_icon(shape));
                     }
                 }
             }
@@ -871,7 +945,11 @@ impl Server {
                 let Some(geo) = self.space.element_geometry(&w) else { return };
                 match self.native_place_rect(client, 0, &place, geo.size, &w) {
                     Some(r) => {
-                        tracing::info!("native: client {client} window {window} placed at {},{} as asked", r.loc.x, r.loc.y);
+                        tracing::info!(
+                            "native: client {client} window {window} placed at {},{} as asked",
+                            r.loc.x,
+                            r.loc.y
+                        );
                         self.put(w.clone(), r.loc, false);
                         self.remember(&w);
                     }
@@ -910,7 +988,14 @@ impl Server {
                     let why: String = why.chars().take(200).collect();
                     entry.2 = Some((ok, why.clone()));
                     if let Some((agent, agent_serial)) = entry.3 {
-                        self.bus_send(agent, vergence_protocol::bus::ServerMsg::Agent(vergence_protocol::agent::AgentEvent::Acted { serial: agent_serial, ok, why }));
+                        self.bus_send(
+                            agent,
+                            vergence_protocol::bus::ServerMsg::Agent(vergence_protocol::agent::AgentEvent::Acted {
+                                serial: agent_serial,
+                                ok,
+                                why,
+                            }),
+                        );
                     }
                 }
             }
@@ -933,13 +1018,21 @@ impl Server {
     /// if the request is allowed: wholly on a monitor, below its title bar if
     /// the server draws one. None: Anywhere, an unknown monitor or parent, or
     /// a place that would leave it partly off every monitor.
-    fn native_place_rect(&self, client: u32, parent: u32, place: &vergence_protocol::window::Place, size: Size<i32, Logical>, w: &Win) -> Option<Rectangle<i32, Logical>> {
+    fn native_place_rect(
+        &self,
+        client: u32,
+        parent: u32,
+        place: &vergence_protocol::window::Place,
+        size: Size<i32, Logical>,
+        w: &Win,
+    ) -> Option<Rectangle<i32, Logical>> {
         use vergence_protocol::window::Place;
         let finite = |v: f64| v.is_finite().then_some(v.round() as i32);
         let at: Point<i32, Logical> = match place {
             Place::Anywhere => return None,
             Place::Monitor { id, x, y } => {
-                let out = self.space.outputs().find(|o| crate::memory::monitor_id_of(o).as_deref() == Some(id.as_str()))?;
+                let out =
+                    self.space.outputs().find(|o| crate::memory::monitor_id_of(o).as_deref() == Some(id.as_str()))?;
                 let og = self.space.output_geometry(out)?;
                 (og.loc.x + finite(*x)?, og.loc.y + finite(*y)?).into()
             }
@@ -959,7 +1052,13 @@ impl Server {
     /// Sends `action` to the widget with meaning node `node` in native
     /// window `w`: the serial its answer will carry, or None if `w` is not
     /// a native window.
-    pub fn send_act(&mut self, w: &Win, node: u64, action: vergence_protocol::window::Action, reply: Option<(u32, u32)>) -> Option<u32> {
+    pub fn send_act(
+        &mut self,
+        w: &Win,
+        node: u64,
+        action: vergence_protocol::window::Action,
+        reply: Option<(u32, u32)>,
+    ) -> Option<u32> {
         let n = w.native()?;
         let (client, window) = (n.client, n.id);
         self.acts.next = self.acts.next.wrapping_add(1).max(1);
@@ -968,10 +1067,25 @@ impl Server {
         while self.acts.sent.len() > ACTS_KEPT {
             // The oldest goes; an agent still waiting on it hears so.
             if let Some((_, (_, _, None, Some((agent, s)), _))) = self.acts.sent.pop_first() {
-                self.bus_send(agent, vergence_protocol::bus::ServerMsg::Agent(vergence_protocol::agent::AgentEvent::Acted { serial: s, ok: false, why: "too many actions at once".into() }));
+                self.bus_send(
+                    agent,
+                    vergence_protocol::bus::ServerMsg::Agent(vergence_protocol::agent::AgentEvent::Acted {
+                        serial: s,
+                        ok: false,
+                        why: "too many actions at once".into(),
+                    }),
+                );
             }
         }
-        self.bus_send(client, vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::Act { window, serial, node, action }));
+        self.bus_send(
+            client,
+            vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::Act {
+                window,
+                serial,
+                node,
+                action,
+            }),
+        );
         Some(serial)
     }
 
@@ -986,7 +1100,14 @@ impl Server {
             }
         }
         for (agent, serial) in tell {
-            self.bus_send(agent, vergence_protocol::bus::ServerMsg::Agent(vergence_protocol::agent::AgentEvent::Acted { serial, ok: false, why: "the window went away".into() }));
+            self.bus_send(
+                agent,
+                vergence_protocol::bus::ServerMsg::Agent(vergence_protocol::agent::AgentEvent::Acted {
+                    serial,
+                    ok: false,
+                    why: "the window went away".into(),
+                }),
+            );
         }
     }
 
@@ -1001,7 +1122,14 @@ impl Server {
             }
         }
         for (agent, serial) in tell {
-            self.bus_send(agent, vergence_protocol::bus::ServerMsg::Agent(vergence_protocol::agent::AgentEvent::Acted { serial, ok: false, why: "the window did not answer".into() }));
+            self.bus_send(
+                agent,
+                vergence_protocol::bus::ServerMsg::Agent(vergence_protocol::agent::AgentEvent::Acted {
+                    serial,
+                    ok: false,
+                    why: "the window did not answer".into(),
+                }),
+            );
         }
     }
 
@@ -1018,7 +1146,11 @@ impl Server {
             let Some(Win::Native(n)) = self.natives.get(k) else { continue };
             let s = n.state.lock().unwrap();
             // Its index as `vctl windows` and `vctl act` count (the stacking order).
-            let index = self.space.elements().position(|e| e.native().is_some_and(|m| m.client == n.client && m.id == n.id)).map_or("-".to_string(), |i| i.to_string());
+            let index = self
+                .space
+                .elements()
+                .position(|e| e.native().is_some_and(|m| m.client == n.client && m.id == n.id))
+                .map_or("-".to_string(), |i| i.to_string());
             out.push(format!("window {index} {:?} ({}, client {} window {})", s.title, n.app_id, n.client, n.id));
             let Some((focus, caret, nodes)) = &s.meaning else {
                 out.push("  (no meaning sent)".into());
@@ -1039,18 +1171,28 @@ impl Server {
                 let value = m.value.as_ref().map(|v| format!(" = {v:?}")).unwrap_or_default();
                 let states = if m.states.is_empty() { String::new() } else { format!(" [{}]", m.states.join(", ")) };
                 let mark = if m.id == *focus { "> " } else { "  " };
-                out.push(format!("{mark}{}#{} {} {:?}{value}{states} at {:.0},{:.0} {:.0}x{:.0}", "  ".repeat(depth_of(m.id)), m.id, m.role, m.name, m.x, m.y, m.w, m.h));
+                out.push(format!(
+                    "{mark}{}#{} {} {:?}{value}{states} at {:.0},{:.0} {:.0}x{:.0}",
+                    "  ".repeat(depth_of(m.id)),
+                    m.id,
+                    m.role,
+                    m.name,
+                    m.x,
+                    m.y,
+                    m.w,
+                    m.h
+                ));
             }
             if let Some((x, y, w, h)) = caret {
                 out.push(format!("  caret at {x:.0},{y:.0} {w:.0}x{h:.0}"));
             }
-            out.push(format!("  {} widgets, focus {}", nodes.len(), if *focus == 0 { "none".to_string() } else { format!("{focus:#x}") }));
+            out.push(format!(
+                "  {} widgets, focus {}",
+                nodes.len(),
+                if *focus == 0 { "none".to_string() } else { format!("{focus:#x}") }
+            ));
         }
-        if out.is_empty() {
-            "no native windows".into()
-        } else {
-            out.join("\n")
-        }
+        if out.is_empty() { "no native windows".into() } else { out.join("\n") }
     }
 
     fn native_refuse(&mut self, client: u32, serial: u32, code: ErrorCode, message: String) {
@@ -1061,7 +1203,9 @@ impl Server {
     fn native_attach(&mut self, n: &NativeWindow, buffer: Buffer, damage: &[Damage]) -> Result<(), String> {
         let (fd, width, height, stride, format) = match buffer {
             Buffer::Shm { fd, width, height, stride, format } => (fd, width, height, stride, format),
-            Buffer::Dmabuf { planes, width, height, format, modifier } => return self.native_attach_gpu(n, planes, width, height, format, modifier),
+            Buffer::Dmabuf { planes, width, height, format, modifier } => {
+                return self.native_attach_gpu(n, planes, width, height, format, modifier);
+            }
         };
         let fourcc = match format {
             SHM_ARGB8888 => Fourcc::Argb8888,
@@ -1079,11 +1223,19 @@ impl Server {
         let px: Size<i32, BufferCoords> = (w, h).into();
         let mut s = n.state.lock().unwrap();
         let opaque = opaque_region(fourcc, s.style.is_some_and(|st| st.frosted), px);
-        let reuse = s.picture.as_ref().is_some_and(|p| p.px == px && p.format == format && p.opaque == opaque.is_some() && matches!(p.content, Content::Memory(_)));
+        let reuse = s.picture.as_ref().is_some_and(|p| {
+            p.px == px && p.format == format && p.opaque == opaque.is_some() && matches!(p.content, Content::Memory(_))
+        });
         if !reuse {
             let declared = opaque.is_some();
             let buffer = MemoryRenderBuffer::new(fourcc, px, 1, Transform::Normal, opaque);
-            s.picture = Some(Picture { content: Content::Memory(buffer), px, logical: Size::default(), format, opaque: declared });
+            s.picture = Some(Picture {
+                content: Content::Memory(buffer),
+                px,
+                logical: Size::default(),
+                format,
+                opaque: declared,
+            });
         }
         let scale = s.scale;
         let p = s.picture.as_mut().unwrap();
@@ -1127,7 +1279,12 @@ impl Server {
 
     /// Pixels drawn by the server (a scene on the CPU: RGBA, premultiplied)
     /// as the window's picture.
-    pub(crate) fn native_attach_pixels(&mut self, n: &NativeWindow, px: Size<i32, BufferCoords>, rgba: &[u8]) -> Result<(), String> {
+    pub(crate) fn native_attach_pixels(
+        &mut self,
+        n: &NativeWindow,
+        px: Size<i32, BufferCoords>,
+        rgba: &[u8],
+    ) -> Result<(), String> {
         let buffer = MemoryRenderBuffer::from_slice(rgba, Fourcc::Abgr8888, px, 1, Transform::Normal, None);
         let mut s = n.state.lock().unwrap();
         let logical = (points_of(px.w, s.scale), points_of(px.h, s.scale)).into();
@@ -1136,10 +1293,23 @@ impl Server {
     }
 
     /// A GPU buffer: checked and kept, to be imported when the scene is built.
-    pub(crate) fn native_attach_gpu(&mut self, n: &NativeWindow, planes: Vec<vergence_protocol::window::Plane>, width: u32, height: u32, format: u32, modifier: u64) -> Result<(), String> {
+    pub(crate) fn native_attach_gpu(
+        &mut self,
+        n: &NativeWindow,
+        planes: Vec<vergence_protocol::window::Plane>,
+        width: u32,
+        height: u32,
+        format: u32,
+        modifier: u64,
+    ) -> Result<(), String> {
         use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
         let fourcc = Fourcc::try_from(format).map_err(|_| format!("GPU picture format {format:#x} is unknown"))?;
-        let mut b = Dmabuf::builder((width as i32, height as i32), fourcc, smithay::backend::allocator::Modifier::from(modifier), DmabufFlags::empty());
+        let mut b = Dmabuf::builder(
+            (width as i32, height as i32),
+            fourcc,
+            smithay::backend::allocator::Modifier::from(modifier),
+            DmabufFlags::empty(),
+        );
         for p in planes {
             if !b.add_plane(p.fd.0.clone(), p.offset, p.stride) {
                 return Err("too many planes".into());
@@ -1151,7 +1321,8 @@ impl Server {
         let logical = (points_of(width as i32, s.scale), points_of(height as i32, s.scale)).into();
         let serial = PICTURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         let gpu = GpuPicture { dmabuf, texture: None, gles: None, failed: false, serial };
-        s.picture = Some(Picture { content: Content::Gpu(Arc::new(Mutex::new(gpu))), px, logical, format, opaque: false });
+        s.picture =
+            Some(Picture { content: Content::Gpu(Arc::new(Mutex::new(gpu))), px, logical, format, opaque: false });
         Ok(())
     }
 
@@ -1175,7 +1346,9 @@ impl Server {
         // the editor's Open dialog closed, keys went nowhere): to a dialog's
         // parent, else the window in front.
         if had_keys {
-            let next = parent.filter(|p| self.space.element_geometry(p).is_some()).or_else(|| self.space.elements().filter(|e| *e != w).next_back().cloned());
+            let next = parent
+                .filter(|p| self.space.element_geometry(p).is_some())
+                .or_else(|| self.space.elements().filter(|e| *e != w).next_back().cloned());
             if let Some(next) = next {
                 self.focus_window(&next, smithay::utils::SERIAL_COUNTER.next_serial());
             }
@@ -1188,7 +1361,9 @@ impl Server {
         self.native_input.keymap_sent.remove(&client);
         self.acts_fail(client, None);
         // What it had put on the clipboard goes with it.
-        use smithay::wayland::selection::data_device::{clear_data_device_selection, current_data_device_selection_userdata};
+        use smithay::wayland::selection::data_device::{
+            clear_data_device_selection, current_data_device_selection_userdata,
+        };
         let owned = current_data_device_selection_userdata(&self.seat).is_some_and(|o| *o == ClipOwner::Native(client));
         if owned {
             clear_data_device_selection(&self.display_handle, &self.seat);
@@ -1231,7 +1406,17 @@ impl Server {
             s.inset = if s.under_bar { bar } else { 0 };
             (s.sent_serial, s.size, s.scale, s.maximized, s.activated, s.inset as f64, s.text)
         };
-        let ev = WinEvent::Configure { window: n.id, serial, width: size.w as f64, height: size.h as f64, scale, maximized, activated, inset, text };
+        let ev = WinEvent::Configure {
+            window: n.id,
+            serial,
+            width: size.w as f64,
+            height: size.h as f64,
+            scale,
+            maximized,
+            activated,
+            inset,
+            text,
+        };
         self.bus_send(n.client, ServerMsg::Window(ev));
     }
 
@@ -1243,7 +1428,9 @@ impl Server {
     /// The scale and text factor (displays.rs, Scales::text) of the monitor
     /// a rectangle is mostly on.
     fn screen_at(&self, rect: Rectangle<i32, Logical>) -> (f64, f64) {
-        let of = |o: &Output| (o.current_scale().fractional_scale(), self.scale_notes.get(&o.name()).map_or(1.0, |s| s.text));
+        let of = |o: &Output| {
+            (o.current_scale().fractional_scale(), self.scale_notes.get(&o.name()).map_or(1.0, |s| s.text))
+        };
         self.space
             .outputs()
             .filter_map(|o| {
@@ -1375,13 +1562,19 @@ impl Server {
     /// A button, pressed or let go, for it.
     pub fn native_button(&mut self, w: &Win, button: u32, pressed: bool, serial: u32, time_ms: u32) {
         let Win::Native(n) = w else { return };
-        self.bus_send(n.client, ServerMsg::Window(WinEvent::PointerButton { window: n.id, serial, time_ms, button, pressed }));
+        self.bus_send(
+            n.client,
+            ServerMsg::Window(WinEvent::PointerButton { window: n.id, serial, time_ms, button, pressed }),
+        );
     }
 
     /// The wheel or a touchpad's scroll, for it.
     pub fn native_axis(&mut self, w: &Win, time_ms: u32, source: u8, dx: f64, dy: f64, v120x: i32, v120y: i32) {
         let Win::Native(n) = w else { return };
-        self.bus_send(n.client, ServerMsg::Window(WinEvent::PointerAxis { window: n.id, time_ms, source, dx, dy, v120x, v120y }));
+        self.bus_send(
+            n.client,
+            ServerMsg::Window(WinEvent::PointerAxis { window: n.id, time_ms, source, dx, dy, v120x, v120y }),
+        );
     }
 
     /// The key repeat a native window is told (settings.rs keeps it).
@@ -1419,14 +1612,21 @@ impl Server {
     /// The modifiers now, from our own xkb state (keys.rs).
     pub fn native_modifiers(&mut self, w: &Win) {
         let Win::Native(n) = w else { return };
-        let Some((depressed, latched, locked, group)) = self.input.keys.as_ref().map(|k| k.serialized()) else { return };
+        let Some((depressed, latched, locked, group)) = self.input.keys.as_ref().map(|k| k.serialized()) else {
+            return;
+        };
         self.bus_send(n.client, ServerMsg::Window(WinEvent::Modifiers { depressed, latched, locked, group }));
     }
 
     /// The keymap (keys.rs: Smithay's own, read before the first key), NUL-terminated as Wayland's,
     /// in an anonymous file the client maps read-only (vergence_protocol::shm).
     fn native_keymap(&mut self) -> std::io::Result<(vergence_protocol::window::Fd, u32)> {
-        let text = self.input.keys.as_ref().map(|k| k.text.clone()).ok_or_else(|| std::io::Error::other("keymap not read yet"))?;
+        let text = self
+            .input
+            .keys
+            .as_ref()
+            .map(|k| k.text.clone())
+            .ok_or_else(|| std::io::Error::other("keymap not read yet"))?;
         let mut bytes = text.into_bytes();
         bytes.push(0);
         let mut shm = vergence_protocol::shm::ShmFile::new(bytes.len())?;
@@ -1498,12 +1698,22 @@ impl Server {
     /// search field): asked of whoever holds it through a pipe, read on a
     /// thread, and handed to `then` on the main loop.
     pub fn server_paste(&mut self, then: fn(&mut Server, String)) {
-        use smithay::wayland::selection::{SelectionTarget, data_device::{current_data_device_selection_userdata, request_data_device_client_selection}};
+        use smithay::wayland::selection::{
+            SelectionTarget,
+            data_device::{current_data_device_selection_userdata, request_data_device_client_selection},
+        };
         let owner = current_data_device_selection_userdata(&self.seat).map(|o| o.clone());
         if let Some(ClipOwner::Server(text)) = &owner {
             return then(self, text.to_string());
         }
-        let kind = self.native_input.clip_kinds.as_ref().and_then(|ks| TEXT_KINDS.iter().find(|k| ks.iter().any(|x| x == *k))).copied().unwrap_or("text/plain;charset=utf-8").to_string();
+        let kind = self
+            .native_input
+            .clip_kinds
+            .as_ref()
+            .and_then(|ks| TEXT_KINDS.iter().find(|k| ks.iter().any(|x| x == *k)))
+            .copied()
+            .unwrap_or("text/plain;charset=utf-8")
+            .to_string();
         let Ok((read, write)) = vergence_protocol::sock::pipe() else { return };
         let sent = match owner {
             Some(ClipOwner::Native(from)) => {
@@ -1541,10 +1751,18 @@ impl Server {
     /// goes to whoever has the clipboard. Only the client with the keyboard
     /// may (security pass 2026-11-15, finding 1).
     fn native_paste(&mut self, client: u32, serial: u32, kind: String) {
-        use smithay::wayland::selection::{SelectionTarget, data_device::{current_data_device_selection_userdata, request_data_device_client_selection}};
+        use smithay::wayland::selection::{
+            SelectionTarget,
+            data_device::{current_data_device_selection_userdata, request_data_device_client_selection},
+        };
         if !self.native_has_keyboard(client) {
             tracing::debug!("native: client {client} pasted without the keyboard; refused");
-            return self.native_refuse(client, serial, ErrorCode::Denied, "paste is for the window with the keyboard".into());
+            return self.native_refuse(
+                client,
+                serial,
+                ErrorCode::Denied,
+                "paste is for the window with the keyboard".into(),
+            );
         }
         let (read, write) = match vergence_protocol::sock::pipe() {
             Ok(p) => p,
@@ -1565,21 +1783,34 @@ impl Server {
                 Ok(())
             }
             Some(ClipOwner::X11) => match self.xwm.as_mut() {
-                Some(xwm) => xwm.send_selection(SelectionTarget::Clipboard, kind.clone(), write).map_err(|e| format!("{e:?}")),
+                Some(xwm) => {
+                    xwm.send_selection(SelectionTarget::Clipboard, kind.clone(), write).map_err(|e| format!("{e:?}"))
+                }
                 None => Err("X11 is gone".into()),
             },
             // A Wayland client's selection, or none.
             None => request_data_device_client_selection(&self.seat, kind.clone(), write).map_err(|e| format!("{e:?}")),
         };
         match sent {
-            Ok(()) => self.bus_send(client, ServerMsg::Window(WinEvent::ClipboardData { serial, fd: vergence_protocol::window::Fd(Arc::new(read)) })),
-            Err(e) => self.native_refuse(client, serial, ErrorCode::BadMessage, format!("nothing to paste as {kind}: {e}")),
+            Ok(()) => self.bus_send(
+                client,
+                ServerMsg::Window(WinEvent::ClipboardData {
+                    serial,
+                    fd: vergence_protocol::window::Fd(Arc::new(read)),
+                }),
+            ),
+            Err(e) => {
+                self.native_refuse(client, serial, ErrorCode::BadMessage, format!("nothing to paste as {kind}: {e}"))
+            }
         }
     }
 
     /// Ask native client `client` to write its clipboard as `kind` into `fd`.
     pub fn native_clipboard_send(&mut self, client: u32, kind: String, fd: std::os::fd::OwnedFd) {
-        self.bus_send(client, ServerMsg::Window(WinEvent::ClipboardSend { kind, fd: vergence_protocol::window::Fd(Arc::new(fd)) }));
+        self.bus_send(
+            client,
+            ServerMsg::Window(WinEvent::ClipboardSend { kind, fd: vergence_protocol::window::Fd(Arc::new(fd)) }),
+        );
     }
 
     /// The clipboard changed: every native client hears what kinds it holds
@@ -1625,7 +1856,10 @@ mod tests {
             for points in [1, 160, 320, 579, 580, 581, 760, 1172, 2880] {
                 let px = (points as f32 * scale as f32).ceil() as i32;
                 let back = points_of(px, scale);
-                assert!(back == points || (scale < 1.0 && (back as f64 * scale).ceil() as i32 == px), "{points} pt at {scale}: {px} px gave {back}");
+                assert!(
+                    back == points || (scale < 1.0 && (back as f64 * scale).ceil() as i32 == px),
+                    "{points} pt at {scale}: {px} px gave {back}"
+                );
             }
         }
         assert_eq!(points_of(0, 1.5), 0);
@@ -1685,7 +1919,15 @@ mod tests {
         let mut mem = vec![0u8; 8 * 2];
         copy_damage(&f, &mut mem, 2, 2, 8, &[]).unwrap();
         assert_eq!(mem, src);
-        let got = copy_damage(&f, &mut mem, 2, 2, 8, &[Damage { x: 1, y: 1, w: 50, h: 50 }, Damage { x: 9, y: 9, w: 1, h: 1 }]).unwrap();
+        let got = copy_damage(
+            &f,
+            &mut mem,
+            2,
+            2,
+            8,
+            &[Damage { x: 1, y: 1, w: 50, h: 50 }, Damage { x: 9, y: 9, w: 1, h: 1 }],
+        )
+        .unwrap();
         assert_eq!(got, vec![Rectangle::new((1, 1).into(), (1, 1).into())]);
     }
 
@@ -1740,10 +1982,19 @@ mod scene_fuzz {
             fonts: Vec::new(),
             images: vec![image(1), image(2)],
             commands: vec![
-                Command::Fill { rect: Rect { x: 0.0, y: 0.0, w: 320.0, h: 200.0 }, radius: 4.0, color: Color::rgb(200, 200, 200) },
+                Command::Fill {
+                    rect: Rect { x: 0.0, y: 0.0, w: 320.0, h: 200.0 },
+                    radius: 4.0,
+                    color: Color::rgb(200, 200, 200),
+                },
                 Command::Image { image: 0, rect: Rect { x: 10.0, y: 10.0, w: 80.0, h: 40.0 }, opacity: 1.0 },
                 Command::Image { image: 1, rect: Rect { x: 100.0, y: 10.0, w: 80.0, h: 40.0 }, opacity: 0.5 },
-                Command::Stroke { rect: Rect { x: 5.0, y: 5.0, w: 300.0, h: 180.0 }, radius: 6.0, width: 1.0, color: Color::rgb(0, 0, 0) },
+                Command::Stroke {
+                    rect: Rect { x: 5.0, y: 5.0, w: 300.0, h: 180.0 },
+                    radius: 6.0,
+                    width: 1.0,
+                    color: Color::rgb(0, 0, 0),
+                },
             ],
         };
         let first = scene.encode_keyed(&[7, 9], &|_| false).unwrap();

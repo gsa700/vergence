@@ -434,8 +434,14 @@ mod tests {
         Value::Array(
             "{sv}".into(),
             vec![
-                Value::Entry(Box::new(Value::Str("UnixUserID".into())), Box::new(Value::Variant(Box::new(Value::U32(1001))))),
-                Value::Entry(Box::new(Value::Str("Name".into())), Box::new(Value::Variant(Box::new(Value::Str("x".into()))))),
+                Value::Entry(
+                    Box::new(Value::Str("UnixUserID".into())),
+                    Box::new(Value::Variant(Box::new(Value::U32(1001)))),
+                ),
+                Value::Entry(
+                    Box::new(Value::Str("Name".into())),
+                    Box::new(Value::Variant(Box::new(Value::Str("x".into())))),
+                ),
             ],
         )
     }

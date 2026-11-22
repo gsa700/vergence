@@ -243,10 +243,18 @@ mod tests {
 
     #[test]
     fn one_screen_over_all_screens() {
-        let mut d = t("[appearance]\ncolor-scheme = \"dark\"\n[[menu.item]]\nname = \"T\"\nexec = \"foot\"\n[wallpaper]\nimage = \"/a.svg\"\nmode = \"fill\"\ncolor = \"#111111\"\n");
-        assert_eq!(shown(&d, Some("m1")), Shown { image: Some("/a.svg".into()), mode: "fill".into(), color: "#111111".into(), own: false });
+        let mut d = t(
+            "[appearance]\ncolor-scheme = \"dark\"\n[[menu.item]]\nname = \"T\"\nexec = \"foot\"\n[wallpaper]\nimage = \"/a.svg\"\nmode = \"fill\"\ncolor = \"#111111\"\n",
+        );
+        assert_eq!(
+            shown(&d, Some("m1")),
+            Shown { image: Some("/a.svg".into()), mode: "fill".into(), color: "#111111".into(), own: false }
+        );
         set(&mut d, Some("m1"), "ASUS", Some(Path::new("/b.png")), "fit", "#000000");
-        assert_eq!(shown(&d, Some("m1")), Shown { image: Some("/b.png".into()), mode: "fit".into(), color: "#000000".into(), own: true });
+        assert_eq!(
+            shown(&d, Some("m1")),
+            Shown { image: Some("/b.png".into()), mode: "fit".into(), color: "#000000".into(), own: true }
+        );
         // All screens are unchanged, and so is everything else in the file.
         assert_eq!(shown(&d, None).image, Some("/a.svg".into()));
         assert_eq!(shown(&d, Some("m2")).image, Some("/a.svg".into()));
@@ -256,7 +264,10 @@ mod tests {
         assert_eq!(monitors(&d).len(), 1);
         assert_eq!(shown(&d, Some("m1")).image, None); // "" = the color alone
         clear_own(&mut d, "m1");
-        assert_eq!(shown(&d, Some("m1")), Shown { image: Some("/a.svg".into()), mode: "fill".into(), color: "#111111".into(), own: false });
+        assert_eq!(
+            shown(&d, Some("m1")),
+            Shown { image: Some("/a.svg".into()), mode: "fill".into(), color: "#111111".into(), own: false }
+        );
         assert!(d["wallpaper"].get("monitor").is_none());
     }
 
@@ -280,8 +291,14 @@ mod tests {
         assert_eq!(primary(&d, &ids).as_deref(), Some("right"));
         // Nothing changed on screen: right's picture is now the default, left keeps its own.
         assert_eq!(shown(&d, None).image, Some("/b.png".into()));
-        assert_eq!(shown(&d, Some("right")), Shown { image: Some("/b.png".into()), mode: "fit".into(), color: "#000000".into(), own: false });
-        assert_eq!(shown(&d, Some("left")), Shown { image: Some("/a.svg".into()), mode: "fill".into(), color: "#111111".into(), own: true });
+        assert_eq!(
+            shown(&d, Some("right")),
+            Shown { image: Some("/b.png".into()), mode: "fit".into(), color: "#000000".into(), own: false }
+        );
+        assert_eq!(
+            shown(&d, Some("left")),
+            Shown { image: Some("/a.svg".into()), mode: "fill".into(), color: "#111111".into(), own: true }
+        );
         // A recorded primary that isn't connected: the first is.
         assert_eq!(primary(&d, &["other".to_string()]).as_deref(), Some("other"));
     }

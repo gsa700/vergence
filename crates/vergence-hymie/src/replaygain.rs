@@ -63,7 +63,12 @@ impl ReplayGain {
 /// missing peak as 0. An MP3 takes its LAME tag's when these have no gain.
 pub(crate) fn raw(tags: &HashMap<String, String>) -> [i32; 4] {
     let get = |k: &str, missing: i32| tags.get(k).map_or(missing, |v| parse(v, missing));
-    [get("REPLAYGAIN_TRACK_GAIN", MISSING), get("REPLAYGAIN_TRACK_PEAK", 0), get("REPLAYGAIN_ALBUM_GAIN", MISSING), get("REPLAYGAIN_ALBUM_PEAK", 0)]
+    [
+        get("REPLAYGAIN_TRACK_GAIN", MISSING),
+        get("REPLAYGAIN_TRACK_PEAK", 0),
+        get("REPLAYGAIN_ALBUM_GAIN", MISSING),
+        get("REPLAYGAIN_ALBUM_PEAK", 0),
+    ]
 }
 
 /// FFmpeg's parse_value: a whole number, then up to five decimals, in
@@ -103,7 +108,10 @@ mod tests {
         assert_eq!(parse("-7.53 dB", MISSING), -753_000);
         assert_eq!(parse("+1.000001", MISSING), 100_000);
         assert_eq!(parse("0.988525", 0), 98_852);
-        let tags: HashMap<String, String> = [("REPLAYGAIN_TRACK_GAIN", "-6.00 dB"), ("REPLAYGAIN_TRACK_PEAK", "0.5")].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let tags: HashMap<String, String> = [("REPLAYGAIN_TRACK_GAIN", "-6.00 dB"), ("REPLAYGAIN_TRACK_PEAK", "0.5")]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
         let g = ReplayGain::from_tags(&tags);
         assert!(g.present && g.album_gain == g.track_gain, "the album takes the track's");
         assert!((g.multiplier(false) - 0.501).abs() < 0.001);

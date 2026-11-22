@@ -24,7 +24,10 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         renderer::{
-            element::{Kind, memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement}},
+            element::{
+                Kind,
+                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
+            },
             gles::GlesRenderer,
         },
     },
@@ -80,7 +83,18 @@ impl Server {
         }
         let first = self.picker.is_none();
         tracing::info!("picker: {} ({} windows)", item.key, windows.len());
-        self.picker = Some(Picker { key: item.key, place, windows, rect: Rectangle::default(), thumbs: Vec::new(), closes: Vec::new(), hover: None, on_close: false, picture: None, frost: None });
+        self.picker = Some(Picker {
+            key: item.key,
+            place,
+            windows,
+            rect: Rectangle::default(),
+            thumbs: Vec::new(),
+            closes: Vec::new(),
+            hover: None,
+            on_close: false,
+            picture: None,
+            frost: None,
+        });
         self.shelf.named = false;
         self.redraw_all();
         if first {
@@ -98,7 +112,15 @@ impl Server {
     /// For `vctl picker`: closed, or the app and each tile's picture (x y w h).
     pub fn picker_report(&self) -> String {
         let Some(p) = self.picker.as_ref() else { return "closed".into() };
-        let mut out = vec![format!("open {} at {} {} {} {}, {} windows", p.key, p.rect.loc.x, p.rect.loc.y, p.rect.size.w, p.rect.size.h, p.windows.len())];
+        let mut out = vec![format!(
+            "open {} at {} {} {} {}, {} windows",
+            p.key,
+            p.rect.loc.x,
+            p.rect.loc.y,
+            p.rect.size.w,
+            p.rect.size.h,
+            p.windows.len()
+        )];
         for (i, t) in p.thumbs.iter().enumerate() {
             out.push(format!("{i} {} {} {} {}", t.loc.x, t.loc.y, t.size.w, t.size.h));
         }
@@ -121,14 +143,19 @@ impl Server {
         let p = self.picker.as_ref()?;
         let dock = self.shelf.dock?;
         let upright = self.shelf.config.placement().upright();
-        running::slot(crate::shelf::rect(dock), p.place, upright).map(|r| Rectangle::new((r.x, r.y).into(), (r.w, r.h).into()))
+        running::slot(crate::shelf::rect(dock), p.place, upright)
+            .map(|r| Rectangle::new((r.x, r.y).into(), (r.w, r.h).into()))
     }
 
     /// The pointer moved: the tile under it; off the icon and the strip a
     /// moment, the picker goes.
     pub fn picker_hover(&mut self, at: Point<f64, Logical>) {
         let Some(p) = self.picker.as_ref() else { return };
-        let hover = p.thumbs.iter().position(|r| r.to_f64().contains(at)).or_else(|| p.closes.iter().position(|r| r.to_f64().contains(at)));
+        let hover = p
+            .thumbs
+            .iter()
+            .position(|r| r.to_f64().contains(at))
+            .or_else(|| p.closes.iter().position(|r| r.to_f64().contains(at)));
         let on_close = p.closes.iter().any(|r| r.to_f64().contains(at));
         if (hover, on_close) != (p.hover, p.on_close) {
             if let Some(p) = self.picker.as_mut() {
@@ -173,7 +200,12 @@ impl Server {
     }
 
     /// The picker's elements on `out`: the pictures, the chrome, the frost.
-    pub fn picker_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
+    pub fn picker_elements(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Vec<SceneElement> {
         let Some(key) = self.picker.as_ref().map(|p| p.key.clone()) else { return Vec::new() };
         // The app's windows now (one may have closed or opened).
         let items = self.shelf_items();
@@ -209,7 +241,11 @@ impl Server {
             }
         };
         // Tiles in a row for a dock along the bottom or top, in a column beside a side dock.
-        let (w, h) = if across_tiles { (along(tw), 2 * PAD + th + TITLE_H) } else { (2 * PAD + tw, 2 * PAD + n * (th + TITLE_H) + (n - 1) * GAP) };
+        let (w, h) = if across_tiles {
+            (along(tw), 2 * PAD + th + TITLE_H)
+        } else {
+            (2 * PAD + tw, 2 * PAD + n * (th + TITLE_H) + (n - 1) * GAP)
+        };
         let middle = (slot.y + slot.h / 2 - h / 2, slot.x + slot.w / 2 - w / 2);
         let (x, y) = match side {
             Edge::Left => (dock.loc.x - OFF - w, middle.0),
@@ -217,17 +253,30 @@ impl Server {
             Edge::Top => (middle.1, dock.loc.y - OFF - h),
             Edge::Bottom => (middle.1, dock.loc.y + dock.size.h + OFF),
         };
-        let (x, y) = (x.min(screen.loc.x + screen.size.w - w).max(screen.loc.x), y.min(screen.loc.y + screen.size.h - h).max(screen.loc.y));
+        let (x, y) = (
+            x.min(screen.loc.x + screen.size.w - w).max(screen.loc.x),
+            y.min(screen.loc.y + screen.size.h - h).max(screen.loc.y),
+        );
         let area: Rectangle<i32, Logical> = Rectangle::new((x, y).into(), (w, h).into());
         let tile_at = |i: i32| -> Point<i32, Logical> {
-            if across_tiles { (x + PAD + i * (tw + GAP), y + PAD).into() } else { (x + PAD, y + PAD + i * (th + TITLE_H + GAP)).into() }
+            if across_tiles {
+                (x + PAD + i * (tw + GAP), y + PAD).into()
+            } else {
+                (x + PAD, y + PAD + i * (th + TITLE_H + GAP)).into()
+            }
         };
-        let thumbs: Vec<Rectangle<i32, Logical>> = (0..n).map(|i| Rectangle::new(tile_at(i), (tw, th).into())).collect();
-        let closes: Vec<Rectangle<i32, Logical>> = (0..n).map(|i| {
-            let t = tile_at(i);
-            Rectangle::new((t.x + tw - TITLE_H, t.y + th).into(), (TITLE_H, TITLE_H).into())
-        }).collect();
-        let titles: Vec<String> = windows.iter().map(|w| self.window_title(w).chars().filter(|c| !c.is_control()).take(200).collect()).collect();
+        let thumbs: Vec<Rectangle<i32, Logical>> =
+            (0..n).map(|i| Rectangle::new(tile_at(i), (tw, th).into())).collect();
+        let closes: Vec<Rectangle<i32, Logical>> = (0..n)
+            .map(|i| {
+                let t = tile_at(i);
+                Rectangle::new((t.x + tw - TITLE_H, t.y + th).into(), (TITLE_H, TITLE_H).into())
+            })
+            .collect();
+        let titles: Vec<String> = windows
+            .iter()
+            .map(|w| self.window_title(w).chars().filter(|c| !c.is_control()).take(200).collect())
+            .collect();
         let minimized: Vec<bool> = windows.iter().map(|w| self.is_minimized(w)).collect();
         let light = self.light_style();
         let frost = self.frost_program(renderer);
@@ -240,7 +289,21 @@ impl Server {
         p.closes = closes;
         let (hover, on_close) = (p.hover.filter(|i| *i < windows.len()), p.on_close);
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        (&titles, &minimized, hover, on_close, w, h, tw, th, across_tiles, frost.is_some(), light, (accent.r, accent.g, accent.b)).hash(&mut hasher);
+        (
+            &titles,
+            &minimized,
+            hover,
+            on_close,
+            w,
+            h,
+            tw,
+            th,
+            across_tiles,
+            frost.is_some(),
+            light,
+            (accent.r, accent.g, accent.b),
+        )
+            .hash(&mut hasher);
         let key = hasher.finish() ^ scale.to_bits();
         if p.picture.as_ref().map(|(k, _)| *k) != Some(key) {
             let s = vergence_look::shelf_look(light);
@@ -260,30 +323,60 @@ impl Server {
                 let (tx, ty) = ((t.x - x) as f32, (t.y - y) as f32);
                 // The tile under the pointer: shaded behind its picture and title.
                 if hover == Some(i) {
-                    scene.fill_rounded(SceneRect::new(tx - 4.0, ty - 4.0, tw as f32 + 8.0, (th + TITLE_H) as f32 + 4.0), vergence_look::RADIUS, ink(s.hover));
+                    scene.fill_rounded(
+                        SceneRect::new(tx - 4.0, ty - 4.0, tw as f32 + 8.0, (th + TITLE_H) as f32 + 4.0),
+                        vergence_look::RADIUS,
+                        ink(s.hover),
+                    );
                 }
                 // The picture's room, a faint ground where the picture does not fill it.
-                scene.fill_rounded(SceneRect::new(tx, ty, tw as f32, th as f32), 4.0, Color { a: 26, ..ink(s.menu_ink) });
+                scene.fill_rounded(
+                    SceneRect::new(tx, ty, tw as f32, th as f32),
+                    4.0,
+                    Color { a: 26, ..ink(s.menu_ink) },
+                );
                 let close_w = if hover == Some(i) { TITLE_H as f32 } else { 0.0 };
                 let text_ink = if minimized[i] { ink(s.menu_ink_off) } else { ink(s.menu_ink) };
                 scene.push_clip(SceneRect::new(tx, ty + th as f32, tw as f32 - close_w, TITLE_H as f32), 0.0);
                 let baseline = (ty + th as f32 + (TITLE_H as f32 - (m.ascent + m.descent)) / 2.0 + m.ascent).round();
                 let title = if titles[i].is_empty() { "Untitled".to_string() } else { titles[i].clone() };
-                vergence_render::text(&mut scene, fonts, face, size, text_ink, ScenePoint::new(tx + 2.0, baseline), &title);
+                vergence_render::text(
+                    &mut scene,
+                    fonts,
+                    face,
+                    size,
+                    text_ink,
+                    ScenePoint::new(tx + 2.0, baseline),
+                    &title,
+                );
                 scene.pop_clip();
                 if hover == Some(i) {
                     // The ×, shaded while the pointer is on it.
                     let (cx, cy) = (tx + tw as f32 - TITLE_H as f32, ty + th as f32);
                     if on_close {
-                        scene.fill_rounded(SceneRect::new(cx + 3.0, cy + 3.0, TITLE_H as f32 - 6.0, TITLE_H as f32 - 6.0), 4.0, ink(s.hover));
+                        scene.fill_rounded(
+                            SceneRect::new(cx + 3.0, cy + 3.0, TITLE_H as f32 - 6.0, TITLE_H as f32 - 6.0),
+                            4.0,
+                            ink(s.hover),
+                        );
                     }
                     let (mx, my, r) = (cx + TITLE_H as f32 / 2.0, cy + TITLE_H as f32 / 2.0, 4.0);
                     scene.line(ScenePoint::new(mx - r, my - r), ScenePoint::new(mx + r, my + r), 1.4, ink(s.menu_ink));
                     scene.line(ScenePoint::new(mx + r, my - r), ScenePoint::new(mx - r, my + r), 1.4, ink(s.menu_ink));
                 }
             }
-            let Ok(pic) = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) else { return Vec::new() };
-            let buffer = MemoryRenderBuffer::from_slice(&pic.data, Fourcc::Abgr8888, (pic.width as i32, pic.height as i32), 1, Transform::Normal, None);
+            let Ok(pic) = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0))
+            else {
+                return Vec::new();
+            };
+            let buffer = MemoryRenderBuffer::from_slice(
+                &pic.data,
+                Fourcc::Abgr8888,
+                (pic.width as i32, pic.height as i32),
+                1,
+                Transform::Normal,
+                None,
+            );
             if let Some(p) = self.picker.as_mut() {
                 p.picture = Some((key, buffer));
             }
@@ -305,7 +398,15 @@ impl Server {
         let whole = px(area);
         if let Some((_, buffer)) = self.picker.as_ref().and_then(|p| p.picture.as_ref()) {
             let src = Rectangle::<f64, Logical>::from_size((whole.size.w as f64, whole.size.h as f64).into());
-            if let Ok(e) = MemoryRenderBufferRenderElement::from_buffer(renderer, whole.loc.to_f64(), buffer, None, Some(src), Some(area.size), Kind::Unspecified) {
+            if let Ok(e) = MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                whole.loc.to_f64(),
+                buffer,
+                None,
+                Some(src),
+                Some(area.size),
+                Kind::Unspecified,
+            ) {
                 elements.push(SceneElement::Memory(e));
             }
         }

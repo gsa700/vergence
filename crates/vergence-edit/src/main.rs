@@ -27,7 +27,10 @@ use std::time::SystemTime;
 use vergence_ui::{AppCommand as C, Bar, BarStyle, BarTab, Role, TabEvent};
 use vergence_widgets::edit::Ending;
 use vergence_widgets::prefs::{Choice, Control, Part, Prefs, Row, Rows};
-use vergence_widgets::{Align, AreaOptions, ButtonLook, Element, Input, Length, Padding, Program, TextDoc, Theme, Waker, Window, button, column, field, label, panel, row, rule, space, text_area};
+use vergence_widgets::{
+    Align, AreaOptions, ButtonLook, Element, Input, Length, Padding, Program, TextDoc, Theme, Waker, Window, button,
+    column, field, label, panel, row, rule, space, text_area,
+};
 
 const APP_ID: &str = "vergence-edit";
 const SECTION: &str = "[editor]";
@@ -110,7 +113,10 @@ fn is_prose(path: Option<&std::path::Path>) -> bool {
     }
     match path.extension().and_then(|e| e.to_str()) {
         None => true,
-        Some(e) => matches!(e.to_ascii_lowercase().as_str(), "md" | "markdown" | "txt" | "text" | "rst" | "adoc" | "asciidoc" | "org" | "tex"),
+        Some(e) => matches!(
+            e.to_ascii_lowercase().as_str(),
+            "md" | "markdown" | "txt" | "text" | "rst" | "adoc" | "asciidoc" | "org" | "tex"
+        ),
     }
 }
 
@@ -201,7 +207,10 @@ enum Answer {
 enum Picking {
     Open,
     /// Save tab `tab` under a new name; then close it (the close question's Save).
-    SaveAs { tab: u32, then_close: bool },
+    SaveAs {
+        tab: u32,
+        then_close: bool,
+    },
 }
 
 /// A file dialog open over the window: what for, and where its answer lands.
@@ -255,7 +264,9 @@ struct EditWindow {
 /// ~/.config/vergence/desktop.toml and when it last changed.
 fn desktop_text() -> (String, Option<SystemTime>) {
     match vergence_widgets::prefs::desktop_path() {
-        Some(p) => (std::fs::read_to_string(&p).unwrap_or_default(), std::fs::metadata(&p).and_then(|m| m.modified()).ok()),
+        Some(p) => {
+            (std::fs::read_to_string(&p).unwrap_or_default(), std::fs::metadata(&p).and_then(|m| m.modified()).ok())
+        }
         None => (String::new(), None),
     }
 }
@@ -264,7 +275,30 @@ impl EditWindow {
     fn new(shared: SharedRef, tabs: Vec<DocTab>) -> EditWindow {
         let (desktop, stamp) = desktop_text();
         let front = tabs.first().map_or(0, |t| t.id);
-        let mut w = EditWindow { shared, ending: None, tabs, front, me: None, waker: None, desktop, stamp, zoom: 1.0, prefs_open: Rc::new(Cell::new(false)), asking: None, closing: Vec::new(), closing_window: false, notice: None, picking: None, find: None, focus_turn: 0, goto: None, token: String::new(), keep_pending: false, watching: false, page_drawn: Cell::new(None) };
+        let mut w = EditWindow {
+            shared,
+            ending: None,
+            tabs,
+            front,
+            me: None,
+            waker: None,
+            desktop,
+            stamp,
+            zoom: 1.0,
+            prefs_open: Rc::new(Cell::new(false)),
+            asking: None,
+            closing: Vec::new(),
+            closing_window: false,
+            notice: None,
+            picking: None,
+            find: None,
+            focus_turn: 0,
+            goto: None,
+            token: String::new(),
+            keep_pending: false,
+            watching: false,
+            page_drawn: Cell::new(None),
+        };
         if w.tabs.is_empty() {
             let t = w.untitled_tab();
             w.front = t.id;
@@ -303,7 +337,11 @@ impl EditWindow {
             editable: t.read_only.is_none(),
             // The right-click menu as full as the terminal's (Dave's list):
             // the editor's own lines after the text's.
-            commands: vec![("New Tab".into(), cmd::NEW_TAB, "Ctrl+T"), ("New Window".into(), cmd::NEW_WINDOW, "Ctrl+N"), ("Find…".into(), cmd::FIND, "Ctrl+F")],
+            commands: vec![
+                ("New Tab".into(), cmd::NEW_TAB, "Ctrl+T"),
+                ("New Window".into(), cmd::NEW_WINDOW, "Ctrl+N"),
+                ("Find…".into(), cmd::FIND, "Ctrl+F"),
+            ],
             complete: self.flag("complete", true),
             // Its own choice, else the desktop's ([text] spellcheck), on by default.
             spell: match self.setting("spellcheck").as_deref() {
@@ -332,7 +370,8 @@ impl EditWindow {
             let o = self.options_for(&self.tabs[i]);
             self.tabs[i].doc.borrow_mut().set_options(o);
             // Completion also offers the words of the window's other documents.
-            let others: Vec<vergence_widgets::WeakDoc> = self.tabs.iter().enumerate().filter(|(k, _)| *k != i).map(|(_, t)| t.doc.downgrade()).collect();
+            let others: Vec<vergence_widgets::WeakDoc> =
+                self.tabs.iter().enumerate().filter(|(k, _)| *k != i).map(|(_, t)| t.doc.downgrade()).collect();
             self.tabs[i].doc.borrow_mut().set_words(Some(other_words(others)));
         }
     }
@@ -364,7 +403,17 @@ impl EditWindow {
     fn untitled_tab(&self) -> DocTab {
         // The lowest number no open Untitled here has.
         let n = (1..).find(|n| !self.tabs.iter().any(|t| t.path.is_none() && t.untitled == *n)).unwrap_or(1);
-        DocTab { id: self.new_tab_id(), doc: TextDoc::new(""), path: None, untitled: n, read_only: None, bom: false, spaces: None, disk: None, changed_on_disk: false }
+        DocTab {
+            id: self.new_tab_id(),
+            doc: TextDoc::new(""),
+            path: None,
+            untitled: n,
+            read_only: None,
+            bom: false,
+            spaces: None,
+            disk: None,
+            changed_on_disk: false,
+        }
     }
 
     /// A tab for `path`, read in; None (and a notice) if it cannot be.
@@ -374,7 +423,17 @@ impl EditWindow {
                 let doc = TextDoc::new(&l.text);
                 doc.borrow_mut().mark_saved();
                 let spaces = doc.borrow().buffer().uses_tabs().map(|tabs| !tabs);
-                Some(DocTab { id: self.new_tab_id(), doc, path: Some(path.to_path_buf()), untitled: 0, read_only: l.read_only, bom: l.bom, spaces, disk: stamp(path), changed_on_disk: false })
+                Some(DocTab {
+                    id: self.new_tab_id(),
+                    doc,
+                    path: Some(path.to_path_buf()),
+                    untitled: 0,
+                    read_only: l.read_only,
+                    bom: l.bom,
+                    spaces,
+                    disk: stamp(path),
+                    changed_on_disk: false,
+                })
             }
             Err(e) => {
                 self.notice = Some(e);
@@ -392,7 +451,10 @@ impl EditWindow {
             }
             if let Some(t) = self.file_tab(p) {
                 // An untouched empty Untitled gives way to the first file.
-                let lone = self.tabs.len() == 1 && self.tabs[0].path.is_none() && !self.tabs[0].modified() && self.tabs[0].doc.borrow().buffer().bytes() == 0;
+                let lone = self.tabs.len() == 1
+                    && self.tabs[0].path.is_none()
+                    && !self.tabs[0].modified()
+                    && self.tabs[0].doc.borrow().buffer().bytes() == 0;
                 if lone {
                     self.tabs.clear();
                 }
@@ -449,10 +511,16 @@ impl EditWindow {
             .map(|t| {
                 let d = t.doc.borrow();
                 let c = d.caret();
-                keep::TabSnap { path: t.path.clone(), untitled: t.untitled, text: t.modified().then(|| d.text()), caret: (c.line, c.col) }
+                keep::TabSnap {
+                    path: t.path.clone(),
+                    untitled: t.untitled,
+                    text: t.modified().then(|| d.text()),
+                    caret: (c.line, c.col),
+                }
             })
             .collect::<Vec<_>>();
-        let front = self.tabs.iter().filter(|t| t.path.is_some() || t.modified()).position(|t| t.id == self.front).unwrap_or(0);
+        let front =
+            self.tabs.iter().filter(|t| t.path.is_some() || t.modified()).position(|t| t.id == self.front).unwrap_or(0);
         keep::WindowSnap { token: self.token.clone(), front, tabs }
     }
 
@@ -466,7 +534,8 @@ impl EditWindow {
             Some(slot) => slot.1 = snap,
             None => s.snaps.push((me, snap)),
         }
-        let all: Vec<keep::WindowSnap> = s.snaps.iter().map(|(_, w)| w.clone()).filter(|w| !w.tabs.is_empty() || !w.token.is_empty()).collect();
+        let all: Vec<keep::WindowSnap> =
+            s.snaps.iter().map(|(_, w)| w.clone()).filter(|w| !w.tabs.is_empty() || !w.token.is_empty()).collect();
         keep::save(&all);
     }
 
@@ -490,7 +559,17 @@ impl EditWindow {
                     let doc = TextDoc::new(text);
                     doc.borrow_mut().mark_unsaved();
                     let spaces = doc.borrow().buffer().uses_tabs().map(|tabs| !tabs);
-                    Some(DocTab { id: w.new_tab_id(), doc, path: path.clone(), untitled: t.untitled, read_only: None, bom: false, spaces, disk: path.as_deref().and_then(stamp), changed_on_disk: false })
+                    Some(DocTab {
+                        id: w.new_tab_id(),
+                        doc,
+                        path: path.clone(),
+                        untitled: t.untitled,
+                        read_only: None,
+                        bom: false,
+                        spaces,
+                        disk: path.as_deref().and_then(stamp),
+                        changed_on_disk: false,
+                    })
                 }
                 (None, Some(p)) => w.file_tab(p),
                 (None, None) => None,
@@ -555,7 +634,9 @@ impl EditWindow {
     fn go_to(&mut self, what: &str) -> bool {
         let Some(doc) = self.doc() else { return false };
         let mut parts = what.trim().splitn(2, [':', ',', ' ']);
-        let Some(line) = parts.next().and_then(|l| l.trim().parse::<usize>().ok()).filter(|l| *l > 0) else { return false };
+        let Some(line) = parts.next().and_then(|l| l.trim().parse::<usize>().ok()).filter(|l| *l > 0) else {
+            return false;
+        };
         let col = parts.next().and_then(|c| c.trim().parse::<usize>().ok()).unwrap_or(1).max(1);
         let mut d = doc.borrow_mut();
         let line = (line - 1).min(d.buffer().line_count() - 1);
@@ -571,7 +652,10 @@ impl EditWindow {
     /// one line, is what it looks for.
     fn open_find(&mut self, replace: bool) {
         let Some(doc) = self.doc() else { return };
-        let (sel, (a, _)) = { let d = doc.borrow(); (d.selected_text(), d.selection()) };
+        let (sel, (a, _)) = {
+            let d = doc.borrow();
+            (d.selected_text(), d.selection())
+        };
         let f = self.find.get_or_insert_with(Find::default);
         if !sel.is_empty() && !sel.contains('\n') {
             f.needle = sel;
@@ -745,7 +829,12 @@ impl EditWindow {
                 Some(t) if t.modified() => {
                     self.front = id;
                     let answer = Rc::new(Cell::new(None));
-                    let q = SaveQuestion { name: t.name(), answer: answer.clone(), waker: self.waker.clone(), theme: self.theme() };
+                    let q = SaveQuestion {
+                        name: t.name(),
+                        answer: answer.clone(),
+                        waker: self.waker.clone(),
+                        theme: self.theme(),
+                    };
                     self.asking = Some(Asking { tab: id, answer });
                     window.open_window(vergence_widgets::window(q));
                     return;
@@ -803,11 +892,12 @@ impl EditWindow {
             return;
         }
         let waker = self.waker.clone();
-        let prefs = Prefs::new("Edit", APP_ID, SECTION, false, Box::new(EditRows::new()), self.prefs_open.clone()).on_write(move || {
-            if let Some(w) = &waker {
-                w.wake();
-            }
-        });
+        let prefs = Prefs::new("Edit", APP_ID, SECTION, false, Box::new(EditRows::new()), self.prefs_open.clone())
+            .on_write(move || {
+                if let Some(w) = &waker {
+                    w.wake();
+                }
+            });
         window.open_window(vergence_widgets::window(prefs));
     }
 
@@ -858,7 +948,9 @@ impl EditWindow {
     fn run(&mut self, id: u32, window: &mut Window) {
         let doc = self.doc();
         match id {
-            cmd::NEW_WINDOW => window.open_window(vergence_widgets::window(EditWindow::new(self.shared.clone(), Vec::new()))),
+            cmd::NEW_WINDOW => {
+                window.open_window(vergence_widgets::window(EditWindow::new(self.shared.clone(), Vec::new())))
+            }
             cmd::NEW_TAB => {
                 let t = self.untitled_tab();
                 self.front = t.id;
@@ -917,7 +1009,13 @@ impl EditWindow {
             cmd::PREV_TAB => self.step_tab(-1),
             cmd::SETTINGS => self.open_settings(window),
             cmd::ABOUT => {
-                let about = vergence_widgets::about::About::new(APP_ID, "Edit", env!("CARGO_PKG_VERSION"), "A plain-text editor: tabs, line numbers, wrapping, undo; files saved whole or not at all.", self.theme());
+                let about = vergence_widgets::about::About::new(
+                    APP_ID,
+                    "Edit",
+                    env!("CARGO_PKG_VERSION"),
+                    "A plain-text editor: tabs, line numbers, wrapping, undo; files saved whole or not at all.",
+                    self.theme(),
+                );
                 window.open_window(vergence_widgets::window(about));
             }
             _ => {}
@@ -928,7 +1026,11 @@ impl EditWindow {
 impl EditWindow {
     fn find_bar(&self, f: &Find, t: &Theme) -> Element<Msg> {
         let small = |text: &str, m: Msg, on: bool, name: &str| -> Element<Msg> {
-            button(label(text).size(12.0)).look(if on { ButtonLook::Chosen } else { ButtonLook::Plain }).padding(Padding::hv(3.0, 8.0)).on_press(m).name(name)
+            button(label(text).size(12.0))
+                .look(if on { ButtonLook::Chosen } else { ButtonLook::Plain })
+                .padding(Padding::hv(3.0, 8.0))
+                .on_press(m)
+                .name(name)
         };
         let count = match (f.replaced, f.needle.is_empty(), f.matches.len()) {
             (Some(n), _, _) => format!("Replaced {}", grouped(n)),
@@ -946,27 +1048,45 @@ impl EditWindow {
                 }
             }
         };
-        let find_field = field(f.needle.clone(), Msg::FindTyped).placeholder("Find").on_submit(Msg::FindNext).key(self.focus_turn).autofocus().width(Length::FILL).name("Find");
-        let mut rows: Vec<Element<Msg>> = vec![row(vec![
-            find_field,
-            label(count).size(12.0).dim().width(Length::Fixed(96.0)),
-            small("‹", Msg::FindPrev, false, "Previous match"),
-            small("›", Msg::FindNext, false, "Next match"),
-            small("Aa", Msg::FindCase, f.case, "Match case"),
-            small("Whole words", Msg::FindWhole, f.whole, "Whole words"),
-            small("Replace", Msg::FindReplace, f.replace, "Show Replace"),
-            small("×", Msg::FindClose, false, "Close"),
-        ])
-        .spacing(4.0)
-        .align(Align::Center)
-        .width(Length::FILL)];
+        let find_field = field(f.needle.clone(), Msg::FindTyped)
+            .placeholder("Find")
+            .on_submit(Msg::FindNext)
+            .key(self.focus_turn)
+            .autofocus()
+            .width(Length::FILL)
+            .name("Find");
+        let mut rows: Vec<Element<Msg>> = vec![
+            row(vec![
+                find_field,
+                label(count).size(12.0).dim().width(Length::Fixed(96.0)),
+                small("‹", Msg::FindPrev, false, "Previous match"),
+                small("›", Msg::FindNext, false, "Next match"),
+                small("Aa", Msg::FindCase, f.case, "Match case"),
+                small("Whole words", Msg::FindWhole, f.whole, "Whole words"),
+                small("Replace", Msg::FindReplace, f.replace, "Show Replace"),
+                small("×", Msg::FindClose, false, "Close"),
+            ])
+            .spacing(4.0)
+            .align(Align::Center)
+            .width(Length::FILL),
+        ];
         if f.replace {
             let editable = self.front_tab().is_some_and(|t| t.read_only.is_none());
             rows.push(
                 row(vec![
-                    field(f.with.clone(), Msg::WithTyped).placeholder("Replace with").on_submit(Msg::ReplaceOne).width(Length::FILL).name("Replace with"),
-                    button(label("Replace").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press_if(editable, Msg::ReplaceOne).name("Replace"),
-                    button(label("Replace all").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press_if(editable && !f.matches.is_empty(), Msg::ReplaceAll).name("Replace all"),
+                    field(f.with.clone(), Msg::WithTyped)
+                        .placeholder("Replace with")
+                        .on_submit(Msg::ReplaceOne)
+                        .width(Length::FILL)
+                        .name("Replace with"),
+                    button(label("Replace").size(12.0))
+                        .padding(Padding::hv(3.0, 10.0))
+                        .on_press_if(editable, Msg::ReplaceOne)
+                        .name("Replace"),
+                    button(label("Replace all").size(12.0))
+                        .padding(Padding::hv(3.0, 10.0))
+                        .on_press_if(editable && !f.matches.is_empty(), Msg::ReplaceAll)
+                        .name("Replace all"),
                 ])
                 .spacing(6.0)
                 .align(Align::Center)
@@ -974,7 +1094,10 @@ impl EditWindow {
             );
         }
         let _ = t;
-        panel(column(rows).spacing(6.0).width(Length::FILL)).radius(0.0).padding(Padding::hv(6.0, 10.0)).width(Length::FILL)
+        panel(column(rows).spacing(6.0).width(Length::FILL))
+            .radius(0.0)
+            .padding(Padding::hv(6.0, 10.0))
+            .width(Length::FILL)
     }
 }
 
@@ -1007,7 +1130,11 @@ impl Program for EditWindow {
     }
 
     fn bar(&self) -> Option<Bar> {
-        let tabs = self.tabs.iter().map(|t| BarTab { id: t.id, title: t.name(), closable: true, alert: false, edited: t.modified() }).collect();
+        let tabs = self
+            .tabs
+            .iter()
+            .map(|t| BarTab { id: t.id, title: t.name(), closable: true, alert: false, edited: t.modified() })
+            .collect();
         // The tab in front is the page's color, as the terminal's: joined to
         // the text, and the server knows the page's style, so text scrolled
         // under a bar of the other style shows through inverted (readable)
@@ -1016,7 +1143,13 @@ impl Program for EditWindow {
             let p = self.theme().page;
             (p.r as u32) << 16 | (p.g as u32) << 8 | p.b as u32
         });
-        Some(Bar::Tabs { tabs, front: self.front_tab().map_or(0, |t| t.id), plus: true, accent: Some(page), menu: Vec::new() })
+        Some(Bar::Tabs {
+            tabs,
+            front: self.front_tab().map_or(0, |t| t.id),
+            plus: true,
+            accent: Some(page),
+            menu: Vec::new(),
+        })
     }
 
     fn view(&self, t: &Theme) -> Element<Msg> {
@@ -1030,9 +1163,16 @@ impl Program for EditWindow {
         let strip = |text: String, dismiss: bool| -> Element<Msg> {
             let mut items: Vec<Element<Msg>> = vec![label(text).size(12.0).wrap().width(Length::FILL)];
             if dismiss {
-                items.push(button(label("OK").size(12.0)).padding(Padding::hv(2.0, 10.0)).on_press(Msg::DismissNotice).name("OK"));
+                items.push(
+                    button(label("OK").size(12.0))
+                        .padding(Padding::hv(2.0, 10.0))
+                        .on_press(Msg::DismissNotice)
+                        .name("OK"),
+                );
             }
-            panel(row(items).spacing(8.0).align(Align::Center).width(Length::FILL)).padding(Padding::hv(6.0, 12.0)).width(Length::FILL)
+            panel(row(items).spacing(8.0).align(Align::Center).width(Length::FILL))
+                .padding(Padding::hv(6.0, 12.0))
+                .width(Length::FILL)
         };
         if let Some(n) = &self.notice {
             parts.push(strip(n.clone(), true));
@@ -1046,8 +1186,15 @@ impl Program for EditWindow {
                 panel(
                     row(vec![
                         label(format!("“{}” changed on disk.", tab.name())).size(12.0).wrap().width(Length::FILL),
-                        button(label("Keep mine").size(12.0)).padding(Padding::hv(2.0, 10.0)).on_press(Msg::KeepMine).name("Keep mine"),
-                        button(label("Reload").size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(2.0, 10.0)).on_press(Msg::Reload).name("Reload from disk"),
+                        button(label("Keep mine").size(12.0))
+                            .padding(Padding::hv(2.0, 10.0))
+                            .on_press(Msg::KeepMine)
+                            .name("Keep mine"),
+                        button(label("Reload").size(12.0))
+                            .look(ButtonLook::Accent)
+                            .padding(Padding::hv(2.0, 10.0))
+                            .on_press(Msg::Reload)
+                            .name("Reload from disk"),
                     ])
                     .spacing(8.0)
                     .align(Align::Center)
@@ -1062,10 +1209,20 @@ impl Program for EditWindow {
                 panel(
                     row(vec![
                         label("Go to line").size(12.0),
-                        field(g.clone(), Msg::GotoTyped).placeholder("Line, or line:column").on_submit(Msg::GotoGo).key(self.focus_turn).autofocus().width(Length::Fixed(200.0)).name("Line"),
+                        field(g.clone(), Msg::GotoTyped)
+                            .placeholder("Line, or line:column")
+                            .on_submit(Msg::GotoGo)
+                            .key(self.focus_turn)
+                            .autofocus()
+                            .width(Length::Fixed(200.0))
+                            .name("Line"),
                         label(format!("of {}", grouped(tab.doc.borrow().buffer().line_count()))).size(12.0).dim(),
                         space().width(Length::FILL),
-                        button(label("×").size(12.0)).look(ButtonLook::Plain).padding(Padding::hv(2.0, 8.0)).on_press(Msg::GotoClose).name("Close"),
+                        button(label("×").size(12.0))
+                            .look(ButtonLook::Plain)
+                            .padding(Padding::hv(2.0, 8.0))
+                            .on_press(Msg::GotoClose)
+                            .name("Close"),
                     ])
                     .spacing(8.0)
                     .align(Align::Center)
@@ -1084,11 +1241,18 @@ impl Program for EditWindow {
         // terminal's does (the text area keeps its first line below the bar).
         let mut all: Vec<Element<Msg>> = Vec::new();
         if !parts.is_empty() {
-            all.push(panel(column(std::mem::take(&mut parts)).spacing(1.0).width(Length::FILL)).color(shade).padding(Padding { top: t.top, ..Padding::default() }).radius(0.0).width(Length::FILL));
+            all.push(
+                panel(column(std::mem::take(&mut parts)).spacing(1.0).width(Length::FILL))
+                    .color(shade)
+                    .padding(Padding { top: t.top, ..Padding::default() })
+                    .radius(0.0)
+                    .width(Length::FILL),
+            );
         }
         // The area's id changes with focus_turn, so it takes the keyboard back
         // when the find bar closes (its state is the document's, not the id's).
-        let area = text_area(&tab.doc).key((self.focus_turn << 32) | tab.id as u64).on_change(Msg::Changed).name(tab.name());
+        let area =
+            text_area(&tab.doc).key((self.focus_turn << 32) | tab.id as u64).on_change(Msg::Changed).name(tab.name());
         all.push(if self.find.is_none() && self.goto.is_none() { area.autofocus() } else { area });
         // The status line: where the caret is, how Tab indents, the line endings.
         let d = tab.doc.borrow();
@@ -1097,7 +1261,15 @@ impl Program for EditWindow {
         let mut status: Vec<Element<Msg>> = vec![space().width(Length::FILL)];
         // Words (Dave, 2026-11-15: "a word counter in there somewhere").
         let words = grouped(d.word_count());
-        status.push(label(if a != b { format!("{} of {words} words", grouped(d.selected_words())) } else { format!("{words} words") }).size(12.0).dim());
+        status.push(
+            label(if a != b {
+                format!("{} of {words} words", grouped(d.selected_words()))
+            } else {
+                format!("{words} words")
+            })
+            .size(12.0)
+            .dim(),
+        );
         if a != b {
             let n = d.selected_text().chars().count();
             status.push(label(format!("{} characters selected", grouped(n))).size(12.0).dim());
@@ -1106,12 +1278,23 @@ impl Program for EditWindow {
         let o = d.options();
         let indent = if o.spaces { format!("Spaces: {}", o.tab_width) } else { format!("Tab width: {}", o.tab_width) };
         let ending = if d.buffer().ending() == Ending::CrLf { "CRLF" } else { "LF" };
-        let small = |text: String, m: Msg, name: &str| -> Element<Msg> { button(label(text).size(12.0).dim()).look(ButtonLook::Plain).padding(Padding::hv(1.0, 6.0)).on_press(m).name(name) };
+        let small = |text: String, m: Msg, name: &str| -> Element<Msg> {
+            button(label(text).size(12.0).dim())
+                .look(ButtonLook::Plain)
+                .padding(Padding::hv(1.0, 6.0))
+                .on_press(m)
+                .name(name)
+        };
         status.push(small(indent, Msg::ToggleSpaces, "Indent with spaces or tabs"));
         status.push(small(ending.into(), Msg::ToggleEnding, "Line endings"));
         status.push(label("UTF-8").size(12.0).dim());
         all.push(rule());
-        all.push(panel(row(status).spacing(14.0).align(Align::Center).width(Length::FILL)).radius(0.0).padding(Padding { top: 3.0, bottom: 3.0, left: 12.0, right: 12.0 }).width(Length::FILL));
+        all.push(
+            panel(row(status).spacing(14.0).align(Align::Center).width(Length::FILL))
+                .radius(0.0)
+                .padding(Padding { top: 3.0, bottom: 3.0, left: 12.0, right: 12.0 })
+                .width(Length::FILL),
+        );
         column(all).width(Length::FILL).height(Length::FILL)
     }
 
@@ -1302,9 +1485,14 @@ impl Program for EditWindow {
                 // (Dave's list, 2026-11-16): for now, this window; the lasting
                 // size is the editor's own settings window's.
                 C::role(cmd::ZOOM_OUT, Role::ZoomOut).enabled(self.zoom > ZOOM_MIN + 0.001).featured(),
-                C { label: format!("{}%", (self.zoom * 100.0).round()), ..C::role(cmd::ZOOM_RESET, Role::ZoomReset).featured() },
+                C {
+                    label: format!("{}%", (self.zoom * 100.0).round()),
+                    ..C::role(cmd::ZOOM_RESET, Role::ZoomReset).featured()
+                },
                 C::role(cmd::ZOOM_IN, Role::ZoomIn).enabled(self.zoom < ZOOM_MAX - 0.001).featured(),
-                C::own(cmd::LINE_NUMBERS, "View", "Line numbers", "").checked(self.flag("line-numbers", true)).featured(),
+                C::own(cmd::LINE_NUMBERS, "View", "Line numbers", "")
+                    .checked(self.flag("line-numbers", true))
+                    .featured(),
                 C::own(cmd::WRAP, "View", "Wrap lines", "").checked(self.flag("wrap", true)),
                 C::role(cmd::NEXT_TAB, Role::NextTab),
                 C::role(cmd::PREV_TAB, Role::PreviousTab),
@@ -1326,7 +1514,13 @@ impl Program for EditWindow {
     }
 
     fn dropped(&mut self, _x: f32, _y: f32, _action: u8, items: &[(String, Vec<u8>)], window: &mut Window) {
-        let paths: Vec<PathBuf> = items.iter().find(|(k, _)| k == "text/uri-list").map(|(_, v)| String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()).unwrap_or_default();
+        let paths: Vec<PathBuf> = items
+            .iter()
+            .find(|(k, _)| k == "text/uri-list")
+            .map(|(_, v)| {
+                String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()
+            })
+            .unwrap_or_default();
         if !paths.is_empty() {
             self.open_files(&paths);
             window.redraw();
@@ -1490,7 +1684,8 @@ impl Program for EditWindow {
         // Tabs joined to this window.
         let mine: Vec<(u32, DocTab)> = {
             let mut s = self.shared.borrow_mut();
-            let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut s.transfers).into_iter().partition(|(into, _, _)| Some(*into) == self.me);
+            let (mine, rest): (Vec<_>, Vec<_>) =
+                std::mem::take(&mut s.transfers).into_iter().partition(|(into, _, _)| Some(*into) == self.me);
             s.transfers = rest;
             mine.into_iter().map(|(_, to, t)| (to, t)).collect()
         };
@@ -1508,7 +1703,8 @@ impl Program for EditWindow {
             s.windows.first().map(|(id, _)| Some(*id) == self.me).unwrap_or(false)
         };
         if listening {
-            let requests: Vec<Vec<PathBuf>> = std::mem::take(&mut *self.shared.borrow().inbox.lock().unwrap_or_else(|e| e.into_inner()));
+            let requests: Vec<Vec<PathBuf>> =
+                std::mem::take(&mut *self.shared.borrow().inbox.lock().unwrap_or_else(|e| e.into_inner()));
             for files in requests {
                 if files.is_empty() {
                     window.open_window(vergence_widgets::window(EditWindow::new(self.shared.clone(), Vec::new())));
@@ -1574,7 +1770,10 @@ fn suggested_name(t: &DocTab) -> String {
     }
     let doc = t.doc.borrow();
     let first = doc.buffer().lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
-    let clean: String = first.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') && !c.is_control()).collect();
+    let clean: String = first
+        .chars()
+        .filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') && !c.is_control())
+        .collect();
     let words: Vec<&str> = clean.split_whitespace().collect();
     let mut name = String::new();
     for w in words {
@@ -1624,12 +1823,26 @@ impl Program for SaveQuestion {
         self.theme.clone()
     }
     fn view(&self, _: &Theme) -> Element<Answer> {
-        let b = |text: &str, a: Answer, look: ButtonLook| -> Element<Answer> { button(label(text).size(12.0)).look(look).padding(Padding::hv(4.0, 12.0)).on_press(a).name(text) };
+        let b = |text: &str, a: Answer, look: ButtonLook| -> Element<Answer> {
+            button(label(text).size(12.0)).look(look).padding(Padding::hv(4.0, 12.0)).on_press(a).name(text)
+        };
         panel(
             column(vec![
-                label(format!("Save the changes to “{}”?", self.name)).size(15.0).weight(600).wrap().width(Length::FILL),
+                label(format!("Save the changes to “{}”?", self.name))
+                    .size(15.0)
+                    .weight(600)
+                    .wrap()
+                    .width(Length::FILL),
                 label("If you don't save them, they are lost.").dim().wrap().width(Length::FILL),
-                row(vec![b("Don't save", Answer::Discard, ButtonLook::Normal), space().width(Length::FILL), b("Cancel", Answer::Cancel, ButtonLook::Normal), b("Save", Answer::Save, ButtonLook::Accent)]).spacing(8.0).align(Align::Center).width(Length::FILL),
+                row(vec![
+                    b("Don't save", Answer::Discard, ButtonLook::Normal),
+                    space().width(Length::FILL),
+                    b("Cancel", Answer::Cancel, ButtonLook::Normal),
+                    b("Save", Answer::Save, ButtonLook::Accent),
+                ])
+                .spacing(8.0)
+                .align(Align::Center)
+                .width(Length::FILL),
             ])
             .spacing(10.0)
             .width(Length::FILL),
@@ -1644,7 +1857,14 @@ impl Program for SaveQuestion {
         window.close();
     }
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: true, min: (420.0, 150.0), max: (0.0, 0.0), alone: false, frosted: false }
+        vergence_ui::Style {
+            kind: vergence_ui::WinKind::Dialog,
+            modal: true,
+            min: (420.0, 150.0),
+            max: (0.0, 0.0),
+            alone: false,
+            frosted: false,
+        }
     }
 }
 
@@ -1667,7 +1887,14 @@ impl EditRows {
     fn new() -> EditRows {
         let list = |args: &[&str]| -> Vec<String> {
             let out = std::process::Command::new("fc-list").args(args).output();
-            let mut v: Vec<String> = out.ok().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default().lines().filter_map(|l| l.split(',').next().map(|s| s.trim().to_string())).filter(|s| !s.is_empty()).collect();
+            let mut v: Vec<String> = out
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|l| l.split(',').next().map(|s| s.trim().to_string()))
+                .filter(|s| !s.is_empty())
+                .collect();
             v.sort_by_key(|n| n.to_lowercase());
             v.dedup();
             v
@@ -1682,44 +1909,134 @@ impl EditRows {
 impl Rows for EditRows {
     fn parts(&self, text: &str) -> Vec<Part> {
         let fonts: Vec<Choice> = self.fonts.iter().map(|f| Choice::text(f, f)).collect();
-        let sizes: Vec<Choice> = [8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28].iter().map(|s| Choice::number(&s.to_string(), *s)).collect();
+        let sizes: Vec<Choice> = [8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28]
+            .iter()
+            .map(|s| Choice::number(&s.to_string(), *s))
+            .collect();
         let tabs: Vec<Choice> = [2, 3, 4, 8].iter().map(|s| Choice::number(&s.to_string(), *s)).collect();
         let opacity = vergence_ui::opacity_setting(text, "[appearance]");
-        let locked = vergence_ui::desktop_pick(text).map(|light| format!("{} for every app: Settings > Appearance > Style", if light { "Light" } else { "Dark" }));
+        let locked = vergence_ui::desktop_pick(text).map(|light| {
+            format!("{} for every app: Settings > Appearance > Style", if light { "Light" } else { "Dark" })
+        });
         let styles = vec![Choice::text("Dark", "dark"), Choice::text("Light", "light")];
         vec![
             Part {
                 title: "Text".into(),
                 rows: vec![
-                    Row::new("font", "Font", "", Control::Choose { choices: fonts, desktop: Some("Monospace".into()), app_default: 0 }),
-                    Row::new("text-size", "Text size", "Ctrl+= and Ctrl+− change it for a while.", Control::Choose { choices: sizes, desktop: Some("Desktop default".into()), app_default: 0 }),
+                    Row::new(
+                        "font",
+                        "Font",
+                        "",
+                        Control::Choose { choices: fonts, desktop: Some("Monospace".into()), app_default: 0 },
+                    ),
+                    Row::new(
+                        "text-size",
+                        "Text size",
+                        "Ctrl+= and Ctrl+− change it for a while.",
+                        Control::Choose { choices: sizes, desktop: Some("Desktop default".into()), app_default: 0 },
+                    ),
                     Row::new(
                         "line-spacing",
                         "Line spacing",
                         "Automatic: roomier for prose (.md, .txt, untitled), closer for code.",
-                        Control::Choose { choices: vec![Choice::text("Automatic", "auto"), Choice::text("Compact", "compact"), Choice::text("Comfortable", "comfortable"), Choice::text("Loose", "loose")], desktop: None, app_default: 0 },
+                        Control::Choose {
+                            choices: vec![
+                                Choice::text("Automatic", "auto"),
+                                Choice::text("Compact", "compact"),
+                                Choice::text("Comfortable", "comfortable"),
+                                Choice::text("Loose", "loose"),
+                            ],
+                            desktop: None,
+                            app_default: 0,
+                        },
                     ),
                     Row::new("line-numbers", "Line numbers", "", Control::Switch { default: true }),
-                    Row::new("wrap", "Wrap lines", "Long lines go on below at the window's edge; off, the text scrolls sideways.", Control::Switch { default: true }),
+                    Row::new(
+                        "wrap",
+                        "Wrap lines",
+                        "Long lines go on below at the window's edge; off, the text scrolls sideways.",
+                        Control::Switch { default: true },
+                    ),
                     Row::new("current-line", "Shade the current line", "", Control::Switch { default: true }),
-                    Row::new("spellcheck", "Check spelling", "Words spelled wrong are underlined in red; a right click on one gives suggestions.", Control::Choose { choices: vec![Choice::text("On", "true"), Choice::text("Off", "false")], desktop: Some(format!("Desktop default ({})", if vergence_ui::table_value(text, "[text]", "spellcheck").as_deref() == Some("false") { "Off" } else { "On" })), app_default: 0 }),
-                    Row::new("complete", "Suggest words as you type", "The likely rest of a word shows in gray; Tab takes it. Alt+Escape, F5 or Ctrl+Space lists them all.", Control::Switch { default: true }),
+                    Row::new(
+                        "spellcheck",
+                        "Check spelling",
+                        "Words spelled wrong are underlined in red; a right click on one gives suggestions.",
+                        Control::Choose {
+                            choices: vec![Choice::text("On", "true"), Choice::text("Off", "false")],
+                            desktop: Some(format!(
+                                "Desktop default ({})",
+                                if vergence_ui::table_value(text, "[text]", "spellcheck").as_deref() == Some("false") {
+                                    "Off"
+                                } else {
+                                    "On"
+                                }
+                            )),
+                            app_default: 0,
+                        },
+                    ),
+                    Row::new(
+                        "complete",
+                        "Suggest words as you type",
+                        "The likely rest of a word shows in gray; Tab takes it. Alt+Escape, F5 or Ctrl+Space lists them all.",
+                        Control::Switch { default: true },
+                    ),
                 ],
             },
             Part {
                 title: "Indenting".into(),
                 rows: vec![
-                    Row::new("tab-width", "Tab width", "How many spaces wide a tab is.", Control::Choose { choices: tabs, desktop: Some("4".into()), app_default: 0 }),
-                    Row::new("spaces", "Indent with spaces", "Tab inserts spaces; a file indented with tabs keeps its tabs.", Control::Switch { default: true }),
+                    Row::new(
+                        "tab-width",
+                        "Tab width",
+                        "How many spaces wide a tab is.",
+                        Control::Choose { choices: tabs, desktop: Some("4".into()), app_default: 0 },
+                    ),
+                    Row::new(
+                        "spaces",
+                        "Indent with spaces",
+                        "Tab inserts spaces; a file indented with tabs keeps its tabs.",
+                        Control::Switch { default: true },
+                    ),
                 ],
             },
             Part {
                 title: "On this desktop".into(),
                 rows: vec![
-                    Row::new("style", "Style", "While the desktop's Style is App default.", Control::Choose { choices: styles.clone(), desktop: Some("Built-in (Light)".into()), app_default: 0 }).locked(locked.clone()),
-                    Row::new("bar-style", "Title bar", "", Control::Choose { choices: styles, desktop: Some("Built-in (Light)".into()), app_default: 0 }).locked(locked),
-                    Row::new("opacity", "Opacity", "30 to 100: how much of the window's ground shows; the text stays as it is.", Control::Percent { min: 30, desktop: format!("Desktop default ({:.0})", opacity * 100.0), now: (opacity * 100.0).round() as u32 }),
-                    Row::new("", "Window places", "Where the desktop puts the editor's windows, for each set of screens.", Control::Button { label: "Forget…".into(), id: 1 }),
+                    Row::new(
+                        "style",
+                        "Style",
+                        "While the desktop's Style is App default.",
+                        Control::Choose {
+                            choices: styles.clone(),
+                            desktop: Some("Built-in (Light)".into()),
+                            app_default: 0,
+                        },
+                    )
+                    .locked(locked.clone()),
+                    Row::new(
+                        "bar-style",
+                        "Title bar",
+                        "",
+                        Control::Choose { choices: styles, desktop: Some("Built-in (Light)".into()), app_default: 0 },
+                    )
+                    .locked(locked),
+                    Row::new(
+                        "opacity",
+                        "Opacity",
+                        "30 to 100: how much of the window's ground shows; the text stays as it is.",
+                        Control::Percent {
+                            min: 30,
+                            desktop: format!("Desktop default ({:.0})", opacity * 100.0),
+                            now: (opacity * 100.0).round() as u32,
+                        },
+                    ),
+                    Row::new(
+                        "",
+                        "Window places",
+                        "Where the desktop puts the editor's windows, for each set of screens.",
+                        Control::Button { label: "Forget…".into(), id: 1 },
+                    ),
                 ],
             },
         ]
@@ -1727,7 +2044,8 @@ impl Rows for EditRows {
 
     fn button(&self, id: u32) {
         if id == 1 {
-            let _ = std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", APP_ID]).spawn();
+            let _ =
+                std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", APP_ID]).spawn();
         }
     }
 }
@@ -1752,7 +2070,15 @@ fn main() {
             w.wake();
         }
     });
-    let shared = Rc::new(RefCell::new(Shared { windows: Vec::new(), transfers: Vec::new(), inbox, listener, next_tab: 0, snaps: Vec::new(), pending: Vec::new() }));
+    let shared = Rc::new(RefCell::new(Shared {
+        windows: Vec::new(),
+        transfers: Vec::new(),
+        inbox,
+        listener,
+        next_tab: 0,
+        snaps: Vec::new(),
+        pending: Vec::new(),
+    }));
     // The windows kept from the last run come back, the first here and the
     // rest once it is open; files named on the command line join the first.
     let mut kept = keep::load();
@@ -1787,7 +2113,15 @@ mod tests {
     }
 
     fn shared() -> SharedRef {
-        Rc::new(RefCell::new(Shared { windows: Vec::new(), transfers: Vec::new(), inbox: Arc::new(Mutex::new(Vec::new())), listener: Arc::new(Mutex::new(None)), next_tab: 0, snaps: Vec::new(), pending: Vec::new() }))
+        Rc::new(RefCell::new(Shared {
+            windows: Vec::new(),
+            transfers: Vec::new(),
+            inbox: Arc::new(Mutex::new(Vec::new())),
+            listener: Arc::new(Mutex::new(None)),
+            next_tab: 0,
+            snaps: Vec::new(),
+            pending: Vec::new(),
+        }))
     }
 
     #[test]
@@ -1841,7 +2175,10 @@ mod tests {
         let mut w = EditWindow::new(shared(), Vec::new());
         w.tabs[0].doc.borrow_mut().insert("a note not saved");
         w.open_files(std::slice::from_ref(&p));
-        w.tabs[1].doc.borrow_mut().set_selection(vergence_widgets::edit::Pos::new(2, 1), vergence_widgets::edit::Pos::new(2, 1));
+        w.tabs[1]
+            .doc
+            .borrow_mut()
+            .set_selection(vergence_widgets::edit::Pos::new(2, 1), vergence_widgets::edit::Pos::new(2, 1));
         w.token = "tok".into();
         let snap = w.snap();
         assert_eq!(snap.tabs.len(), 2);

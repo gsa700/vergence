@@ -77,7 +77,11 @@ impl Theme {
         };
         if high_contrast {
             // Text on pure black or white, edges as strong as the text.
-            (t.text, t.page) = if dark { (Color::rgb(255, 255, 255), Color::rgb(0, 0, 0)) } else { (Color::rgb(0, 0, 0), Color::rgb(255, 255, 255)) };
+            (t.text, t.page) = if dark {
+                (Color::rgb(255, 255, 255), Color::rgb(0, 0, 0))
+            } else {
+                (Color::rgb(0, 0, 0), Color::rgb(255, 255, 255))
+            };
             t.line = t.dim;
             t.dim = t.text;
         }
@@ -125,7 +129,9 @@ impl Theme {
         t.opacity = vergence_ui::opacity_setting(text, section);
         let on = |v: Option<String>| v.map(|v| v != "false");
         t.tint_mix = tint_amount(vergence_ui::table_value(text, "[appearance]", "tint-amount").as_deref());
-        t.spell = on(vergence_ui::table_value(text, section, "spellcheck")).or_else(|| on(vergence_ui::table_value(text, "[text]", "spellcheck"))).unwrap_or(true);
+        t.spell = on(vergence_ui::table_value(text, section, "spellcheck"))
+            .or_else(|| on(vergence_ui::table_value(text, "[text]", "spellcheck")))
+            .unwrap_or(true);
         t
     }
 
@@ -218,13 +224,18 @@ mod tests {
 
     #[test]
     fn the_desktop_s_words() {
-        let t = Theme::from_desktop("[appearance]\ncolor-scheme = \"light\"\naccent = \"#ff8000\"\n", true, "[settings]");
+        let t =
+            Theme::from_desktop("[appearance]\ncolor-scheme = \"light\"\naccent = \"#ff8000\"\n", true, "[settings]");
         assert!(!t.dark);
         assert_eq!(t.accent, Color::rgb(255, 128, 0));
         assert_eq!(t.page, c(PALETTE_LIGHT.page));
         let t = Theme::from_desktop("[appearance]\ncolor-scheme = \"default\"\n", false, "[settings]");
         assert!(!t.dark, "the program's own choice");
-        let t = Theme::from_desktop("[appearance]\ncontrast = \"high\"\nreduced-motion = true\n[settings]\nopacity = 0.8\n", true, "[settings]");
+        let t = Theme::from_desktop(
+            "[appearance]\ncontrast = \"high\"\nreduced-motion = true\n[settings]\nopacity = 0.8\n",
+            true,
+            "[settings]",
+        );
         assert!(t.high_contrast && t.reduced_motion && t.dark);
         assert_eq!((t.text, t.page), (Color::rgb(255, 255, 255), Color::rgb(0, 0, 0)));
         assert_eq!(t.ground().a, 204);

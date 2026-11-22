@@ -27,7 +27,10 @@ use std::time::{Duration, Instant};
 
 use vergence_ui::{Input, Window};
 
-use crate::{Align, ButtonLook, Element, Length, Padding, Program, Theme, button, column, field, label, panel, row, rule, scroll, space};
+use crate::{
+    Align, ButtonLook, Element, Length, Padding, Program, Theme, button, column, field, label, panel, row, rule,
+    scroll, space,
+};
 
 /// The most rows listed (a folder of more is narrowed by typing).
 const MAX_ROWS: usize = 2000;
@@ -92,8 +95,10 @@ enum Mode {
     Folder,
 }
 
+use crate::files::{
+    Entry, expand, home, looks_like_path, plain, remember, remembered_folder, size_words, text_start, when,
+};
 pub use crate::files::{Kind, SortBy, kind_icon};
-use crate::files::{Entry, expand, home, looks_like_path, plain, remember, remembered_folder, size_words, text_start, when};
 
 #[derive(Clone, Debug)]
 pub enum FileMsg {
@@ -161,12 +166,26 @@ impl FileDialog {
     }
 
     /// A Save dialog, the name `name` suggested.
-    pub fn save(app_id: &str, title: &str, name: &str, theme: Theme, done: impl FnOnce(Vec<PathBuf>) + 'static) -> FileDialog {
+    pub fn save(
+        app_id: &str,
+        title: &str,
+        name: &str,
+        theme: Theme,
+        done: impl FnOnce(Vec<PathBuf>) + 'static,
+    ) -> FileDialog {
         FileDialog::new(Mode::Save, app_id, title, name.to_string(), theme, Box::new(done))
     }
 
-    fn new(mode: Mode, app_id: &str, title: &str, typed: String, theme: Theme, done: Box<dyn FnOnce(Vec<PathBuf>)>) -> FileDialog {
-        let start = remembered_folder(app_id).filter(|p| p.is_dir()).or_else(home).unwrap_or_else(|| PathBuf::from("/"));
+    fn new(
+        mode: Mode,
+        app_id: &str,
+        title: &str,
+        typed: String,
+        theme: Theme,
+        done: Box<dyn FnOnce(Vec<PathBuf>)>,
+    ) -> FileDialog {
+        let start =
+            remembered_folder(app_id).filter(|p| p.is_dir()).or_else(home).unwrap_or_else(|| PathBuf::from("/"));
         let mut d = FileDialog {
             mode,
             app_id: app_id.into(),
@@ -197,7 +216,12 @@ impl FileDialog {
     }
 
     /// A dialog that chooses a folder.
-    pub fn choose_folder(app_id: &str, title: &str, theme: Theme, done: impl FnOnce(Vec<PathBuf>) + 'static) -> FileDialog {
+    pub fn choose_folder(
+        app_id: &str,
+        title: &str,
+        theme: Theme,
+        done: impl FnOnce(Vec<PathBuf>) + 'static,
+    ) -> FileDialog {
         FileDialog::new(Mode::Folder, app_id, title, String::new(), theme, Box::new(done))
     }
 
@@ -253,7 +277,11 @@ impl FileDialog {
     /// What the list shows, in order: hidden files and the filter's left
     /// out, the typed text narrowing it in Open.
     fn visible(&self) -> Vec<&Entry> {
-        let narrow = if self.mode == Mode::Open && !looks_like_path(&self.typed) { self.typed.to_lowercase() } else { String::new() };
+        let narrow = if self.mode == Mode::Open && !looks_like_path(&self.typed) {
+            self.typed.to_lowercase()
+        } else {
+            String::new()
+        };
         let filter = self.filters.get(self.filter);
         let mut v: Vec<&Entry> = self
             .entries
@@ -263,7 +291,13 @@ impl FileDialog {
             .filter(|e| narrow.is_empty() || e.name.to_lowercase().contains(&narrow))
             .collect();
         // Folders first (the recent files keep their order unless sorted).
-        crate::files::sort(&mut v, self.sort.0, self.sort.1, self.showing == Showing::Recent, crate::files::GroupBy::None);
+        crate::files::sort(
+            &mut v,
+            self.sort.0,
+            self.sort.1,
+            self.showing == Showing::Recent,
+            crate::files::GroupBy::None,
+        );
         v.truncate(MAX_ROWS);
         v
     }
@@ -302,7 +336,8 @@ impl FileDialog {
                 self.go(Showing::Folder(p));
                 return;
             }
-            if self.mode == Mode::Open && p.is_file() || self.mode == Mode::Save && p.parent().is_some_and(Path::is_dir) {
+            if self.mode == Mode::Open && p.is_file() || self.mode == Mode::Save && p.parent().is_some_and(Path::is_dir)
+            {
                 return self.answer(p, window);
             }
             self.problem = Some(format!("{typed} does not exist."));
@@ -341,7 +376,9 @@ impl FileDialog {
                 }
             }
             Mode::Save => {
-                if let Some((p, true)) = chosen.clone().filter(|_| typed.is_empty() || self.selected_name() != Some(typed.clone())) {
+                if let Some((p, true)) =
+                    chosen.clone().filter(|_| typed.is_empty() || self.selected_name() != Some(typed.clone()))
+                {
                     return self.go(Showing::Folder(p));
                 }
                 if typed.is_empty() {
@@ -433,10 +470,15 @@ impl FileDialog {
     fn crumbs(&self) -> Vec<(String, PathBuf)> {
         let Some(dir) = self.dir() else { return Vec::new() };
         let home = home();
-        let (mut at, rest, first) = match home.as_ref().and_then(|h| dir.strip_prefix(h).ok().map(|r| (h.clone(), r.to_path_buf()))) {
-            Some((h, r)) => (h, r, "Home".to_string()),
-            None => (PathBuf::from("/"), dir.strip_prefix("/").map(Path::to_path_buf).unwrap_or_default(), "Computer".to_string()),
-        };
+        let (mut at, rest, first) =
+            match home.as_ref().and_then(|h| dir.strip_prefix(h).ok().map(|r| (h.clone(), r.to_path_buf()))) {
+                Some((h, r)) => (h, r, "Home".to_string()),
+                None => (
+                    PathBuf::from("/"),
+                    dir.strip_prefix("/").map(Path::to_path_buf).unwrap_or_default(),
+                    "Computer".to_string(),
+                ),
+            };
         let mut out = vec![(first, at.clone())];
         for c in rest.components() {
             at = at.join(c);
@@ -446,12 +488,19 @@ impl FileDialog {
     }
 
     fn preview(&self, e: &Entry, t: &Theme) -> Element<FileMsg> {
-        let mut lines: Vec<Element<FileMsg>> = vec![label(e.name.clone()).size(13.0).weight(600).wrap().width(Length::FILL)];
+        let mut lines: Vec<Element<FileMsg>> =
+            vec![label(e.name.clone()).size(13.0).weight(600).wrap().width(Length::FILL)];
         if e.dir {
-            let n = fs::read_dir(&e.path).map(|r| r.flatten().filter(|x| self.hidden || !x.file_name().to_string_lossy().starts_with('.')).count()).unwrap_or(0);
+            let n = fs::read_dir(&e.path)
+                .map(|r| {
+                    r.flatten().filter(|x| self.hidden || !x.file_name().to_string_lossy().starts_with('.')).count()
+                })
+                .unwrap_or(0);
             lines.push(label(format!("Folder · {n} item{}", if n == 1 { "" } else { "s" })).size(11.0).dim());
         } else {
-            lines.push(label(format!("{} · {}", size_words(e.size), e.changed.map(when).unwrap_or_default())).size(11.0).dim());
+            lines.push(
+                label(format!("{} · {}", size_words(e.size), e.changed.map(when).unwrap_or_default())).size(11.0).dim(),
+            );
             if let Some(text) = text_start(&e.path) {
                 lines.push(space().height(Length::Fixed(6.0)));
                 for l in text.lines().take(PREVIEW_LINES) {
@@ -460,7 +509,12 @@ impl FileDialog {
                 }
             }
         }
-        panel(scroll(column(lines).spacing(2.0).width(Length::FILL))).color(t.card).radius(8.0).padding(10.0).width(Length::Fixed(230.0)).height(Length::FILL)
+        panel(scroll(column(lines).spacing(2.0).width(Length::FILL)))
+            .color(t.card)
+            .radius(8.0)
+            .padding(10.0)
+            .width(Length::Fixed(230.0))
+            .height(Length::FILL)
     }
 }
 
@@ -480,11 +534,21 @@ impl Program for FileDialog {
     }
 
     fn view(&self, t: &Theme) -> Element<FileMsg> {
-        let small = |text: &str, m: FileMsg| -> Element<FileMsg> { button(label(text).size(12.0)).look(ButtonLook::Plain).padding(Padding::hv(3.0, 8.0)).on_press(m).name(text) };
+        let small = |text: &str, m: FileMsg| -> Element<FileMsg> {
+            button(label(text).size(12.0)).look(ButtonLook::Plain).padding(Padding::hv(3.0, 8.0)).on_press(m).name(text)
+        };
         // The path: Back, Up, then each folder up to this one.
         let mut path: Vec<Element<FileMsg>> = vec![
-            button(label("‹").size(16.0)).look(ButtonLook::Plain).padding(Padding::hv(0.0, 8.0)).on_press_if(!self.back.is_empty(), FileMsg::Back).name("Back"),
-            button(label("↑").size(14.0)).look(ButtonLook::Plain).padding(Padding::hv(0.0, 8.0)).on_press_if(self.dir().is_some_and(|d| d.parent().is_some()), FileMsg::Up).name("Up"),
+            button(label("‹").size(16.0))
+                .look(ButtonLook::Plain)
+                .padding(Padding::hv(0.0, 8.0))
+                .on_press_if(!self.back.is_empty(), FileMsg::Back)
+                .name("Back"),
+            button(label("↑").size(14.0))
+                .look(ButtonLook::Plain)
+                .padding(Padding::hv(0.0, 8.0))
+                .on_press_if(self.dir().is_some_and(|d| d.parent().is_some()), FileMsg::Up)
+                .name("Up"),
         ];
         match &self.showing {
             Showing::Recent => path.push(label("Recent").size(13.0).weight(600)),
@@ -496,7 +560,13 @@ impl Program for FileDialog {
                         path.push(label("›").size(12.0).dim());
                     }
                     let last = i + 1 == n;
-                    path.push(button(label(name.clone()).size(12.0).weight(if last { 600 } else { 400 })).look(ButtonLook::Plain).padding(Padding::hv(3.0, 6.0)).on_press(FileMsg::Go(p)).name(name));
+                    path.push(
+                        button(label(name.clone()).size(12.0).weight(if last { 600 } else { 400 }))
+                            .look(ButtonLook::Plain)
+                            .padding(Padding::hv(3.0, 6.0))
+                            .on_press(FileMsg::Go(p))
+                            .name(name),
+                    );
                 }
             }
         }
@@ -506,14 +576,35 @@ impl Program for FileDialog {
 
         // The places.
         let places = self.places();
-        let sidebar = crate::files::sidebar(&places, self.dir(), |p| p.path.clone().map_or(FileMsg::Recent, FileMsg::Go), t);
+        let sidebar =
+            crate::files::sidebar(&places, self.dir(), |p| p.path.clone().map_or(FileMsg::Recent, FileMsg::Go), t);
 
         // The list: headings, then the rows.
         let recent = self.showing == Showing::Recent;
         let visible = self.visible();
         let chosen = |k: usize, e: &Entry| self.selected == Some(k) || self.marked.contains(&e.path);
         let click = |k: usize| FileMsg::Click(k);
-        let view = crate::files::View { entries: &visible, chosen: &chosen, in_view: self.selected.map(|k| (k, self.turn.get() << 32 | k as u64)), click: &click, drag: None, folders: recent, thumb: None, menu: None, look: &crate::files::ListLook { rows: crate::files::RowSize::Small, kind: false, ..crate::files::ListLook::default() }, folder_size: None, grip: None, under: None, changed_heading: None, trailing: None, rename: None };
+        let view = crate::files::View {
+            entries: &visible,
+            chosen: &chosen,
+            in_view: self.selected.map(|k| (k, self.turn.get() << 32 | k as u64)),
+            click: &click,
+            drag: None,
+            folders: recent,
+            thumb: None,
+            menu: None,
+            look: &crate::files::ListLook {
+                rows: crate::files::RowSize::Small,
+                kind: false,
+                ..crate::files::ListLook::default()
+            },
+            folder_size: None,
+            grip: None,
+            under: None,
+            changed_heading: None,
+            trailing: None,
+            rename: None,
+        };
         let (head, rows) = crate::files::list(&view, self.sort, FileMsg::Sort);
         let empty = rows.is_empty();
         let mut list: Vec<Element<FileMsg>> = vec![head, rule()];
@@ -521,11 +612,23 @@ impl Program for FileDialog {
             list.push(label(p.clone()).size(12.0).wrap().width(Length::FILL));
         }
         if empty && self.problem.is_none() {
-            let why = if !self.typed.is_empty() && self.mode == Mode::Open { "Nothing here has that in its name." } else if recent { "Nothing opened or saved yet." } else { "This folder is empty." };
+            let why = if !self.typed.is_empty() && self.mode == Mode::Open {
+                "Nothing here has that in its name."
+            } else if recent {
+                "Nothing opened or saved yet."
+            } else {
+                "This folder is empty."
+            };
             list.push(panel(label(why).size(12.0).dim()).padding(12.0));
         }
         list.push(scroll(column(rows).spacing(1.0).width(Length::FILL)));
-        let list = panel(column(list).spacing(2.0).width(Length::FILL).height(Length::FILL)).color(t.page).radius(8.0).edge(t.line, 1.0).padding(4.0).width(Length::FILL).height(Length::FILL);
+        let list = panel(column(list).spacing(2.0).width(Length::FILL).height(Length::FILL))
+            .color(t.page)
+            .radius(8.0)
+            .edge(t.line, 1.0)
+            .padding(4.0)
+            .width(Length::FILL)
+            .height(Length::FILL);
         let mut middle = vec![sidebar, list];
         if let Some(e) = self.selected.and_then(|k| visible.get(k)) {
             middle.push(self.preview(e, t));
@@ -537,7 +640,13 @@ impl Program for FileDialog {
         match self.mode {
             Mode::Save => {
                 foot.push(label("Name").size(12.0));
-                foot.push(field(self.typed.clone(), FileMsg::Typed).on_submit(FileMsg::Submit).autofocus().width(Length::FILL).name("Name"));
+                foot.push(
+                    field(self.typed.clone(), FileMsg::Typed)
+                        .on_submit(FileMsg::Submit)
+                        .autofocus()
+                        .width(Length::FILL)
+                        .name("Name"),
+                );
             }
             Mode::Open | Mode::Folder => {
                 let hint = if self.marked.len() > 1 {
@@ -547,24 +656,48 @@ impl Program for FileDialog {
                 } else {
                     "Type to narrow the list, or a path".to_string()
                 };
-                foot.push(field(self.typed.clone(), FileMsg::Typed).placeholder(&hint).on_submit(FileMsg::Submit).autofocus().width(Length::FILL).name("Find or go to"))
+                foot.push(
+                    field(self.typed.clone(), FileMsg::Typed)
+                        .placeholder(&hint)
+                        .on_submit(FileMsg::Submit)
+                        .autofocus()
+                        .width(Length::FILL)
+                        .name("Find or go to"),
+                )
             }
         }
         if self.filters.len() > 1 {
             let names: Vec<String> = self.filters.iter().map(|f| f.name.clone()).collect();
-            foot.push(crate::choice(names, Some(self.filter), FileMsg::Filter).width(Length::Fixed(150.0)).name("Kind of file"));
+            foot.push(
+                crate::choice(names, Some(self.filter), FileMsg::Filter)
+                    .width(Length::Fixed(150.0))
+                    .name("Kind of file"),
+            );
         }
         if self.mode == Mode::Save && self.dir().is_some() {
-            foot.push(button(label("New folder").size(12.0)).padding(Padding::hv(4.0, 10.0)).on_press(FileMsg::NewFolder).name("New folder"));
+            foot.push(
+                button(label("New folder").size(12.0))
+                    .padding(Padding::hv(4.0, 10.0))
+                    .on_press(FileMsg::NewFolder)
+                    .name("New folder"),
+            );
         }
-        foot.push(button(label("Cancel").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(FileMsg::Cancel).name("Cancel"));
+        foot.push(
+            button(label("Cancel").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(FileMsg::Cancel).name("Cancel"),
+        );
         let word = match self.mode {
             Mode::Save => "Save",
             Mode::Open => "Open",
             Mode::Folder => "Choose",
         };
         let go = self.accept.as_deref().unwrap_or(word);
-        foot.push(button(label(go).size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(4.0, 14.0)).on_press(FileMsg::Submit).name(go));
+        foot.push(
+            button(label(go).size(12.0))
+                .look(ButtonLook::Accent)
+                .padding(Padding::hv(4.0, 14.0))
+                .on_press(FileMsg::Submit)
+                .name(go),
+        );
         let mut all = vec![path, middle];
         // A question or a name, in a strip above the foot.
         if let Some(p) = &self.replace {
@@ -572,9 +705,19 @@ impl Program for FileDialog {
             all.push(
                 panel(
                     row(vec![
-                        label(format!("“{name}” is already here. Replace it?")).size(12.0).weight(600).width(Length::FILL),
-                        button(label("Cancel").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press(FileMsg::NotReplace).name("Don't replace"),
-                        button(label("Replace").size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(3.0, 10.0)).on_press(FileMsg::Replace).name("Replace"),
+                        label(format!("“{name}” is already here. Replace it?"))
+                            .size(12.0)
+                            .weight(600)
+                            .width(Length::FILL),
+                        button(label("Cancel").size(12.0))
+                            .padding(Padding::hv(3.0, 10.0))
+                            .on_press(FileMsg::NotReplace)
+                            .name("Don't replace"),
+                        button(label("Replace").size(12.0))
+                            .look(ButtonLook::Accent)
+                            .padding(Padding::hv(3.0, 10.0))
+                            .on_press(FileMsg::Replace)
+                            .name("Replace"),
                     ])
                     .spacing(8.0)
                     .align(Align::Center)
@@ -591,8 +734,16 @@ impl Program for FileDialog {
                 panel(
                     row(vec![
                         label("New folder").size(12.0),
-                        field(n.clone(), FileMsg::FolderName).on_submit(FileMsg::MakeFolder).autofocus().width(Length::FILL).name("Folder name"),
-                        button(label("Make").size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(3.0, 10.0)).on_press(FileMsg::MakeFolder).name("Make the folder"),
+                        field(n.clone(), FileMsg::FolderName)
+                            .on_submit(FileMsg::MakeFolder)
+                            .autofocus()
+                            .width(Length::FILL)
+                            .name("Folder name"),
+                        button(label("Make").size(12.0))
+                            .look(ButtonLook::Accent)
+                            .padding(Padding::hv(3.0, 10.0))
+                            .on_press(FileMsg::MakeFolder)
+                            .name("Make the folder"),
                     ])
                     .spacing(8.0)
                     .align(Align::Center)
@@ -605,7 +756,11 @@ impl Program for FileDialog {
             );
         }
         all.push(row(foot).spacing(8.0).align(Align::Center).width(Length::FILL));
-        panel(column(all).spacing(8.0).width(Length::FILL).height(Length::FILL)).padding(Padding { top: 10.0 + t.top, bottom: 12.0, left: 12.0, right: 12.0 }).radius(0.0).width(Length::FILL).height(Length::FILL)
+        panel(column(all).spacing(8.0).width(Length::FILL).height(Length::FILL))
+            .padding(Padding { top: 10.0 + t.top, bottom: 12.0, left: 12.0, right: 12.0 })
+            .radius(0.0)
+            .width(Length::FILL)
+            .height(Length::FILL)
     }
 
     fn update(&mut self, m: FileMsg, window: &mut Window) {
@@ -615,7 +770,9 @@ impl Program for FileDialog {
                 self.replace = None;
                 if self.mode == Mode::Open {
                     // The narrowed list's first row is the one Enter opens.
-                    self.selected = (!self.typed.is_empty() && !looks_like_path(&self.typed) && !self.visible().is_empty()).then_some(0);
+                    self.selected =
+                        (!self.typed.is_empty() && !looks_like_path(&self.typed) && !self.visible().is_empty())
+                            .then_some(0);
                 }
             }
             FileMsg::Submit => self.submit(window),
@@ -735,15 +892,26 @@ impl Program for FileDialog {
                     window.close();
                 }
             }
-            BACKSPACE if self.mode == Mode::Open && self.typed.is_empty() && self.new_folder.is_none() => self.update(FileMsg::Up, window),
-            s if m.ctrl && char::from_u32(s).is_some_and(|c| c.eq_ignore_ascii_case(&'h')) => self.update(FileMsg::Hidden, window),
+            BACKSPACE if self.mode == Mode::Open && self.typed.is_empty() && self.new_folder.is_none() => {
+                self.update(FileMsg::Up, window)
+            }
+            s if m.ctrl && char::from_u32(s).is_some_and(|c| c.eq_ignore_ascii_case(&'h')) => {
+                self.update(FileMsg::Hidden, window)
+            }
             _ => return None,
         }
         Some(true)
     }
 
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: true, min: (640.0, 400.0), max: (0.0, 0.0), alone: false, frosted: false }
+        vergence_ui::Style {
+            kind: vergence_ui::WinKind::Dialog,
+            modal: true,
+            min: (640.0, 400.0),
+            max: (0.0, 0.0),
+            alone: false,
+            frosted: false,
+        }
     }
 
     fn opening_size(&self) -> Option<(u32, u32)> {

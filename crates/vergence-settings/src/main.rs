@@ -28,22 +28,22 @@
 // own; previews are drawn on threads too. Both reach the window through a
 // channel and the toolkit's waker.
 
-mod disp;
-mod theme;
-mod thumbs;
-mod wall;
 mod battery;
+mod datetime;
+mod disp;
+mod lockscreen;
 mod modes;
 mod notify;
 mod shots;
-mod datetime;
-mod lockscreen;
 mod single;
+mod theme;
+mod thumbs;
+mod wall;
 use notify::NotifyMsg;
 use shots::ShotsMsg;
-mod places;
 /// Where the app was, for the next start (session milestone 1).
 mod keep;
+mod places;
 use places::PlacesMsg;
 mod privacy;
 use privacy::PrivacyMsg;
@@ -69,8 +69,8 @@ use vergence_render::text;
 use vergence_scene::{Color, Image, Point, Rect, Scene};
 use vergence_text::Fonts;
 use vergence_widgets::{
-    Align, ButtonLook, Element, Length, Padding, Program, Theme, Touch, Waker, Window, button, choice, column, drawing, field, label, panel, parse_hex, picture, row, rule, scroll, slider, space, switch,
-    vrule,
+    Align, ButtonLook, Element, Length, Padding, Program, Theme, Touch, Waker, Window, button, choice, column, drawing,
+    field, label, panel, parse_hex, picture, row, rule, scroll, slider, space, switch, vrule,
 };
 
 const SCHEMES: [&str; 3] = ["default", "dark", "light"];
@@ -116,7 +116,8 @@ const FROST_NAMES: [&str; 3] = ["Clear", "Standard", "Heavy"];
 const FROST_VALUES: [&str; 3] = ["clear", "standard", "heavy"];
 /// Title bar shade (`[appearance] bar-shade`, vergence-look bar_look_shaded):
 /// the names shown and their steps.
-const SHADE_CHOICES: [(&str, i64); 5] = [("Lighter", -1), ("Standard", 0), ("A little darker", 1), ("Darker", 2), ("Darkest", 3)];
+const SHADE_CHOICES: [(&str, i64); 5] =
+    [("Lighter", -1), ("Standard", 0), ("A little darker", 1), ("Darker", 2), ("Darkest", 3)];
 /// The tab in front: the page's own color, or frosted (page when unset).
 const FRONT_TAB_NAMES: [&str; 2] = ["Page color", "Frosted"];
 const FRONT_TAB_VALUES: [&str; 2] = ["page", "frosted"];
@@ -129,7 +130,8 @@ const SWATCHES: [&str; 8] = ["#3b82f6", "#8b5cf6", "#ec4899", "#ef4444", "#e05a0
 /// The accent where the user names none: the settings app's own blue.
 /// The dock's edges: as shown, and as desktop.toml writes them.
 /// The dock's edges, the default (bottom, 2026-11-16) first.
-const DOCK_EDGES: [(&str, &str); 4] = [("Bottom edge", "bottom"), ("Left edge", "left"), ("Top edge", "top"), ("Right edge", "right")];
+const DOCK_EDGES: [(&str, &str); 4] =
+    [("Bottom edge", "bottom"), ("Left edge", "left"), ("Top edge", "top"), ("Right edge", "right")];
 /// When the dock hides: as shown, and as desktop.toml writes it.
 const DOCK_HIDE: [(&str, &str); 3] = [("Never", "never"), ("When a window covers it", "windows"), ("Always", "always")];
 /// Snapping and switching (windows milestone 1), as shown and as desktop.toml
@@ -165,8 +167,16 @@ mod search_tests {
     fn pages_are_found_by_name_first_then_by_their_settings() {
         assert_eq!(search_match("mouse", "Mouse", "pointer speed"), Some(true));
         assert_eq!(search_match("pad", "Touchpad", "pointer speed"), Some(true), "anywhere in the name");
-        assert_eq!(search_match("fro", "Appearance", "style light dark frost"), Some(false), "a setting's word, by its start");
-        assert_eq!(search_match("ost", "Appearance", "style light dark frost"), None, "not the middle of a setting's word");
+        assert_eq!(
+            search_match("fro", "Appearance", "style light dark frost"),
+            Some(false),
+            "a setting's word, by its start"
+        );
+        assert_eq!(
+            search_match("ost", "Appearance", "style light dark frost"),
+            None,
+            "not the middle of a setting's word"
+        );
         assert_eq!(search_match("", "Appearance", "frost"), None);
     }
 }
@@ -782,7 +792,13 @@ fn keyboard_int(d: &toml::Table, k: &str, default: i64) -> i64 {
 const TERM_SCHEMES: [&str; 2] = ["Catppuccin", "Tango"];
 
 fn term_scheme(d: &toml::Table) -> &'static str {
-    match d.get("appearance").and_then(|a| a.get("terminal-colors")).and_then(|v| v.as_str()).map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+    match d
+        .get("appearance")
+        .and_then(|a| a.get("terminal-colors"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_ascii_lowercase())
+        .as_deref()
+    {
         Some("tango") => "Tango",
         _ => "Catppuccin",
     }
@@ -802,8 +818,17 @@ const OFF_CHOICES: [(&str, i64); 11] = [
     ("1 hour", 60),
     ("2 hours", 120),
 ];
-const SLEEP_CHOICES: [(&str, i64); 9] =
-    [("Never", 0), ("10 minutes", 10), ("15 minutes", 15), ("20 minutes", 20), ("30 minutes", 30), ("45 minutes", 45), ("1 hour", 60), ("2 hours", 120), ("3 hours", 180)];
+const SLEEP_CHOICES: [(&str, i64); 9] = [
+    ("Never", 0),
+    ("10 minutes", 10),
+    ("15 minutes", 15),
+    ("20 minutes", 20),
+    ("30 minutes", 30),
+    ("45 minutes", 45),
+    ("1 hour", 60),
+    ("2 hours", 120),
+    ("3 hours", 180),
+];
 
 fn energy_int(d: &toml::Table, k: &str, default: i64) -> i64 {
     d.get("energy").and_then(|a| a.get(k)).and_then(|v| v.as_integer()).unwrap_or(default)
@@ -863,7 +888,9 @@ fn read_desktop() -> toml::Table {
 fn update_desktop(f: impl FnOnce(&mut toml::Table)) -> Result<toml::Table, String> {
     let path = desktop_path();
     let mut table = match std::fs::read_to_string(&path) {
-        Ok(text) => text.parse::<toml::Table>().map_err(|e| format!("{} is not valid TOML ({e}); not overwriting it", path.display()))?,
+        Ok(text) => text
+            .parse::<toml::Table>()
+            .map_err(|e| format!("{} is not valid TOML ({e}); not overwriting it", path.display()))?,
         Err(_) => toml::Table::new(),
     };
     f(&mut table);
@@ -968,7 +995,9 @@ impl App {
         app.tint_pct = {
             let a = app.desktop.get("appearance");
             let on = a.and_then(|a| a.get("wallpaper-tint")).and_then(|v| v.as_bool()).unwrap_or(true);
-            let amount = a.and_then(|a| a.get("tint-amount")).map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()));
+            let amount = a
+                .and_then(|a| a.get("tint-amount"))
+                .map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()));
             if on { ((vergence_widgets::tint_amount(amount.as_deref()) * 200.0).round() / 2.0).min(10.0) } else { 0.0 }
         };
         app.repeat_rate = keyboard_int(&app.desktop, "repeat-rate", REPEAT_RATE) as f32;
@@ -1006,7 +1035,15 @@ impl App {
         }
         // Its changes (opacity) shown in the main window at once, not when it next has the keyboard.
         let mail = self.mail.clone();
-        let prefs = vergence_widgets::prefs::Prefs::new("Settings", "vergence-settings", "[settings]", false, Box::new(OwnRows), self.prefs_open.clone()).on_write(move || {
+        let prefs = vergence_widgets::prefs::Prefs::new(
+            "Settings",
+            "vergence-settings",
+            "[settings]",
+            false,
+            Box::new(OwnRows),
+            self.prefs_open.clone(),
+        )
+        .on_write(move || {
             mail.send(Message::Reread);
         });
         window.open_window(vergence_widgets::window(prefs));
@@ -1068,7 +1105,9 @@ impl App {
     /// main screen (Techbench, 2026-11-17: the dock named the ASUS from long
     /// before, and nothing on the Screens page could move it).
     fn make_main(&mut self, new: &str) {
-        let old = self.primary().and_then(|p| self.outputs.iter().find(|o| o.id == p).map(|o| (o.id.clone(), screen_label(o))));
+        let old = self
+            .primary()
+            .and_then(|p| self.outputs.iter().find(|o| o.id == p).map(|o| (o.id.clone(), screen_label(o))));
         self.save(|d| {
             wall::make_primary(d, old.as_ref().map(|(i, l)| (i.as_str(), l.as_str())), new);
             if let Some(shelf) = d.get_mut("shelf").and_then(|s| s.as_table_mut()) {
@@ -1116,7 +1155,12 @@ impl App {
     /// the app whose page is open, and how far it is scrolled.
     fn kept_now(&self, closed: Option<(u64, String)>) -> keep::Kept {
         let app = (self.page == Page::AppPage).then(|| self.app_open.clone()).flatten();
-        let page = self.page_groups().into_iter().flat_map(|(_, rows)| rows).find(|(_, p, ..)| *p == self.page).map(|(n, ..)| n);
+        let page = self
+            .page_groups()
+            .into_iter()
+            .flat_map(|(_, rows)| rows)
+            .find(|(_, p, ..)| *p == self.page)
+            .map(|(n, ..)| n);
         keep::Kept { page, app, scroll: self.scrolled_to, closed }
     }
 
@@ -1132,7 +1176,9 @@ impl App {
         if due {
             keep::save(&now);
             self.kept_written = Some((now, std::time::Instant::now()));
-        } else if !self.keep_waiting && self.kept_written.as_ref().is_some_and(|(k, _)| (k.scroll - now.scroll).abs() >= 1.0) {
+        } else if !self.keep_waiting
+            && self.kept_written.as_ref().is_some_and(|(k, _)| (k.scroll - now.scroll).abs() >= 1.0)
+        {
             // Scrolled again within the second: written once it has passed,
             // so where the scrolling stopped is what is kept.
             self.keep_waiting = true;
@@ -1299,7 +1345,14 @@ impl App {
                 self.save_appearance(|t| {
                     t.insert("wallpaper-tint".into(), (p > 0.0).into());
                     if p > 0.0 {
-                        t.insert("tint-amount".into(), if p.fract() == 0.0 { toml::Value::Integer(p as i64) } else { toml::Value::Float(p as f64) });
+                        t.insert(
+                            "tint-amount".into(),
+                            if p.fract() == 0.0 {
+                                toml::Value::Integer(p as i64)
+                            } else {
+                                toml::Value::Float(p as f64)
+                            },
+                        );
                     } else {
                         t.remove("tint-amount");
                     }
@@ -1383,7 +1436,8 @@ impl App {
                 {
                     self.save(|d| wall::make_primary(d, None, &p));
                 }
-                let wanted: Vec<PathBuf> = self.outputs.iter().filter_map(|o| wall::shown(&self.desktop, Some(&o.id)).image).collect();
+                let wanted: Vec<PathBuf> =
+                    self.outputs.iter().filter_map(|o| wall::shown(&self.desktop, Some(&o.id)).image).collect();
                 self.ask_thumbs(wanted);
             }
             Message::DockEdge(i) => {
@@ -1441,7 +1495,12 @@ impl App {
                 });
             }
             Message::Applet(id, on) => {
-                let mut off: Vec<String> = self.shelf().and_then(|t| t.get("applets-off")).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
+                let mut off: Vec<String> = self
+                    .shelf()
+                    .and_then(|t| t.get("applets-off"))
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                    .unwrap_or_default();
                 off.retain(|x| *x != id);
                 if !on {
                     off.push(id);
@@ -1451,7 +1510,10 @@ impl App {
                     if off.is_empty() {
                         t.remove("applets-off");
                     } else {
-                        t.insert("applets-off".into(), toml::Value::Array(off.into_iter().map(toml::Value::String).collect()));
+                        t.insert(
+                            "applets-off".into(),
+                            toml::Value::Array(off.into_iter().map(toml::Value::String).collect()),
+                        );
                     }
                 });
             }
@@ -1490,7 +1552,11 @@ impl App {
             }
             Message::PointerSave(table, key) => {
                 if let Some(v) = self.sliding.remove(&(table, key)) {
-                    let value: toml::Value = if key == "speed" { ((v as f64 * 100.0).round() / 100.0).into() } else { (v.round() as i64).into() };
+                    let value: toml::Value = if key == "speed" {
+                        ((v as f64 * 100.0).round() / 100.0).into()
+                    } else {
+                        (v.round() as i64).into()
+                    };
                     self.save_table(table, |t| {
                         t.insert(key.into(), value);
                     });
@@ -1748,7 +1814,11 @@ impl App {
                 let o = &self.outputs[d.index];
                 let fx = ((o.x - x0) as f32 + d.offset.0 / k) / bw as f32;
                 let fy = ((o.y - y0) as f32 + d.offset.1 / k) / bh as f32;
-                let mut rects: Vec<disp::Rect> = self.outputs.iter().map(|o| disp::Rect { id: o.id.clone(), x: o.x, y: o.y, w: o.width, h: o.height }).collect();
+                let mut rects: Vec<disp::Rect> = self
+                    .outputs
+                    .iter()
+                    .map(|o| disp::Rect { id: o.id.clone(), x: o.x, y: o.y, w: o.width, h: o.height })
+                    .collect();
                 let (x, y) = (x0 + (fx * bw as f32).round() as i32, y0 + (fy * bh as f32).round() as i32);
                 let (nx, ny) = disp::snap(&rects, d.index, x, y, (bw.max(bh) / 40).max(20));
                 rects[d.index].x = nx;
@@ -1847,7 +1917,12 @@ impl App {
     fn page_groups(&self) -> Vec<(&'static str, Vec<(String, Page, Icon, &'static str)>)> {
         let multi = self.outputs.len() > 1;
         let screens_page = if multi { Page::Overview } else { Page::Screen(0) };
-        let mut screens = vec![("Screens".to_string(), screens_page, Icon::Screen, "screen display monitor scale resolution arrangement")];
+        let mut screens = vec![(
+            "Screens".to_string(),
+            screens_page,
+            Icon::Screen,
+            "screen display monitor scale resolution arrangement",
+        )];
         if multi {
             for (i, o) in self.outputs.iter().enumerate() {
                 screens.push((screen_label(o), Page::Screen(i), Icon::Screen, "screen display monitor scale"));
@@ -1911,8 +1986,13 @@ impl App {
         if q.is_empty() {
             return Vec::new();
         }
-        let all: Vec<(String, Page, &str)> = self.page_groups().into_iter().flat_map(|(_, pages)| pages.into_iter().map(|(n, p, _, words)| (n, p, words))).collect();
-        let mut found: Vec<Page> = all.iter().filter(|(n, _, w)| search_match(&q, n, w) == Some(true)).map(|(_, p, _)| *p).collect();
+        let all: Vec<(String, Page, &str)> = self
+            .page_groups()
+            .into_iter()
+            .flat_map(|(_, pages)| pages.into_iter().map(|(n, p, _, words)| (n, p, words)))
+            .collect();
+        let mut found: Vec<Page> =
+            all.iter().filter(|(n, _, w)| search_match(&q, n, w) == Some(true)).map(|(_, p, _)| *p).collect();
         for (n, p, words) in &all {
             if !found.contains(p) && search_match(&q, n, words) == Some(false) {
                 found.push(*p);
@@ -1930,14 +2010,23 @@ impl App {
         let item = |text: String, page: Page, icon: Icon, child: bool| -> Element<Message> {
             let selected = selected_page(page);
             let l = label(text).size(if child { 12.0 } else { 13.0 }).weight(if selected { 600 } else { 400 });
-            button(row(vec![icon_mark(icon), l, space().width(Length::FILL)]).spacing(8.0).align(Align::Center).width(Length::FILL))
-                .look(if selected { ButtonLook::Chosen } else { ButtonLook::Plain })
-                .padding(Padding { top: 4.0, bottom: 4.0, left: if child { 22.0 } else { 8.0 }, right: 10.0 })
-                .on_press(Message::Go(page))
-                .width(Length::FILL)
+            button(
+                row(vec![icon_mark(icon), l, space().width(Length::FILL)])
+                    .spacing(8.0)
+                    .align(Align::Center)
+                    .width(Length::FILL),
+            )
+            .look(if selected { ButtonLook::Chosen } else { ButtonLook::Plain })
+            .padding(Padding { top: 4.0, bottom: 4.0, left: if child { 22.0 } else { 8.0 }, right: 10.0 })
+            .on_press(Message::Go(page))
+            .width(Length::FILL)
         };
         let mut items: Vec<Element<Message>> = vec![
-            field(&self.search, Message::Search).placeholder("Search").on_submit(Message::SearchGo).width(Length::FILL).name("Search settings"),
+            field(&self.search, Message::Search)
+                .placeholder("Search")
+                .on_submit(Message::SearchGo)
+                .width(Length::FILL)
+                .name("Search settings"),
             space().height(Length::Fixed(8.0)),
         ];
         let found = self.found_pages();
@@ -1972,21 +2061,65 @@ impl App {
     /// program reads changes.
     fn accessibility(&self) -> Element<Message> {
         let contrast = appearance_text(&self.desktop, "contrast") == "high";
-        let motion = self.desktop.get("appearance").and_then(|a| a.get("reduced-motion")).and_then(|v| v.as_bool()).unwrap_or(false);
-        let transparency = self.desktop.get("appearance").and_then(|a| a.get("reduce-transparency")).and_then(|v| v.as_bool()).unwrap_or(false);
+        let motion = self
+            .desktop
+            .get("appearance")
+            .and_then(|a| a.get("reduced-motion"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let transparency = self
+            .desktop
+            .get("appearance")
+            .and_then(|a| a.get("reduce-transparency"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         self.page_layout(
             "Accessibility",
             "Contrast, motion and transparency for the whole desktop, and how big everything is.",
             vec![
-                self.group(Some("Seeing"), vec![
-                    setting("High contrast", "Apps that support it draw stronger edges and text. The desktop's bars are solid.", switch(contrast, Message::Contrast).name("High contrast")),
-                    setting("Reduce transparency", "Bars, the dock and menus are solid: nothing shows through them.", switch(transparency, Message::Transparency).name("Reduce transparency")),
-                    setting("Size", &format!("Everything bigger on every screen, on top of each screen's own scale (Screens): {}%.", (self.size * 100.0).round()), size_slider(self.size)),
-                    self.focus_ring_row(),
-                ]),
+                self.group(
+                    Some("Seeing"),
+                    vec![
+                        setting(
+                            "High contrast",
+                            "Apps that support it draw stronger edges and text. The desktop's bars are solid.",
+                            switch(contrast, Message::Contrast).name("High contrast"),
+                        ),
+                        setting(
+                            "Reduce transparency",
+                            "Bars, the dock and menus are solid: nothing shows through them.",
+                            switch(transparency, Message::Transparency).name("Reduce transparency"),
+                        ),
+                        setting(
+                            "Size",
+                            &format!(
+                                "Everything bigger on every screen, on top of each screen's own scale (Screens): {}%.",
+                                (self.size * 100.0).round()
+                            ),
+                            size_slider(self.size),
+                        ),
+                        self.focus_ring_row(),
+                    ],
+                ),
                 self.zoom_group(),
-                self.group(Some("Motion"), vec![setting("Reduce motion", "Apps that support it turn off animations, and zooming jumps rather than glides.", switch(motion, Message::Motion).name("Reduce motion"))]),
-                self.group(None, vec![setting("Fonts", "The interface and monospace fonts and their sizes are in Theme and fonts.", button(label("Theme and fonts")).on_press(Message::Go(Page::Theme)).name("Open Theme and fonts"))]),
+                self.group(
+                    Some("Motion"),
+                    vec![setting(
+                        "Reduce motion",
+                        "Apps that support it turn off animations, and zooming jumps rather than glides.",
+                        switch(motion, Message::Motion).name("Reduce motion"),
+                    )],
+                ),
+                self.group(
+                    None,
+                    vec![setting(
+                        "Fonts",
+                        "The interface and monospace fonts and their sizes are in Theme and fonts.",
+                        button(label("Theme and fonts"))
+                            .on_press(Message::Go(Page::Theme))
+                            .name("Open Theme and fonts"),
+                    )],
+                ),
                 self.status_line(),
             ],
         )
@@ -2003,7 +2136,11 @@ impl App {
                 .padding(0.0)
                 .width(Length::Fixed(22.0))
                 .height(Length::Fixed(22.0))
-                .look(ButtonLook::Custom { fill: None, edge: Some(if none_selected { (text_c, 2.0) } else { (line_c, 1.0) }), radius: 11.0 })
+                .look(ButtonLook::Custom {
+                    fill: None,
+                    edge: Some(if none_selected { (text_c, 2.0) } else { (line_c, 1.0) }),
+                    radius: 11.0,
+                })
                 .on_press(Message::Accent(None))
                 .name("No accent"),
         ];
@@ -2021,14 +2158,26 @@ impl App {
             );
         }
         let contrast = appearance_text(&self.desktop, "contrast") == "high";
-        let motion = self.desktop.get("appearance").and_then(|a| a.get("reduced-motion")).and_then(|v| v.as_bool()).unwrap_or(false);
+        let motion = self
+            .desktop
+            .get("appearance")
+            .and_then(|a| a.get("reduced-motion"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let names: Vec<String> = SCHEME_NAMES.iter().map(|s| s.to_string()).collect();
-        let transparency = self.desktop.get("appearance").and_then(|a| a.get("reduce-transparency")).and_then(|v| v.as_bool()).unwrap_or(false);
+        let transparency = self
+            .desktop
+            .get("appearance")
+            .and_then(|a| a.get("reduce-transparency"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let frost = FROST_VALUES.iter().position(|v| *v == appearance_text(&self.desktop, "frost")).unwrap_or(1);
-        let front = FRONT_TAB_VALUES.iter().position(|v| *v == appearance_text(&self.desktop, "front-tab")).unwrap_or(0);
+        let front =
+            FRONT_TAB_VALUES.iter().position(|v| *v == appearance_text(&self.desktop, "front-tab")).unwrap_or(0);
         let frost_names: Vec<String> = FROST_NAMES.iter().map(|s| s.to_string()).collect();
         let front_names: Vec<String> = FRONT_TAB_NAMES.iter().map(|s| s.to_string()).collect();
-        let controls = CONTROLS_VALUES.iter().position(|v| *v == appearance_text(&self.desktop, "controls")).unwrap_or(1);
+        let controls =
+            CONTROLS_VALUES.iter().position(|v| *v == appearance_text(&self.desktop, "controls")).unwrap_or(1);
         let controls_names: Vec<String> = CONTROLS_NAMES.iter().map(|s| s.to_string()).collect();
         self.page_layout(
             "Appearance",
@@ -2109,8 +2258,12 @@ impl App {
             let size_at = sizes.iter().position(|s| *s == num(size));
             let (fam_list, size_list) = (families.clone(), sizes.clone());
             row(vec![
-                choice(families, at, move |i| Message::Pick(key, theme::join_font(&fam_list[i], size))).width(Length::Fixed(220.0)).name(if mono { "Monospace font" } else { "Interface font" }),
-                choice(sizes, size_at, move |i| Message::FontSize(mono, size_list[i].clone())).width(Length::Fixed(76.0)).name("Size"),
+                choice(families, at, move |i| Message::Pick(key, theme::join_font(&fam_list[i], size)))
+                    .width(Length::Fixed(220.0))
+                    .name(if mono { "Monospace font" } else { "Interface font" }),
+                choice(sizes, size_at, move |i| Message::FontSize(mono, size_list[i].clone()))
+                    .width(Length::Fixed(76.0))
+                    .name("Size"),
             ])
             .spacing(6.0)
         };
@@ -2147,7 +2300,10 @@ impl App {
         if let Some(v) = self.sliding.get(&(table, key)) {
             return *v;
         }
-        self.pointer_table(table).and_then(|t| t.get(key)).and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64))).map_or(default, |v| v as f32)
+        self.pointer_table(table)
+            .and_then(|t| t.get(key))
+            .and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64)))
+            .map_or(default, |v| v as f32)
     }
 
     fn pointer_int(&self, table: &'static str, key: &'static str, default: i64) -> i64 {
@@ -2169,9 +2325,20 @@ impl App {
     fn speed_row(&self, table: &'static str) -> Element<Message> {
         {
             let v = self.pointer_float(table, "speed", 0.0).clamp(-1.0, 1.0);
-            let words = if v < -0.05 { "slower" } else if v > 0.05 { "faster" } else { "standard" };
+            let words = if v < -0.05 {
+                "slower"
+            } else if v > 0.05 {
+                "faster"
+            } else {
+                "standard"
+            };
             row(vec![
-                slider(-1.0, 1.0, v, move |v| Message::PointerSlide(table, "speed", v)).step(0.05).marks(vec![0.0]).on_release(Message::PointerSave(table, "speed")).width(Length::Fixed(220.0)).name("Pointer speed"),
+                slider(-1.0, 1.0, v, move |v| Message::PointerSlide(table, "speed", v))
+                    .step(0.05)
+                    .marks(vec![0.0])
+                    .on_release(Message::PointerSave(table, "speed"))
+                    .width(Length::Fixed(220.0))
+                    .name("Pointer speed"),
                 label(words).width(Length::Fixed(72.0)).align(Align::End),
             ])
             .spacing(8.0)
@@ -2184,8 +2351,15 @@ impl App {
         {
             let n = self.pointer_int(table, "scroll-lines", 3).clamp(1, 10);
             row(vec![
-                slider(1.0, 10.0, n as f32, move |v| Message::PointerSlide(table, "scroll-lines", v)).step(1.0).marks(vec![3.0]).on_release(Message::PointerSave(table, "scroll-lines")).width(Length::Fixed(220.0)).name("Scrolling speed"),
-                label(if n == 1 { "1 line".to_string() } else { format!("{n} lines") }).width(Length::Fixed(72.0)).align(Align::End),
+                slider(1.0, 10.0, n as f32, move |v| Message::PointerSlide(table, "scroll-lines", v))
+                    .step(1.0)
+                    .marks(vec![3.0])
+                    .on_release(Message::PointerSave(table, "scroll-lines"))
+                    .width(Length::Fixed(220.0))
+                    .name("Scrolling speed"),
+                label(if n == 1 { "1 line".to_string() } else { format!("{n} lines") })
+                    .width(Length::Fixed(72.0))
+                    .align(Align::End),
             ])
             .spacing(8.0)
             .align(Align::Center)
@@ -2219,29 +2393,53 @@ impl App {
             setting(
                 "Acceleration",
                 "On: a fast move takes the pointer farther. Off: always the same distance, for precise work and games.",
-                switch(self.pointer_flag("mouse", "acceleration", true), |on| Message::PointerFlag("mouse", "acceleration", on)).name("Acceleration"),
+                switch(self.pointer_flag("mouse", "acceleration", true), |on| {
+                    Message::PointerFlag("mouse", "acceleration", on)
+                })
+                .name("Acceleration"),
             ),
-            setting("Scrolling speed", "How many lines a notch of the wheel moves, in every app.", self.lines_row("mouse")),
+            setting(
+                "Scrolling speed",
+                "How many lines a notch of the wheel moves, in every app.",
+                self.lines_row("mouse"),
+            ),
             setting(
                 "Natural scrolling",
                 "The content follows the wheel, as on a Mac.",
-                switch(self.pointer_flag("mouse", "natural-scroll", false), |on| Message::PointerFlag("mouse", "natural-scroll", on)).name("Natural scrolling (mouse)"),
+                switch(self.pointer_flag("mouse", "natural-scroll", false), |on| {
+                    Message::PointerFlag("mouse", "natural-scroll", on)
+                })
+                .name("Natural scrolling (mouse)"),
             ),
             setting(
                 "Primary button",
                 "Right, for the left hand.",
-                choice(vec!["Left".into(), "Right".into()], Some(self.pointer_flag("mouse", "left-handed", false) as usize), Message::PrimaryButton).width(Length::Fixed(120.0)).name("Primary button"),
+                choice(
+                    vec!["Left".into(), "Right".into()],
+                    Some(self.pointer_flag("mouse", "left-handed", false) as usize),
+                    Message::PrimaryButton,
+                )
+                .width(Length::Fixed(120.0))
+                .name("Primary button"),
             ),
             setting(
                 "Middle click",
                 "Pressing both buttons together is a middle click, for mice without one.",
-                switch(self.pointer_flag("mouse", "middle-click", false), |on| Message::PointerFlag("mouse", "middle-click", on)).name("Middle click"),
+                switch(self.pointer_flag("mouse", "middle-click", false), |on| {
+                    Message::PointerFlag("mouse", "middle-click", on)
+                })
+                .name("Middle click"),
             ),
             setting(
                 "Double-click speed",
                 &format!("How quickly the two clicks must come: {dc} ms. {tested}"),
                 row(vec![
-                    slider(200.0, 900.0, dc as f32, |v| Message::PointerSlide("mouse", "double-click", v)).step(10.0).marks(vec![400.0]).on_release(Message::PointerSave("mouse", "double-click")).width(Length::Fixed(160.0)).name("Double-click speed"),
+                    slider(200.0, 900.0, dc as f32, |v| Message::PointerSlide("mouse", "double-click", v))
+                        .step(10.0)
+                        .marks(vec![400.0])
+                        .on_release(Message::PointerSave("mouse", "double-click"))
+                        .width(Length::Fixed(160.0))
+                        .name("Double-click speed"),
                     button(label("Try it")).on_press(Message::ClickTest).name("Double-click test"),
                 ])
                 .spacing(8.0)
@@ -2251,7 +2449,11 @@ impl App {
         self.page_layout(
             "Mouse",
             "How the pointer moves and scrolls. Changes apply at once, to every mouse plugged in.",
-            vec![self.group(None, mouse), self.advanced("mouse", self.devices_of(InputKind::Mouse)), self.status_line()],
+            vec![
+                self.group(None, mouse),
+                self.advanced("mouse", self.devices_of(InputKind::Mouse)),
+                self.status_line(),
+            ],
         )
     }
 
@@ -2260,28 +2462,52 @@ impl App {
         let pad_click = (self.pointer_word("touchpad", "click") == "fingers") as usize;
         let pad = vec![
             setting("Pointer speed", "", self.speed_row("touchpad")),
-            setting("Tap to click", "A tap is a click; two fingers, a right click.", switch(self.pointer_flag("touchpad", "tap-to-click", true), |on| Message::PointerFlag("touchpad", "tap-to-click", on)).name("Tap to click")),
-            setting("Tap and drag", "Tap, then touch again and move: a drag.", switch(self.pointer_flag("touchpad", "tap-and-drag", true), |on| Message::PointerFlag("touchpad", "tap-and-drag", on)).name("Tap and drag")),
+            setting(
+                "Tap to click",
+                "A tap is a click; two fingers, a right click.",
+                switch(self.pointer_flag("touchpad", "tap-to-click", true), |on| {
+                    Message::PointerFlag("touchpad", "tap-to-click", on)
+                })
+                .name("Tap to click"),
+            ),
+            setting(
+                "Tap and drag",
+                "Tap, then touch again and move: a drag.",
+                switch(self.pointer_flag("touchpad", "tap-and-drag", true), |on| {
+                    Message::PointerFlag("touchpad", "tap-and-drag", on)
+                })
+                .name("Tap and drag"),
+            ),
             setting(
                 "Natural scrolling",
                 "The content follows the fingers, as on a phone.",
-                switch(self.pointer_flag("touchpad", "natural-scroll", true), |on| Message::PointerFlag("touchpad", "natural-scroll", on)).name("Natural scrolling (touchpad)"),
+                switch(self.pointer_flag("touchpad", "natural-scroll", true), |on| {
+                    Message::PointerFlag("touchpad", "natural-scroll", on)
+                })
+                .name("Natural scrolling (touchpad)"),
             ),
             setting(
                 "Scrolling",
                 "",
-                choice(vec!["Two fingers".into(), "Along the edge".into()], Some(pad_scroll), Message::PadScroll).width(Length::Fixed(160.0)).name("Scrolling"),
+                choice(vec!["Two fingers".into(), "Along the edge".into()], Some(pad_scroll), Message::PadScroll)
+                    .width(Length::Fixed(160.0))
+                    .name("Scrolling"),
             ),
             setting("Scrolling speed", "", self.lines_row("touchpad")),
             setting(
                 "Right click",
                 "On the pad's bottom right corner, or with two fingers anywhere.",
-                choice(vec!["Bottom right corner".into(), "Two fingers".into()], Some(pad_click), Message::PadClick).width(Length::Fixed(180.0)).name("Right click"),
+                choice(vec!["Bottom right corner".into(), "Two fingers".into()], Some(pad_click), Message::PadClick)
+                    .width(Length::Fixed(180.0))
+                    .name("Right click"),
             ),
             setting(
                 "Off while typing",
                 "A palm on the pad does nothing while keys are being typed.",
-                switch(self.pointer_flag("touchpad", "disable-while-typing", true), |on| Message::PointerFlag("touchpad", "disable-while-typing", on)).name("Off while typing"),
+                switch(self.pointer_flag("touchpad", "disable-while-typing", true), |on| {
+                    Message::PointerFlag("touchpad", "disable-while-typing", on)
+                })
+                .name("Off while typing"),
             ),
         ];
         let mut items = vec![self.group(None, pad)];
@@ -2298,16 +2524,28 @@ impl App {
     /// to), and what a finger does.
     fn touchscreen_page(&self) -> Element<Message> {
         let panels: Vec<&str> = {
-            let mut v: Vec<&str> = self.inputs.iter().filter(|d| d.kind == InputKind::Touchscreen).map(|d| d.name.as_str()).collect();
+            let mut v: Vec<&str> =
+                self.inputs.iter().filter(|d| d.kind == InputKind::Touchscreen).map(|d| d.name.as_str()).collect();
             v.dedup();
             v
         };
         let tied = |name: &str| -> Option<String> {
-            self.desktop.get("touch")?.get("panel")?.as_array()?.iter().find(|p| p.get("name").and_then(|n| n.as_str()) == Some(name))?.get("screen")?.as_str().map(str::to_string)
+            self.desktop
+                .get("touch")?
+                .get("panel")?
+                .as_array()?
+                .iter()
+                .find(|p| p.get("name").and_then(|n| n.as_str()) == Some(name))?
+                .get("screen")?
+                .as_str()
+                .map(str::to_string)
         };
         let mut items = Vec::new();
         if panels.is_empty() {
-            items.push(self.group(None, vec![setting("No touch screen is connected now", "Its settings come back when it is.", space())]));
+            items.push(self.group(
+                None,
+                vec![setting("No touch screen is connected now", "Its settings come back when it is.", space())],
+            ));
         }
         for name in &panels {
             let mut names = vec!["The main screen".to_string()];
@@ -2316,11 +2554,18 @@ impl App {
             let ids: Vec<String> = self.outputs.iter().map(|o| o.id.clone()).collect();
             let panel_name = name.to_string();
             let control: Element<Message> = if self.outputs.len() > 1 {
-                choice(names, Some(at), move |i| Message::PanelScreen(panel_name.clone(), if i == 0 { None } else { ids.get(i - 1).cloned() })).width(Length::Fixed(200.0)).name("Screen")
+                choice(names, Some(at), move |i| {
+                    Message::PanelScreen(panel_name.clone(), if i == 0 { None } else { ids.get(i - 1).cloned() })
+                })
+                .width(Length::Fixed(200.0))
+                .name("Screen")
             } else {
                 label(names.get(1).cloned().unwrap_or_else(|| names[0].clone())).dim()
             };
-            items.push(self.group(Some(&short_name(name, 60)), vec![setting("On the screen", "The screen this panel is glued to: a touch lands there.", control)]));
+            items.push(self.group(
+                Some(&short_name(name, 60)),
+                vec![setting("On the screen", "The screen this panel is glued to: a touch lands there.", control)],
+            ));
         }
         items.push(self.group(
             Some("Fingers"),
@@ -2343,20 +2588,36 @@ impl App {
         let on = self.desktop.get("keyboard").and_then(|a| a.get("repeat")).and_then(|v| v.as_bool()).unwrap_or(true);
         let value = |s: String| label(s).width(Length::Fixed(72.0)).align(Align::End);
         let delay = row(vec![
-            slider(150.0, 1000.0, self.repeat_delay, Message::RepeatDelay).step(10.0).on_release(Message::RepeatDone).width(Length::Fixed(220.0)).name("Delay"),
+            slider(150.0, 1000.0, self.repeat_delay, Message::RepeatDelay)
+                .step(10.0)
+                .on_release(Message::RepeatDone)
+                .width(Length::Fixed(220.0))
+                .name("Delay"),
             value(format!("{:.0} ms", self.repeat_delay)),
         ])
         .spacing(8.0)
         .align(Align::Center);
         let rate = row(vec![
-            slider(5.0, 60.0, self.repeat_rate, Message::RepeatRate).step(1.0).on_release(Message::RepeatDone).width(Length::Fixed(220.0)).name("Speed"),
+            slider(5.0, 60.0, self.repeat_rate, Message::RepeatRate)
+                .step(1.0)
+                .on_release(Message::RepeatDone)
+                .width(Length::Fixed(220.0))
+                .name("Speed"),
             value(format!("{:.0} a second", self.repeat_rate)),
         ])
         .spacing(8.0)
         .align(Align::Center);
-        let mut rows = vec![setting("Key repeat", "Holding a key down types it again and again.", switch(on, Message::Repeat).name("Key repeat"))];
+        let mut rows = vec![setting(
+            "Key repeat",
+            "Holding a key down types it again and again.",
+            switch(on, Message::Repeat).name("Key repeat"),
+        )];
         if on {
-            rows.push(setting("Delay", "How long a key is held before it repeats. Longer: fewer doubled letters.", delay));
+            rows.push(setting(
+                "Delay",
+                "How long a key is held before it repeats. Longer: fewer doubled letters.",
+                delay,
+            ));
             rows.push(setting("Speed", "How fast it repeats once it starts.", rate));
         }
         self.page_layout(
@@ -2389,26 +2650,69 @@ impl App {
             choice(options, at, move |i| f(list[i].clone())).width(Length::Fixed(160.0)).name(name)
         };
         let mut groups = if self.has_battery() {
-                    // Two pairs where there is a battery; the one in use says so.
-                    let on_battery = self.battery.power.on_battery();
-                    let (boff_list, boff_now) = minute_choices(&OFF_CHOICES, energy_battery_int(&self.desktop, "screens-off"));
-                    let (bsleep_list, bsleep_now) = minute_choices(&SLEEP_CHOICES, energy_battery_int(&self.desktop, "sleep"));
+            // Two pairs where there is a battery; the one in use says so.
+            let on_battery = self.battery.power.on_battery();
+            let (boff_list, boff_now) = minute_choices(&OFF_CHOICES, energy_battery_int(&self.desktop, "screens-off"));
+            let (bsleep_list, bsleep_now) = minute_choices(&SLEEP_CHOICES, energy_battery_int(&self.desktop, "sleep"));
+            vec![
+                self.group(
+                    Some(if on_battery { "On battery (now)" } else { "On battery" }),
                     vec![
-                        self.group(Some(if on_battery { "On battery (now)" } else { "On battery" }), vec![
-                            setting("Turn the screens off", "After no input. Every monitor is switched off; apps keep running.", minutes(boff_list, &boff_now, Message::BatteryScreensOff, "On battery: turn the screens off")),
-                            setting("Put the machine to sleep", "Suspend to memory. The screens go off first.", minutes(bsleep_list, &bsleep_now, Message::BatterySleepAfter, "On battery: put the machine to sleep")),
-                        ]),
-                        self.group(Some(if on_battery { "On power" } else { "On power (now)" }), vec![
-                            setting("Turn the screens off", "After no input, plugged in.", minutes(off_list, &off_now, Message::ScreensOff, "On power: turn the screens off")),
-                            setting("Put the machine to sleep", "Suspend to memory. The screens go off first.", minutes(sleep_list, &sleep_now, Message::SleepAfter, "On power: put the machine to sleep")),
-                        ]),
-                    ]
-                } else {
-                    vec![self.group(Some("After no input"), vec![
-                        setting("Turn the screens off", "Every monitor is switched off; apps keep running.", minutes(off_list, &off_now, Message::ScreensOff, "Turn the screens off")),
-                        setting("Put the machine to sleep", "Suspend to memory. The screens go off first.", minutes(sleep_list, &sleep_now, Message::SleepAfter, "Put the machine to sleep")),
-                    ])]
-                };
+                        setting(
+                            "Turn the screens off",
+                            "After no input. Every monitor is switched off; apps keep running.",
+                            minutes(
+                                boff_list,
+                                &boff_now,
+                                Message::BatteryScreensOff,
+                                "On battery: turn the screens off",
+                            ),
+                        ),
+                        setting(
+                            "Put the machine to sleep",
+                            "Suspend to memory. The screens go off first.",
+                            minutes(
+                                bsleep_list,
+                                &bsleep_now,
+                                Message::BatterySleepAfter,
+                                "On battery: put the machine to sleep",
+                            ),
+                        ),
+                    ],
+                ),
+                self.group(
+                    Some(if on_battery { "On power" } else { "On power (now)" }),
+                    vec![
+                        setting(
+                            "Turn the screens off",
+                            "After no input, plugged in.",
+                            minutes(off_list, &off_now, Message::ScreensOff, "On power: turn the screens off"),
+                        ),
+                        setting(
+                            "Put the machine to sleep",
+                            "Suspend to memory. The screens go off first.",
+                            minutes(sleep_list, &sleep_now, Message::SleepAfter, "On power: put the machine to sleep"),
+                        ),
+                    ],
+                ),
+            ]
+        } else {
+            vec![self.group(
+                Some("After no input"),
+                vec![
+                    setting(
+                        "Turn the screens off",
+                        "Every monitor is switched off; apps keep running.",
+                        minutes(off_list, &off_now, Message::ScreensOff, "Turn the screens off"),
+                    ),
+                    setting(
+                        "Put the machine to sleep",
+                        "Suspend to memory. The screens go off first.",
+                        minutes(sleep_list, &sleep_now, Message::SleepAfter, "Put the machine to sleep"),
+                    ),
+                ],
+            )]
+        };
         self.page_layout(
             "Energy",
             "When nothing has been touched for a while: the screens go dark, then the machine sleeps. Any key or a nudge of the mouse brings everything back.",
@@ -2480,7 +2784,10 @@ impl App {
                 label("Default").dim()
             } else {
                 let id = id.clone();
-                button(label("Use this").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::SoundDefault(id)).name(&format!("Use {}", o.name))
+                button(label("Use this").size(12.0))
+                    .padding(Padding::hv(4.0, 12.0))
+                    .on_press(Message::SoundDefault(id))
+                    .name(&format!("Use {}", o.name))
             };
             let vol_id = id.clone();
             let mute_id = id.clone();
@@ -2489,7 +2796,10 @@ impl App {
                 setting(
                     "Volume",
                     &format!("{}%", o.volume),
-                    slider(0.0, 100.0, o.volume as f32, move |v| Message::SoundVolume(vol_id.clone(), v)).step(1.0).width(Length::Fixed(220.0)).name(&format!("{} volume", o.name)),
+                    slider(0.0, 100.0, o.volume as f32, move |v| Message::SoundVolume(vol_id.clone(), v))
+                        .step(1.0)
+                        .width(Length::Fixed(220.0))
+                        .name(&format!("{} volume", o.name)),
                 )
             } else {
                 setting("Volume", "Set on the monitor or device itself.", space())
@@ -2497,11 +2807,23 @@ impl App {
             groups.push(self.group(
                 Some(&o.name),
                 vec![
-                    setting(if o.default { "Sound goes here" } else { "Not the default" }, &note, chosen),
-                    volume,
-                    setting("Mute", "", switch(o.muted, move |on| Message::SoundMute(mute_id.clone(), on)).name(&format!("Mute {}", o.name))),
-                    setting("Test sound", "A short tone, quiet.", button(label("Play").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::SoundTone(tone_id)).name(&format!("Test {}", o.name))),
-                ],
+                        setting(if o.default { "Sound goes here" } else { "Not the default" }, &note, chosen),
+                        volume,
+                        setting(
+                            "Mute",
+                            "",
+                            switch(o.muted, move |on| Message::SoundMute(mute_id.clone(), on))
+                                .name(&format!("Mute {}", o.name)),
+                        ),
+                        setting(
+                            "Test sound",
+                            "A short tone, quiet.",
+                            button(label("Play").size(12.0))
+                                .padding(Padding::hv(4.0, 12.0))
+                                .on_press(Message::SoundTone(tone_id))
+                                .name(&format!("Test {}", o.name)),
+                        ),
+                    ],
             ));
         }
         if groups.is_empty() {
@@ -2524,9 +2846,21 @@ impl App {
     /// The dock's sliders follow the file when it is read.
     fn dock_from_file(&mut self) {
         let shelf = self.shelf();
-        let gap = shelf.and_then(|t| t.get("gap")).and_then(|v| v.as_integer()).unwrap_or(vergence_shell::GAP as i64).clamp(0, vergence_shell::MAX_GAP as i64) as f32;
-        let opacity = shelf.and_then(|t| t.get("opacity")).and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64))).unwrap_or(1.0).clamp(0.3, 1.0) as f32;
-        let size = shelf.and_then(|t| t.get("size")).and_then(|v| v.as_integer()).unwrap_or(vergence_shell::STRIP_W as i64).clamp(vergence_shell::MIN_SIZE as i64, vergence_shell::MAX_SIZE as i64) as f32;
+        let gap = shelf
+            .and_then(|t| t.get("gap"))
+            .and_then(|v| v.as_integer())
+            .unwrap_or(vergence_shell::GAP as i64)
+            .clamp(0, vergence_shell::MAX_GAP as i64) as f32;
+        let opacity = shelf
+            .and_then(|t| t.get("opacity"))
+            .and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64)))
+            .unwrap_or(1.0)
+            .clamp(0.3, 1.0) as f32;
+        let size = shelf
+            .and_then(|t| t.get("size"))
+            .and_then(|v| v.as_integer())
+            .unwrap_or(vergence_shell::STRIP_W as i64)
+            .clamp(vergence_shell::MIN_SIZE as i64, vergence_shell::MAX_SIZE as i64) as f32;
         (self.dock_gap, self.dock_opacity, self.dock_size) = (gap, opacity, size);
     }
 
@@ -2572,7 +2906,11 @@ impl App {
         };
         let mut place = vec![setting(
             "Where",
-            if free { "Floating where it was dragged. Choose an edge, or drag it to one, to dock it there." } else { "Drag the dock away from its edge to float it anywhere." },
+            if free {
+                "Floating where it was dragged. Choose an edge, or drag it to one, to dock it there."
+            } else {
+                "Drag the dock away from its edge to float it anywhere."
+            },
             choice(edges, at, Message::DockEdge).width(Length::Fixed(180.0)).name("Where"),
         )];
         if self.outputs.len() > 1 {
@@ -2580,13 +2918,22 @@ impl App {
             screens.extend(self.outputs.iter().map(screen_label));
             let id = text("screen");
             let at = self.outputs.iter().position(|o| o.id == id).map_or(0, |i| i + 1);
-            place.push(setting("Screen", "", choice(screens, Some(at), Message::DockScreen).width(Length::Fixed(180.0)).name("Screen")));
+            place.push(setting(
+                "Screen",
+                "",
+                choice(screens, Some(at), Message::DockScreen).width(Length::Fixed(180.0)).name("Screen"),
+            ));
         }
         place.push(setting(
             "Gap",
             "The room between the dock, its edge and the windows.",
             row(vec![
-                slider(0.0, vergence_shell::MAX_GAP as f32, self.dock_gap, Message::DockGap).step(1.0).marks(vec![vergence_shell::GAP as f32]).on_release(Message::DockSave).width(Length::Fixed(200.0)).name("Gap"),
+                slider(0.0, vergence_shell::MAX_GAP as f32, self.dock_gap, Message::DockGap)
+                    .step(1.0)
+                    .marks(vec![vergence_shell::GAP as f32])
+                    .on_release(Message::DockSave)
+                    .width(Length::Fixed(200.0))
+                    .name("Gap"),
                 label(format!("{:.0} pt", self.dock_gap)).width(Length::Fixed(48.0)).align(Align::End),
             ])
             .spacing(8.0)
@@ -2602,12 +2949,17 @@ impl App {
                 "Size",
                 "How big the dock and its icons are. The usual size is 48.",
                 row(vec![
-                    slider(vergence_shell::MIN_SIZE as f32, vergence_shell::MAX_SIZE as f32, self.dock_size, Message::DockSize)
-                        .step(1.0)
-                        .marks(vec![vergence_shell::STRIP_W as f32])
-                        .on_release(Message::DockSave)
-                        .width(Length::Fixed(200.0))
-                        .name("Size"),
+                    slider(
+                        vergence_shell::MIN_SIZE as f32,
+                        vergence_shell::MAX_SIZE as f32,
+                        self.dock_size,
+                        Message::DockSize,
+                    )
+                    .step(1.0)
+                    .marks(vec![vergence_shell::STRIP_W as f32])
+                    .on_release(Message::DockSave)
+                    .width(Length::Fixed(200.0))
+                    .name("Size"),
                     label(format!("{:.0} pt", self.dock_size)).width(Length::Fixed(48.0)).align(Align::End),
                 ])
                 .spacing(8.0)
@@ -2616,20 +2968,30 @@ impl App {
             setting(
                 "Hide",
                 "Out of the way, a sliver left at its edge; the pointer there brings it back. Windows then have the whole screen.",
-                choice(DOCK_HIDE.iter().map(|h| h.0.to_string()).collect(), Some(self.dock_hide()), Message::DockHide).width(Length::Fixed(220.0)).name("Hide"),
+                choice(DOCK_HIDE.iter().map(|h| h.0.to_string()).collect(), Some(self.dock_hide()), Message::DockHide)
+                    .width(Length::Fixed(220.0))
+                    .name("Hide"),
             ),
             setting(
                 "Opacity",
                 "Less, and the desktop shows through the dock. Its icons stay solid.",
                 row(vec![
-                    slider(0.3, 1.0, self.dock_opacity, Message::DockOpacity).step(0.05).on_release(Message::DockSave).width(Length::Fixed(200.0)).name("Opacity"),
+                    slider(0.3, 1.0, self.dock_opacity, Message::DockOpacity)
+                        .step(0.05)
+                        .on_release(Message::DockSave)
+                        .width(Length::Fixed(200.0))
+                        .name("Opacity"),
                     percent(self.dock_opacity),
                 ])
                 .spacing(8.0)
                 .align(Align::Center),
             ),
         ];
-        let off: Vec<String> = shelf.and_then(|t| t.get("applets-off")).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
+        let off: Vec<String> = shelf
+            .and_then(|t| t.get("applets-off"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+            .unwrap_or_default();
         let mut applets: Vec<Element<Message>> = vec![setting(
             "Out of the drawer when in trouble",
             "An applet with a problem or a warning stands on the dock until it clears.",
@@ -2643,7 +3005,14 @@ impl App {
             let what = if from == "the desktop" { "From the desktop.".to_string() } else { format!("From {from}.") };
             let id = id.clone();
             let shown = if name.is_empty() { id.clone() } else { name.clone() };
-            applets.push(setting(&shown, &what, switch(on, move |on| Message::Applet(id.clone(), on)).name(&format!("Show {shown}"))).key(i as u64 + 1));
+            applets.push(
+                setting(
+                    &shown,
+                    &what,
+                    switch(on, move |on| Message::Applet(id.clone(), on)).name(&format!("Show {shown}")),
+                )
+                .key(i as u64 + 1),
+            );
         }
         self.page_layout(
             "Dock",
@@ -2672,12 +3041,21 @@ impl App {
         let s = self.desktop.get("session");
         let restore = s.and_then(|d| d.get("restore")).and_then(|v| v.as_bool()).unwrap_or(true);
         let places = s.and_then(|d| d.get("places")).and_then(|v| v.as_bool()).unwrap_or(true);
-        let keep = s.and_then(|d| d.get("settings-keep")).and_then(|v| v.as_integer()).unwrap_or(vergence_widgets::session::SETTINGS_KEEP);
+        let keep = s
+            .and_then(|d| d.get("settings-keep"))
+            .and_then(|v| v.as_integer())
+            .unwrap_or(vergence_widgets::session::SETTINGS_KEEP);
         let keep_at = KEEP_CHOICES.iter().position(|(_, m)| *m == keep);
         let mut start = vec![setting(
             "When Vergence starts",
             "Reopen the apps that were open when the last session ended, with their windows and documents, or start with none open. Apps then also forget the windows they kept.",
-            choice(vec!["Reopen the apps that were open".into(), "Start with no apps open".into()], Some(if restore { 0 } else { 1 }), Message::Restore).width(Length::Fixed(260.0)).name("When Vergence starts"),
+            choice(
+                vec!["Reopen the apps that were open".into(), "Start with no apps open".into()],
+                Some(if restore { 0 } else { 1 }),
+                Message::Restore,
+            )
+            .width(Length::Fixed(260.0))
+            .name("When Vergence starts"),
         )];
         if restore {
             start.push(setting(
@@ -2710,7 +3088,10 @@ impl App {
         let l = winbar::parse(&theme::get(&self.xsettings, winbar::KEY));
         let side = |left: bool, text: &'static str| {
             let selected = l.left == left;
-            button(label(text)).look(if selected { ButtonLook::Chosen } else { ButtonLook::Normal }).padding(Padding::hv(5.0, 16.0)).on_press(Message::Layout(winbar::Layout { left, ..l }))
+            button(label(text))
+                .look(if selected { ButtonLook::Chosen } else { ButtonLook::Normal })
+                .padding(Padding::hv(5.0, 16.0))
+                .on_press(Message::Layout(winbar::Layout { left, ..l }))
         };
         self.page_layout(
             "Windows",
@@ -2738,8 +3119,16 @@ impl App {
     /// Windows > Snapping and switching (windows milestone 1, step 6).
     fn snapping(&self) -> Element<Message> {
         let names = |list: &[(&str, &str)]| list.iter().map(|(n, _)| n.to_string()).collect::<Vec<_>>();
-        let pick = |key: &'static str, list: &'static [(&'static str, &'static str)], default: usize, width: f32, name: &str, enabled: bool| {
-            let c = choice(names(list), Some(self.win_word(key, list, default)), move |i| Message::WinWord(key, list[i].1)).width(Length::Fixed(width)).name(name);
+        let pick = |key: &'static str,
+                    list: &'static [(&'static str, &'static str)],
+                    default: usize,
+                    width: f32,
+                    name: &str,
+                    enabled: bool| {
+            let c =
+                choice(names(list), Some(self.win_word(key, list, default)), move |i| Message::WinWord(key, list[i].1))
+                    .width(Length::Fixed(width))
+                    .name(name);
             if enabled { c } else { c.disabled() }
         };
         let flag = |key: &'static str, default: bool, name: &str, enabled: bool| {
@@ -2786,8 +3175,13 @@ impl App {
     /// page); else a screen page's map, the screen being edited framed in the
     /// accent and a press on another going to its page.
     fn arrangement(&self, highlight: Option<usize>, interactive: bool, height: f32) -> Element<Message> {
-        let screens: Vec<(OutputInfo, Option<Arc<Image>>)> =
-            self.outputs.iter().map(|o| (o.clone(), wall::shown(&self.desktop, Some(&o.id)).image.and_then(|p| self.thumbs.get(&p).cloned()))).collect();
+        let screens: Vec<(OutputInfo, Option<Arc<Image>>)> = self
+            .outputs
+            .iter()
+            .map(|o| {
+                (o.clone(), wall::shown(&self.desktop, Some(&o.id)).image.and_then(|p| self.thumbs.get(&p).cloned()))
+            })
+            .collect();
         let drag = if interactive { self.arrange_drag } else { None };
         let size_out = self.arrange_size.clone();
         let (accent, line) = (self.accent(), self.line_color());
@@ -2816,7 +3210,15 @@ impl App {
                         let w = fonts.layout(f, 11.0, s).1;
                         let base = tile.y + tile.h - band + 3.0 + m.ascent + k as f32 * 14.0;
                         scene.push_clip(tile, 0.0);
-                        text(scene, fonts, f, 11.0, WHITE, Point::new((tile.x + (tile.w - w) / 2.0).round(), base.round()), s);
+                        text(
+                            scene,
+                            fonts,
+                            f,
+                            11.0,
+                            WHITE,
+                            Point::new((tile.x + (tile.w - w) / 2.0).round(), base.round()),
+                            s,
+                        );
                         scene.pop_clip();
                     }
                 }
@@ -2846,7 +3248,11 @@ impl App {
                 _ => o.base_scale as f32,
             };
             let marks = scale_marks(o);
-            let note = if (v as f64 - o.default_scale).abs() < 1e-6 { format!("{:.0}%, the sharpest for it.", o.default_scale * 100.0) } else { format!("Its default is {:.0}%.", o.default_scale * 100.0) };
+            let note = if (v as f64 - o.default_scale).abs() < 1e-6 {
+                format!("{:.0}%, the sharpest for it.", o.default_scale * 100.0)
+            } else {
+                format!("Its default is {:.0}%.", o.default_scale * 100.0)
+            };
             scales.push(setting(&screen_label(o), &note, scale_slider_of(i, v, o, &marks)));
         }
         let mut screens_group = scales;
@@ -2865,11 +3271,19 @@ impl App {
             self.group(Some("Scale"), screens_group),
         ];
         if (self.size - 1.0).abs() > 0.004 {
-            items.push(self.group(None, vec![setting(
-                "Size in Accessibility",
-                &format!("Everything is {}% bigger on every screen, on top of these scales.", ((self.size - 1.0) * 100.0).round()),
-                button(label("Accessibility")).on_press(Message::Go(Page::Accessibility)).name("Open Accessibility"),
-            )]));
+            items.push(self.group(
+                None,
+                vec![setting(
+                        "Size in Accessibility",
+                        &format!(
+                            "Everything is {}% bigger on every screen, on top of these scales.",
+                            ((self.size - 1.0) * 100.0).round()
+                        ),
+                        button(label("Accessibility"))
+                            .on_press(Message::Go(Page::Accessibility))
+                            .name("Open Accessibility"),
+                    )],
+            ));
         }
         self.page_layout(
             "Screens",
@@ -2909,17 +3323,27 @@ impl App {
             "On: each screen at its calculated scale, so a window keeps its size moving between screens; a whole scale wins where it is within 8%. Off: the nearest whole scale where it is close, the sharpest. Now: {}.",
             if screens.is_empty() { "no screens".to_string() } else { screens.join(", ") }
         );
-        setting("Windows the same size on every screen", &note, switch(on, Message::SameSize).name("Windows the same size on every screen"))
+        setting(
+            "Windows the same size on every screen",
+            &note,
+            switch(on, Message::SameSize).name("Windows the same size on every screen"),
+        )
     }
 
     fn screen(&self) -> Element<Message> {
         let multi = self.outputs.len() > 1;
         let o = self.current_output();
         let title = o.map(screen_label).unwrap_or_else(|| "Screens".into());
-        let description = if multi { "Its scale and where it sits, drawn at the screen's own pixels." } else { "Its scale, drawn at the screen's own pixels." };
+        let description = if multi {
+            "Its scale and where it sits, drawn at the screen's own pixels."
+        } else {
+            "Its scale, drawn at the screen's own pixels."
+        };
         let mut items: Vec<Element<Message>> = Vec::new();
         if multi && let Page::Screen(i) = self.page {
-            items.push(self.group(None, vec![panel(self.arrangement(Some(i), false, 110.0)).padding(6.0).width(Length::FILL)]));
+            items.push(
+                self.group(None, vec![panel(self.arrangement(Some(i), false, 110.0)).padding(6.0).width(Length::FILL)]),
+            );
         }
         if let Some(o) = o {
             let marks = scale_marks(o);
@@ -2935,7 +3359,9 @@ impl App {
             let chosen = disp::screen(&self.desktop, &o.id).1.is_some();
             let mut shown_row = vec![label(format!("{:.0}%", o.scale * 100.0)).dim()];
             if chosen {
-                shown_row.push(button(label("Default").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press(Message::ScaleDefault));
+                shown_row.push(
+                    button(label("Default").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press(Message::ScaleDefault),
+                );
             }
             let screen_controls: Vec<String> = SCREEN_CONTROLS_NAMES.iter().map(|s| s.to_string()).collect();
             let mode_rows = self.mode_rows(o);
@@ -2952,30 +3378,62 @@ impl App {
                     ),
                     row(shown_row).spacing(8.0).align(Align::Center),
                 ),
-                setting("Size of controls", "Automatic: Large with a touch panel, else the desktop's (Appearance).", choice(screen_controls, Some(disp::controls(&self.desktop, &o.id)), Message::ScreenControls).width(Length::Fixed(160.0)).name("Size of controls")),
+                setting(
+                    "Size of controls",
+                    "Automatic: Large with a touch panel, else the desktop's (Appearance).",
+                    choice(screen_controls, Some(disp::controls(&self.desktop, &o.id)), Message::ScreenControls)
+                        .width(Length::Fixed(160.0))
+                        .name("Size of controls"),
+                ),
             ];
             if multi {
                 let is_main = self.primary().as_deref() == Some(o.id.as_str());
                 rows.push(setting(
                     "Main screen",
-                    if is_main { "The dock stands on it, and its wallpaper is the default for the others." } else { "Make it the main screen: the dock moves to it, and its wallpaper becomes the default." },
-                    if is_main { label("Main screen").dim() } else { button(label("Make main screen").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::MakePrimary) },
+                    if is_main {
+                        "The dock stands on it, and its wallpaper is the default for the others."
+                    } else {
+                        "Make it the main screen: the dock moves to it, and its wallpaper becomes the default."
+                    },
+                    if is_main {
+                        label("Main screen").dim()
+                    } else {
+                        button(label("Make main screen").size(12.0))
+                            .padding(Padding::hv(4.0, 12.0))
+                            .on_press(Message::MakePrimary)
+                    },
                 ));
             }
             rows.extend(mode_rows);
             // A screen on one GPU drawn by another (GPUs milestone 1) says so up front.
             if !o.shown_by.is_empty() && o.shown_by != o.drawn_by {
-                rows.push(setting("Graphics", &format!("Shown by {}, drawn by {} and copied there.", o.shown_by, o.drawn_by), space()));
+                rows.push(setting(
+                    "Graphics",
+                    &format!("Shown by {}, drawn by {} and copied there.", o.shown_by, o.drawn_by),
+                    space(),
+                ));
             }
             items.push(self.group(Some("Display"), rows));
         }
         // Its picture is chosen on the Wallpaper page (settings milestone 1).
         if let Page::Screen(i) = self.page {
             let shown = wall::shown(&self.desktop, self.scope().as_ref().map(|(id, _)| id.as_str()));
-            let what = shown.image.as_deref().and_then(|p| p.file_stem()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| format!("Color {}", shown.color));
+            let what = shown
+                .image
+                .as_deref()
+                .and_then(|p| p.file_stem())
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| format!("Color {}", shown.color));
             items.push(self.group(
                 Some("Wallpaper"),
-                vec![setting(&short_name(&what, 40), "Chosen on the Wallpaper page.", button(label("Wallpaper").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Go(Page::Wallpaper(i))).name("Open Wallpaper"))],
+                vec![setting(
+                        &short_name(&what, 40),
+                        "Chosen on the Wallpaper page.",
+                        button(label("Wallpaper").size(12.0))
+                            .padding(Padding::hv(4.0, 12.0))
+                            .on_press(Message::Go(Page::Wallpaper(i)))
+                            .name("Open Wallpaper"),
+                    )],
             ));
         }
         // How the scale was found and what the screen is, for the curious.
@@ -2985,7 +3443,11 @@ impl App {
             let mut rows = if multi { Vec::new() } else { vec![self.same_size_row()] };
             rows.push(setting("How the scale was found", &o.note, space()));
             if !o.shown_by.is_empty() {
-                let g = if o.shown_by == o.drawn_by { o.shown_by.clone() } else { format!("Shown by {}, drawn by {}", o.shown_by, o.drawn_by) };
+                let g = if o.shown_by == o.drawn_by {
+                    o.shown_by.clone()
+                } else {
+                    format!("Shown by {}, drawn by {}", o.shown_by, o.drawn_by)
+                };
                 rows.push(setting("Graphics", &g, space()));
             }
             // A laptop's panel often has no make and model: its connector stands in.
@@ -2994,7 +3456,11 @@ impl App {
             }
             rows.push(setting("Connector", &o.name, space()));
             rows.push(setting("Size", &format!("{} x {} points at {}, {}", o.width, o.height, o.x, o.y), space()));
-            rows.push(setting("Identity", &format!("{} (from its EDID: its settings follow it to any port)", o.id), space()));
+            rows.push(setting(
+                "Identity",
+                &format!("{} (from its EDID: its settings follow it to any port)", o.id),
+                space(),
+            ));
             items.push(self.advanced("screen", rows));
         }
         items.push(self.status_line());
@@ -3009,11 +3475,13 @@ impl App {
         let scope = self.scope();
         let shown = wall::shown(&self.desktop, scope.as_ref().map(|(i, _)| i.as_str()));
         let is_primary = scope.is_none();
-        let primary_label = self.primary().and_then(|p| self.outputs.iter().find(|o| o.id == p)).map(screen_label).unwrap_or_default();
+        let primary_label =
+            self.primary().and_then(|p| self.outputs.iter().find(|o| o.id == p)).map(screen_label).unwrap_or_default();
         let description = if !multi {
             "The picture behind your windows, drawn at the screen's own pixels.".to_string()
         } else if is_primary {
-            "The main screen's wallpaper is the default, shown on every other screen that has none of its own.".to_string()
+            "The main screen's wallpaper is the default, shown on every other screen that has none of its own."
+                .to_string()
         } else {
             format!("Shows the main screen's wallpaper ({primary_label}) unless it has its own.")
         };
@@ -3031,8 +3499,14 @@ impl App {
                 let own = (primary.as_deref() != Some(o.id.as_str())).then_some(o.id.as_str());
                 let its = wall::shown(&self.desktop, own);
                 let pic: Element<Message> = match its.image.as_ref().and_then(|p| self.grid.get(p)) {
-                    Some(img) => picture(img.clone()).width(Length::Fixed(thumbs::GRID_W)).height(Length::Fixed(thumbs::GRID_H)),
-                    None => panel(space()).color(parse_hex(&its.color).unwrap_or(card)).radius(0.0).width(Length::Fixed(thumbs::GRID_W)).height(Length::Fixed(thumbs::GRID_H)),
+                    Some(img) => {
+                        picture(img.clone()).width(Length::Fixed(thumbs::GRID_W)).height(Length::Fixed(thumbs::GRID_H))
+                    }
+                    None => panel(space())
+                        .color(parse_hex(&its.color).unwrap_or(card))
+                        .radius(0.0)
+                        .width(Length::Fixed(thumbs::GRID_W))
+                        .height(Length::Fixed(thumbs::GRID_H)),
                 };
                 let mut name = screen_label(o);
                 if primary.as_deref() == Some(o.id.as_str()) {
@@ -3042,7 +3516,11 @@ impl App {
                 screens_out.push(
                     button(column(vec![pic, caption]).spacing(4.0))
                         .padding(3.0)
-                        .look(ButtonLook::Custom { fill: None, edge: (i == open).then_some((accent, 3.0)), radius: 6.0 })
+                        .look(ButtonLook::Custom {
+                            fill: None,
+                            edge: (i == open).then_some((accent, 3.0)),
+                            radius: 6.0,
+                        })
                         .on_press(Message::Go(Page::Wallpaper(i)))
                         .name(name)
                         .key(1000 + i as u64),
@@ -3052,14 +3530,32 @@ impl App {
         }
         let mut wp: Vec<Element<Message>> = Vec::new();
         if multi && !is_primary {
-            let detail = if shown.own { "Off: this screen has its own.".to_string() } else { format!("Shows {primary_label}'s wallpaper.") };
-            wp.push(setting("Same as the main screen", &detail, switch(!shown.own, Message::SameAsPrimary).name("Same as the main screen")));
+            let detail = if shown.own {
+                "Off: this screen has its own.".to_string()
+            } else {
+                format!("Shows {primary_label}'s wallpaper.")
+            };
+            wp.push(setting(
+                "Same as the main screen",
+                &detail,
+                switch(!shown.own, Message::SameAsPrimary).name("Same as the main screen"),
+            ));
         }
         if multi {
             wp.push(setting(
                 "Main screen",
-                if is_primary { "The dock stands on it, and its wallpaper is the default for the others." } else { "Make it the main screen: the dock moves to it, and its wallpaper becomes the default." },
-                if is_primary { label("Main screen").dim() } else { button(label("Make main screen").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::MakePrimary) },
+                if is_primary {
+                    "The dock stands on it, and its wallpaper is the default for the others."
+                } else {
+                    "Make it the main screen: the dock moves to it, and its wallpaper becomes the default."
+                },
+                if is_primary {
+                    label("Main screen").dim()
+                } else {
+                    button(label("Make main screen").size(12.0))
+                        .padding(Padding::hv(4.0, 12.0))
+                        .on_press(Message::MakePrimary)
+                },
             ));
         }
         let fit = wall::MODES.iter().position(|m| *m == shown.mode).unwrap_or(0);
@@ -3068,7 +3564,11 @@ impl App {
         wp.push(setting(
             "Background color",
             "Around a picture, or alone without one. Enter applies it.",
-            field(&self.bg_text, Message::Background).placeholder("#202020").on_submit(Message::BackgroundSubmit).width(Length::Fixed(120.0)).name("Background color"),
+            field(&self.bg_text, Message::Background)
+                .placeholder("#202020")
+                .on_submit(Message::BackgroundSubmit)
+                .width(Length::Fixed(120.0))
+                .name("Background color"),
         ));
         items.push(self.group(Some("Wallpaper"), wp));
         // The pictures.
@@ -3077,8 +3577,14 @@ impl App {
             let selected = shown.image.as_deref() == Some(p.as_path());
             let name = p.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let pic: Element<Message> = match self.grid.get(p) {
-                Some(img) => picture(img.clone()).width(Length::Fixed(thumbs::GRID_W)).height(Length::Fixed(thumbs::GRID_H)),
-                None => panel(space()).color(card).radius(0.0).width(Length::Fixed(thumbs::GRID_W)).height(Length::Fixed(thumbs::GRID_H)),
+                Some(img) => {
+                    picture(img.clone()).width(Length::Fixed(thumbs::GRID_W)).height(Length::Fixed(thumbs::GRID_H))
+                }
+                None => panel(space())
+                    .color(card)
+                    .radius(0.0)
+                    .width(Length::Fixed(thumbs::GRID_W))
+                    .height(Length::Fixed(thumbs::GRID_H)),
             };
             // Long names are shortened to the tile's width instead of running into the next.
             let caption = label(short_name(&name, 25)).size(11.0).width(Length::Fixed(thumbs::GRID_W));
@@ -3095,15 +3601,25 @@ impl App {
         // Your pictures.
         let (folders, files) = wall::sources(&self.desktop);
         let mut yours: Vec<Element<Message>> = Vec::new();
-        for (i, (p, kind)) in folders.iter().map(|f| (f, "Folder")).chain(files.iter().map(|f| (f, "Picture"))).enumerate() {
-            yours.push(setting(&p.display().to_string(), kind, button(label("Remove").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press(Message::RemoveSource(i))));
+        for (i, (p, kind)) in
+            folders.iter().map(|f| (f, "Folder")).chain(files.iter().map(|f| (f, "Picture"))).enumerate()
+        {
+            yours.push(setting(
+                &p.display().to_string(),
+                kind,
+                button(label("Remove").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press(Message::RemoveSource(i)),
+            ));
         }
         yours.push(setting(
             if folders.is_empty() && files.is_empty() { "Add your own pictures" } else { "Add more" },
             "Pictures added to a folder later appear too.",
             row(vec![
-                button(label("Add a folder\u{2026}").size(12.0)).padding(Padding::hv(4.0, 10.0)).on_press(Message::Browse(true)),
-                button(label("Add pictures\u{2026}").size(12.0)).padding(Padding::hv(4.0, 10.0)).on_press(Message::Browse(false)),
+                button(label("Add a folder\u{2026}").size(12.0))
+                    .padding(Padding::hv(4.0, 10.0))
+                    .on_press(Message::Browse(true)),
+                button(label("Add pictures\u{2026}").size(12.0))
+                    .padding(Padding::hv(4.0, 10.0))
+                    .on_press(Message::Browse(false)),
             ])
             .spacing(6.0),
         ));
@@ -3117,16 +3633,26 @@ impl App {
         let mut entries = Vec::new();
         for (i, (p, folder)) in b.entries.iter().enumerate() {
             let picked = !b.folders && b.picked.contains(p);
-            let mark = if *folder { "\u{25B8}" } else if picked { "\u{2713}" } else { "" };
+            let mark = if *folder {
+                "\u{25B8}"
+            } else if picked {
+                "\u{2713}"
+            } else {
+                ""
+            };
             let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             entries.push(
-                button(row(vec![label(mark).width(Length::Fixed(18.0)), label(name.clone()), space().width(Length::FILL)]).spacing(6.0).width(Length::FILL))
-                    .padding(Padding::hv(5.0, 10.0))
-                    .look(if picked { ButtonLook::Chosen } else { ButtonLook::Plain })
-                    .on_press(Message::BrowseOpen(i))
-                    .width(Length::FILL)
-                    .name(name)
-                    .key(i as u64),
+                button(
+                    row(vec![label(mark).width(Length::Fixed(18.0)), label(name.clone()), space().width(Length::FILL)])
+                        .spacing(6.0)
+                        .width(Length::FILL),
+                )
+                .padding(Padding::hv(5.0, 10.0))
+                .look(if picked { ButtonLook::Chosen } else { ButtonLook::Plain })
+                .on_press(Message::BrowseOpen(i))
+                .width(Length::FILL)
+                .name(name)
+                .key(i as u64),
             );
         }
         let add_label = if b.folders {
@@ -3144,16 +3670,31 @@ impl App {
             column(vec![
                 self.intro(
                     Some(if b.folders { "Add a folder" } else { "Add pictures" }),
-                    if b.folders { "Open the folder you want, then add it. Every picture in it and its folders is offered." } else { "Click pictures to pick them, in as many folders as you like, then add them." },
+                    if b.folders {
+                        "Open the folder you want, then add it. Every picture in it and its folders is offered."
+                    } else {
+                        "Click pictures to pick them, in as many folders as you like, then add them."
+                    },
                 ),
-                row(vec![button(label("\u{2191} Up").size(12.0)).padding(Padding::hv(4.0, 10.0)).on_press(Message::BrowseUp), label(b.dir.display().to_string()).size(12.0).dim()]).spacing(10.0).align(Align::Center),
+                row(vec![
+                    button(label("\u{2191} Up").size(12.0)).padding(Padding::hv(4.0, 10.0)).on_press(Message::BrowseUp),
+                    label(b.dir.display().to_string()).size(12.0).dim(),
+                ])
+                .spacing(10.0)
+                .align(Align::Center),
                 panel(scroll(column(entries).spacing(1.0).width(Length::FILL)).name("Folder"))
                     .color(self.card_color())
                     .radius(10.0)
                     .padding(4.0)
                     .width(Length::FILL)
                     .height(Length::FILL),
-                row(vec![space().width(Length::FILL), button(label("Cancel")).padding(Padding::hv(5.0, 14.0)).on_press(Message::BrowseCancel), add]).spacing(8.0).width(Length::FILL),
+                row(vec![
+                    space().width(Length::FILL),
+                    button(label("Cancel")).padding(Padding::hv(5.0, 14.0)).on_press(Message::BrowseCancel),
+                    add,
+                ])
+                .spacing(8.0)
+                .width(Length::FILL),
             ])
             .spacing(12.0)
             .width(Length::FILL)
@@ -3177,37 +3718,56 @@ impl App {
             "About",
             "Vergence: every app the right size, in the right place and readable, on any monitor setup.",
             vec![
-                self.group(None, vec![
-                    setting("Settings app", "", label(format!("version {}", env!("CARGO_PKG_VERSION")))),
-                    setting("Session", "", label(session)),
-                    setting("Built with", "", label("vergence-ui, Vergence's own toolkit")),
-                ]),
-                self.group(None, vec![
-                    setting("Copyright", "", label(COPYRIGHT)),
-                    setting(
-                        "License",
-                        "Apache License 2.0, or GNU GPL version 2 or later, at your choice. No warranty.",
-                        button(label("Read").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Go(Page::LicenseText)).name("Read the license"),
-                    ),
-                    setting(
-                        "Third-party software",
-                        &format!("{} crates, each under its own license", notices_summary().len()),
-                        button(label("List").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Go(Page::Notices)).name("List third-party software"),
-                    ),
-                ]),
+                self.group(
+                    None,
+                    vec![
+                        setting("Settings app", "", label(format!("version {}", env!("CARGO_PKG_VERSION")))),
+                        setting("Session", "", label(session)),
+                        setting("Built with", "", label("vergence-ui, Vergence's own toolkit")),
+                    ],
+                ),
+                self.group(
+                    None,
+                    vec![
+                        setting("Copyright", "", label(COPYRIGHT)),
+                        setting(
+                            "License",
+                            "Apache License 2.0, or GNU GPL version 2 or later, at your choice. No warranty.",
+                            button(label("Read").size(12.0))
+                                .padding(Padding::hv(4.0, 12.0))
+                                .on_press(Message::Go(Page::LicenseText))
+                                .name("Read the license"),
+                        ),
+                        setting(
+                            "Third-party software",
+                            &format!("{} crates, each under its own license", notices_summary().len()),
+                            button(label("List").size(12.0))
+                                .padding(Padding::hv(4.0, 12.0))
+                                .on_press(Message::Go(Page::Notices))
+                                .name("List third-party software"),
+                        ),
+                    ],
+                ),
             ],
         )
     }
 
     fn back_to_about(&self) -> Element<Message> {
-        row(vec![button(label("\u{2039} About").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Go(Page::About)).name("Back to About"), space().width(Length::FILL)])
-            .width(Length::FILL)
+        row(vec![
+            button(label("\u{2039} About").size(12.0))
+                .padding(Padding::hv(4.0, 12.0))
+                .on_press(Message::Go(Page::About))
+                .name("Back to About"),
+            space().width(Length::FILL),
+        ])
+        .width(Length::FILL)
     }
 
     /// Both license texts, a paragraph to a label so they wrap to the window.
     fn license_page(&self) -> Element<Message> {
         let text = |t: &'static str| -> Element<Message> {
-            let paras: Vec<Element<Message>> = paragraphs(t).into_iter().map(|p| label(p).size(11.0).wrap().width(Length::FILL)).collect();
+            let paras: Vec<Element<Message>> =
+                paragraphs(t).into_iter().map(|p| label(p).size(11.0).wrap().width(Length::FILL)).collect();
             panel(column(paras).spacing(8.0).width(Length::FILL)).padding(Padding::hv(12.0, 14.0)).width(Length::FILL)
         };
         self.page_layout(
@@ -3228,7 +3788,9 @@ impl App {
             .map(|(name, version, license)| setting(&format!("{name} {version}"), "", label(license).size(11.0).dim()))
             .collect();
         let full = match installed_doc_dir() {
-            Some(d) => format!("Their full license and notice texts are in {}.", d.join("THIRD-PARTY-NOTICES.md").display()),
+            Some(d) => {
+                format!("Their full license and notice texts are in {}.", d.join("THIRD-PARTY-NOTICES.md").display())
+            }
             None => "Their full license and notice texts are in THIRD-PARTY-NOTICES.md, beside the source.".to_string(),
         };
         self.page_layout(
@@ -3239,12 +3801,20 @@ impl App {
     }
 
     fn status_line(&self) -> Element<Message> {
-        if self.status.is_empty() { space() } else { label(self.status.clone()).size(11.0).dim().wrap().width(Length::FILL) }
+        if self.status.is_empty() {
+            space()
+        } else {
+            label(self.status.clone()).size(11.0).dim().wrap().width(Length::FILL)
+        }
     }
 
     // The theme's colors, for the few places that are drawn by hand.
     fn palette(&self) -> vergence_look::Palette {
-        if appearance_text(&self.desktop, "color-scheme") == "dark" { vergence_look::PALETTE_DARK } else { vergence_look::PALETTE_LIGHT }
+        if appearance_text(&self.desktop, "color-scheme") == "dark" {
+            vergence_look::PALETTE_DARK
+        } else {
+            vergence_look::PALETTE_LIGHT
+        }
     }
 
     fn text_color(&self) -> Color {
@@ -3311,13 +3881,26 @@ impl Program for App {
         // override is engaged"). Its own Style choice does not apply.
         let dark = vergence_ui::desktop_pick(&text) == Some(false);
         let mut t = Theme::new(dark, self.accent(), appearance_text(&self.desktop, "contrast") == "high");
-        t.reduced_motion = self.desktop.get("appearance").and_then(|a| a.get("reduced-motion")).and_then(|v| v.as_bool()).unwrap_or(false);
-        t.double_click = self.desktop.get("mouse").and_then(|a| a.get("double-click")).and_then(|v| v.as_integer()).map_or(400, |v| v.clamp(100, 2000) as u32);
+        t.reduced_motion = self
+            .desktop
+            .get("appearance")
+            .and_then(|a| a.get("reduced-motion"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        t.double_click = self
+            .desktop
+            .get("mouse")
+            .and_then(|a| a.get("double-click"))
+            .and_then(|v| v.as_integer())
+            .map_or(400, |v| v.clamp(100, 2000) as u32);
         // The wallpaper tint's amount and the spelling switch, as every other
         // app reads them (Theme::from_desktop); it tinted at 8% whatever the
         // slider said (Dave, 2026-11-15: "even 1% is pretty aggressive").
-        t.tint_mix = vergence_widgets::tint_amount(vergence_ui::table_value(&text, "[appearance]", "tint-amount").as_deref());
-        t.spell = vergence_ui::table_value(&text, "[settings]", "spellcheck").or_else(|| vergence_ui::table_value(&text, "[text]", "spellcheck")).is_none_or(|v| v != "false");
+        t.tint_mix =
+            vergence_widgets::tint_amount(vergence_ui::table_value(&text, "[appearance]", "tint-amount").as_deref());
+        t.spell = vergence_ui::table_value(&text, "[settings]", "spellcheck")
+            .or_else(|| vergence_ui::table_value(&text, "[text]", "spellcheck"))
+            .is_none_or(|v| v != "false");
         t.opacity = vergence_ui::opacity_setting(&text, "[settings]");
         // The desktop's fonts as every app reads them (points; text milestone 1, step 5).
         let fonts = vergence_ui::DesktopFonts::from_text(&format!(
@@ -3370,14 +3953,21 @@ impl Program for App {
             Page::LicenseText => self.license_page(),
             Page::Notices => self.notices_page(),
         };
-        row(vec![self.sidebar().color(t.sidebar), vrule().color(t.line), page.width(Length::FILL).height(Length::FILL)]).width(Length::FILL).height(Length::FILL)
+        row(vec![self.sidebar().color(t.sidebar), vrule().color(t.line), page.width(Length::FILL).height(Length::FILL)])
+            .width(Length::FILL)
+            .height(Length::FILL)
     }
 
     /// A sidebar window (window styles milestone 1; Dave's screenshot of
     /// macOS's System Settings): its content runs up under the server's
     /// frosted bar, 760 x 480 to 1100 wide, no maximize.
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Sidebar, min: (760.0, 480.0), max: (1100.0, 0.0), ..Default::default() }
+        vergence_ui::Style {
+            kind: vergence_ui::WinKind::Sidebar,
+            min: (760.0, 480.0),
+            max: (1100.0, 0.0),
+            ..Default::default()
+        }
     }
 
     fn under_bar(&self) -> bool {
@@ -3428,7 +4018,11 @@ impl Program for App {
         // A new mode: ask, and go back by itself unless kept.
         if std::mem::take(&mut self.mode_ask) {
             let until = std::time::Instant::now() + modes::KEEP_FOR;
-            window.open_window(vergence_widgets::window(modes::KeepDialog { mail: self.mail.clone(), until, theme: Program::theme(self) }));
+            window.open_window(vergence_widgets::window(modes::KeepDialog {
+                mail: self.mail.clone(),
+                until,
+                theme: Program::theme(self),
+            }));
             window.wake_after(modes::REVERT_TIMER, modes::KEEP_FOR);
         }
         self.places_dialog(window);
@@ -3535,7 +4129,12 @@ impl App {
         all.extend(items);
         // The page scrolls up under the frosted bar (look milestone 1's content under the bar).
         let top = self.top.get();
-        scroll(panel(column(all).spacing(16.0).width(Length::FILL)).padding(Padding { top: 22.0 + top, bottom: 22.0, left: 22.0, right: 22.0 }).width(Length::FILL)).name(title)
+        scroll(
+            panel(column(all).spacing(16.0).width(Length::FILL))
+                .padding(Padding { top: 22.0 + top, bottom: 22.0, left: 22.0, right: 22.0 })
+                .width(Length::FILL),
+        )
+        .name(title)
     }
 
     /// A page's Advanced part (settings milestone 1, step 2): every other
@@ -3543,11 +4142,13 @@ impl App {
     /// opens it, and it stays open while the app runs. `key` names it.
     fn advanced(&self, key: &'static str, rows: Vec<Element<Message>>) -> Element<Message> {
         let open = self.advanced.contains(key);
-        let head = button(row(vec![chevron(open), label("Advanced").size(12.0).dim().weight(600)]).spacing(4.0).align(Align::Center))
-            .look(ButtonLook::Plain)
-            .padding(Padding::hv(2.0, 4.0))
-            .on_press(Message::Advanced(key))
-            .name(if open { "Close Advanced" } else { "Open Advanced" });
+        let head = button(
+            row(vec![chevron(open), label("Advanced").size(12.0).dim().weight(600)]).spacing(4.0).align(Align::Center),
+        )
+        .look(ButtonLook::Plain)
+        .padding(Padding::hv(2.0, 4.0))
+        .on_press(Message::Advanced(key))
+        .name(if open { "Close Advanced" } else { "Open Advanced" });
         let mut parts = vec![row(vec![head, space().width(Length::FILL)]).width(Length::FILL)];
         if open {
             parts.push(self.group(None, rows));
@@ -3564,16 +4165,17 @@ impl App {
             }
             inner.push(r);
         }
-        let card = panel(column(inner).width(Length::FILL)).color(self.card_color()).radius(10.0).padding(2.0).width(Length::FILL);
+        let card = panel(column(inner).width(Length::FILL))
+            .color(self.card_color())
+            .radius(10.0)
+            .padding(2.0)
+            .width(Length::FILL);
         match heading {
             Some(h) => column(vec![label(h).size(12.0).dim().weight(600), card]).spacing(6.0).width(Length::FILL),
             None => card,
         }
     }
 }
-
-
-
 
 /// `name` cut to at most `max` characters, with an ellipsis when cut (about a
 /// 152-point tile's width at 11 points).
@@ -3592,7 +4194,14 @@ fn setting(name: &str, detail: &str, control: Element<Message>) -> Element<Messa
     if !detail.is_empty() {
         left.push(label(detail).size(11.0).dim().wrap().width(Length::FILL));
     }
-    panel(row(vec![column(left).spacing(2.0).width(Length::FILL), control]).spacing(16.0).align(Align::Center).width(Length::FILL)).padding(Padding::hv(8.0, 12.0)).width(Length::FILL)
+    panel(
+        row(vec![column(left).spacing(2.0).width(Length::FILL), control])
+            .spacing(16.0)
+            .align(Align::Center)
+            .width(Length::FILL),
+    )
+    .padding(Padding::hv(8.0, 12.0))
+    .width(Length::FILL)
 }
 
 /// The slider's top: 300% (Dave, 2026-11-17: "No one will run a monitor
@@ -3624,21 +4233,51 @@ fn percent(v: f32) -> Element<Message> {
 
 /// The size slider, 75% to 150%, sticking to 100% within 3.5%.
 fn size_slider(v: f32) -> Element<Message> {
-    row(vec![slider(0.75, 1.5, v, Message::Size).step(0.01).marks(vec![1.0]).on_release(Message::SizeDone).width(Length::Fixed(220.0)).name("Size"), percent(v)]).spacing(8.0).align(Align::Center)
+    row(vec![
+        slider(0.75, 1.5, v, Message::Size)
+            .step(0.01)
+            .marks(vec![1.0])
+            .on_release(Message::SizeDone)
+            .width(Length::Fixed(220.0))
+            .name("Size"),
+        percent(v),
+    ])
+    .spacing(8.0)
+    .align(Align::Center)
 }
 
 /// A screen's scale slider, with marks at the whole numbers and the default.
 fn scale_slider(v: f32, o: &OutputInfo, marks: &[f64]) -> Element<Message> {
     let max = scale_max(o) as f32;
     let marks: Vec<f32> = marks.iter().map(|m| *m as f32).collect();
-    row(vec![slider(0.75, max, v, Message::Scale).step(0.01).marks(marks).on_release(Message::ScaleDone).width(Length::Fixed(260.0)).name("Scale"), percent(v)]).spacing(8.0).align(Align::Center)
+    row(vec![
+        slider(0.75, max, v, Message::Scale)
+            .step(0.01)
+            .marks(marks)
+            .on_release(Message::ScaleDone)
+            .width(Length::Fixed(260.0))
+            .name("Scale"),
+        percent(v),
+    ])
+    .spacing(8.0)
+    .align(Align::Center)
 }
 
 /// Screen `i`'s scale slider on the Screens overview.
 fn scale_slider_of(i: usize, v: f32, o: &OutputInfo, marks: &[f64]) -> Element<Message> {
     let max = scale_max(o) as f32;
     let marks: Vec<f32> = marks.iter().map(|m| *m as f32).collect();
-    row(vec![slider(0.75, max, v, move |x| Message::ScaleOf(i, x)).step(0.01).marks(marks).on_release(Message::ScaleOfDone(i)).width(Length::Fixed(220.0)).name("Scale"), percent(v)]).spacing(8.0).align(Align::Center)
+    row(vec![
+        slider(0.75, max, v, move |x| Message::ScaleOf(i, x))
+            .step(0.01)
+            .marks(marks)
+            .on_release(Message::ScaleOfDone(i))
+            .width(Length::Fixed(220.0))
+            .name("Scale"),
+        percent(v),
+    ])
+    .spacing(8.0)
+    .align(Align::Center)
 }
 
 /// A preview of a title bar in the chosen layout, in the server's colors.
@@ -3715,7 +4354,17 @@ fn area(outputs: &[OutputInfo], size: (f32, f32)) -> ((f32, f32), f32) {
 fn tiles(outputs: &[OutputInfo], size: (f32, f32)) -> Vec<Rect> {
     let (x0, y0, _, _) = bbox(outputs);
     let (origin, k) = area(outputs, size);
-    outputs.iter().map(|s| Rect::new(origin.0 + (s.x - x0) as f32 * k + GAP, origin.1 + (s.y - y0) as f32 * k + GAP, s.width as f32 * k - 2.0 * GAP, s.height as f32 * k - 2.0 * GAP)).collect()
+    outputs
+        .iter()
+        .map(|s| {
+            Rect::new(
+                origin.0 + (s.x - x0) as f32 * k + GAP,
+                origin.1 + (s.y - y0) as f32 * k + GAP,
+                s.width as f32 * k - 2.0 * GAP,
+                s.height as f32 * k - 2.0 * GAP,
+            )
+        })
+        .collect()
 }
 
 fn inside(r: &Rect, x: f32, y: f32) -> bool {
@@ -3755,7 +4404,13 @@ fn bus_outputs(mail: Mail) {
 
 /// Settings > Session's "Remember the page after closing": the names
 /// shown and the minutes (`[session] settings-keep`; -1 until the next session).
-const KEEP_CHOICES: [(&str, i64); 5] = [("Never", 0), ("10 minutes", 10), ("30 minutes", 30), ("1 hour", 60), ("Until the next session", vergence_widgets::session::UNTIL_NEXT_SESSION)];
+const KEEP_CHOICES: [(&str, i64); 5] = [
+    ("Never", 0),
+    ("10 minutes", 10),
+    ("30 minutes", 30),
+    ("1 hour", 60),
+    ("Until the next session", vergence_widgets::session::UNTIL_NEXT_SESSION),
+];
 
 fn main() -> std::io::Result<()> {
     if std::env::args().any(|a| a == "--version" || a == "-V") {
@@ -3835,15 +4490,31 @@ impl vergence_widgets::prefs::Rows for OwnRows {
         vec![Part {
             title: "On this desktop".into(),
             rows: vec![
-                Row::new("opacity", "Opacity", "30 to 100: how much of the window's ground shows; the text stays as it is.", Control::Percent { min: 30, desktop: format!("Desktop default ({:.0})", opacity * 100.0), now: (opacity * 100.0).round() as u32 }),
-                Row::new("", "Window places", "Where the desktop puts the settings window, for each set of screens.", Control::Button { label: "Forget…".into(), id: 1 }),
+                Row::new(
+                    "opacity",
+                    "Opacity",
+                    "30 to 100: how much of the window's ground shows; the text stays as it is.",
+                    Control::Percent {
+                        min: 30,
+                        desktop: format!("Desktop default ({:.0})", opacity * 100.0),
+                        now: (opacity * 100.0).round() as u32,
+                    },
+                ),
+                Row::new(
+                    "",
+                    "Window places",
+                    "Where the desktop puts the settings window, for each set of screens.",
+                    Control::Button { label: "Forget…".into(), id: 1 },
+                ),
             ],
         }]
     }
 
     fn button(&self, id: u32) {
         if id == 1
-            && let Err(e) = std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", "vergence-settings"]).spawn()
+            && let Err(e) = std::process::Command::new("vergence-settings")
+                .args(["--page", "windows", "--forget", "vergence-settings"])
+                .spawn()
         {
             eprintln!("vergence-settings: {e}");
         }
@@ -3854,7 +4525,11 @@ impl vergence_widgets::prefs::Rows for OwnRows {
 /// ~/.local/state/vergence/applets.toml): tile id, name, who supplies it;
 /// the desktop's first, then by name.
 fn read_applets() -> Vec<(String, String, String)> {
-    let Some(state) = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state"))) else {
+    let Some(state) = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
+    else {
         return Vec::new();
     };
     let text = std::fs::read_to_string(state.join("vergence/applets.toml")).unwrap_or_default();
@@ -3862,7 +4537,10 @@ fn read_applets() -> Vec<(String, String, String)> {
 }
 
 fn parse_applets(text: &str) -> Vec<(String, String, String)> {
-    let Some(a) = text.parse::<toml::Table>().ok().and_then(|t| t.get("applets").and_then(|a| a.as_table()).cloned()) else { return Vec::new() };
+    let Some(a) = text.parse::<toml::Table>().ok().and_then(|t| t.get("applets").and_then(|a| a.as_table()).cloned())
+    else {
+        return Vec::new();
+    };
     let mut out: Vec<(String, String, String)> = a
         .iter()
         .filter_map(|(id, v)| {
@@ -3871,7 +4549,9 @@ fn parse_applets(text: &str) -> Vec<(String, String, String)> {
             Some((id.clone(), s("name"), s("from")))
         })
         .collect();
-    out.sort_by(|a, b| (a.2 != "the desktop").cmp(&(b.2 != "the desktop")).then_with(|| a.1.to_lowercase().cmp(&b.1.to_lowercase())));
+    out.sort_by(|a, b| {
+        (a.2 != "the desktop").cmp(&(b.2 != "the desktop")).then_with(|| a.1.to_lowercase().cmp(&b.1.to_lowercase()))
+    });
     out
 }
 

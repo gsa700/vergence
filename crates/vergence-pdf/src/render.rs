@@ -20,8 +20,8 @@ use std::rc::Rc;
 use vergence_raster::{Blend, Canvas, Cap, Clip, FillRule, Image, Join, Mask, Path, Point, Stroke, Transform};
 
 use crate::color::ColorSpace;
-use crate::font::Font;
 use crate::content;
+use crate::font::Font;
 use crate::function::Function;
 use crate::image::{self, Decoded};
 use crate::object::{Dict, Object, Ref};
@@ -50,14 +50,21 @@ pub fn page_size(page: &Page) -> (f64, f64) {
 /// The page's pixels at `scale` (its full size is page_size times scale,
 /// rounded up), or only the rectangle `region` (x, y, width, height in
 /// those pixels): a tile while zoomed in.
-pub fn render_region(doc: &Document, page: &Page, scale: f64, region: Option<(usize, usize, usize, usize)>) -> Option<Canvas> {
+pub fn render_region(
+    doc: &Document,
+    page: &Page,
+    scale: f64,
+    region: Option<(usize, usize, usize, usize)>,
+) -> Option<Canvas> {
     let b = page_box(page);
     let (w, h) = (b[2] - b[0], b[3] - b[1]);
     let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
     let (dw, dh) = page_size(page);
     let (full_w, full_h) = ((dw * scale).ceil().max(1.0) as usize, (dh * scale).ceil().max(1.0) as usize);
     let (x, y, pw, ph) = match region {
-        Some((x, y, rw, rh)) if rw > 0 && rh > 0 && x < full_w && y < full_h => (x, y, rw.min(full_w - x), rh.min(full_h - y)),
+        Some((x, y, rw, rh)) if rw > 0 && rh > 0 && x < full_w && y < full_h => {
+            (x, y, rw.min(full_w - x), rh.min(full_h - y))
+        }
         Some(_) => return None,
         None => (0, 0, full_w, full_h),
     };
@@ -66,7 +73,17 @@ pub fn render_region(doc: &Document, page: &Page, scale: f64, region: Option<(us
     let mut base = page_transform(b, page.rotate, scale);
     base.e -= x as f64;
     base.f -= y as f64;
-    let mut r = Renderer { doc, canvas, ops: 0, forms: HashSet::new(), base, fonts: std::collections::HashMap::new(), text_only: false, chars: Vec::new(), masks: std::collections::HashMap::new() };
+    let mut r = Renderer {
+        doc,
+        canvas,
+        ops: 0,
+        forms: HashSet::new(),
+        base,
+        fonts: std::collections::HashMap::new(),
+        text_only: false,
+        chars: Vec::new(),
+        masks: std::collections::HashMap::new(),
+    };
     let resources = Rc::new(page.resources.clone().unwrap_or_default());
     let mut gs = State::new(base, Clip::full(pw, ph), resources.clone());
     // The page's box clips everything drawn on it.
@@ -85,7 +102,17 @@ pub fn page_text(doc: &Document, page: &Page) -> Vec<crate::text::Char> {
     let b = page_box(page);
     let Some(canvas) = Canvas::new(1, 1) else { return Vec::new() };
     let base = page_transform(b, page.rotate, 1.0);
-    let mut r = Renderer { doc, canvas, ops: 0, forms: HashSet::new(), base, fonts: std::collections::HashMap::new(), text_only: true, chars: Vec::new(), masks: std::collections::HashMap::new() };
+    let mut r = Renderer {
+        doc,
+        canvas,
+        ops: 0,
+        forms: HashSet::new(),
+        base,
+        fonts: std::collections::HashMap::new(),
+        text_only: true,
+        chars: Vec::new(),
+        masks: std::collections::HashMap::new(),
+    };
     let resources = Rc::new(page.resources.clone().unwrap_or_default());
     let gs = State::new(base, Clip::full(1, 1), resources);
     let data = doc.contents(page);
@@ -170,7 +197,16 @@ struct TextState {
 
 impl Default for TextState {
     fn default() -> TextState {
-        TextState { char_spacing: 0.0, word_spacing: 0.0, scale: 1.0, leading: 0.0, font: None, size: 0.0, mode: 0, rise: 0.0 }
+        TextState {
+            char_spacing: 0.0,
+            word_spacing: 0.0,
+            scale: 1.0,
+            leading: 0.0,
+            font: None,
+            size: 0.0,
+            mode: 0,
+            rise: 0.0,
+        }
     }
 }
 
@@ -178,7 +214,11 @@ impl State {
     /// The clip narrowed to `path` (W, W*, a text clip, a form's BBox).
     fn narrow(&mut self, path: &Path, t: &Transform, rule: FillRule, w: usize, h: usize) {
         self.base_clip = Rc::new(self.base_clip.intersect(path, t, rule, w, h));
-        self.clip = if self.smask.is_some() { Rc::new(self.clip.intersect(path, t, rule, w, h)) } else { self.base_clip.clone() };
+        self.clip = if self.smask.is_some() {
+            Rc::new(self.clip.intersect(path, t, rule, w, h))
+        } else {
+            self.base_clip.clone()
+        };
     }
 
     /// A new soft mask (None: /SMask /None).
@@ -203,7 +243,20 @@ impl State {
 
     fn new(ctm: Transform, clip: Clip, resources: Rc<Dict>) -> State {
         let clip = Rc::new(clip);
-        State { ctm, base_clip: clip.clone(), clip, smask: None, blend: Blend::Normal, stroke: Stroke::default(), stroke_paint: Paint::black(), fill_paint: Paint::black(), stroke_alpha: 1.0, fill_alpha: 1.0, resources, text: TextState::default() }
+        State {
+            ctm,
+            base_clip: clip.clone(),
+            clip,
+            smask: None,
+            blend: Blend::Normal,
+            stroke: Stroke::default(),
+            stroke_paint: Paint::black(),
+            fill_paint: Paint::black(),
+            stroke_alpha: 1.0,
+            fill_alpha: 1.0,
+            resources,
+            text: TextState::default(),
+        }
     }
 }
 
@@ -276,7 +329,11 @@ impl Renderer<'_> {
                 b"j" => gs.stroke.join = join(n(0)),
                 b"M" => gs.stroke.miter_limit = n(0),
                 b"d" => {
-                    gs.stroke.dash = a.first().and_then(Object::as_array).map(|d| d.iter().filter_map(Object::as_f64).collect()).unwrap_or_default();
+                    gs.stroke.dash = a
+                        .first()
+                        .and_then(Object::as_array)
+                        .map(|d| d.iter().filter_map(Object::as_f64).collect())
+                        .unwrap_or_default();
                     gs.stroke.dash_phase = n(1);
                 }
                 b"gs" => {
@@ -339,7 +396,10 @@ impl Renderer<'_> {
                 b"W*" => pending_clip = Some(FillRule::EvenOdd),
                 // Color.
                 b"CS" | b"cs" => {
-                    let space = a.first().and_then(|o| ColorSpace::parse(o, self.doc, Some(&gs.resources))).unwrap_or(ColorSpace::Gray);
+                    let space = a
+                        .first()
+                        .and_then(|o| ColorSpace::parse(o, self.doc, Some(&gs.resources)))
+                        .unwrap_or(ColorSpace::Gray);
                     let paint = Paint { color: space.initial(), space: Rc::new(space), pattern: None };
                     if op.name == b"CS" { gs.stroke_paint = paint } else { gs.fill_paint = paint }
                 }
@@ -348,9 +408,21 @@ impl Renderer<'_> {
                     p.color = a.iter().filter_map(Object::as_f64).collect();
                     p.pattern = a.last().filter(|o| o.as_name().is_some()).cloned();
                 }
-                b"G" | b"g" => set_color(if op.name == b"G" { &mut gs.stroke_paint } else { &mut gs.fill_paint }, ColorSpace::Gray, vec![n(0)]),
-                b"RG" | b"rg" => set_color(if op.name == b"RG" { &mut gs.stroke_paint } else { &mut gs.fill_paint }, ColorSpace::Rgb, vec![n(0), n(1), n(2)]),
-                b"K" | b"k" => set_color(if op.name == b"K" { &mut gs.stroke_paint } else { &mut gs.fill_paint }, ColorSpace::Cmyk, vec![n(0), n(1), n(2), n(3)]),
+                b"G" | b"g" => set_color(
+                    if op.name == b"G" { &mut gs.stroke_paint } else { &mut gs.fill_paint },
+                    ColorSpace::Gray,
+                    vec![n(0)],
+                ),
+                b"RG" | b"rg" => set_color(
+                    if op.name == b"RG" { &mut gs.stroke_paint } else { &mut gs.fill_paint },
+                    ColorSpace::Rgb,
+                    vec![n(0), n(1), n(2)],
+                ),
+                b"K" | b"k" => set_color(
+                    if op.name == b"K" { &mut gs.stroke_paint } else { &mut gs.fill_paint },
+                    ColorSpace::Cmyk,
+                    vec![n(0), n(1), n(2), n(3)],
+                ),
                 // XObjects, shadings, inline images.
                 b"Do" => {
                     if let Some(name) = a.first().and_then(Object::as_name) {
@@ -371,7 +443,11 @@ impl Renderer<'_> {
                         && !self.text_only
                     {
                         let decoded = image::inline(self.doc, d, data, Some(&gs.resources));
-                        self.image(decoded, &gs, matches!(d.get("I").or_else(|| d.get("Interpolate")), Some(Object::Bool(true))));
+                        self.image(
+                            decoded,
+                            &gs,
+                            matches!(d.get("I").or_else(|| d.get("Interpolate")), Some(Object::Bool(true))),
+                        );
                     }
                 }
                 // Text.
@@ -484,7 +560,8 @@ impl Renderer<'_> {
                     // The glyph's box in text space: its width, a usual
                     // ascent and descent, through to the page.
                     let trm = Transform::new(t.size * t.scale, 0.0, 0.0, t.size, 0.0, t.rise).then(tm).then(&gs.ctm);
-                    let corners = [(0.0, -0.2), (w0.max(0.0), -0.2), (0.0, 0.8), (w0.max(0.0), 0.8)].map(|(x, y)| trm.apply(Point::new(x, y)));
+                    let corners = [(0.0, -0.2), (w0.max(0.0), -0.2), (0.0, 0.8), (w0.max(0.0), 0.8)]
+                        .map(|(x, y)| trm.apply(Point::new(x, y)));
                     let (x0, x1) = corners.iter().fold((f64::MAX, f64::MIN), |a, p| (a.0.min(p.x), a.1.max(p.x)));
                     let (y0, y1) = corners.iter().fold((f64::MAX, f64::MIN), |a, p| (a.0.min(p.y), a.1.max(p.y)));
                     let rect = [x0 as f32, y0 as f32, x1 as f32, y1 as f32];
@@ -498,7 +575,8 @@ impl Renderer<'_> {
             }
             if font.is_type3() {
                 // A Type 3 glyph is a content stream in glyph space.
-                if mode != 3 && mode != 7
+                if mode != 3
+                    && mode != 7
                     && let Some((t3, proc_obj)) = font.type3(code)
                     && let Object::Stream(st) = self.doc.resolve(&proc_obj)
                 {
@@ -556,9 +634,13 @@ impl Renderer<'_> {
             gs.stroke.miter_limit = v;
         }
         if let Object::Array(dash) = get("D")
-            && let (Some(arr), Some(phase)) = (dash.first().map(|o| self.doc.resolve(o)), dash.get(1).and_then(|o| self.doc.resolve(o).as_f64()))
+            && let (Some(arr), Some(phase)) =
+                (dash.first().map(|o| self.doc.resolve(o)), dash.get(1).and_then(|o| self.doc.resolve(o).as_f64()))
         {
-            gs.stroke.dash = arr.as_array().map(|a| a.iter().filter_map(|x| self.doc.resolve(x).as_f64()).collect()).unwrap_or_default();
+            gs.stroke.dash = arr
+                .as_array()
+                .map(|a| a.iter().filter_map(|x| self.doc.resolve(x).as_f64()).collect())
+                .unwrap_or_default();
             gs.stroke.dash_phase = phase;
         }
         if let Some(v) = get("CA").as_f64() {
@@ -571,7 +653,10 @@ impl Renderer<'_> {
         match get("BM") {
             Object::Name(n) => gs.blend = Blend::from_name(&n).unwrap_or(Blend::Normal),
             Object::Array(list) => {
-                gs.blend = list.iter().find_map(|o| self.doc.resolve(o).as_name().and_then(Blend::from_name)).unwrap_or(Blend::Normal);
+                gs.blend = list
+                    .iter()
+                    .find_map(|o| self.doc.resolve(o).as_name().and_then(Blend::from_name))
+                    .unwrap_or(Blend::Normal);
             }
             _ => {}
         }
@@ -582,7 +667,8 @@ impl Renderer<'_> {
         match smask.as_ref().map(|o| (o.as_ref(), self.doc.resolve(o))) {
             Some((_, Object::Name(n))) if n == b"None" => gs.set_smask(None),
             Some((reference, Object::Dict(m))) => {
-                let key = reference.map(|r| (r.num, [gs.ctm.a, gs.ctm.b, gs.ctm.c, gs.ctm.d, gs.ctm.e, gs.ctm.f].map(f64::to_bits)));
+                let key = reference
+                    .map(|r| (r.num, [gs.ctm.a, gs.ctm.b, gs.ctm.c, gs.ctm.d, gs.ctm.e, gs.ctm.f].map(f64::to_bits)));
                 let mask = match key.and_then(|k| self.masks.get(&k).cloned()) {
                     Some(m) => Some(m),
                     None => {
@@ -613,8 +699,16 @@ impl Renderer<'_> {
         let mut canvas = Canvas::new(w, h)?;
         if luminosity {
             // The backdrop, in the group's color space; black by default.
-            let space = doc.get_in(&g.dict, "Group").as_dict().map(|gd| doc.get_in(gd, "CS")).and_then(|cs| ColorSpace::parse(&cs, doc, Some(&gs.resources)));
-            let bc: Vec<f64> = doc.get_in(m, "BC").as_array().map(|a| a.iter().filter_map(|x| doc.resolve(x).as_f64()).collect()).unwrap_or_default();
+            let space = doc
+                .get_in(&g.dict, "Group")
+                .as_dict()
+                .map(|gd| doc.get_in(gd, "CS"))
+                .and_then(|cs| ColorSpace::parse(&cs, doc, Some(&gs.resources)));
+            let bc: Vec<f64> = doc
+                .get_in(m, "BC")
+                .as_array()
+                .map(|a| a.iter().filter_map(|x| doc.resolve(x).as_f64()).collect())
+                .unwrap_or_default();
             let rgb = match space {
                 Some(cs) if bc.len() == cs.components() => cs.to_rgb(&bc).unwrap_or([0.0; 3]),
                 _ => [0.0; 3],
@@ -642,7 +736,11 @@ impl Renderer<'_> {
             .0
             .iter()
             .map(|p| {
-                let v = if luminosity { (0.3 * p[0] as f32 + 0.59 * p[1] as f32 + 0.11 * p[2] as f32).round() as usize } else { p[3] as usize };
+                let v = if luminosity {
+                    (0.3 * p[0] as f32 + 0.59 * p[1] as f32 + 0.11 * p[2] as f32).round() as usize
+                } else {
+                    p[3] as usize
+                };
                 lut[v.min(255)]
             })
             .collect();
@@ -700,7 +798,14 @@ impl Renderer<'_> {
 
     /// A form: its /Matrix, its /BBox as a clip, its own resources (or the
     /// caller's), drawn from a copy of the caller's state.
-    fn form(&mut self, s: &crate::object::Stream, reference: Option<Ref>, gs: &State, depth: usize, extra: Option<Transform>) {
+    fn form(
+        &mut self,
+        s: &crate::object::Stream,
+        reference: Option<Ref>,
+        gs: &State,
+        depth: usize,
+        extra: Option<Transform>,
+    ) {
         if depth >= MAX_FORM_DEPTH {
             return;
         }
@@ -726,8 +831,13 @@ impl Renderer<'_> {
         // A transparency group painted with alpha, a blend mode or a soft
         // mask is drawn apart and composited once (§11.4.7): its objects
         // overlap each other as they would at full strength.
-        let group = self.doc.get_in(&s.dict, "Group").as_dict().is_some_and(|g| self.doc.get_in(g, "S").as_name() == Some(b"Transparency".as_slice()));
-        let apart = group && !self.text_only && (gs.fill_alpha < 1.0 || gs.blend != Blend::Normal || gs.smask.is_some());
+        let group = self
+            .doc
+            .get_in(&s.dict, "Group")
+            .as_dict()
+            .is_some_and(|g| self.doc.get_in(g, "S").as_name() == Some(b"Transparency".as_slice()));
+        let apart =
+            group && !self.text_only && (gs.fill_alpha < 1.0 || gs.blend != Blend::Normal || gs.smask.is_some());
         match apart.then(|| Canvas::new(self.canvas.width, self.canvas.height)).flatten() {
             Some(layer) => {
                 let own = std::mem::replace(&mut self.canvas, layer);
@@ -748,7 +858,9 @@ impl Renderer<'_> {
         if self.text_only {
             return;
         }
-        let to_device = |w: usize, h: usize, ctm: &Transform| Transform::new(1.0 / w as f64, 0.0, 0.0, -1.0 / h as f64, 0.0, 1.0).then(ctm);
+        let to_device = |w: usize, h: usize, ctm: &Transform| {
+            Transform::new(1.0 / w as f64, 0.0, 0.0, -1.0 / h as f64, 0.0, 1.0).then(ctm)
+        };
         match decoded {
             Decoded::Color(img) => {
                 let t = to_device(img.width, img.height, &gs.ctm);
@@ -760,7 +872,8 @@ impl Renderer<'_> {
             Decoded::Stencil { width, height, alpha } => {
                 let Some(rgb) = gs.fill_paint.rgb() else { return };
                 let px = |c: f32, a: u8| ((c * a as f32).round()) as u8;
-                let data: Vec<u8> = alpha.iter().flat_map(|a| [px(rgb[0], *a), px(rgb[1], *a), px(rgb[2], *a), *a]).collect();
+                let data: Vec<u8> =
+                    alpha.iter().flat_map(|a| [px(rgb[0], *a), px(rgb[1], *a), px(rgb[2], *a), *a]).collect();
                 let img = Image { width, height, data };
                 let t = to_device(width, height, &gs.ctm);
                 self.canvas.draw_image(&img, &t, true, gs.fill_alpha, Some(&gs.clip));
@@ -797,7 +910,16 @@ impl Renderer<'_> {
 
     /// A shading within `path` (through `path_t`), in shading space `space`.
     #[allow(clippy::too_many_arguments)]
-    fn shade(&mut self, sh: &Object, path: &Path, path_t: &Transform, rule: FillRule, space: &Transform, gs: &State, alpha: f32) {
+    fn shade(
+        &mut self,
+        sh: &Object,
+        path: &Path,
+        path_t: &Transform,
+        rule: FillRule,
+        space: &Transform,
+        gs: &State,
+        alpha: f32,
+    ) {
         if self.text_only {
             return;
         }
@@ -806,10 +928,22 @@ impl Renderer<'_> {
         let Some(d) = sh.as_dict().cloned() else { return };
         let Some(cs) = ColorSpace::parse(&doc.get_in(&d, "ColorSpace"), doc, Some(&gs.resources)) else { return };
         let func = d.get("Function").and_then(|f| Function::parse(f, doc));
-        let nums = |k: &str| -> Vec<f64> { doc.get_in(&d, k).as_array().map(|a| a.iter().filter_map(|x| doc.resolve(x).as_f64()).collect()).unwrap_or_default() };
+        let nums = |k: &str| -> Vec<f64> {
+            doc.get_in(&d, k)
+                .as_array()
+                .map(|a| a.iter().filter_map(|x| doc.resolve(x).as_f64()).collect())
+                .unwrap_or_default()
+        };
         let coords = nums("Coords");
-        let domain = { let v = nums("Domain"); if v.len() >= 2 { v } else { vec![0.0, 1.0, 0.0, 1.0] } };
-        let extend: Vec<bool> = doc.get_in(&d, "Extend").as_array().map(|a| a.iter().map(|x| matches!(doc.resolve(x), Object::Bool(true))).collect()).unwrap_or_default();
+        let domain = {
+            let v = nums("Domain");
+            if v.len() >= 2 { v } else { vec![0.0, 1.0, 0.0, 1.0] }
+        };
+        let extend: Vec<bool> = doc
+            .get_in(&d, "Extend")
+            .as_array()
+            .map(|a| a.iter().map(|x| matches!(doc.resolve(x), Object::Bool(true))).collect())
+            .unwrap_or_default();
         let (e0, e1) = (extend.first().copied().unwrap_or(false), extend.get(1).copied().unwrap_or(false));
         let Some(inv) = space.invert() else { return };
         let color = |t: &[f64]| -> Option<[f32; 3]> {
@@ -836,7 +970,8 @@ impl Renderer<'_> {
             let t: Option<Vec<f64>> = match kind {
                 1 => {
                     let p = finv.apply(q);
-                    (p.x >= domain[0] && p.x <= domain[1] && p.y >= domain[2] && p.y <= domain[3]).then(|| vec![p.x, p.y])
+                    (p.x >= domain[0] && p.x <= domain[1] && p.y >= domain[2] && p.y <= domain[3])
+                        .then(|| vec![p.x, p.y])
                 }
                 2 => {
                     let (x0, y0, x1, y1) = (coords[0], coords[1], coords[2], coords[3]);
@@ -857,7 +992,17 @@ impl Renderer<'_> {
 
     /// A tiling pattern: one cell drawn, then repeated by XStep and YStep.
     #[allow(clippy::too_many_arguments)]
-    fn tiling(&mut self, s: &crate::object::Stream, reference: Option<Ref>, space: &Transform, path: &Path, rule: FillRule, gs: &State, tint: Option<[f32; 3]>, depth: usize) {
+    fn tiling(
+        &mut self,
+        s: &crate::object::Stream,
+        reference: Option<Ref>,
+        space: &Transform,
+        path: &Path,
+        rule: FillRule,
+        gs: &State,
+        tint: Option<[f32; 3]>,
+        depth: usize,
+    ) {
         if depth >= MAX_FORM_DEPTH {
             return;
         }
@@ -884,16 +1029,31 @@ impl Renderer<'_> {
         }
         let Some(cell_canvas) = Canvas::new(cw, ch) else { return };
         let cell_t = Transform::new(k, 0.0, 0.0, -k, -bbox[0] * k, bbox[1] * k + ystep * k);
-        let mut sub = Renderer { doc, canvas: cell_canvas, ops: self.ops, forms: std::mem::take(&mut self.forms), base: cell_t, fonts: std::mem::take(&mut self.fonts) , text_only: false, chars: Vec::new(), masks: std::mem::take(&mut self.masks) };
+        let mut sub = Renderer {
+            doc,
+            canvas: cell_canvas,
+            ops: self.ops,
+            forms: std::mem::take(&mut self.forms),
+            base: cell_t,
+            fonts: std::mem::take(&mut self.fonts),
+            text_only: false,
+            chars: Vec::new(),
+            masks: std::mem::take(&mut self.masks),
+        };
         if let Some(r) = reference {
             sub.forms.insert(r.num);
         }
-        let mut cell_state = State::new(cell_t, Clip::full(cw, ch), Rc::new(doc.get_in(&s.dict, "Resources").as_dict().cloned().unwrap_or_default()));
+        let mut cell_state = State::new(
+            cell_t,
+            Clip::full(cw, ch),
+            Rc::new(doc.get_in(&s.dict, "Resources").as_dict().cloned().unwrap_or_default()),
+        );
         let mut bp = Path::new();
         bp.rect(bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]);
         cell_state.narrow(&bp, &cell_t, FillRule::NonZero, cw, ch);
         if let Some(c) = tint {
-            let paint = Paint { space: Rc::new(ColorSpace::Rgb), color: c.iter().map(|v| *v as f64).collect(), pattern: None };
+            let paint =
+                Paint { space: Rc::new(ColorSpace::Rgb), color: c.iter().map(|v| *v as f64).collect(), pattern: None };
             cell_state.fill_paint = paint.clone();
             cell_state.stroke_paint = paint;
         }
@@ -920,7 +1080,12 @@ impl Renderer<'_> {
             let (cx, cy) = (((u * k) as usize).min(cw - 1), ((ch as f64 - v * k) as usize).min(ch - 1));
             let i = (cy * cw + cx) * 4;
             let p = &cell.data[i..i + 4];
-            [p[0] as f32 / 255.0 * alpha, p[1] as f32 / 255.0 * alpha, p[2] as f32 / 255.0 * alpha, p[3] as f32 / 255.0 * alpha]
+            [
+                p[0] as f32 / 255.0 * alpha,
+                p[1] as f32 / 255.0 * alpha,
+                p[2] as f32 / 255.0 * alpha,
+                p[3] as f32 / 255.0 * alpha,
+            ]
         });
     }
 
@@ -955,9 +1120,12 @@ impl Renderer<'_> {
             // Algorithm 8.1: the form's box through its matrix, fitted to /Rect.
             let m = matrix(doc, &s.dict);
             let Some(bb) = rect(doc, &doc.get_in(&s.dict, "BBox")) else { continue };
-            let pts = [(bb[0], bb[1]), (bb[2], bb[1]), (bb[0], bb[3]), (bb[2], bb[3])].map(|(x, y)| m.apply(Point::new(x, y)));
-            let (tx0, ty0) = (pts.iter().map(|p| p.x).fold(f64::MAX, f64::min), pts.iter().map(|p| p.y).fold(f64::MAX, f64::min));
-            let (tx1, ty1) = (pts.iter().map(|p| p.x).fold(f64::MIN, f64::max), pts.iter().map(|p| p.y).fold(f64::MIN, f64::max));
+            let pts = [(bb[0], bb[1]), (bb[2], bb[1]), (bb[0], bb[3]), (bb[2], bb[3])]
+                .map(|(x, y)| m.apply(Point::new(x, y)));
+            let (tx0, ty0) =
+                (pts.iter().map(|p| p.x).fold(f64::MAX, f64::min), pts.iter().map(|p| p.y).fold(f64::MAX, f64::min));
+            let (tx1, ty1) =
+                (pts.iter().map(|p| p.x).fold(f64::MIN, f64::max), pts.iter().map(|p| p.y).fold(f64::MIN, f64::max));
             if tx1 - tx0 <= 0.0 || ty1 - ty0 <= 0.0 {
                 continue;
             }
@@ -992,7 +1160,11 @@ fn join(v: f64) -> Join {
 
 /// A dictionary's /Matrix (identity if absent or unusable).
 fn matrix(doc: &Document, d: &Dict) -> Transform {
-    let v: Vec<f64> = doc.get_in(d, "Matrix").as_array().map(|a| a.iter().filter_map(|x| doc.resolve(x).as_f64()).collect()).unwrap_or_default();
+    let v: Vec<f64> = doc
+        .get_in(d, "Matrix")
+        .as_array()
+        .map(|a| a.iter().filter_map(|x| doc.resolve(x).as_f64()).collect())
+        .unwrap_or_default();
     if v.len() == 6 {
         let m = Transform::new(v[0], v[1], v[2], v[3], v[4], v[5]);
         if m.is_finite() {
@@ -1059,7 +1231,10 @@ mod tests {
 
     /// A form XObject (a stream object) for `pdf_with`'s extra objects.
     fn form(extra_dict: &str, content: &str) -> String {
-        format!("<< /Type /XObject /Subtype /Form /BBox [0 0 100 100] {extra_dict} /Length {} >>\nstream\n{content}\nendstream", content.len())
+        format!(
+            "<< /Type /XObject /Subtype /Form /BBox [0 0 100 100] {extra_dict} /Length {} >>\nstream\n{content}\nendstream",
+            content.len()
+        )
     }
 
     /// A one-page PDF with more objects after the page's, numbered from 5.
@@ -1082,7 +1257,9 @@ mod tests {
         for o in offsets {
             out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
         }
-        out.extend_from_slice(format!("trailer << /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF", objects.len() + 1).as_bytes());
+        out.extend_from_slice(
+            format!("trailer << /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF", objects.len() + 1).as_bytes(),
+        );
         out
     }
 
@@ -1098,12 +1275,18 @@ mod tests {
 
     #[test]
     fn multiply_darkens_what_is_under_it() {
-        let c = draw("1 0 0 rg 0 0 100 100 re f /M gs 0 0 1 rg 0 0 50 50 re f 0.5 g 50 50 50 50 re f", "<< /ExtGState << /M << /BM /Multiply >> >> >>");
+        let c = draw(
+            "1 0 0 rg 0 0 100 100 re f /M gs 0 0 1 rg 0 0 50 50 re f 0.5 g 50 50 50 50 re f",
+            "<< /ExtGState << /M << /BM /Multiply >> >> >>",
+        );
         assert_eq!(c.pixel(10, 90), [0, 0, 0, 255], "blue times red is black");
         assert_eq!(c.pixel(90, 10), [128, 0, 0, 255], "gray times red is dark red");
         assert_eq!(c.pixel(90, 90), [255, 0, 0, 255], "red where nothing went over it");
         // An array names the first mode known.
-        let c = draw("1 0 0 rg 0 0 100 100 re f /M gs 0 0 1 rg 0 0 100 100 re f", "<< /ExtGState << /M << /BM [/Fancy /Screen] >> >> >>");
+        let c = draw(
+            "1 0 0 rg 0 0 100 100 re f /M gs 0 0 1 rg 0 0 100 100 re f",
+            "<< /ExtGState << /M << /BM [/Fancy /Screen] >> >> >>",
+        );
         assert_eq!(c.pixel(50, 50), [255, 0, 255, 255], "red screened with blue is magenta");
     }
 

@@ -3,7 +3,9 @@
 //! 2026-11-08). Deterministic (a fixed seed); FUZZ_ITERS raises the count for a
 //! long run: `FUZZ_ITERS=2000000 cargo test --release -p vergence-protocol`.
 
-use vergence_protocol::bus::{ClientMsg, ErrorCode, InputInfo, InputKind, OutputInfo, ServerMsg, Setting, SettingValue, Topic};
+use vergence_protocol::bus::{
+    ClientMsg, ErrorCode, InputInfo, InputKind, OutputInfo, ServerMsg, Setting, SettingValue, Topic,
+};
 use vergence_protocol::wire::{FrameReader, MAX_FRAME};
 
 struct Rng(u64);
@@ -119,7 +121,14 @@ fn output(rng: &mut Rng) -> OutputInfo {
         base_scale: rng.f64(),
         shown_by: rng.string(40),
         drawn_by: rng.string(40),
-        modes: (0..rng.below(6)).map(|_| vergence_protocol::bus::ModeInfo { width: rng.next() as u32, height: rng.next() as u32, refresh_mhz: rng.next() as u32, preferred: rng.below(2) == 1 }).collect(),
+        modes: (0..rng.below(6))
+            .map(|_| vergence_protocol::bus::ModeInfo {
+                width: rng.next() as u32,
+                height: rng.next() as u32,
+                refresh_mhz: rng.next() as u32,
+                preferred: rng.below(2) == 1,
+            })
+            .collect(),
         mode: rng.next() as u32,
         text_ratio: rng.f64(),
     }
@@ -140,18 +149,30 @@ fn setting(rng: &mut Rng) -> Setting {
 fn server(rng: &mut Rng) -> ServerMsg {
     let serial = rng.next() as u32;
     match rng.below(11) {
-        9 => ServerMsg::Places { serial, apps: (0..rng.below(6)).map(|_| (rng.string(30), rng.next() as u32)).collect() },
+        9 => {
+            ServerMsg::Places { serial, apps: (0..rng.below(6)).map(|_| (rng.string(30), rng.next() as u32)).collect() }
+        }
         0 => ServerMsg::Welcome { version: rng.next() as u32, client_id: rng.next() as u32 },
         1 => ServerMsg::Pong { serial },
         2 => ServerMsg::Done { serial },
         3 => ServerMsg::Error { serial, code: ErrorCode::from_wire(rng.next() as u16), message: rng.string(100) },
-        4 => ServerMsg::Outputs { serial, outputs: (0..rng.below(5)).map(|_| output(rng)).collect(), setup: rng.string(20) },
-        5 => ServerMsg::Settings { serial, complete: rng.below(2) == 1, settings: (0..rng.below(12)).map(|_| setting(rng)).collect() },
+        4 => ServerMsg::Outputs {
+            serial,
+            outputs: (0..rng.below(5)).map(|_| output(rng)).collect(),
+            setup: rng.string(20),
+        },
+        5 => ServerMsg::Settings {
+            serial,
+            complete: rng.below(2) == 1,
+            settings: (0..rng.below(12)).map(|_| setting(rng)).collect(),
+        },
         6 => ServerMsg::Notified { serial, id: rng.next() as u32 },
         7 => ServerMsg::NotificationClosed { id: rng.next() as u32, reason: rng.next() as u32 },
         8 => ServerMsg::Inputs {
             serial,
-            devices: (0..rng.below(6)).map(|_| InputInfo { name: rng.string(60), kind: InputKind::from_wire(rng.next() as u8) }).collect(),
+            devices: (0..rng.below(6))
+                .map(|_| InputInfo { name: rng.string(60), kind: InputKind::from_wire(rng.next() as u8) })
+                .collect(),
             seen: (0..rng.below(5)).map(|_| InputKind::from_wire(rng.next() as u8)).collect(),
         },
         _ => ServerMsg::ActionInvoked { id: rng.next() as u32, key: rng.string(40) },
@@ -215,7 +236,8 @@ fn mutated_frames_never_panic() {
     let mut rng = Rng::new(3);
     let mut reader = FrameReader::new();
     for _ in 0..iters() {
-        let mut bytes = if rng.below(2) == 0 { client(&mut rng).encode().unwrap() } else { server(&mut rng).encode().unwrap() };
+        let mut bytes =
+            if rng.below(2) == 0 { client(&mut rng).encode().unwrap() } else { server(&mut rng).encode().unwrap() };
         let rounds = 1 + rng.below(4);
         for _ in 0..rounds {
             mutate(&mut rng, &mut bytes);
@@ -261,25 +283,79 @@ fn window_messages_with_descriptors() {
     let pipe = || Fd::new(vergence_protocol::sock::pipe().unwrap().0);
     // Good messages to mutate from.
     let seeds: Vec<WinRequest> = vec![
-        WinRequest::Create { serial: 1, window: 1, role: "main".into(), token: String::new(), title: "t".into(), width: 640.0, height: 480.0, parent: 0, place: Place::Anywhere },
-        WinRequest::Attach { window: 1, buffer: Buffer::Shm { fd: pipe(), width: 64, height: 32, stride: 256, format: 0 }, damage: vec![Damage { x: 0, y: 0, w: 8, h: 8 }] },
-        WinRequest::Meaning { window: 1, focus: 2, caret: None, nodes: vec![Node { id: 2, parent: 0, role: "button".into(), name: "OK".into(), value: None, states: vec![], x: 0.0, y: 0.0, w: 10.0, h: 10.0, items: vec!["One".into(), "Two".into()] }] },
+        WinRequest::Create {
+            serial: 1,
+            window: 1,
+            role: "main".into(),
+            token: String::new(),
+            title: "t".into(),
+            width: 640.0,
+            height: 480.0,
+            parent: 0,
+            place: Place::Anywhere,
+        },
+        WinRequest::Attach {
+            window: 1,
+            buffer: Buffer::Shm { fd: pipe(), width: 64, height: 32, stride: 256, format: 0 },
+            damage: vec![Damage { x: 0, y: 0, w: 8, h: 8 }],
+        },
+        WinRequest::Meaning {
+            window: 1,
+            focus: 2,
+            caret: None,
+            nodes: vec![Node {
+                id: 2,
+                parent: 0,
+                role: "button".into(),
+                name: "OK".into(),
+                value: None,
+                states: vec![],
+                x: 0.0,
+                y: 0.0,
+                w: 10.0,
+                h: 10.0,
+                items: vec!["One".into(), "Two".into()],
+            }],
+        },
         WinRequest::Copy { input_serial: 3, kinds: vec!["text/plain".into()] },
-        WinRequest::Style { window: 1, kind: vergence_protocol::window::WinKind::Dialog, modal: true, min: (320.0, 200.0), max: (1100.0, 0.0), frosted: true },
+        WinRequest::Style {
+            window: 1,
+            kind: vergence_protocol::window::WinKind::Dialog,
+            modal: true,
+            min: (320.0, 200.0),
+            max: (1100.0, 0.0),
+            frosted: true,
+        },
         WinRequest::Bar {
             window: 1,
-            bar: Bar::Tabs { tabs: vec![Tab { id: 1, title: "a".into(), closable: true, alert: false, edited: true }, Tab { id: 2, title: "b".into(), closable: false, alert: true, edited: false }], front: 2, plus: true, accent: Some(0xff0000), menu: vec![MenuEntry { id: 7, label: "m".into() }] },
+            bar: Bar::Tabs {
+                tabs: vec![
+                    Tab { id: 1, title: "a".into(), closable: true, alert: false, edited: true },
+                    Tab { id: 2, title: "b".into(), closable: false, alert: true, edited: false },
+                ],
+                front: 2,
+                plus: true,
+                accent: Some(0xff0000),
+                menu: vec![MenuEntry { id: 7, label: "m".into() }],
+            },
         },
     ];
     let encoded: Vec<Vec<u8>> = seeds.iter().map(|m| m.encode().unwrap().0).collect();
     let events = [
         WinEvent::Keymap { fd: pipe(), size: 10 }.encode().unwrap().0,
         WinEvent::ClipboardData { serial: 1, fd: pipe() }.encode().unwrap().0,
-        WinEvent::TabOut { window: 1, tab: 2, place: Place::Monitor { id: "m".into(), x: 1.0, y: 2.0 } }.encode().unwrap().0,
+        WinEvent::TabOut { window: 1, tab: 2, place: Place::Monitor { id: "m".into(), x: 1.0, y: 2.0 } }
+            .encode()
+            .unwrap()
+            .0,
         WinEvent::TabJoin { window: 1, tab: 2, into: 3, to: 0 }.encode().unwrap().0,
     ];
     for round in 0..iters() {
-        let mut data = if rng.below(3) == 0 { events[rng.below(events.len())].clone() } else { encoded[rng.below(encoded.len())].clone() };
+        let mut data = if rng.below(3) == 0 {
+            events[rng.below(events.len())].clone()
+        } else {
+            encoded[rng.below(encoded.len())].clone()
+        };
         for _ in 0..rng.below(4) {
             mutate(&mut rng, &mut data);
         }

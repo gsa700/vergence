@@ -24,7 +24,10 @@ use vergence_scene::{Image, Rect};
 use vergence_ui::keyboard::sym;
 use vergence_widgets::files::{self, Entry, Kind};
 use vergence_widgets::textarea::{AreaOptions, TextDoc, text_area};
-use vergence_widgets::{Element, Input, Length, Padding, Program, Theme, Waker, Window, button, column, drawing, label, panel, row, scroll, space};
+use vergence_widgets::{
+    Element, Input, Length, Padding, Program, Theme, Waker, Window, button, column, drawing, label, panel, row, scroll,
+    space,
+};
 
 /// What the preview and the window it came from share.
 pub struct Link {
@@ -181,7 +184,15 @@ impl Peek {
             Some(e) if e.kind() == Kind::Sound => self.listen(e.path.clone()),
             Some(e) if e.kind() == Kind::Text => match read_text(&e.path) {
                 Some(text) => {
-                    let options = AreaOptions { editable: false, wrap: true, line_numbers: false, current_line: false, complete: false, spell: false, ..AreaOptions::default() };
+                    let options = AreaOptions {
+                        editable: false,
+                        wrap: true,
+                        line_numbers: false,
+                        current_line: false,
+                        complete: false,
+                        spell: false,
+                        ..AreaOptions::default()
+                    };
                     Shows::Text(TextDoc::with_options(&text, options))
                 }
                 None => Shows::Facts,
@@ -197,7 +208,8 @@ impl Peek {
     /// the worker started without it is replaced at once, and would click.
     fn listen(&self, path: PathBuf) -> Shows {
         let l = crate::listen::Listen::start(path, SLICES, self.waker.clone());
-        let off = vergence_ui::table_value(&crate::desktop_text().0, crate::SECTION, "preview-autoplay").as_deref() == Some("false");
+        let off = vergence_ui::table_value(&crate::desktop_text().0, crate::SECTION, "preview-autoplay").as_deref()
+            == Some("false");
         if self.waker.is_some() && !off {
             l.ask(crate::listen::Ask::Play);
         }
@@ -275,7 +287,12 @@ impl Peek {
 
     fn picture(&self) -> Option<Arc<Image>> {
         let path = &self.entry.as_ref()?.path;
-        self.picture.lock().unwrap_or_else(|e| e.into_inner()).as_ref().filter(|(p, _)| p == path).and_then(|(_, i)| i.clone())
+        self.picture
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .filter(|(p, _)| p == path)
+            .and_then(|(_, i)| i.clone())
     }
 
     /// The size the window wants for what it shows, in points (the server
@@ -293,7 +310,14 @@ impl Peek {
                 None => (640.0, 480.0),
             },
             Shows::Pages => {
-                let first = self.pages.lock().unwrap_or_else(|e| e.into_inner()).sizes.first().copied().unwrap_or((612.0, 792.0));
+                let first = self
+                    .pages
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .sizes
+                    .first()
+                    .copied()
+                    .unwrap_or((612.0, 792.0));
                 let page_w = 720.0;
                 (page_w + STRIP_W + 3.0 * PAD, page_w * first.1 / first.0.max(1.0) + 2.0 * PAD)
             }
@@ -301,7 +325,10 @@ impl Peek {
             Shows::Text(doc) => {
                 let lines = doc.borrow().buffer().line_count() as f32;
                 let line_h = self.theme.mono_size * 1.45;
-                (self.theme.mono_size * 0.6 * 100.0 + 2.0 * PAD + 16.0, (lines * line_h + 2.0 * PAD).clamp(200.0, 1100.0))
+                (
+                    self.theme.mono_size * 0.6 * 100.0 + 2.0 * PAD + 16.0,
+                    (lines * line_h + 2.0 * PAD).clamp(200.0, 1100.0),
+                )
             }
         };
         // The frost's margin around the card.
@@ -332,11 +359,17 @@ impl Peek {
             let (w, h) = p.sizes.get(i).copied().unwrap_or((img.width as f32, img.height as f32));
             pages.push(page(img.clone(), page_w, page_w * h / w.max(1.0)));
             let tw = STRIP_W - 16.0;
-            thumbs.push(button(page(img.clone(), tw, tw * h / w.max(1.0))).on_press(Msg::Page(i)).name(format!("Page {}", i + 1)));
+            thumbs.push(
+                button(page(img.clone(), tw, tw * h / w.max(1.0)))
+                    .on_press(Msg::Page(i))
+                    .name(format!("Page {}", i + 1)),
+            );
         }
         if p.count > p.drawn.len() && p.drawn.len() == PAGES_MAX {
             let more = p.count - PAGES_MAX;
-            pages.push(label(format!("{more} more page{} in the document", if more == 1 { "" } else { "s" })).size(12.0).dim());
+            pages.push(
+                label(format!("{more} more page{} in the document", if more == 1 { "" } else { "s" })).size(12.0).dim(),
+            );
         }
         row(vec![
             scroll(column(thumbs).spacing(8.0).width(Length::FILL)).width(Length::Fixed(STRIP_W)),
@@ -354,9 +387,17 @@ impl Peek {
         let Some(e) = &self.entry else { return space() };
         let cover: Element<Msg> = match &s.cover {
             Some(img) => fitted(img.clone()).width(Length::Fixed(160.0)).height(Length::Fixed(160.0)).name("Cover art"),
-            None => panel(files::entry_icon_sized(e, 8.0).width(Length::Fixed(150.0)).height(Length::Fixed(150.0))).width(Length::Fixed(160.0)).height(Length::Fixed(160.0)),
+            None => panel(files::entry_icon_sized(e, 8.0).width(Length::Fixed(150.0)).height(Length::Fixed(150.0)))
+                .width(Length::Fixed(160.0))
+                .height(Length::Fixed(160.0)),
         };
-        let mut words = vec![label(s.info.as_ref().and_then(|i| i.title.clone()).unwrap_or_else(|| e.name.clone())).size(17.0).weight(600).wrap().width(Length::FILL)];
+        let mut words = vec![
+            label(s.info.as_ref().and_then(|i| i.title.clone()).unwrap_or_else(|| e.name.clone()))
+                .size(17.0)
+                .weight(600)
+                .wrap()
+                .width(Length::FILL),
+        ];
         if let Some(i) = &s.info {
             for w in [&i.artist, &i.album].into_iter().flatten() {
                 words.push(label(w.clone()).size(13.0).wrap().width(Length::FILL));
@@ -367,7 +408,9 @@ impl Peek {
                 n => format!("{n} channels"),
             };
             let bits = if i.bits > 0 { format!(" · {}-bit", i.bits) } else { String::new() };
-            words.push(label(format!("{} · {} kHz{bits} · {ch}", clock(i.seconds()), i.rate as f32 / 1000.0)).size(12.0).dim());
+            words.push(
+                label(format!("{} · {} kHz{bits} · {ch}", clock(i.seconds()), i.rate as f32 / 1000.0)).size(12.0).dim(),
+            );
         }
         if let Some(why) = &s.error {
             words.push(label(why.clone()).size(12.0).dim().wrap().width(Length::FILL));
@@ -387,7 +430,8 @@ impl Peek {
                     let x = r.x + r.w * i as f32 / SLICES as f32;
                     let w = (r.w / SLICES as f32).max(1.0);
                     let (lo, hi) = p[lane];
-                    let (top, bottom) = (mid - hi.clamp(-1.0, 1.0) * lane_h * 0.48, mid - lo.clamp(-1.0, 1.0) * lane_h * 0.48);
+                    let (top, bottom) =
+                        (mid - hi.clamp(-1.0, 1.0) * lane_h * 0.48, mid - lo.clamp(-1.0, 1.0) * lane_h * 0.48);
                     let color = if (i as f32 / SLICES as f32) < played { on } else { off };
                     scene.fill(Rect::new(x, top, w, (bottom - top).max(1.0)), color);
                 }
@@ -429,8 +473,13 @@ impl Peek {
 
     fn facts_view(&self) -> Element<Msg> {
         let Some(e) = &self.entry else { return space() };
-        let kind = if e.dir { "Folder".to_string() } else { vergence_types::describe(e.mime.unwrap_or(vergence_types::of_file(&e.path))) };
-        let mut lines = vec![label(e.name.clone()).size(15.0).weight(600).wrap().width(Length::FILL), label(kind).size(12.0).dim()];
+        let kind = if e.dir {
+            "Folder".to_string()
+        } else {
+            vergence_types::describe(e.mime.unwrap_or(vergence_types::of_file(&e.path)))
+        };
+        let mut lines =
+            vec![label(e.name.clone()).size(15.0).weight(600).wrap().width(Length::FILL), label(kind).size(12.0).dim()];
         if e.dir {
             let n = std::fs::read_dir(&e.path).map(|r| r.count()).unwrap_or(0);
             lines.push(label(format!("{n} item{}", if n == 1 { "" } else { "s" })).size(12.0).dim());
@@ -441,7 +490,8 @@ impl Peek {
             lines.push(label(format!("Changed {}", files::when(c))).size(12.0).dim());
         }
         row(vec![
-            panel(files::entry_icon_sized(e, 8.0).width(Length::Fixed(150.0)).height(Length::Fixed(150.0))).width(Length::Fixed(170.0)),
+            panel(files::entry_icon_sized(e, 8.0).width(Length::Fixed(150.0)).height(Length::Fixed(150.0)))
+                .width(Length::Fixed(170.0)),
             column(lines).spacing(4.0).width(Length::FILL),
         ])
         .spacing(PAD)
@@ -499,7 +549,9 @@ fn read_text(path: &Path) -> Option<String> {
     }
     match std::str::from_utf8(&buf) {
         Ok(s) => Some(s.to_string()),
-        Err(e) if e.valid_up_to() + 4 >= buf.len() => Some(String::from_utf8_lossy(&buf[..e.valid_up_to()]).into_owned()),
+        Err(e) if e.valid_up_to() + 4 >= buf.len() => {
+            Some(String::from_utf8_lossy(&buf[..e.valid_up_to()]).into_owned())
+        }
         Err(_) => None,
     }
 }
@@ -509,7 +561,12 @@ fn app_for(path: &Path) -> Option<(String, String)> {
     let mime = vergence_types::of_file(path);
     let entries = vergence_shell::apps::installed();
     let id = vergence_shell::open::apps_for(mime, &entries, &vergence_types::lists()).into_iter().next()?;
-    let name = entries.iter().find(|e| vergence_shell::open::desktop_id(&e.id) == id).map(|e| e.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| id.trim_end_matches(".desktop").to_string());
+    let name = entries
+        .iter()
+        .find(|e| vergence_shell::open::desktop_id(&e.id) == id)
+        .map(|e| e.name.clone())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| id.trim_end_matches(".desktop").to_string());
     Some((id, name))
 }
 
@@ -532,7 +589,14 @@ impl Program for Peek {
     }
 
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: false, min: (240.0, 160.0), max: (0.0, 0.0), alone: false, frosted: true }
+        vergence_ui::Style {
+            kind: vergence_ui::WinKind::Dialog,
+            modal: false,
+            min: (240.0, 160.0),
+            max: (0.0, 0.0),
+            alone: false,
+            frosted: true,
+        }
     }
 
     /// Its own place in window memory, apart from FileView's windows.
@@ -563,7 +627,16 @@ impl Program for Peek {
     }
 
     fn bar(&self) -> Option<vergence_ui::Bar> {
-        let buttons = self.app.iter().map(|(_, name)| vergence_ui::BarButton { id: OPEN_WITH, icon: vergence_ui::BarIcon::Label, name: format!("Open with {name}"), enabled: true }).collect();
+        let buttons = self
+            .app
+            .iter()
+            .map(|(_, name)| vergence_ui::BarButton {
+                id: OPEN_WITH,
+                icon: vergence_ui::BarIcon::Label,
+                name: format!("Open with {name}"),
+                enabled: true,
+            })
+            .collect();
         Some(vergence_ui::Bar::Tools { buttons, from: 0.0 })
     }
 
@@ -663,7 +736,8 @@ impl Program for Peek {
             }
             Msg::Seek(x) => {
                 if let Shows::Sound(l) = &self.shows {
-                    let frames = l.state.lock().unwrap_or_else(|e| e.into_inner()).info.as_ref().map_or(0, |i| i.frames);
+                    let frames =
+                        l.state.lock().unwrap_or_else(|e| e.into_inner()).info.as_ref().map_or(0, |i| i.frames);
                     let w = (self.card_w() - 2.0 * PAD).max(1.0);
                     l.ask(crate::listen::Ask::Seek(((x / w).clamp(0.0, 1.0) as f64 * frames as f64) as u64));
                     l.ask(crate::listen::Ask::Play);
@@ -702,5 +776,9 @@ impl Program for Peek {
 /// Seconds as m:ss (h:mm:ss past an hour).
 fn clock(seconds: f64) -> String {
     let t = seconds.max(0.0) as u64;
-    if t >= 3600 { format!("{}:{:02}:{:02}", t / 3600, t / 60 % 60, t % 60) } else { format!("{}:{:02}", t / 60, t % 60) }
+    if t >= 3600 {
+        format!("{}:{:02}:{:02}", t / 3600, t / 60 % 60, t % 60)
+    } else {
+        format!("{}:{:02}", t / 60, t % 60)
+    }
 }

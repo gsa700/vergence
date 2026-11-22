@@ -110,7 +110,13 @@ type Res<T> = Result<T, Box<dyn std::error::Error>>;
 /// Own the XSETTINGS selection on `display` and publish `settings` until the
 /// selection is taken or the X server goes away; a poke on `again` reads the
 /// files again and republishes (next serial).
-fn serve(display: u32, mut settings: Settings, again: std::sync::mpsc::Receiver<()>, scale: f64, cursor_points: u32) -> Res<()> {
+fn serve(
+    display: u32,
+    mut settings: Settings,
+    again: std::sync::mpsc::Receiver<()>,
+    scale: f64,
+    cursor_points: u32,
+) -> Res<()> {
     settings.serial = 1;
     let (conn, screen) = RustConnection::connect(Some(&format!(":{display}")))?;
     let root = conn.setup().roots[screen].root;

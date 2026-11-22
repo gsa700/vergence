@@ -101,9 +101,19 @@ pub(crate) struct Label {
 /// coordinates. A press holds the drawing's attention until it is let go.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Touch {
-    Press { x: f32, y: f32 },
-    Move { x: f32, y: f32, pressed: bool },
-    Release { x: f32, y: f32 },
+    Press {
+        x: f32,
+        y: f32,
+    },
+    Move {
+        x: f32,
+        y: f32,
+        pressed: bool,
+    },
+    Release {
+        x: f32,
+        y: f32,
+    },
     /// The pointer left, or the system took a finger back.
     Leave,
 }
@@ -125,21 +135,87 @@ pub(crate) type OnTouch<M> = Box<dyn Fn(Touch) -> Option<M>>;
 
 pub(crate) enum Kind<M> {
     Space,
-    Rule { color: Option<Color>, thickness: f32 },
+    Rule {
+        color: Option<Color>,
+        thickness: f32,
+    },
     Label(Label),
-    Panel { child: Box<Element<M>>, padding: Padding, fill: Option<Color>, edge: Option<(Color, f32)>, radius: f32, align_x: Align, align_y: Align },
-    Button { child: Box<Element<M>>, padding: Padding, on_press: Option<M>, look: ButtonLook, on_drag: Option<M> },
-    Row { children: Vec<Element<M>>, spacing: f32, align: Align, wrap: bool },
-    Column { children: Vec<Element<M>>, spacing: f32, align: Align },
-    Stack { children: Vec<Element<M>> },
-    Switch { on: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
-    Slider { min: f32, max: f32, step: f32, value: f32, marks: Vec<f32>, on_change: Option<Box<dyn Fn(f32) -> M>>, on_release: Option<M> },
-    Field { value: String, placeholder: String, secret: bool, autofocus: bool, on_input: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
-    Choice { options: Vec<String>, selected: Option<usize>, placeholder: String, on_select: Option<Box<dyn Fn(usize) -> M>> },
-    Scroll { child: Box<Element<M>> },
-    Picture { image: Arc<Image>, fit: Fit, radius: f32, opacity: f32 },
-    Drawing { draw: Draw, on_touch: Option<OnTouch<M>>, cursor: Option<vergence_ui::Cursor> },
-    Area { doc: crate::textarea::TextDoc, on_change: Option<M>, autofocus: bool },
+    Panel {
+        child: Box<Element<M>>,
+        padding: Padding,
+        fill: Option<Color>,
+        edge: Option<(Color, f32)>,
+        radius: f32,
+        align_x: Align,
+        align_y: Align,
+    },
+    Button {
+        child: Box<Element<M>>,
+        padding: Padding,
+        on_press: Option<M>,
+        look: ButtonLook,
+        on_drag: Option<M>,
+    },
+    Row {
+        children: Vec<Element<M>>,
+        spacing: f32,
+        align: Align,
+        wrap: bool,
+    },
+    Column {
+        children: Vec<Element<M>>,
+        spacing: f32,
+        align: Align,
+    },
+    Stack {
+        children: Vec<Element<M>>,
+    },
+    Switch {
+        on: bool,
+        on_toggle: Option<Box<dyn Fn(bool) -> M>>,
+    },
+    Slider {
+        min: f32,
+        max: f32,
+        step: f32,
+        value: f32,
+        marks: Vec<f32>,
+        on_change: Option<Box<dyn Fn(f32) -> M>>,
+        on_release: Option<M>,
+    },
+    Field {
+        value: String,
+        placeholder: String,
+        secret: bool,
+        autofocus: bool,
+        on_input: Option<Box<dyn Fn(String) -> M>>,
+        on_submit: Option<M>,
+    },
+    Choice {
+        options: Vec<String>,
+        selected: Option<usize>,
+        placeholder: String,
+        on_select: Option<Box<dyn Fn(usize) -> M>>,
+    },
+    Scroll {
+        child: Box<Element<M>>,
+    },
+    Picture {
+        image: Arc<Image>,
+        fit: Fit,
+        radius: f32,
+        opacity: f32,
+    },
+    Drawing {
+        draw: Draw,
+        on_touch: Option<OnTouch<M>>,
+        cursor: Option<vergence_ui::Cursor>,
+    },
+    Area {
+        doc: crate::textarea::TextDoc,
+        on_change: Option<M>,
+        autofocus: bool,
+    },
 }
 
 /// One piece of a window: built from the program's state each time it
@@ -167,7 +243,19 @@ pub struct Element<M> {
 
 impl<M> Element<M> {
     pub(crate) fn new(kind: Kind<M>, width: Length, height: Length) -> Element<M> {
-        Element { kind, width, height, max_width: None, key: None, name: None, value: None, reveal: false, hover_only: false, pointer: None, on_menu: None }
+        Element {
+            kind,
+            width,
+            height,
+            max_width: None,
+            key: None,
+            name: None,
+            value: None,
+            reveal: false,
+            hover_only: false,
+            pointer: None,
+            on_menu: None,
+        }
     }
 
     pub fn width(mut self, width: Length) -> Self {
@@ -481,13 +569,34 @@ pub fn vrule<M>() -> Element<M> {
 
 /// Text: one line unless it [wraps](Element::wrap).
 pub fn label<M>(text: impl Into<String>) -> Element<M> {
-    Element::new(Kind::Label(Label { text: text.into(), size: None, weight: 400, color: None, dim: false, align: Align::Start, wrap: false, elide: false }), Length::Shrink, Length::Shrink)
+    Element::new(
+        Kind::Label(Label {
+            text: text.into(),
+            size: None,
+            weight: 400,
+            color: None,
+            dim: false,
+            align: Align::Start,
+            wrap: false,
+            elide: false,
+        }),
+        Length::Shrink,
+        Length::Shrink,
+    )
 }
 
 /// A box around one child: a ground, an edge, rounded corners, padding.
 pub fn panel<M>(child: Element<M>) -> Element<M> {
     Element::new(
-        Kind::Panel { child: Box::new(child), padding: Padding::default(), fill: None, edge: None, radius: vergence_look::RADIUS, align_x: Align::Start, align_y: Align::Start },
+        Kind::Panel {
+            child: Box::new(child),
+            padding: Padding::default(),
+            fill: None,
+            edge: None,
+            radius: vergence_look::RADIUS,
+            align_x: Align::Start,
+            align_y: Align::Start,
+        },
         Length::Shrink,
         Length::Shrink,
     )
@@ -495,7 +604,17 @@ pub fn panel<M>(child: Element<M>) -> Element<M> {
 
 /// Something to press, around any child (usually a label).
 pub fn button<M>(child: Element<M>) -> Element<M> {
-    Element::new(Kind::Button { child: Box::new(child), padding: Padding::hv(5.0, 14.0), on_press: None, look: ButtonLook::Normal, on_drag: None }, Length::Shrink, Length::Shrink)
+    Element::new(
+        Kind::Button {
+            child: Box::new(child),
+            padding: Padding::hv(5.0, 14.0),
+            on_press: None,
+            look: ButtonLook::Normal,
+            on_drag: None,
+        },
+        Length::Shrink,
+        Length::Shrink,
+    )
 }
 
 /// Children side by side.
@@ -515,7 +634,11 @@ pub fn stack<M>(children: Vec<Element<M>>) -> Element<M> {
 
 /// On or off. Without `on_toggle` it is off and cannot be changed.
 pub fn switch<M>(on: bool, on_toggle: impl Fn(bool) -> M + 'static) -> Element<M> {
-    Element::new(Kind::Switch { on, on_toggle: Some(Box::new(on_toggle)) }, Length::Fixed(SWITCH_W), Length::Fixed(SWITCH_H))
+    Element::new(
+        Kind::Switch { on, on_toggle: Some(Box::new(on_toggle)) },
+        Length::Fixed(SWITCH_W),
+        Length::Fixed(SWITCH_H),
+    )
 }
 
 pub(crate) const SWITCH_W: f32 = 36.0;
@@ -529,7 +652,15 @@ pub(crate) const FIELD_PAD_H: f32 = 8.0;
 pub fn slider<M>(min: f32, max: f32, value: f32, on_change: impl Fn(f32) -> M + 'static) -> Element<M> {
     let (min, max) = if max > min { (min, max) } else { (min, min + 1.0) };
     Element::new(
-        Kind::Slider { min, max, step: 0.0, value: value.clamp(min, max), marks: Vec::new(), on_change: Some(Box::new(on_change)), on_release: None },
+        Kind::Slider {
+            min,
+            max,
+            step: 0.0,
+            value: value.clamp(min, max),
+            marks: Vec::new(),
+            on_change: Some(Box::new(on_change)),
+            on_release: None,
+        },
         Length::Fixed(200.0),
         Length::Fixed(SLIDER_H),
     )
@@ -539,16 +670,31 @@ pub fn slider<M>(min: f32, max: f32, value: f32, on_change: impl Fn(f32) -> M + 
 /// each change; the program keeps it and gives it back in `value`.
 pub fn field<M>(value: impl Into<String>, on_input: impl Fn(String) -> M + 'static) -> Element<M> {
     Element::new(
-        Kind::Field { value: value.into(), placeholder: String::new(), secret: false, autofocus: false, on_input: Some(Box::new(on_input)), on_submit: None },
+        Kind::Field {
+            value: value.into(),
+            placeholder: String::new(),
+            secret: false,
+            autofocus: false,
+            on_input: Some(Box::new(on_input)),
+            on_submit: None,
+        },
         Length::FILL,
         Length::Shrink,
     )
 }
 
 /// One of a list: a button showing the chosen one, opening the list.
-pub fn choice<M>(options: Vec<String>, selected: Option<usize>, on_select: impl Fn(usize) -> M + 'static) -> Element<M> {
+pub fn choice<M>(
+    options: Vec<String>,
+    selected: Option<usize>,
+    on_select: impl Fn(usize) -> M + 'static,
+) -> Element<M> {
     let selected = selected.filter(|i| *i < options.len());
-    Element::new(Kind::Choice { options, selected, placeholder: String::new(), on_select: Some(Box::new(on_select)) }, Length::Shrink, Length::Shrink)
+    Element::new(
+        Kind::Choice { options, selected, placeholder: String::new(), on_select: Some(Box::new(on_select)) },
+        Length::Shrink,
+        Length::Shrink,
+    )
 }
 
 /// One child, taller than its place, moved up and down within it.
@@ -561,14 +707,22 @@ pub fn scroll<M>(child: Element<M>) -> Element<M> {
 /// as reference units, unless given.
 pub fn picture<M>(image: Arc<Image>) -> Element<M> {
     let (w, h) = (image.width as f32, image.height as f32);
-    Element::new(Kind::Picture { image, fit: Fit::Contain, radius: 0.0, opacity: 1.0 }, Length::Fixed(w), Length::Fixed(h))
+    Element::new(
+        Kind::Picture { image, fit: Fit::Contain, radius: 0.0, opacity: 1.0 },
+        Length::Fixed(w),
+        Length::Fixed(h),
+    )
 }
 
 /// A place the program draws itself: `draw` is given the scene, the fonts
 /// (for `vergence_render::text`), the place, and the theme; `on_touch`, if
 /// any, is told of the pointer and fingers in the place's own coordinates.
 pub fn drawing<M>(draw: impl Fn(&mut Scene, &mut Fonts, Rect, &Theme) + 'static) -> Element<M> {
-    Element::new(Kind::Drawing { draw: Box::new(draw), on_touch: None, cursor: None }, Length::FILL, Length::Fixed(100.0))
+    Element::new(
+        Kind::Drawing { draw: Box::new(draw), on_touch: None, cursor: None },
+        Length::FILL,
+        Length::Fixed(100.0),
+    )
 }
 
 impl<M> Element<M> {

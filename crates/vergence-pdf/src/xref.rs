@@ -16,9 +16,15 @@ const MAX_SECTIONS: usize = 4096;
 pub enum Entry {
     Free,
     /// At a byte offset, with its generation.
-    At { offset: usize, generation: u16 },
+    At {
+        offset: usize,
+        generation: u16,
+    },
     /// The `idx`th object of object stream `stm`.
-    InStream { stm: u32, idx: u32 },
+    InStream {
+        stm: u32,
+        idx: u32,
+    },
 }
 
 pub struct Table {
@@ -44,7 +50,8 @@ pub fn read(data: &[u8], header: usize) -> Option<Table> {
             break;
         }
         // Some files count offsets from the %PDF header, not the file's start.
-        let section = section(data, off, &mut table).or_else(|| if header > 0 { section(data, off + header, &mut table) } else { None });
+        let section = section(data, off, &mut table)
+            .or_else(|| if header > 0 { section(data, off + header, &mut table) } else { None });
         let Some(dict) = section else {
             // The first section unreadable: repair. A later one: what we have.
             if sections == 1 {
@@ -87,7 +94,9 @@ fn section(data: &[u8], off: usize, table: &mut Table) -> Option<Dict> {
                 let kind = l.word();
                 let num = start as u32 + i;
                 let entry = match kind {
-                    b"n" if offset > 0 => Entry::At { offset: offset as usize, generation: generation.min(u16::MAX as u64) as u16 },
+                    b"n" if offset > 0 => {
+                        Entry::At { offset: offset as usize, generation: generation.min(u16::MAX as u64) as u16 }
+                    }
                     _ => Entry::Free,
                 };
                 table.entries.entry(num).or_insert(entry);
@@ -109,7 +118,8 @@ fn stream_section(data: &[u8], off: usize, table: &mut Table) -> Option<Dict> {
     if s.dict.name("Type") != Some(b"XRef") {
         return None;
     }
-    let w: Vec<usize> = s.dict.get("W")?.as_array()?.iter().map(|o| o.as_int().unwrap_or(0).clamp(0, 8) as usize).collect();
+    let w: Vec<usize> =
+        s.dict.get("W")?.as_array()?.iter().map(|o| o.as_int().unwrap_or(0).clamp(0, 8) as usize).collect();
     if w.len() < 3 {
         return None;
     }
@@ -125,7 +135,8 @@ fn stream_section(data: &[u8], off: usize, table: &mut Table) -> Option<Dict> {
     if row == 0 {
         return None;
     }
-    let field = |r: &[u8], from: usize, width: usize| r[from..from + width].iter().fold(0u64, |a, b| a << 8 | *b as u64);
+    let field =
+        |r: &[u8], from: usize, width: usize| r[from..from + width].iter().fold(0u64, |a, b| a << 8 | *b as u64);
     let mut rows = decoded.chunks_exact(row);
     for pair in index.chunks(2) {
         let [start, count] = pair else { break };
@@ -185,7 +196,10 @@ pub fn repair(data: &[u8]) -> Table {
     }
     if !trailer.has("Root") {
         // An xref stream's dictionary, or the catalog itself.
-        let mut by_offset: Vec<(u32, usize)> = entries.iter().filter_map(|(n, e)| if let Entry::At { offset, .. } = e { Some((*n, *offset)) } else { None }).collect();
+        let mut by_offset: Vec<(u32, usize)> = entries
+            .iter()
+            .filter_map(|(n, e)| if let Entry::At { offset, .. } = e { Some((*n, *offset)) } else { None })
+            .collect();
         by_offset.sort_by_key(|(_, o)| std::cmp::Reverse(*o));
         for (num, off) in by_offset {
             let mut l = Lexer::new(data, off);

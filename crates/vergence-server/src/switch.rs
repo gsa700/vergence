@@ -114,7 +114,10 @@ impl Switching {
                 let in_row = if row == rows - 1 { n - row * per_row } else { per_row };
                 let row_w = in_row * tw + (in_row - 1) * GAP;
                 let x0 = panel.loc.x + (w - row_w) / 2;
-                Rectangle::new((x0 + col * (tw + GAP), panel.loc.y + PAD + row * (th + TITLE_H + GAP)).into(), (tw, th + TITLE_H).into())
+                Rectangle::new(
+                    (x0 + col * (tw + GAP), panel.loc.y + PAD + row * (th + TITLE_H + GAP)).into(),
+                    (tw, th + TITLE_H).into(),
+                )
             })
             .collect();
         Some((panel, tiles, (tw, th)))
@@ -145,7 +148,8 @@ impl Server {
                     self.space.outputs().filter_map(|o| self.space.output_geometry(o)).find(|o| o.contains(mid))
                 });
                 let screen = screen.or_else(|| self.output_at_pointer());
-                let mut sw = Switching { list, at: 0, rows, since: Instant::now(), screen, picture: None, backdrop: None };
+                let mut sw =
+                    Switching { list, at: 0, rows, since: Instant::now(), screen, picture: None, backdrop: None };
                 if focused.is_some_and(|f| sw.list[0] == f) {
                     sw.step(back);
                 } else if back {
@@ -153,15 +157,18 @@ impl Server {
                 }
                 self.input.switching = Some(sw);
                 // Live tiles: drawn again while the list is up (thumbs.rs).
-                let _ = self.loop_handle.insert_source(smithay::reexports::calloop::timer::Timer::from_duration(crate::thumbs::EVERY), |_, _, st| {
-                    if st.input.switching.is_none() {
-                        return smithay::reexports::calloop::timer::TimeoutAction::Drop;
-                    }
-                    if st.input.switching.as_ref().is_some_and(|sw| sw.shown()) {
-                        st.redraw_all();
-                    }
-                    smithay::reexports::calloop::timer::TimeoutAction::ToDuration(crate::thumbs::EVERY)
-                });
+                let _ = self.loop_handle.insert_source(
+                    smithay::reexports::calloop::timer::Timer::from_duration(crate::thumbs::EVERY),
+                    |_, _, st| {
+                        if st.input.switching.is_none() {
+                            return smithay::reexports::calloop::timer::TimeoutAction::Drop;
+                        }
+                        if st.input.switching.as_ref().is_some_and(|sw| sw.shown()) {
+                            st.redraw_all();
+                        }
+                        smithay::reexports::calloop::timer::TimeoutAction::ToDuration(crate::thumbs::EVERY)
+                    },
+                );
             }
             Switch::Step { back } => {
                 if let Some(sw) = self.input.switching.as_mut() {
@@ -211,10 +218,15 @@ impl Server {
             items.into_iter().flat_map(|(_, ws)| ws).collect()
         };
         // `alt-tab = "screen"`: only those on the focused window's screen (by their middle).
-        let windows: Vec<Win> = match focused.as_ref().and_then(|f| self.space.element_geometry(f)).filter(|_| self.snap.config.alt_tab_screen && !app) {
+        let windows: Vec<Win> = match focused
+            .as_ref()
+            .and_then(|f| self.space.element_geometry(f))
+            .filter(|_| self.snap.config.alt_tab_screen && !app)
+        {
             Some(g) => {
                 let mid = (g.loc.x + g.size.w / 2, g.loc.y + g.size.h / 2);
-                let screen = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).find(|o| o.contains(mid));
+                let screen =
+                    self.space.outputs().filter_map(|o| self.space.output_geometry(o)).find(|o| o.contains(mid));
                 windows
                     .into_iter()
                     .filter(|w| {
@@ -233,7 +245,14 @@ impl Server {
             }
             None => windows,
         };
-        let mut list: Vec<Win> = self.input.seat.order_of_use().iter().filter_map(|&id| self.input.window(id)).filter(|w| windows.contains(w)).collect();
+        let mut list: Vec<Win> = self
+            .input
+            .seat
+            .order_of_use()
+            .iter()
+            .filter_map(|&id| self.input.window(id))
+            .filter(|w| windows.contains(w))
+            .collect();
         for w in windows {
             if !list.contains(&w) {
                 list.push(w);
@@ -257,7 +276,12 @@ impl Server {
 
     /// Is `pos` on the shown list (dispatch.rs: a press there is the list's)?
     pub fn switcher_contains(&self, pos: Point<f64, Logical>) -> bool {
-        self.input.switching.as_ref().filter(|sw| sw.shown()).and_then(|sw| sw.panel()).is_some_and(|r| r.to_f64().contains(pos))
+        self.input
+            .switching
+            .as_ref()
+            .filter(|sw| sw.shown())
+            .and_then(|sw| sw.panel())
+            .is_some_and(|r| r.to_f64().contains(pos))
     }
 
     /// A click on the list: the tile under it is chosen.
@@ -274,8 +298,17 @@ impl Server {
 
     /// The list's picture on `out`, once it shows: the live pictures in
     /// front, the chrome (tiles' grounds, outline, icons, titles), the frost.
-    pub fn switcher_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
-        let Some((panel, tiles, (tw, th))) = self.input.switching.as_ref().filter(|sw| sw.shown()).and_then(|sw| sw.layout()) else { return Vec::new() };
+    pub fn switcher_elements(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+    ) -> Vec<SceneElement> {
+        let Some((panel, tiles, (tw, th))) =
+            self.input.switching.as_ref().filter(|sw| sw.shown()).and_then(|sw| sw.layout())
+        else {
+            return Vec::new();
+        };
         if !panel.overlaps(out) {
             return Vec::new();
         }
@@ -285,11 +318,31 @@ impl Server {
         let accent = self.accent();
         let pixels = (ICON as f64 * scale).round() as u32;
         let at = self.input.switching.as_ref().unwrap().at;
-        let rows: Vec<(String, String, bool)> = self.input.switching.as_ref().unwrap().rows.iter().map(|r| (r.icon.clone(), r.title.clone(), r.minimized)).collect();
+        let rows: Vec<(String, String, bool)> = self
+            .input
+            .switching
+            .as_ref()
+            .unwrap()
+            .rows
+            .iter()
+            .map(|r| (r.icon.clone(), r.title.clone(), r.minimized))
+            .collect();
         let list: Vec<Win> = self.input.switching.as_ref().unwrap().list.clone();
-        let icons: Vec<Option<Arc<crate::shelf::Icon>>> = rows.iter().map(|(icon, ..)| self.shelf_icon(icon, pixels)).collect();
+        let icons: Vec<Option<Arc<crate::shelf::Icon>>> =
+            rows.iter().map(|(icon, ..)| self.shelf_icon(icon, pixels)).collect();
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        (at, panel.size.w, panel.size.h, tw, th, scale.to_bits(), light, frost.is_some(), (accent.r, accent.g, accent.b)).hash(&mut hasher);
+        (
+            at,
+            panel.size.w,
+            panel.size.h,
+            tw,
+            th,
+            scale.to_bits(),
+            light,
+            frost.is_some(),
+            (accent.r, accent.g, accent.b),
+        )
+            .hash(&mut hasher);
         for ((_, title, min), icon) in rows.iter().zip(&icons) {
             (title, min, icon.is_some()).hash(&mut hasher);
         }
@@ -307,7 +360,11 @@ impl Server {
             for (i, (((_, title, minimized), icon), tile)) in rows.iter().zip(&icons).zip(&tiles).enumerate() {
                 let (x, y) = ((tile.loc.x - panel.loc.x) as f32, (tile.loc.y - panel.loc.y) as f32);
                 // The picture's room: a faint ground where the picture does not fill it.
-                scene.fill_rounded(SceneRect::new(x, y, tw as f32, th as f32), 5.0, Color { a: 26, ..color(s.menu_ink) });
+                scene.fill_rounded(
+                    SceneRect::new(x, y, tw as f32, th as f32),
+                    5.0,
+                    Color { a: 26, ..color(s.menu_ink) },
+                );
                 // The one stepped to: shaded, outlined in the accent.
                 if i == at {
                     let r = SceneRect::new(x - 5.0, y - 5.0, tw as f32 + 10.0, (th + TITLE_H) as f32 + 5.0);
@@ -315,12 +372,18 @@ impl Server {
                     scene.stroke(r, vergence_look::RADIUS + 2.0, 2.5, accent);
                 }
                 let alpha = if *minimized { 0.45 } else { 1.0 };
-                let square = SceneRect::new(x + 2.0, y + th as f32 + (TITLE_H - ICON) as f32 / 2.0, ICON as f32, ICON as f32);
+                let square =
+                    SceneRect::new(x + 2.0, y + th as f32 + (TITLE_H - ICON) as f32 / 2.0, ICON as f32, ICON as f32);
                 match icon {
                     Some(icon) => {
                         let (iw, ih) = (icon.width as f32 / scale as f32, icon.height as f32 / scale as f32);
-                        let picture = scene.image(Image { width: icon.width, height: icon.height, rgba: icon.rgba.clone() });
-                        scene.draw_image(picture, SceneRect::new(square.x + (square.w - iw) / 2.0, square.y + (square.h - ih) / 2.0, iw, ih), alpha);
+                        let picture =
+                            scene.image(Image { width: icon.width, height: icon.height, rgba: icon.rgba.clone() });
+                        scene.draw_image(
+                            picture,
+                            SceneRect::new(square.x + (square.w - iw) / 2.0, square.y + (square.h - ih) / 2.0, iw, ih),
+                            alpha,
+                        );
                     }
                     None => {
                         scene.fill_rounded(square, 4.0, color(s.tile));
@@ -340,13 +403,31 @@ impl Server {
                     }
                     let ink = if *minimized && i != at { s.menu_ink_off } else { s.menu_ink };
                     scene.push_clip(SceneRect::new(tx, y + th as f32, room, TITLE_H as f32), 0.0);
-                    vergence_render::text(&mut scene, fonts, face, size, color(ink), ScenePoint::new(tx, (y + th as f32 + (TITLE_H as f32 - (m.ascent + m.descent)) / 2.0 + m.ascent).round()), &text);
+                    vergence_render::text(
+                        &mut scene,
+                        fonts,
+                        face,
+                        size,
+                        color(ink),
+                        ScenePoint::new(
+                            tx,
+                            (y + th as f32 + (TITLE_H as f32 - (m.ascent + m.descent)) / 2.0 + m.ascent).round(),
+                        ),
+                        &text,
+                    );
                     scene.pop_clip();
                 }
             }
             match vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) {
                 Ok(p) => {
-                    let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+                    let buffer = MemoryRenderBuffer::from_slice(
+                        &p.data,
+                        Fourcc::Abgr8888,
+                        (p.width as i32, p.height as i32),
+                        1,
+                        Transform::Normal,
+                        None,
+                    );
                     self.input.switching.as_mut().unwrap().picture = Some((stamp, buffer));
                 }
                 Err(e) => {
@@ -373,7 +454,15 @@ impl Server {
         let whole = px(panel);
         let src = Rectangle::<f64, Logical>::from_size((whole.size.w as f64, whole.size.h as f64).into());
         if let Some((_, buffer)) = &self.input.switching.as_ref().unwrap().picture
-            && let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(renderer, whole.loc.to_f64(), buffer, None, Some(src), Some(panel.size), Kind::Unspecified)
+            && let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                whole.loc.to_f64(),
+                buffer,
+                None,
+                Some(src),
+                Some(panel.size),
+                Kind::Unspecified,
+            )
         {
             elements.push(SceneElement::Memory(el));
         }
@@ -402,9 +491,16 @@ impl Server {
         match &self.input.switching {
             None => "not switching".into(),
             Some(sw) => {
-                let mut out = vec![format!("at {} of {}, shown {}, panel {:?}", sw.at, sw.list.len(), sw.shown(), sw.panel())];
+                let mut out =
+                    vec![format!("at {} of {}, shown {}, panel {:?}", sw.at, sw.list.len(), sw.shown(), sw.panel())];
                 for (i, r) in sw.rows.iter().enumerate() {
-                    out.push(format!("{}{}: {}{}", if i == sw.at { "> " } else { "  " }, i, r.title, if r.minimized { " (minimized)" } else { "" }));
+                    out.push(format!(
+                        "{}{}: {}{}",
+                        if i == sw.at { "> " } else { "  " },
+                        i,
+                        r.title,
+                        if r.minimized { " (minimized)" } else { "" }
+                    ));
                 }
                 out.join("\n")
             }

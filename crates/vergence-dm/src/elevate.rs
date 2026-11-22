@@ -31,10 +31,14 @@ impl Action {
     /// What the prompt says is asked.
     pub fn describe(&self) -> String {
         match self {
-            Action::AutologinOn(u) => format!("Turn on automatic login for {u}: this machine starts into {u}'s session without a password"),
+            Action::AutologinOn(u) => {
+                format!("Turn on automatic login for {u}: this machine starts into {u}'s session without a password")
+            }
             Action::AutologinOff => "Turn off automatic login".into(),
             Action::LoginScreenOn => "Start this machine at the Vergence login screen".into(),
-            Action::LoginScreenOff => "Stop starting this machine at the Vergence login screen (log in on a text console instead)".into(),
+            Action::LoginScreenOff => {
+                "Stop starting this machine at the Vergence login screen (log in on a text console instead)".into()
+            }
         }
     }
 
@@ -52,7 +56,10 @@ impl Action {
 /// An account's name as accounts are named: letters, digits, '.', '_', '-',
 /// not first; at most 64.
 fn valid_name(n: &str) -> bool {
-    !n.is_empty() && n.len() <= 64 && !n.starts_with('-') && n.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
+    !n.is_empty()
+        && n.len() <= 64
+        && !n.starts_with('-')
+        && n.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
 }
 
 /// The program file a process runs (Linux /proc/<pid>/exe; FreeBSD the
@@ -65,7 +72,14 @@ pub fn program_path(pid: u32) -> Option<std::path::PathBuf> {
     #[cfg(not(target_os = "linux"))]
     {
         unsafe extern "C" {
-            fn sysctl(name: *const i32, namelen: u32, old: *mut u8, oldlen: *mut usize, new: *const u8, newlen: usize) -> i32;
+            fn sysctl(
+                name: *const i32,
+                namelen: u32,
+                old: *mut u8,
+                oldlen: *mut usize,
+                new: *const u8,
+                newlen: usize,
+            ) -> i32;
         }
         let mib = [1i32, 14, 12, pid as i32];
         let mut buf = vec![0u8; 1024];
@@ -95,7 +109,9 @@ fn installed_by_root(path: &std::path::Path) -> bool {
 /// program. The words are what the person decides on; this is a hint.
 pub fn program_shown(pid: u32) -> String {
     match program_path(pid) {
-        Some(p) if installed_by_root(&p) && p.file_name().is_some_and(|n| n == "vergence-settings") => "System Settings".into(),
+        Some(p) if installed_by_root(&p) && p.file_name().is_some_and(|n| n == "vergence-settings") => {
+            "System Settings".into()
+        }
         Some(p) => format!("A program ({})", crate::proto::clean(&p.display().to_string())),
         None => format!("A program (process {pid})"),
     }
@@ -112,7 +128,11 @@ pub fn parent_of(pid: u32) -> Option<u32> {
         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
         stat[stat.rfind(')')? + 1..].split_whitespace().nth(1)?.parse().ok()
     } else {
-        let o = std::process::Command::new("/bin/ps").args(["-o", "ppid=", "-p", &pid.to_string()]).env_clear().output().ok()?;
+        let o = std::process::Command::new("/bin/ps")
+            .args(["-o", "ppid=", "-p", &pid.to_string()])
+            .env_clear()
+            .output()
+            .ok()?;
         String::from_utf8_lossy(&o.stdout).trim().parse().ok()
     }
 }
@@ -170,17 +190,22 @@ mod tests {
 /// thread). What vdm said it did, or why not.
 pub fn request(words: &[&str]) -> Result<String, String> {
     use crate::proto::{self, FromVdm, Service, ToVdm};
-    let mut s = std::os::unix::net::UnixStream::connect(crate::paths::ELEVATE_SOCKET).map_err(|_| "vdm is not running here".to_string())?;
+    let mut s = std::os::unix::net::UnixStream::connect(crate::paths::ELEVATE_SOCKET)
+        .map_err(|_| "vdm is not running here".to_string())?;
     // The prompt waits 120 s, and a check after it may take as long again.
     let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(260)));
-    proto::send_to_vdm(&mut s, &ToVdm::Hello { version: proto::VERSION, service: Service::Elevate }).map_err(|e| e.to_string())?;
-    proto::send_to_vdm(&mut s, &ToVdm::Act(words.iter().map(|w| w.to_string()).collect())).map_err(|e| e.to_string())?;
+    proto::send_to_vdm(&mut s, &ToVdm::Hello { version: proto::VERSION, service: Service::Elevate })
+        .map_err(|e| e.to_string())?;
+    proto::send_to_vdm(&mut s, &ToVdm::Act(words.iter().map(|w| w.to_string()).collect()))
+        .map_err(|e| e.to_string())?;
     let mut said = String::new();
     loop {
         match proto::read_from_vdm(&mut s) {
             Ok(FromVdm::Info(t) | FromVdm::Error(t)) => said = t,
             Ok(FromVdm::Done { ok: true, .. }) => return Ok(said),
-            Ok(FromVdm::Done { ok: false, .. }) => return Err(if said.is_empty() { "not allowed".into() } else { said }),
+            Ok(FromVdm::Done { ok: false, .. }) => {
+                return Err(if said.is_empty() { "not allowed".into() } else { said });
+            }
             Ok(_) => return Err("vdm answered out of turn".into()),
             Err(e) => return Err(format!("vdm: {e}")),
         }

@@ -96,7 +96,8 @@ fn opt_bool(options: &Value, key: &str) -> bool {
 /// A byte string (`ay`, NUL-ended as the portal sends paths) as a path.
 fn bytes_path(v: Option<&Value>) -> Option<PathBuf> {
     let Some(Value::Array(_, items)) = v else { return None };
-    let mut bytes: Vec<u8> = items.iter().filter_map(|b| if let Value::Byte(b) = b { Some(*b) } else { None }).collect();
+    let mut bytes: Vec<u8> =
+        items.iter().filter_map(|b| if let Value::Byte(b) = b { Some(*b) } else { None }).collect();
     while bytes.last() == Some(&0) {
         bytes.pop();
     }
@@ -112,7 +113,9 @@ fn filter_arg(v: &Value) -> Option<String> {
     if let Some(Value::Array(_, rules)) = parts.get(1) {
         for r in rules {
             let Value::Struct(rule) = r else { continue };
-            let (Some(Value::U32(kind)), Some(pattern)) = (rule.first(), rule.get(1).and_then(Value::as_str)) else { continue };
+            let (Some(Value::U32(kind)), Some(pattern)) = (rule.first(), rule.get(1).and_then(Value::as_str)) else {
+                continue;
+            };
             if pattern.contains('|') {
                 continue;
             }
@@ -149,7 +152,13 @@ pub fn request_path(unique: &str, token: &str) -> String {
 fn helper() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
-    [dir.join("vergence-choose"), dir.parent()?.join("libexec/vergence/vergence-choose"), PathBuf::from("/usr/local/libexec/vergence/vergence-choose")].into_iter().find(|p| p.is_file())
+    [
+        dir.join("vergence-choose"),
+        dir.parent()?.join("libexec/vergence/vergence-choose"),
+        PathBuf::from("/usr/local/libexec/vergence/vergence-choose"),
+    ]
+    .into_iter()
+    .find(|p| p.is_file())
 }
 
 /// Whether desktop.toml asks for our dialog in other apps.
@@ -177,7 +186,8 @@ impl Server {
     /// The caller's window: an `x11:<id>` parent if given and found; else
     /// the window of its process with the keyboard; else its newest.
     fn caller_window(&self, conn: u32, parent_window: &str) -> Option<Win> {
-        if let Some(id) = parent_window.strip_prefix("x11:").and_then(|h| u32::from_str_radix(h.trim_start_matches("0x"), 16).ok())
+        if let Some(id) =
+            parent_window.strip_prefix("x11:").and_then(|h| u32::from_str_radix(h.trim_start_matches("0x"), 16).ok())
             && let Some(w) = self.space.elements().find(|e| e.x11_surface().is_some_and(|x| x.window_id() == id))
         {
             return Some(w.clone());
@@ -203,7 +213,9 @@ impl Server {
             format!("vergence{}", self.portal.serial)
         });
         let handle = request_path(unique, &token);
-        let Some(helper) = helper() else { return Err("the file dialog (libexec/vergence/vergence-choose) is not installed".into()) };
+        let Some(helper) = helper() else {
+            return Err("the file dialog (libexec/vergence/vergence-choose) is not installed".into());
+        };
         let mut cmd = std::process::Command::new(helper);
         let mut save_files = None;
         match member {
@@ -220,7 +232,9 @@ impl Server {
                 cmd.arg("--save");
                 // current_file: an existing file being saved again (its folder and name).
                 let file = bytes_path(option(options, "current_file"));
-                if let Some(name) = opt_str(options, "current_name").or_else(|| file.as_ref().and_then(|f| f.file_name()).map(|n| n.to_string_lossy().into_owned())) {
+                if let Some(name) = opt_str(options, "current_name")
+                    .or_else(|| file.as_ref().and_then(|f| f.file_name()).map(|n| n.to_string_lossy().into_owned()))
+                {
                     cmd.args(["--name", &name]);
                 }
                 if let Some(dir) = file.as_ref().and_then(|f| f.parent()) {
@@ -231,7 +245,11 @@ impl Server {
                 // Several files into one folder: the folder is chosen.
                 cmd.arg("--folder");
                 let names: Vec<String> = match option(options, "files") {
-                    Some(Value::Array(_, files)) => files.iter().filter_map(|f| bytes_path(Some(f))).filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).collect(),
+                    Some(Value::Array(_, files)) => files
+                        .iter()
+                        .filter_map(|f| bytes_path(Some(f)))
+                        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                        .collect(),
                     _ => Vec::new(),
                 };
                 save_files = Some(names);
@@ -261,7 +279,11 @@ impl Server {
         let parent = self.caller_window(conn, &parent_window);
         let sender = self.portal_channel();
         crate::no_terminal(&mut cmd);
-        let mut child = cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).spawn().map_err(|e| format!("the file dialog could not be started: {e}"))?;
+        let mut child = cmd
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("the file dialog could not be started: {e}"))?;
         let pid = child.id();
         std::thread::spawn(move || {
             let mut out = String::new();
@@ -272,7 +294,11 @@ impl Server {
             let code = child.wait().ok().and_then(|s| s.code());
             let _ = sender.send((pid, code, out));
         });
-        tracing::info!("portal: {member} for {app} (pid {pid}){}: {:?}", if parent.is_some() { ", over its window" } else { "" }, opts_seen(options));
+        tracing::info!(
+            "portal: {member} for {app} (pid {pid}){}: {:?}",
+            if parent.is_some() { ", over its window" } else { "" },
+            opts_seen(options)
+        );
         self.portal.choosers.insert(pid, Chooser { conn, handle: handle.clone(), parent, save_files });
         Ok(handle)
     }
@@ -299,7 +325,9 @@ impl Server {
     fn portal_answer(&mut self, pid: u32, code: Option<i32>, out: &str) {
         let Some(c) = self.portal.choosers.remove(&pid) else { return };
         // Its window is gone or going: forget whose it was (and any that died).
-        self.portal.adopted.retain(|w, parent| smithay::utils::IsAlive::alive(w) && Some(&*parent) != c.parent.as_ref());
+        self.portal
+            .adopted
+            .retain(|w, parent| smithay::utils::IsAlive::alive(w) && Some(&*parent) != c.parent.as_ref());
         let chosen: Vec<PathBuf> = out.lines().filter(|l| l.starts_with('/')).map(PathBuf::from).collect();
         let (response, uris): (u32, Vec<String>) = match code {
             Some(0) if !chosen.is_empty() => {
@@ -314,7 +342,13 @@ impl Server {
             _ => (2, Vec::new()),
         };
         tracing::info!("portal: dialog {pid} answered {response} ({} file(s))", uris.len());
-        let results = Value::Array("{sv}".into(), vec![Value::Entry(Box::new(Value::Str("uris".into())), Box::new(Value::Variant(Box::new(Value::strings(uris)))))]);
+        let results = Value::Array(
+            "{sv}".into(),
+            vec![Value::Entry(
+                Box::new(Value::Str("uris".into())),
+                Box::new(Value::Variant(Box::new(Value::strings(uris)))),
+            )],
+        );
         self.dbus_request_response(c.conn, &c.handle, response, results);
     }
 
@@ -354,7 +388,14 @@ impl Server {
     /// OpenURI.OpenFile / OpenDirectory: the file passed as descriptor
     /// `args[1]` (an index into `fds`), opened by type, or the folder it is
     /// in shown; the Response sent at once, as OpenURI's.
-    pub fn portal_open_fd(&mut self, conn: u32, unique: &str, directory: bool, args: &[Value], fds: &[std::os::fd::OwnedFd]) -> Result<String, String> {
+    pub fn portal_open_fd(
+        &mut self,
+        conn: u32,
+        unique: &str,
+        directory: bool,
+        args: &[Value],
+        fds: &[std::os::fd::OwnedFd],
+    ) -> Result<String, String> {
         let Some(Value::Fd(i)) = args.get(1) else { return Err("(sha{sv})".into()) };
         let fd = fds.get(*i as usize).ok_or("no such file descriptor")?;
         let path = fd_path(fd).ok_or("the file's path could not be found")?;
@@ -381,7 +422,9 @@ impl Server {
     /// A window just made by a bus client: if it is a portal dialog's (by
     /// the helper's pid), it belongs to the caller's window.
     pub fn portal_adopt(&mut self, w: &Win, pid: Option<u32>) {
-        let Some(parent) = pid.and_then(|p| self.portal.choosers.get(&p)).and_then(|c| c.parent.clone()) else { return };
+        let Some(parent) = pid.and_then(|p| self.portal.choosers.get(&p)).and_then(|c| c.parent.clone()) else {
+            return;
+        };
         self.portal.adopted.insert(w.clone(), parent);
     }
 }
@@ -426,18 +469,28 @@ fn fd_path(fd: &std::os::fd::OwnedFd) -> Option<PathBuf> {
 /// The option names a call carried, for the log (not their values: paths).
 fn opts_seen(options: &Value) -> Vec<String> {
     let Value::Array(_, entries) = options else { return Vec::new() };
-    entries.iter().filter_map(|e| if let Value::Entry(k, _) = e { Some(k.as_str().unwrap_or("?").to_string()) } else { None }).collect()
+    entries
+        .iter()
+        .filter_map(|e| if let Value::Entry(k, _) = e { Some(k.as_str().unwrap_or("?").to_string()) } else { None })
+        .collect()
 }
 
 /// A process's name (its command), for the dialog's remembered folder.
 pub(crate) fn process_name(pid: u32) -> Option<String> {
     #[cfg(target_os = "linux")]
     {
-        std::fs::read_to_string(format!("/proc/{pid}/comm")).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+        std::fs::read_to_string(format!("/proc/{pid}/comm"))
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let out = std::process::Command::new("ps").args(["-o", "comm=", "-p", &pid.to_string()]).stderr(std::process::Stdio::null()).output().ok()?;
+        let out = std::process::Command::new("ps")
+            .args(["-o", "comm=", "-p", &pid.to_string()])
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()?;
         let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
         (!s.is_empty()).then_some(s)
     }
@@ -462,15 +515,30 @@ mod tests {
 
     #[test]
     fn options_filters_and_paths_are_read() {
-        let entry = |k: &str, v: Value| Value::Entry(Box::new(Value::Str(k.into())), Box::new(Value::Variant(Box::new(v))));
-        let filter = |name: &str, rules: Vec<(u32, &str)>| Value::Struct(vec![Value::Str(name.into()), Value::Array("(us)".into(), rules.into_iter().map(|(k, p)| Value::Struct(vec![Value::U32(k), Value::Str(p.into())])).collect())]);
+        let entry =
+            |k: &str, v: Value| Value::Entry(Box::new(Value::Str(k.into())), Box::new(Value::Variant(Box::new(v))));
+        let filter = |name: &str, rules: Vec<(u32, &str)>| {
+            Value::Struct(vec![
+                Value::Str(name.into()),
+                Value::Array(
+                    "(us)".into(),
+                    rules.into_iter().map(|(k, p)| Value::Struct(vec![Value::U32(k), Value::Str(p.into())])).collect(),
+                ),
+            ])
+        };
         let folder: Vec<Value> = b"/home/u/Pictures\0".iter().map(|b| Value::Byte(*b)).collect();
         let opts = Value::Array(
             "{sv}".into(),
             vec![
                 entry("handle_token", Value::Str("t1".into())),
                 entry("multiple", Value::Bool(true)),
-                entry("filters", Value::Array("(sa(us))".into(), vec![filter("Images", vec![(0, "*.png"), (1, "image/jpeg")]), filter("All", vec![(0, "*")])])),
+                entry(
+                    "filters",
+                    Value::Array(
+                        "(sa(us))".into(),
+                        vec![filter("Images", vec![(0, "*.png"), (1, "image/jpeg")]), filter("All", vec![(0, "*")])],
+                    ),
+                ),
                 entry("current_folder", Value::Array("y".into(), folder)),
             ],
         );
@@ -481,8 +549,16 @@ mod tests {
         let Some(Value::Array(_, fs)) = option(&opts, "filters") else { panic!() };
         assert_eq!(filter_arg(&fs[0]).as_deref(), Some("Images|glob:*.png|mime:image/jpeg"));
         assert_eq!(request_path(":1.42", "t1"), "/org/freedesktop/portal/desktop/request/1_42/t1");
-        assert_eq!(request_path(":1.42", "a-b"), "/org/freedesktop/portal/desktop/request/1_42/ab", "only letters, digits and _");
+        assert_eq!(
+            request_path(":1.42", "a-b"),
+            "/org/freedesktop/portal/desktop/request/1_42/ab",
+            "only letters, digits and _"
+        );
         assert_eq!(file_uri(std::path::Path::new("/home/u/a b#c.txt")), "file:///home/u/a%20b%23c.txt");
-        assert_eq!(vergence_types::path_of_link(&file_uri(std::path::Path::new("/tmp/é x"))), Some(PathBuf::from("/tmp/é x")), "round trip");
+        assert_eq!(
+            vergence_types::path_of_link(&file_uri(std::path::Path::new("/tmp/é x"))),
+            Some(PathBuf::from("/tmp/é x")),
+            "round trip"
+        );
     }
 }

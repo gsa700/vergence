@@ -66,7 +66,12 @@ impl SelectionHandler for Server {
 
     /// A Wayland client put something on the clipboard (or cleared it):
     /// native windows and X11 hear of it.
-    fn new_selection(&mut self, ty: smithay::wayland::selection::SelectionTarget, source: Option<smithay::wayland::selection::SelectionSource>, _seat: Seat<Self>) {
+    fn new_selection(
+        &mut self,
+        ty: smithay::wayland::selection::SelectionTarget,
+        source: Option<smithay::wayland::selection::SelectionSource>,
+        _seat: Seat<Self>,
+    ) {
         use smithay::wayland::selection::SelectionTarget;
         if ty != SelectionTarget::Clipboard {
             return;
@@ -82,7 +87,14 @@ impl SelectionHandler for Server {
 
     /// A Wayland client pastes what the server holds for someone: X11's or a
     /// native client's clipboard (before 2026-11-11, X11's never reached it).
-    fn send_selection(&mut self, ty: smithay::wayland::selection::SelectionTarget, mime_type: String, fd: std::os::fd::OwnedFd, _seat: Seat<Self>, owner: &crate::native::ClipOwner) {
+    fn send_selection(
+        &mut self,
+        ty: smithay::wayland::selection::SelectionTarget,
+        mime_type: String,
+        fd: std::os::fd::OwnedFd,
+        _seat: Seat<Self>,
+        owner: &crate::native::ClipOwner,
+    ) {
         use smithay::wayland::selection::SelectionTarget;
         if ty != SelectionTarget::Clipboard {
             return;

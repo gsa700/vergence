@@ -115,8 +115,13 @@ impl MatchRule {
         {
             return false;
         }
-        let eq = |rule: &Option<String>, field: &Option<String>| rule.as_ref().is_none_or(|r| field.as_ref() == Some(r));
-        if !eq(&self.interface, &m.interface) || !eq(&self.member, &m.member) || !eq(&self.path, &m.path) || !eq(&self.destination, &m.destination) {
+        let eq =
+            |rule: &Option<String>, field: &Option<String>| rule.as_ref().is_none_or(|r| field.as_ref() == Some(r));
+        if !eq(&self.interface, &m.interface)
+            || !eq(&self.member, &m.member)
+            || !eq(&self.path, &m.path)
+            || !eq(&self.destination, &m.destination)
+        {
             return false;
         }
         if let Some(ns) = &self.path_namespace {
@@ -134,7 +139,9 @@ impl MatchRule {
         for (i, want, path) in &self.args {
             let Some(got) = arg_str(*i) else { return false };
             let ok = if *path {
-                got == want || (want.ends_with('/') && got.starts_with(want.as_str())) || (got.ends_with('/') && want.starts_with(got))
+                got == want
+                    || (want.ends_with('/') && got.starts_with(want.as_str()))
+                    || (got.ends_with('/') && want.starts_with(got))
             } else {
                 got == want
             };
@@ -168,7 +175,10 @@ mod tests {
 
     #[test]
     fn parse_and_match() {
-        let r = MatchRule::parse("type='signal',sender='org.freedesktop.DBus',member='NameOwnerChanged',arg0='org.mozilla.firefox'").unwrap();
+        let r = MatchRule::parse(
+            "type='signal',sender='org.freedesktop.DBus',member='NameOwnerChanged',arg0='org.mozilla.firefox'",
+        )
+        .unwrap();
         let bus = ["org.freedesktop.DBus".to_string()];
         assert!(r.matches(&noc("org.mozilla.firefox"), &bus));
         assert!(!r.matches(&noc("org.other"), &bus));

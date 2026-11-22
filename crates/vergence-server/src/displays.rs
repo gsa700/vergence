@@ -64,7 +64,8 @@ pub fn parse_mode(s: &str) -> Option<(u32, u32, u32)> {
     let (w, h) = size.split_once('x')?;
     let hz: f64 = rate.trim().parse().ok()?;
     let (w, h): (u32, u32) = (w.trim().parse().ok()?, h.trim().parse().ok()?);
-    (w > 0 && h > 0 && w <= 16384 && h <= 16384 && hz > 1.0 && hz < 1000.0).then(|| (w, h, (hz * 1000.0).round() as u32))
+    (w > 0 && h > 0 && w <= 16384 && h <= 16384 && hz > 1.0 && hz < 1000.0)
+        .then(|| (w, h, (hz * 1000.0).round() as u32))
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
@@ -150,7 +151,12 @@ impl DisplaysConfig {
         let default = if same { on_grid_near(d.exact.max(1.0)) } else { sharp(d.exact) };
         let calc = match d.note {
             Some(n) => format!("calculated 1 ({n})"),
-            None => format!("calculated {:.2} for {:.0} ppi at {} distance", d.exact, d.ppi.unwrap_or(0.0), format!("{dist:?}").to_lowercase()),
+            None => format!(
+                "calculated {:.2} for {:.0} ppi at {} distance",
+                d.exact,
+                d.ppi.unwrap_or(0.0),
+                format!("{dist:?}").to_lowercase()
+            ),
         };
         let chosen = conf.and_then(|c| c.scale).filter(|s| s.is_finite() && (0.5..=8.0).contains(s));
         let (base, how) = match chosen {
@@ -362,15 +368,21 @@ mod tests {
         // No arrangement: left to right.
         assert_eq!(lay_out(&DisplaysConfig::default(), "s", &screens), [(0, 0), (1170, 0)]);
         // B on the left, A on its right, lower down.
-        let c = cfg("[[displays.arrangement]]\nsetup = \"s\"\nplaces = [{ id = \"b\", x = 0, y = 0 }, { id = \"a\", x = 1800, y = 355 }]\n");
+        let c = cfg(
+            "[[displays.arrangement]]\nsetup = \"s\"\nplaces = [{ id = \"b\", x = 0, y = 0 }, { id = \"a\", x = 1800, y = 355 }]\n",
+        );
         assert_eq!(lay_out(&c, "s", &screens), [(1800, 355), (0, 0)]);
         // Another setup's arrangement doesn't apply.
         assert_eq!(lay_out(&c, "other", &screens), [(0, 0), (1170, 0)]);
         // A grew (smaller scale) and now overlaps B: pushed clear.
-        let c = cfg("[[displays.arrangement]]\nsetup = \"s\"\nplaces = [{ id = \"a\", x = 0, y = 0 }, { id = \"b\", x = 1000, y = 0 }]\n");
+        let c = cfg(
+            "[[displays.arrangement]]\nsetup = \"s\"\nplaces = [{ id = \"a\", x = 0, y = 0 }, { id = \"b\", x = 1000, y = 0 }]\n",
+        );
         assert_eq!(lay_out(&c, "s", &screens), [(0, 0), (1170, 0)]);
         // Negative places are moved to 0, 0.
-        let c = cfg("[[displays.arrangement]]\nsetup = \"s\"\nplaces = [{ id = \"a\", x = -1170, y = -10 }, { id = \"b\", x = 0, y = 0 }]\n");
+        let c = cfg(
+            "[[displays.arrangement]]\nsetup = \"s\"\nplaces = [{ id = \"a\", x = -1170, y = -10 }, { id = \"b\", x = 0, y = 0 }]\n",
+        );
         assert_eq!(lay_out(&c, "s", &screens), [(0, 0), (1170, 10)]);
     }
 }

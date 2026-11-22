@@ -26,8 +26,17 @@ const MAX_DEPTH: usize = 8;
 /// a uniform look everywhere, "really important"): Inter for text and the
 /// interface, JetBrains Mono for code, both shipped in share/vergence/fonts
 /// and found there when the system has none of its own.
-const MONOSPACE: [&str; 7] = ["JetBrains Mono", "Noto Sans Mono", "DejaVu Sans Mono", "Liberation Mono", "Adwaita Mono", "Source Code Pro", "Cascadia Mono"];
-const SANS: [&str; 7] = ["Inter", "Inter Variable", "Noto Sans", "DejaVu Sans", "Liberation Sans", "Adwaita Sans", "Cantarell"];
+const MONOSPACE: [&str; 7] = [
+    "JetBrains Mono",
+    "Noto Sans Mono",
+    "DejaVu Sans Mono",
+    "Liberation Mono",
+    "Adwaita Mono",
+    "Source Code Pro",
+    "Cascadia Mono",
+];
+const SANS: [&str; 7] =
+    ["Inter", "Inter Variable", "Noto Sans", "DejaVu Sans", "Liberation Sans", "Adwaita Sans", "Cantarell"];
 const SERIF: [&str; 3] = ["Noto Serif", "DejaVu Serif", "Liberation Serif"];
 
 pub struct Entry {
@@ -70,7 +79,8 @@ impl FontDb {
     pub fn system() -> FontDb {
         let mut dirs: Vec<PathBuf> = Vec::new();
         if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-            let data = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".local/share"));
+            let data =
+                std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".local/share"));
             dirs.push(data.join("fonts"));
             dirs.push(home.join(".fonts"));
         }
@@ -130,7 +140,12 @@ impl FontDb {
         list.iter().find_map(|f| self.in_family(f, weight, italic)).or_else(|| {
             // None of the usual families: any face of the right kind, the
             // nearest in weight and slant, the first of those.
-            let family = self.faces.iter().filter(|e| e.info.monospace == mono).min_by_key(|e| distance(&e.info, weight, italic)).map(|e| e.info.family.clone());
+            let family = self
+                .faces
+                .iter()
+                .filter(|e| e.info.monospace == mono)
+                .min_by_key(|e| distance(&e.info, weight, italic))
+                .map(|e| e.info.family.clone());
             family.and_then(|f| self.in_family(&f, weight, italic))
         })
     }
@@ -156,8 +171,15 @@ impl FontDb {
             .enumerate()
             .filter(|(i, _)| *i != base)
             .map(|(i, e)| {
-                let rank = (e.info.monospace != like.monospace) as u32 * 4 + (e.info.family.split(' ').next() != Some(foundry)) as u32 * 2 + (e.info.italic != like.italic) as u32;
-                (rank, (e.info.width as i32 - like.width as i32).unsigned_abs() * 10_000 + weight_distance(&e.info, like.weight), i)
+                let rank = (e.info.monospace != like.monospace) as u32 * 4
+                    + (e.info.family.split(' ').next() != Some(foundry)) as u32 * 2
+                    + (e.info.italic != like.italic) as u32;
+                (
+                    rank,
+                    (e.info.width as i32 - like.width as i32).unsigned_abs() * 10_000
+                        + weight_distance(&e.info, like.weight),
+                    i,
+                )
             })
             .collect();
         order.sort_unstable();
@@ -181,7 +203,9 @@ fn weight_distance(info: &FaceInfo, weight: u16) -> u32 {
 /// sorting before Regular and the width not looked at; Dave: "the display
 /// seems a little off ... slightly taller than wide"), then the weight.
 fn distance(info: &FaceInfo, weight: u16, italic: bool) -> u32 {
-    (info.italic != italic) as u32 * 100_000 + (info.width as i32 - 5).unsigned_abs() * 10_000 + weight_distance(info, weight)
+    (info.italic != italic) as u32 * 100_000
+        + (info.width as i32 - 5).unsigned_abs() * 10_000
+        + weight_distance(info, weight)
 }
 
 fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
@@ -194,7 +218,12 @@ fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
     for p in entries {
         if p.is_dir() {
             walk(&p, depth + 1, out);
-        } else if p.extension().and_then(|e| e.to_str()).is_some_and(|e| ["ttf", "otf", "ttc", "otc"].iter().any(|x| e.eq_ignore_ascii_case(x))) && out.len() < MAX_FILES {
+        } else if p
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| ["ttf", "otf", "ttc", "otc"].iter().any(|x| e.eq_ignore_ascii_case(x)))
+            && out.len() < MAX_FILES
+        {
             out.push(p);
         }
     }
@@ -258,7 +287,11 @@ mod tests {
         let regular = db.find("sans-serif", 400, false).unwrap();
         assert_eq!(db.faces[regular].info.width, 5);
         let bold = db.find("Noto Sans", 600, false).unwrap();
-        assert_eq!((db.faces[bold].info.width, db.faces[bold].info.weight), (5, 700), "a normal-width bold before a condensed one");
+        assert_eq!(
+            (db.faces[bold].info.width, db.faces[bold].info.weight),
+            (5, 700),
+            "a normal-width bold before a condensed one"
+        );
     }
 
     #[test]
@@ -268,7 +301,12 @@ mod tests {
         assert_eq!(name(&db, db.find("Monospace", 700, false)), Some(("Noto Sans Mono", 700, false)));
         assert_eq!(name(&db, db.find("Sans", 400, false)), Some(("Noto Sans", 400, false)));
         // Without the usual families, any fixed-pitch face.
-        let only = FontDb { faces: vec![entry(Spec { family: "Plain", ..Spec::default() }), entry(Spec { family: "Odd Mono", monospace: true, ..Spec::default() })] };
+        let only = FontDb {
+            faces: vec![
+                entry(Spec { family: "Plain", ..Spec::default() }),
+                entry(Spec { family: "Odd Mono", monospace: true, ..Spec::default() }),
+            ],
+        };
         assert_eq!(name(&only, only.find("monospace", 400, false)), Some(("Odd Mono", 400, false)));
         assert_eq!(FontDb::default().find("monospace", 400, false), None);
     }

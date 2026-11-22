@@ -121,7 +121,10 @@ pub fn find(iface: &str) -> Option<PathBuf> {
 /// named for this process; removed when the client goes.
 fn local_path() -> PathBuf {
     static N: AtomicU32 = AtomicU32::new(0);
-    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).filter(|p| p.is_absolute() && p.is_dir()).unwrap_or_else(std::env::temp_dir);
+    let dir = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute() && p.is_dir())
+        .unwrap_or_else(std::env::temp_dir);
     dir.join(format!("vergence-wpa-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)))
 }
 
@@ -209,7 +212,9 @@ impl Client {
     pub fn networks(&self) -> Result<Vec<Known>> {
         let mut all = parse_networks(&self.request("LIST_NETWORKS")?);
         for k in &mut all {
-            k.manual = self.request(&format!("GET_NETWORK {} id_str", k.id)).is_ok_and(|r| r.trim() == format!("\"{MANUAL}\""));
+            k.manual = self
+                .request(&format!("GET_NETWORK {} id_str", k.id))
+                .is_ok_and(|r| r.trim() == format!("\"{MANUAL}\""));
         }
         Ok(all)
     }
@@ -424,10 +429,18 @@ pub enum Event {
     /// A scan finished: read [`Client::scan_results`].
     ScanResults,
     /// Joined a network.
-    Connected { bssid: String, id: Option<u32> },
-    Disconnected { bssid: String, reason: Option<u32> },
+    Connected {
+        bssid: String,
+        id: Option<u32>,
+    },
+    Disconnected {
+        bssid: String,
+        reason: Option<u32>,
+    },
     /// The network's password was refused.
-    WrongKey { id: Option<u32> },
+    WrongKey {
+        id: Option<u32>,
+    },
     /// None of the known networks is in range.
     NotFound,
     /// wpa_supplicant is stopping.
@@ -456,7 +469,10 @@ pub fn parse_event(text: &str) -> Event {
         let id = word(&body.replace('[', " "), "id").and_then(|v| v.parse().ok());
         Event::Connected { bssid, id }
     } else if body.starts_with("CTRL-EVENT-DISCONNECTED") {
-        Event::Disconnected { bssid: mac(word(body, "bssid")), reason: word(body, "reason").and_then(|v| v.parse().ok()) }
+        Event::Disconnected {
+            bssid: mac(word(body, "bssid")),
+            reason: word(body, "reason").and_then(|v| v.parse().ok()),
+        }
     } else if body.starts_with("CTRL-EVENT-SSID-TEMP-DISABLED") && word(body, "reason") == Some("WRONG_KEY") {
         Event::WrongKey { id: word(body, "id").and_then(|v| v.parse().ok()) }
     } else if body.starts_with("CTRL-EVENT-NETWORK-NOT-FOUND") {
@@ -469,7 +485,9 @@ pub fn parse_event(text: &str) -> Event {
 }
 
 fn is_mac(s: &str) -> bool {
-    s.len() == 17 && s.split(':').count() == 6 && s.split(':').all(|p| p.len() == 2 && p.bytes().all(|b| b.is_ascii_hexdigit()))
+    s.len() == 17
+        && s.split(':').count() == 6
+        && s.split(':').all(|p| p.len() == 2 && p.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
 /// Text from wpa_supplicant as shown: control characters dropped, at most `max` characters.
@@ -588,7 +606,11 @@ pub struct Signal {
 pub fn parse_signal(text: &str) -> Option<Signal> {
     let get = |key: &str| text.lines().find_map(|l| l.strip_prefix(key)?.strip_prefix('='));
     let rssi = get("RSSI")?.parse().ok()?;
-    Some(Signal { rssi, link_mbps: get("LINKSPEED").and_then(|v| v.parse().ok()), freq: get("FREQUENCY").and_then(|v| v.parse().ok()) })
+    Some(Signal {
+        rssi,
+        link_mbps: get("LINKSPEED").and_then(|v| v.parse().ok()),
+        freq: get("FREQUENCY").and_then(|v| v.parse().ok()),
+    })
 }
 
 /// How a network is protected, from its scan flags.
@@ -662,13 +684,23 @@ pub fn parse_scan_results(text: &str) -> Vec<Bss> {
     let mut out = Vec::new();
     for line in text.lines().skip(1) {
         let mut f = line.splitn(5, '\t');
-        let (Some(bssid), Some(freq), Some(signal), Some(flags)) = (f.next(), f.next(), f.next(), f.next()) else { continue };
+        let (Some(bssid), Some(freq), Some(signal), Some(flags)) = (f.next(), f.next(), f.next(), f.next()) else {
+            continue;
+        };
         let raw = unescape(f.next().unwrap_or(""));
         let (Ok(freq), Ok(signal)) = (freq.parse(), signal.parse()) else { continue };
         if !is_mac(bssid) {
             continue;
         }
-        out.push(Bss { bssid: bssid.to_string(), freq, signal, security: security_of(flags), keys: Keys::of(flags), ssid: ssid_text(&raw), ssid_raw: raw });
+        out.push(Bss {
+            bssid: bssid.to_string(),
+            freq,
+            signal,
+            security: security_of(flags),
+            keys: Keys::of(flags),
+            ssid: ssid_text(&raw),
+            ssid_raw: raw,
+        });
     }
     out
 }
@@ -721,7 +753,15 @@ pub fn parse_networks(text: &str) -> Vec<Known> {
         let Some(Ok(id)) = f.first().map(|v| v.parse()) else { continue };
         let raw = unescape(f.get(1).copied().unwrap_or(""));
         let flags = f.get(3).copied().unwrap_or("");
-        out.push(Known { id, ssid: ssid_text(&raw), ssid_raw: raw, current: flags.contains("[CURRENT]"), disabled: flags.contains("[DISABLED]"), temp_disabled: flags.contains("[TEMP-DISABLED]"), manual: false });
+        out.push(Known {
+            id,
+            ssid: ssid_text(&raw),
+            ssid_raw: raw,
+            current: flags.contains("[CURRENT]"),
+            disabled: flags.contains("[DISABLED]"),
+            temp_disabled: flags.contains("[TEMP-DISABLED]"),
+            manual: false,
+        });
     }
     out
 }
@@ -774,7 +814,10 @@ mod tests {
         assert_eq!(all[5].ssid, "Bell[31m", "control characters dropped");
         assert_eq!(all[5].ssid_raw, b"Bell\x07\x1b[31m", "the bytes kept to join it");
         let nets = by_network(all);
-        assert_eq!(nets.iter().map(|b| b.ssid.as_str()).collect::<Vec<_>>(), ["Home", "Bell[31m", "Work", "Café \"free\""]);
+        assert_eq!(
+            nets.iter().map(|b| b.ssid.as_str()).collect::<Vec<_>>(),
+            ["Home", "Bell[31m", "Work", "Café \"free\""]
+        );
         assert_eq!(nets[0].bssid, "aa:bb:cc:dd:ee:01", "the strongest access point of Home");
     }
 
@@ -786,9 +829,14 @@ mod tests {
 
     #[test]
     fn status_and_signal() {
-        let s = parse_status("bssid=aa:bb:cc:dd:ee:01\nfreq=5180\nssid=Home\nid=0\nmode=station\npairwise_cipher=CCMP\nkey_mgmt=WPA2-PSK\nwpa_state=COMPLETED\nip_address=192.168.1.20\naddress=11:22:33:44:55:66\n");
+        let s = parse_status(
+            "bssid=aa:bb:cc:dd:ee:01\nfreq=5180\nssid=Home\nid=0\nmode=station\npairwise_cipher=CCMP\nkey_mgmt=WPA2-PSK\nwpa_state=COMPLETED\nip_address=192.168.1.20\naddress=11:22:33:44:55:66\n",
+        );
         assert!(s.connected());
-        assert_eq!((s.ssid.as_deref(), s.freq, s.id, s.ip.as_deref()), (Some("Home"), Some(5180), Some(0), Some("192.168.1.20")));
+        assert_eq!(
+            (s.ssid.as_deref(), s.freq, s.id, s.ip.as_deref()),
+            (Some("Home"), Some(5180), Some(0), Some("192.168.1.20"))
+        );
         assert!(!parse_status("wpa_state=SCANNING\n").connected());
         assert_eq!(parse_status("ip_address=not an address\n").ip, None);
         let g = parse_signal("RSSI=-52\nLINKSPEED=866\nNOISE=9999\nFREQUENCY=5180\n").unwrap();
@@ -798,7 +846,9 @@ mod tests {
 
     #[test]
     fn known_networks() {
-        let k = parse_networks("network id / ssid / bssid / flags\n0\tHome\tany\t[CURRENT]\n1\tOld\tany\t[DISABLED]\n2\tCaf\\xc3\\xa9\tany\t[TEMP-DISABLED]\n");
+        let k = parse_networks(
+            "network id / ssid / bssid / flags\n0\tHome\tany\t[CURRENT]\n1\tOld\tany\t[DISABLED]\n2\tCaf\\xc3\\xa9\tany\t[TEMP-DISABLED]\n",
+        );
         assert_eq!(k.len(), 3);
         assert!(k[0].current && !k[0].disabled);
         assert!(k[1].disabled);
@@ -813,10 +863,21 @@ mod tests {
             parse_event("<3>CTRL-EVENT-CONNECTED - Connection to aa:bb:cc:dd:ee:01 completed [id=0 id_str=]"),
             Event::Connected { bssid: "aa:bb:cc:dd:ee:01".into(), id: Some(0) }
         );
-        assert_eq!(parse_event("<3>CTRL-EVENT-DISCONNECTED bssid=aa:bb:cc:dd:ee:01 reason=3 locally_generated=1"), Event::Disconnected { bssid: "aa:bb:cc:dd:ee:01".into(), reason: Some(3) });
-        assert_eq!(parse_event("<3>CTRL-EVENT-SSID-TEMP-DISABLED id=4 ssid=\"Home\" auth_failures=1 duration=10 reason=WRONG_KEY"), Event::WrongKey { id: Some(4) });
+        assert_eq!(
+            parse_event("<3>CTRL-EVENT-DISCONNECTED bssid=aa:bb:cc:dd:ee:01 reason=3 locally_generated=1"),
+            Event::Disconnected { bssid: "aa:bb:cc:dd:ee:01".into(), reason: Some(3) }
+        );
+        assert_eq!(
+            parse_event(
+                "<3>CTRL-EVENT-SSID-TEMP-DISABLED id=4 ssid=\"Home\" auth_failures=1 duration=10 reason=WRONG_KEY"
+            ),
+            Event::WrongKey { id: Some(4) }
+        );
         assert_eq!(parse_event("<3>CTRL-EVENT-NETWORK-NOT-FOUND"), Event::NotFound);
-        assert_eq!(parse_event("<3>Trying to associate with \x1b[1mx"), Event::Other("Trying to associate with [1mx".into()));
+        assert_eq!(
+            parse_event("<3>Trying to associate with \x1b[1mx"),
+            Event::Other("Trying to associate with [1mx".into())
+        );
         assert!(is_event("<3>x"));
         assert!(!is_event("OK\n"));
         assert!(!is_event("<a>x"));
@@ -828,7 +889,11 @@ mod tests {
         assert!(ssid_arg(b"").is_err());
         assert!(ssid_arg(&[b'a'; 33]).is_err());
         assert_eq!(psk_arg("correct horse").unwrap(), "\"correct horse\"");
-        assert_eq!(psk_arg("say \"hi\" now").unwrap(), "\"say \"hi\" now\"", "wpa_supplicant takes up to the last quote");
+        assert_eq!(
+            psk_arg("say \"hi\" now").unwrap(),
+            "\"say \"hi\" now\"",
+            "wpa_supplicant takes up to the last quote"
+        );
         assert!(psk_arg("short").is_err());
         assert!(psk_arg(&"x".repeat(64)).is_err(), "64 characters that are not hex");
         assert_eq!(psk_arg(&"a1".repeat(32)).unwrap(), "a1".repeat(32), "a raw key, unquoted");
@@ -867,7 +932,11 @@ mod tests {
 
     fn fake(answers: Vec<(&'static str, &'static str)>, events: Vec<&'static str>) -> Fake {
         static N: AtomicU32 = AtomicU32::new(0);
-        let dir = std::env::temp_dir().join(format!("vergence-net-test-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        let dir = std::env::temp_dir().join(format!(
+            "vergence-net-test-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("wlan0");
         let sock = UnixDatagram::bind(&path).unwrap();
@@ -897,7 +966,16 @@ mod tests {
 
     #[test]
     fn a_client_talks_to_a_fake_wpa_supplicant() {
-        let f = fake(vec![("PING", "PONG\n"), ("STATUS", "wpa_state=COMPLETED\nssid=Home\n"), ("SCAN_RESULTS", SCAN), ("SCAN", "FAIL-BUSY\n"), ("LIST_NETWORKS", "network id / ssid / bssid / flags\n0\tHome\tany\t[CURRENT]\n")], vec![]);
+        let f = fake(
+            vec![
+                ("PING", "PONG\n"),
+                ("STATUS", "wpa_state=COMPLETED\nssid=Home\n"),
+                ("SCAN_RESULTS", SCAN),
+                ("SCAN", "FAIL-BUSY\n"),
+                ("LIST_NETWORKS", "network id / ssid / bssid / flags\n0\tHome\tany\t[CURRENT]\n"),
+            ],
+            vec![],
+        );
         let c = Client::open(&f.path).unwrap();
         c.ping().unwrap();
         assert_eq!(c.status().unwrap().ssid.as_deref(), Some("Home"));
@@ -911,12 +989,26 @@ mod tests {
 
     #[test]
     fn joining_sends_checked_commands_in_order() {
-        let f = fake(vec![("ADD_NETWORK", "3\n"), ("SET_NETWORK", "OK\n"), ("ENABLE_NETWORK", "OK\n"), ("SELECT_NETWORK", "OK\n")], vec![]);
+        let f = fake(
+            vec![
+                ("ADD_NETWORK", "3\n"),
+                ("SET_NETWORK", "OK\n"),
+                ("ENABLE_NETWORK", "OK\n"),
+                ("SELECT_NETWORK", "OK\n"),
+            ],
+            vec![],
+        );
         let c = Client::open(&f.path).unwrap();
         assert_eq!(c.join(b"Home", Some("correct horse"), Keys::default()).unwrap(), 3);
         assert_eq!(
             *f.sent.lock().unwrap(),
-            ["ADD_NETWORK", "SET_NETWORK 3 ssid 486f6d65", "SET_NETWORK 3 psk \"correct horse\"", "ENABLE_NETWORK 3", "SELECT_NETWORK 3"]
+            [
+                "ADD_NETWORK",
+                "SET_NETWORK 3 ssid 486f6d65",
+                "SET_NETWORK 3 psk \"correct horse\"",
+                "ENABLE_NETWORK 3",
+                "SELECT_NETWORK 3"
+            ]
         );
         f.sent.lock().unwrap().clear();
         c.join(b"Cafe", None, Keys::default()).unwrap();
@@ -929,7 +1021,15 @@ mod tests {
 
     #[test]
     fn a_refused_setting_removes_the_half_made_network() {
-        let f = fake(vec![("ADD_NETWORK", "5\n"), ("SET_NETWORK 5 ssid", "OK\n"), ("SET_NETWORK 5 psk", "FAIL\n"), ("REMOVE_NETWORK", "OK\n")], vec![]);
+        let f = fake(
+            vec![
+                ("ADD_NETWORK", "5\n"),
+                ("SET_NETWORK 5 ssid", "OK\n"),
+                ("SET_NETWORK 5 psk", "FAIL\n"),
+                ("REMOVE_NETWORK", "OK\n"),
+            ],
+            vec![],
+        );
         let c = Client::open(&f.path).unwrap();
         assert!(matches!(c.join(b"Home", Some("correct horse"), Keys::default()), Err(Error::Failed(_))));
         assert_eq!(f.sent.lock().unwrap().last().map(String::as_str), Some("REMOVE_NETWORK 5"));
@@ -939,7 +1039,10 @@ mod tests {
     fn a_network_joined_only_when_chosen_is_kept_disabled_when_not_in_use() {
         let f = fake(
             vec![
-                ("LIST_NETWORKS", "network id / ssid / bssid / flags\n0\tHome\tany\t[CURRENT]\n1\tPhone\tany\t\n2\tOld\tany\t[DISABLED]\n"),
+                (
+                    "LIST_NETWORKS",
+                    "network id / ssid / bssid / flags\n0\tHome\tany\t[CURRENT]\n1\tPhone\tany\t\n2\tOld\tany\t[DISABLED]\n",
+                ),
                 ("GET_NETWORK 1 id_str", "\"vergence-manual\"\n"),
                 ("GET_NETWORK", "FAIL\n"),
                 ("SET_NETWORK", "OK\n"),
@@ -1016,7 +1119,13 @@ mod tests {
 
     #[test]
     fn events_arrive_after_attach() {
-        let f = fake(vec![("ATTACH", "OK\n"), ("DETACH", "OK\n")], vec!["<2>CTRL-EVENT-SCAN-RESULTS ", "<3>CTRL-EVENT-SSID-TEMP-DISABLED id=3 ssid=\"Home\" auth_failures=1 duration=10 reason=WRONG_KEY"]);
+        let f = fake(
+            vec![("ATTACH", "OK\n"), ("DETACH", "OK\n")],
+            vec![
+                "<2>CTRL-EVENT-SCAN-RESULTS ",
+                "<3>CTRL-EVENT-SSID-TEMP-DISABLED id=3 ssid=\"Home\" auth_failures=1 duration=10 reason=WRONG_KEY",
+            ],
+        );
         let e = Events::attach(&f.path).unwrap();
         assert_eq!(e.next(Duration::from_secs(2)).unwrap(), Some(Event::ScanResults));
         assert_eq!(e.next(Duration::from_secs(2)).unwrap(), Some(Event::WrongKey { id: Some(3) }));

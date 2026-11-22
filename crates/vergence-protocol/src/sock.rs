@@ -103,10 +103,23 @@ struct Control([u8; CMSG_DATA + MAX_FDS * 4]);
 /// with the descriptors that came beside them appended to `fds`. Past
 /// `max_waiting` descriptors waiting there, more are closed at once: a peer
 /// cannot make this side hold descriptors nobody claims.
-pub fn recv_with_fds(stream: &UnixStream, buf: &mut [u8], fds: &mut VecDeque<OwnedFd>, max_waiting: usize) -> io::Result<usize> {
+pub fn recv_with_fds(
+    stream: &UnixStream,
+    buf: &mut [u8],
+    fds: &mut VecDeque<OwnedFd>,
+    max_waiting: usize,
+) -> io::Result<usize> {
     let mut control = Control([0; CMSG_DATA + MAX_FDS * 4]);
     let mut iov = IoVec { base: buf.as_mut_ptr(), len: buf.len() };
-    let mut msg = MsgHdr { name: std::ptr::null_mut(), namelen: 0, iov: &mut iov, iovlen: 1, control: control.0.as_mut_ptr(), controllen: control.0.len() as sys::ControlLen, flags: 0 };
+    let mut msg = MsgHdr {
+        name: std::ptr::null_mut(),
+        namelen: 0,
+        iov: &mut iov,
+        iovlen: 1,
+        control: control.0.as_mut_ptr(),
+        controllen: control.0.len() as sys::ControlLen,
+        flags: 0,
+    };
     let n = loop {
         // SAFETY: msg points at buffers that live across the call and says their true sizes.
         let n = unsafe { recvmsg(stream.as_raw_fd(), &mut msg, sys::MSG_CMSG_CLOEXEC) };

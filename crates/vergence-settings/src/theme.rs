@@ -28,7 +28,10 @@ pub fn settings_path() -> PathBuf {
 }
 
 pub fn read() -> Settings {
-    std::fs::read_to_string(settings_path()).ok().and_then(|t| vergence_xsettings::from_toml(&t).ok()).unwrap_or_default()
+    std::fs::read_to_string(settings_path())
+        .ok()
+        .and_then(|t| vergence_xsettings::from_toml(&t).ok())
+        .unwrap_or_default()
 }
 
 pub fn get(s: &Settings, key: &str) -> String {
@@ -43,7 +46,9 @@ pub fn get(s: &Settings, key: &str) -> String {
 pub fn set(key: &str, value: &str) -> Result<(), String> {
     let path = settings_path();
     let mut s = match std::fs::read_to_string(&path) {
-        Ok(t) => vergence_xsettings::from_toml(&t).map_err(|e| format!("{}: {e}; not overwriting it", path.display()))?,
+        Ok(t) => {
+            vergence_xsettings::from_toml(&t).map_err(|e| format!("{}: {e}; not overwriting it", path.display()))?
+        }
         Err(_) => Settings::default(),
     };
     s.set(key, Value::Str(value.to_string()));
@@ -61,8 +66,18 @@ pub fn set(key: &str, value: &str) -> Result<(), String> {
 fn theme_dirs(kind: &str) -> Vec<PathBuf> {
     let h = home();
     match kind {
-        "themes" => vec![h.join(".themes"), h.join(".local/share/themes"), "/usr/local/share/themes".into(), "/usr/share/themes".into()],
-        _ => vec![h.join(".icons"), h.join(".local/share/icons"), "/usr/local/share/icons".into(), "/usr/share/icons".into()],
+        "themes" => vec![
+            h.join(".themes"),
+            h.join(".local/share/themes"),
+            "/usr/local/share/themes".into(),
+            "/usr/share/themes".into(),
+        ],
+        _ => vec![
+            h.join(".icons"),
+            h.join(".local/share/icons"),
+            "/usr/local/share/icons".into(),
+            "/usr/share/icons".into(),
+        ],
     }
 }
 
@@ -73,7 +88,8 @@ fn names(dirs: &[PathBuf], keep: impl Fn(&Path) -> bool) -> Vec<String> {
         let Ok(entries) = std::fs::read_dir(d) else { continue };
         for e in entries.flatten() {
             let p = e.path();
-            if p.is_dir() && keep(&p)
+            if p.is_dir()
+                && keep(&p)
                 && let Some(n) = p.file_name().and_then(|n| n.to_str())
                 && !out.iter().any(|x| x == n)
             {
@@ -93,7 +109,8 @@ pub fn gtk_themes() -> Vec<String> {
 /// Icon themes: an index.theme that names icon folders (not just a pointer theme).
 pub fn icon_themes() -> Vec<String> {
     names(&theme_dirs("icons"), |p| {
-        std::fs::read_to_string(p.join("index.theme")).is_ok_and(|t| t.lines().any(|l| l.trim_start().starts_with("Directories=")))
+        std::fs::read_to_string(p.join("index.theme"))
+            .is_ok_and(|t| t.lines().any(|l| l.trim_start().starts_with("Directories=")))
     })
 }
 
@@ -124,7 +141,9 @@ pub fn font_families(mono: bool) -> Vec<String> {
 pub fn split_font(name: &str) -> (String, f32) {
     let name = name.trim();
     match name.rsplit_once(' ') {
-        Some((family, size)) if size.parse::<f32>().is_ok_and(|s| s > 0.0) => (family.to_string(), size.parse().unwrap()),
+        Some((family, size)) if size.parse::<f32>().is_ok_and(|s| s > 0.0) => {
+            (family.to_string(), size.parse().unwrap())
+        }
         _ => (name.to_string(), 10.0),
     }
 }

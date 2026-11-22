@@ -30,11 +30,17 @@ pub struct Client {
 /// the usual places.
 pub fn system_bus_path() -> Option<PathBuf> {
     if let Ok(a) = std::env::var("DBUS_SYSTEM_BUS_ADDRESS")
-        && let Some(p) = a.split(';').find_map(|t| t.strip_prefix("unix:")).and_then(|t| t.split(',').find_map(|kv| kv.strip_prefix("path=")))
+        && let Some(p) = a
+            .split(';')
+            .find_map(|t| t.strip_prefix("unix:"))
+            .and_then(|t| t.split(',').find_map(|kv| kv.strip_prefix("path=")))
     {
         return Some(PathBuf::from(p));
     }
-    ["/run/dbus/system_bus_socket", "/var/run/dbus/system_bus_socket"].into_iter().map(PathBuf::from).find(|p| p.exists())
+    ["/run/dbus/system_bus_socket", "/var/run/dbus/system_bus_socket"]
+        .into_iter()
+        .map(PathBuf::from)
+        .find(|p| p.exists())
 }
 
 fn other(text: impl Into<String>) -> io::Error {
@@ -53,7 +59,9 @@ impl Client {
         sock.set_read_timeout(Some(Duration::from_secs(5)))?;
         // SAFETY: getuid cannot fail and touches no memory of ours.
         let uid = unsafe { getuid() };
-        sock.write_all(format!("\0AUTH EXTERNAL {}\r\n", crate::auth::encode_hex(uid.to_string().as_bytes())).as_bytes())?;
+        sock.write_all(
+            format!("\0AUTH EXTERNAL {}\r\n", crate::auth::encode_hex(uid.to_string().as_bytes())).as_bytes(),
+        )?;
         let mut line = Vec::new();
         let mut byte = [0u8; 1];
         while !line.ends_with(b"\r\n") {
@@ -67,8 +75,12 @@ impl Client {
         }
         sock.write_all(b"BEGIN\r\n")?;
         let mut c = Client { sock, serial: 0, buf: Vec::new(), signals: VecDeque::new(), name: String::new() };
-        let hello = c.call(Message::method_call(crate::BUS_NAME, crate::BUS_PATH, crate::BUS_NAME, "Hello", &[]), Duration::from_secs(5))?;
-        c.name = hello.args().ok().and_then(|a| a.first().and_then(|v| v.as_str().map(str::to_string))).unwrap_or_default();
+        let hello = c.call(
+            Message::method_call(crate::BUS_NAME, crate::BUS_PATH, crate::BUS_NAME, "Hello", &[]),
+            Duration::from_secs(5),
+        )?;
+        c.name =
+            hello.args().ok().and_then(|a| a.first().and_then(|v| v.as_str().map(str::to_string))).unwrap_or_default();
         Ok(c)
     }
 
@@ -116,7 +128,11 @@ impl Client {
             let Some(r) = self.read(left)? else { return Err(io::Error::new(io::ErrorKind::TimedOut, "no reply")) };
             if r.reply_serial == Some(serial) {
                 if r.kind == message::ERROR {
-                    let text = r.args().ok().and_then(|a| a.first().and_then(|v| v.as_str().map(str::to_string))).unwrap_or_default();
+                    let text = r
+                        .args()
+                        .ok()
+                        .and_then(|a| a.first().and_then(|v| v.as_str().map(str::to_string)))
+                        .unwrap_or_default();
                     return Err(other(format!("{}: {text}", r.error_name.as_deref().unwrap_or("error"))));
                 }
                 return Ok(r);
@@ -129,7 +145,17 @@ impl Client {
 
     /// Asks the bus for signals matching `rule` (AddMatch).
     pub fn add_match(&mut self, rule: &str) -> io::Result<()> {
-        self.call(Message::method_call(crate::BUS_NAME, crate::BUS_PATH, crate::BUS_NAME, "AddMatch", &[Value::Str(rule.into())]), Duration::from_secs(5)).map(|_| ())
+        self.call(
+            Message::method_call(
+                crate::BUS_NAME,
+                crate::BUS_PATH,
+                crate::BUS_NAME,
+                "AddMatch",
+                &[Value::Str(rule.into())],
+            ),
+            Duration::from_secs(5),
+        )
+        .map(|_| ())
     }
 
     /// The next signal, waiting at most `timeout`.
@@ -153,10 +179,12 @@ impl Client {
 pub fn lookup<'a>(dict: &'a Value, key: &str) -> Option<&'a Value> {
     let Value::Array(_, items) = dict else { return None };
     items.iter().find_map(|e| match e {
-        Value::Entry(k, v) if k.as_str() == Some(key) || matches!(&**k, Value::Path(p) if p == key) => Some(match &**v {
-            Value::Variant(inner) => &**inner,
-            other => other,
-        }),
+        Value::Entry(k, v) if k.as_str() == Some(key) || matches!(&**k, Value::Path(p) if p == key) => {
+            Some(match &**v {
+                Value::Variant(inner) => &**inner,
+                other => other,
+            })
+        }
         _ => None,
     })
 }
@@ -164,7 +192,11 @@ pub fn lookup<'a>(dict: &'a Value, key: &str) -> Option<&'a Value> {
 /// A byte string (`ay`, as udisks gives paths), its ending nul left off.
 pub fn bytes_str(v: &Value) -> Option<String> {
     let Value::Array(_, items) = v else { return None };
-    let b: Vec<u8> = items.iter().filter_map(|x| if let Value::Byte(b) = x { Some(*b) } else { None }).take_while(|b| *b != 0).collect();
+    let b: Vec<u8> = items
+        .iter()
+        .filter_map(|x| if let Value::Byte(b) = x { Some(*b) } else { None })
+        .take_while(|b| *b != 0)
+        .collect();
     Some(String::from_utf8_lossy(&b).into_owned())
 }
 
@@ -174,7 +206,13 @@ mod tests {
 
     #[test]
     fn dictionaries_and_byte_strings_are_read() {
-        let d = Value::Array("{sv}".into(), vec![Value::Entry(Box::new(Value::Str("HintAuto".into())), Box::new(Value::Variant(Box::new(Value::Bool(true)))))]);
+        let d = Value::Array(
+            "{sv}".into(),
+            vec![Value::Entry(
+                Box::new(Value::Str("HintAuto".into())),
+                Box::new(Value::Variant(Box::new(Value::Bool(true)))),
+            )],
+        );
         assert_eq!(lookup(&d, "HintAuto"), Some(&Value::Bool(true)));
         assert_eq!(lookup(&d, "Nope"), None);
         let ay = Value::Array("y".into(), b"/run/media/u/STICK\0".iter().map(|b| Value::Byte(*b)).collect());
@@ -186,7 +224,12 @@ mod tests {
     fn talks_to_the_system_bus_if_there_is_one() {
         let Ok(mut c) = Client::system() else { return };
         assert!(c.name.starts_with(':'), "a unique name: {}", c.name);
-        let r = c.call(Message::method_call(crate::BUS_NAME, crate::BUS_PATH, crate::BUS_NAME, "GetId", &[]), Duration::from_secs(5)).unwrap();
+        let r = c
+            .call(
+                Message::method_call(crate::BUS_NAME, crate::BUS_PATH, crate::BUS_NAME, "GetId", &[]),
+                Duration::from_secs(5),
+            )
+            .unwrap();
         assert!(r.args().unwrap()[0].as_str().is_some_and(|s| s.len() == 32));
     }
 }

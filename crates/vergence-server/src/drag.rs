@@ -48,7 +48,15 @@ fn files_of(items: &[(String, Vec<u8>)]) -> Vec<String> {
     items
         .iter()
         .find(|(k, _)| k == "text/uri-list")
-        .map(|(_, v)| String::from_utf8_lossy(v).lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).filter_map(vergence_types::path_of_link).map(|p| p.to_string_lossy().into_owned()).collect())
+        .map(|(_, v)| {
+            String::from_utf8_lossy(v)
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .filter_map(vergence_types::path_of_link)
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -63,7 +71,8 @@ impl Server {
             return tracing::debug!("drag: refused (no button held on the window)");
         }
         tracing::info!("drag: {label:?} ({} kinds)", items.len());
-        self.native_drag = Some(NativeDrag { source: Some(w), label, items, over: Over::Nothing, action: DROP_NONE, ghost: None });
+        self.native_drag =
+            Some(NativeDrag { source: Some(w), label, items, over: Over::Nothing, action: DROP_NONE, ghost: None });
         let pos = self.pointer_location();
         self.native_drag_motion(pos);
     }
@@ -72,24 +81,32 @@ impl Server {
     /// out, capture.rs): the left button is held on what it drew.
     pub fn server_drag_start(&mut self, label: String, items: Vec<(String, Vec<u8>)>) {
         tracing::info!("drag: the server's {label:?}");
-        self.native_drag = Some(NativeDrag { source: None, label, items, over: Over::Nothing, action: DROP_NONE, ghost: None });
+        self.native_drag =
+            Some(NativeDrag { source: None, label, items, over: Over::Nothing, action: DROP_NONE, ghost: None });
         let pos = self.pointer_location();
         self.native_drag_motion(pos);
     }
 
     fn drag_mods(&self) -> u8 {
-        self.seat.get_keyboard().map(|k| k.modifier_state()).map_or(0, |m| (if m.ctrl { DRAG_CTRL } else { 0 }) | (if m.shift { DRAG_SHIFT } else { 0 }))
+        self.seat
+            .get_keyboard()
+            .map(|k| k.modifier_state())
+            .map_or(0, |m| (if m.ctrl { DRAG_CTRL } else { 0 }) | (if m.shift { DRAG_SHIFT } else { 0 }))
     }
 
     /// The pointer moved during a drag: whatever is under it hears.
     pub fn native_drag_motion(&mut self, pos: Point<f64, Logical>) {
         let Some(drag) = self.native_drag.as_ref() else { return };
-        let (kinds, has_files) = (drag.items.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>(), !files_of(&drag.items).is_empty());
+        let (kinds, has_files) =
+            (drag.items.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>(), !files_of(&drag.items).is_empty());
         let before = drag.over.clone();
         let under = self.target_at(pos);
         let now = match under {
-            Some(vergence_seat::Target::Native(id)) => self.input.wins.get(&id).cloned().map_or(Over::Nothing, Over::Native),
-            Some(vergence_seat::Target::Server(vergence_seat::Part::Dock)) if has_files => match self.dock_item_at(pos) {
+            Some(vergence_seat::Target::Native(id)) => {
+                self.input.wins.get(&id).cloned().map_or(Over::Nothing, Over::Native)
+            }
+            Some(vergence_seat::Target::Server(vergence_seat::Part::Dock)) if has_files => match self.dock_item_at(pos)
+            {
                 Some(item) if self.shelf.apps.iter().any(|e| e.id == item.key) => Over::Dock(item.key),
                 _ => Over::Nothing,
             },
@@ -135,10 +152,21 @@ impl Server {
             Over::Native(Win::Native(n)) if drag.action != DROP_NONE => {
                 let loc = self.space.element_location(&Win::Native(n.clone())).unwrap_or_default();
                 let (x, y) = (pos.x - loc.x as f64, pos.y - loc.y as f64);
-                self.bus_send(n.client, ServerMsg::Window(WinEvent::DragDrop { window: n.id, x, y, action: drag.action, items: drag.items.clone() }));
+                self.bus_send(
+                    n.client,
+                    ServerMsg::Window(WinEvent::DragDrop {
+                        window: n.id,
+                        x,
+                        y,
+                        action: drag.action,
+                        items: drag.items.clone(),
+                    }),
+                );
                 done = drag.action;
             }
-            Over::Native(Win::Native(n)) => self.bus_send(n.client, ServerMsg::Window(WinEvent::DragLeave { window: n.id })),
+            Over::Native(Win::Native(n)) => {
+                self.bus_send(n.client, ServerMsg::Window(WinEvent::DragLeave { window: n.id }))
+            }
             Over::Dock(key) => {
                 let files = files_of(&drag.items);
                 match self.open_items(&files, key) {
@@ -172,7 +200,13 @@ impl Server {
 
     /// The ghost under the pointer: the drag's words in a rounded box, the
     /// accent's while a drop there would do something.
-    pub fn native_drag_ghost(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64, light: bool) -> Option<SceneElement> {
+    pub fn native_drag_ghost(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        out: Rectangle<i32, Logical>,
+        scale: f64,
+        light: bool,
+    ) -> Option<SceneElement> {
         let pos = self.pointer_location();
         let accent = self.accent();
         let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
@@ -185,10 +219,29 @@ impl Server {
             let (w, h) = ((tw + 28.0).clamp(60.0, 360.0), 30.0f32);
             let style = vergence_look::bar_look(light);
             let mut scene = vergence_scene::Scene::new(w, h);
-            let (fill, ink) = if active { (vergence_scene::Color::rgba(accent.r, accent.g, accent.b, 230), vergence_scene::Color::rgb(255, 255, 255)) } else { (vergence_scene::Color::rgba(style.front.0, style.front.1, style.front.2, 225), vergence_scene::Color::rgb(style.ink.0, style.ink.1, style.ink.2)) };
+            let (fill, ink) = if active {
+                (
+                    vergence_scene::Color::rgba(accent.r, accent.g, accent.b, 230),
+                    vergence_scene::Color::rgb(255, 255, 255),
+                )
+            } else {
+                (
+                    vergence_scene::Color::rgba(style.front.0, style.front.1, style.front.2, 225),
+                    vergence_scene::Color::rgb(style.ink.0, style.ink.1, style.ink.2),
+                )
+            };
             vergence_bar::draw_ghost(&mut scene, fonts, w, h, &d.label, face, 13.0, fill, ink);
-            let p = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0)).ok()?;
-            let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+            let p = vergence_render::Cpu::new()
+                .render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0))
+                .ok()?;
+            let buffer = MemoryRenderBuffer::from_slice(
+                &p.data,
+                Fourcc::Abgr8888,
+                (p.width as i32, p.height as i32),
+                1,
+                Transform::Normal,
+                None,
+            );
             d.ghost = Some((key, buffer, (p.width as i32, p.height as i32), (w, h)));
         }
         let (_, buffer, px, (w, h)) = d.ghost.as_ref()?;
@@ -199,7 +252,17 @@ impl Server {
         }
         let whole = Rectangle::<f64, Logical>::from_size((px.0 as f64, px.1 as f64).into());
         let loc = (at - out.loc.to_f64()).to_physical(scale).to_i32_round::<i32>();
-        MemoryRenderBufferRenderElement::from_buffer(renderer, loc.to_f64(), buffer, None, Some(whole), Some((w.round() as i32, h.round() as i32).into()), Kind::Unspecified).ok().map(SceneElement::Memory)
+        MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            loc.to_f64(),
+            buffer,
+            None,
+            Some(whole),
+            Some((w.round() as i32, h.round() as i32).into()),
+            Kind::Unspecified,
+        )
+        .ok()
+        .map(SceneElement::Memory)
     }
 }
 
@@ -207,7 +270,13 @@ impl Server {
 mod tests {
     #[test]
     fn a_drags_files_are_its_uri_lists_file_lines() {
-        let items = vec![("text/plain".to_string(), b"/x".to_vec()), ("text/uri-list".to_string(), b"# a comment\r\nfile:///home/u/a%20b.txt\r\nhttps://example.org\r\nfile:///tmp/c\r\n".to_vec())];
+        let items = vec![
+            ("text/plain".to_string(), b"/x".to_vec()),
+            (
+                "text/uri-list".to_string(),
+                b"# a comment\r\nfile:///home/u/a%20b.txt\r\nhttps://example.org\r\nfile:///tmp/c\r\n".to_vec(),
+            ),
+        ];
         assert_eq!(super::files_of(&items), vec!["/home/u/a b.txt".to_string(), "/tmp/c".to_string()]);
         assert!(super::files_of(&[]).is_empty());
     }

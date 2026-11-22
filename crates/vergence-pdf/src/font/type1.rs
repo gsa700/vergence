@@ -50,7 +50,10 @@ fn token(d: &[u8], mut at: usize) -> Option<(&[u8], usize)> {
     if d[at] == b'/' {
         at += 1;
     }
-    while at < d.len() && !d[at].is_ascii_whitespace() && !matches!(d[at], b'/' | b'[' | b']' | b'{' | b'}' | b'(' | b')') {
+    while at < d.len()
+        && !d[at].is_ascii_whitespace()
+        && !matches!(d[at], b'/' | b'[' | b']' | b'{' | b'}' | b'(' | b')')
+    {
         at += 1;
     }
     if at == start {
@@ -69,18 +72,29 @@ impl Type1 {
         // The clear part ends where eexec starts; /Length1 is often wrong.
         let clear_end = find(data, b"eexec", 0).map(|p| p + 5).unwrap_or(length1.min(data.len()));
         let clear = &data[..clear_end.min(data.len())];
-        let mut font = Type1 { charstrings: HashMap::new(), subrs: Vec::new(), encoding: vec![None; 256], matrix: [0.001, 0.0, 0.0, 0.001, 0.0, 0.0] };
+        let mut font = Type1 {
+            charstrings: HashMap::new(),
+            subrs: Vec::new(),
+            encoding: vec![None; 256],
+            matrix: [0.001, 0.0, 0.0, 0.001, 0.0, 0.0],
+        };
         if let Some(e) = find(clear, b"/Encoding", 0) {
             if token(clear, e + 9).is_some_and(|(t, _)| t == b"StandardEncoding") {
                 font.encoding = STANDARD.iter().map(|n| (!n.is_empty()).then(|| n.to_string())).collect();
             } else {
                 // dup <code> /<name> put
                 let mut at = e;
-                let stop = find(clear, b"readonly def", e).or_else(|| find(clear, b"def", e + 9)).unwrap_or(clear.len());
+                let stop =
+                    find(clear, b"readonly def", e).or_else(|| find(clear, b"def", e + 9)).unwrap_or(clear.len());
                 while let Some(d) = find(clear, b"dup", at).filter(|d| *d < stop) {
-                    let (Some((code, a)), Some((name, b))) = (token(clear, d + 3), token(clear, d + 3).and_then(|(_, a)| token(clear, a))) else { break };
+                    let (Some((code, a)), Some((name, b))) =
+                        (token(clear, d + 3), token(clear, d + 3).and_then(|(_, a)| token(clear, a)))
+                    else {
+                        break;
+                    };
                     let _ = a;
-                    if let (Ok(code), Some(name)) = (std::str::from_utf8(code).unwrap_or("").parse::<usize>(), name.strip_prefix(b"/"))
+                    if let (Ok(code), Some(name)) =
+                        (std::str::from_utf8(code).unwrap_or("").parse::<usize>(), name.strip_prefix(b"/"))
                         && code < 256
                     {
                         font.encoding[code] = Some(String::from_utf8_lossy(name).into_owned());
@@ -93,7 +107,10 @@ impl Type1 {
             && let Some(open) = find(clear, b"[", m)
             && let Some(close) = find(clear, b"]", open)
         {
-            let v: Vec<f64> = String::from_utf8_lossy(&clear[open + 1..close]).split_whitespace().filter_map(|t| t.parse().ok()).collect();
+            let v: Vec<f64> = String::from_utf8_lossy(&clear[open + 1..close])
+                .split_whitespace()
+                .filter_map(|t| t.parse().ok())
+                .collect();
             if v.len() == 6 && v.iter().all(|x| x.is_finite()) {
                 font.matrix = [v[0], v[1], v[2], v[3], v[4], v[5]];
             }
@@ -106,14 +123,22 @@ impl Type1 {
         let rest = data.get(enc_start..)?;
         let hex = rest.len() >= 4 && rest[..4].iter().all(u8::is_ascii_hexdigit);
         let raw: Vec<u8> = if hex {
-            let digits: Vec<u8> = rest.iter().filter(|b| b.is_ascii_hexdigit()).map(|b| (*b as char).to_digit(16).unwrap_or(0) as u8).collect();
+            let digits: Vec<u8> = rest
+                .iter()
+                .filter(|b| b.is_ascii_hexdigit())
+                .map(|b| (*b as char).to_digit(16).unwrap_or(0) as u8)
+                .collect();
             digits.as_chunks::<2>().0.iter().map(|p| p[0] << 4 | p[1]).collect()
         } else {
             rest.to_vec()
         };
         let private = decrypt(&raw, 55665, 4);
-        let len_iv = find(&private, b"/lenIV", 0).and_then(|p| token(&private, p + 6)).and_then(|(t, _)| std::str::from_utf8(t).ok()?.parse::<i64>().ok()).unwrap_or(4);
-        let chars = |data: &[u8]| -> Vec<u8> { if len_iv < 0 { data.to_vec() } else { decrypt(data, 4330, len_iv as usize) } };
+        let len_iv = find(&private, b"/lenIV", 0)
+            .and_then(|p| token(&private, p + 6))
+            .and_then(|(t, _)| std::str::from_utf8(t).ok()?.parse::<i64>().ok())
+            .unwrap_or(4);
+        let chars =
+            |data: &[u8]| -> Vec<u8> { if len_iv < 0 { data.to_vec() } else { decrypt(data, 4330, len_iv as usize) } };
         // Subrs: dup <i> <n> RD <n bytes> NP
         if let Some(s) = find(&private, b"/Subrs", 0) {
             let mut at = s + 6;
@@ -122,7 +147,10 @@ impl Type1 {
                 let Some((idx, a)) = token(&private, d + 3) else { break };
                 let Some((len, b)) = token(&private, a) else { break };
                 let Some((_rd, c)) = token(&private, b) else { break };
-                let (Ok(idx), Ok(len)) = (std::str::from_utf8(idx).unwrap_or("").parse::<usize>(), std::str::from_utf8(len).unwrap_or("").parse::<usize>()) else {
+                let (Ok(idx), Ok(len)) = (
+                    std::str::from_utf8(idx).unwrap_or("").parse::<usize>(),
+                    std::str::from_utf8(len).unwrap_or("").parse::<usize>(),
+                ) else {
                     at = d + 3;
                     continue;
                 };
@@ -168,7 +196,20 @@ impl Type1 {
 
     fn outline_at(&self, name: &str, depth: usize) -> Option<Path> {
         let cs = self.charstrings.get(name)?;
-        let mut run = Run { font: self, path: Path::new(), stack: Vec::new(), ps: Vec::new(), x: 0.0, y: 0.0, sbx: 0.0, open: false, flex: None, ops: 0, done: false, depth };
+        let mut run = Run {
+            font: self,
+            path: Path::new(),
+            stack: Vec::new(),
+            ps: Vec::new(),
+            x: 0.0,
+            y: 0.0,
+            sbx: 0.0,
+            open: false,
+            flex: None,
+            ops: 0,
+            done: false,
+            depth,
+        };
         run.exec(cs, 0);
         if run.open {
             run.path.close();
@@ -251,7 +292,12 @@ impl Run<'_> {
                         n
                     }
                     _ => {
-                        let n = i32::from_be_bytes([*code.get(i).unwrap_or(&0), *code.get(i + 1).unwrap_or(&0), *code.get(i + 2).unwrap_or(&0), *code.get(i + 3).unwrap_or(&0)]) as f64;
+                        let n = i32::from_be_bytes([
+                            *code.get(i).unwrap_or(&0),
+                            *code.get(i + 1).unwrap_or(&0),
+                            *code.get(i + 2).unwrap_or(&0),
+                            *code.get(i + 3).unwrap_or(&0),
+                        ]) as f64;
                         i += 4;
                         n
                     }
@@ -372,7 +418,8 @@ impl Run<'_> {
                                     self.path.append(&base);
                                 }
                                 if let Some(accent) = name(achar).and_then(|n| font.outline_at(n, 1)) {
-                                    self.path.append(&accent.transformed(&Transform::translate(adx - asb + self.sbx, ady)));
+                                    self.path
+                                        .append(&accent.transformed(&Transform::translate(adx - asb + self.sbx, ady)));
                                 }
                             }
                             self.done = true;
@@ -405,7 +452,14 @@ mod tests {
 
     /// A Type 1 font made by hand: a square "A", encoded at 65, with a subr.
     fn tiny() -> Vec<u8> {
-        let num = |v: i32| -> Vec<u8> { if (-107..=107).contains(&v) { vec![(v + 139) as u8] } else { let w = v - 108; vec![(w / 256 + 247) as u8, (w % 256) as u8] } };
+        let num = |v: i32| -> Vec<u8> {
+            if (-107..=107).contains(&v) {
+                vec![(v + 139) as u8]
+            } else {
+                let w = v - 108;
+                vec![(w / 256 + 247) as u8, (w % 256) as u8]
+            }
+        };
         // hsbw 0 600; rmoveto 100 0; rlineto 0 500 (through subr 0); rlineto 400 0; rlineto 0 -500; closepath; endchar.
         let mut cs = Vec::new();
         cs.extend(num(0));

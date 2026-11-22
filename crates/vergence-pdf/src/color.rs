@@ -3,9 +3,9 @@
 //! by the simple formula): what most viewers do on screen, and the PDF
 //! milestone's plan; profiles can come later.
 
+use crate::Document;
 use crate::function::Function;
 use crate::object::{Dict, Object};
-use crate::Document;
 
 const MAX_DEPTH: usize = 8;
 
@@ -14,12 +14,24 @@ pub enum ColorSpace {
     Gray,
     Rgb,
     Cmyk,
-    Lab { white: [f64; 3], range: [f64; 4] },
-    Indexed { base: Box<ColorSpace>, hival: usize, lookup: Vec<u8> },
+    Lab {
+        white: [f64; 3],
+        range: [f64; 4],
+    },
+    Indexed {
+        base: Box<ColorSpace>,
+        hival: usize,
+        lookup: Vec<u8>,
+    },
     /// Separation (one colorant) and DeviceN (several), through their tint
     /// function into the alternate space. `none`: the colorant /None, which
     /// paints nothing.
-    Tint { n: usize, alternate: Box<ColorSpace>, function: Option<Function>, none: bool },
+    Tint {
+        n: usize,
+        alternate: Box<ColorSpace>,
+        function: Option<Function>,
+        none: bool,
+    },
     /// Pattern: what `scn` names is a pattern; for an uncolored one, the
     /// space of the color it is painted in.
     Pattern(Option<Box<ColorSpace>>),
@@ -76,7 +88,15 @@ impl ColorSpace {
             b"Lab" => {
                 let d = arg(1);
                 let num = |k: &str, n: usize, default: &[f64]| -> Vec<f64> {
-                    let v: Vec<f64> = d.as_dict().and_then(|d| d.get(k)).and_then(|o| doc.resolve(o).as_array().map(|a| a.iter().filter_map(|x| doc.resolve(x).as_f64()).collect())).unwrap_or_default();
+                    let v: Vec<f64> = d
+                        .as_dict()
+                        .and_then(|d| d.get(k))
+                        .and_then(|o| {
+                            doc.resolve(o)
+                                .as_array()
+                                .map(|a| a.iter().filter_map(|x| doc.resolve(x).as_f64()).collect())
+                        })
+                        .unwrap_or_default();
                     if v.len() >= n { v } else { default.to_vec() }
                 };
                 let w = num("WhitePoint", 3, &[0.9505, 1.0, 1.089]);
@@ -96,16 +116,29 @@ impl ColorSpace {
             b"Separation" => {
                 let none = arg(1).as_name() == Some(b"None");
                 let alternate = Self::parse_at(&arg(2), doc, resources, depth + 1).unwrap_or(ColorSpace::Gray);
-                Some(ColorSpace::Tint { n: 1, alternate: Box::new(alternate), function: Function::parse(&arg(3), doc), none })
+                Some(ColorSpace::Tint {
+                    n: 1,
+                    alternate: Box::new(alternate),
+                    function: Function::parse(&arg(3), doc),
+                    none,
+                })
             }
             b"DeviceN" => {
                 let names = arg(1);
                 let n = names.as_array().map_or(1, |a| a.len()).clamp(1, 32);
-                let none = names.as_array().is_some_and(|a| a.iter().all(|x| doc.resolve(x).as_name() == Some(b"None")));
+                let none =
+                    names.as_array().is_some_and(|a| a.iter().all(|x| doc.resolve(x).as_name() == Some(b"None")));
                 let alternate = Self::parse_at(&arg(2), doc, resources, depth + 1).unwrap_or(ColorSpace::Gray);
-                Some(ColorSpace::Tint { n, alternate: Box::new(alternate), function: Function::parse(&arg(3), doc), none })
+                Some(ColorSpace::Tint {
+                    n,
+                    alternate: Box::new(alternate),
+                    function: Function::parse(&arg(3), doc),
+                    none,
+                })
             }
-            b"Pattern" => Some(ColorSpace::Pattern(a.get(1).and_then(|b| Self::parse_at(b, doc, resources, depth + 1)).map(Box::new))),
+            b"Pattern" => Some(ColorSpace::Pattern(
+                a.get(1).and_then(|b| Self::parse_at(b, doc, resources, depth + 1)).map(Box::new),
+            )),
             _ => None,
         }
     }
@@ -151,10 +184,15 @@ impl ColorSpace {
             ColorSpace::Indexed { base, hival, lookup } => {
                 let i = (c.first().copied().unwrap_or(0.0).round().max(0.0) as usize).min(*hival);
                 let n = base.components();
-                let entry: Vec<f64> = (0..n).map(|k| lookup.get(i * n + k).copied().unwrap_or(0) as f64 / 255.0).collect();
+                let entry: Vec<f64> =
+                    (0..n).map(|k| lookup.get(i * n + k).copied().unwrap_or(0) as f64 / 255.0).collect();
                 // Lab lookups hold bytes over the space's ranges.
                 let entry = match base.as_ref() {
-                    ColorSpace::Lab { range, .. } => vec![entry[0] * 100.0, range[0] + entry[1] * (range[1] - range[0]), range[2] + entry[2] * (range[3] - range[2])],
+                    ColorSpace::Lab { range, .. } => vec![
+                        entry[0] * 100.0,
+                        range[0] + entry[1] * (range[1] - range[0]),
+                        range[2] + entry[2] * (range[3] - range[2]),
+                    ],
                     _ => entry,
                 };
                 return base.rgb_at(&entry, depth + 1);
@@ -184,7 +222,11 @@ fn lab_to_rgb(c: &[f64], white: &[f64; 3], range: &[f64; 4]) -> [f32; 3] {
     let m = (l + 16.0) / 116.0;
     let (x, y, z) = (white[0] * g(m + a / 500.0), white[1] * g(m), white[2] * g(m - b / 200.0));
     // XYZ (D50-ish white taken as given) to linear sRGB, then gamma.
-    let lin = [3.2406 * x - 1.5372 * y - 0.4986 * z, -0.9689 * x + 1.8758 * y + 0.0415 * z, 0.0557 * x - 0.2040 * y + 1.0570 * z];
+    let lin = [
+        3.2406 * x - 1.5372 * y - 0.4986 * z,
+        -0.9689 * x + 1.8758 * y + 0.0415 * z,
+        0.0557 * x - 0.2040 * y + 1.0570 * z,
+    ];
     lin.map(|v| {
         let v = v.clamp(0.0, 1.0);
         (if v <= 0.003_130_8 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }) as f32

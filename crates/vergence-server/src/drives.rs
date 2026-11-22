@@ -33,7 +33,14 @@ pub enum Heard {
     List(Vec<DriveInfo>),
     /// An action done: the client and its serial, and where it is mounted (or why not);
     /// the drive's name and kind, for the notice.
-    Done { client: u32, serial: u32, result: Result<String, String>, action: DriveAction, name: String, kind: Option<DriveKind> },
+    Done {
+        client: u32,
+        serial: u32,
+        result: Result<String, String>,
+        action: DriveAction,
+        name: String,
+        kind: Option<DriveKind>,
+    },
 }
 
 impl Server {
@@ -63,7 +70,10 @@ impl Server {
                 for stale in vergence_media::drives::stale_mounts() {
                     match vergence_media::eject(&stale) {
                         Ok(_) => tracing::info!("drives: {} was pulled out while mounted; unmounted", stale.display()),
-                        Err(e) => tracing::warn!("drives: {} was pulled out while mounted and could not be unmounted: {e}", stale.display()),
+                        Err(e) => tracing::warn!(
+                            "drives: {} was pulled out while mounted and could not be unmounted: {e}",
+                            stale.display()
+                        ),
                     }
                 }
                 let now = vergence_media::drives::scan();
@@ -97,7 +107,13 @@ impl Server {
     fn drives_heard(&mut self, heard: Heard) {
         match heard {
             Heard::List(list) => {
-                tracing::info!("drives: {}", list.iter().map(|d| format!("{} ({:?}{})", d.path, d.kind, if d.mounted { "" } else { ", not mounted" })).collect::<Vec<_>>().join(", "));
+                tracing::info!(
+                    "drives: {}",
+                    list.iter()
+                        .map(|d| format!("{} ({:?}{})", d.path, d.kind, if d.mounted { "" } else { ", not mounted" }))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
                 self.drives.list = list;
                 let m = ServerMsg::Drives { serial: 0, drives: self.drives.list.clone() };
                 for id in self.bus_subscribers(Topic::Drives) {
@@ -110,7 +126,9 @@ impl Server {
                         self.bus_send(client, ServerMsg::DriveDone { serial, path: path.clone() });
                         // One notice, from here (Dave: "yes" to the server's one "Safe to
                         // remove"); a disk image or a network mount let go of says nothing.
-                        if action == DriveAction::Eject && matches!(kind, Some(DriveKind::Removable | DriveKind::Optical)) {
+                        if action == DriveAction::Eject
+                            && matches!(kind, Some(DriveKind::Removable | DriveKind::Optical))
+                        {
                             let req = crate::notify::Request {
                                 app: String::new(),
                                 replaces: 0,
@@ -123,7 +141,8 @@ impl Server {
                             self.notify(crate::notify::Origin::Server, req);
                         }
                     }
-                    Err(why) => self.bus_send(client, ServerMsg::Error { serial, code: ErrorCode::Failed, message: why.clone() }),
+                    Err(why) => self
+                        .bus_send(client, ServerMsg::Error { serial, code: ErrorCode::Failed, message: why.clone() }),
                 }
                 if let Some(p) = &self.drives.poke {
                     let _ = p.send(());
@@ -140,15 +159,32 @@ impl Server {
     /// A client's drive action: done on a worker, answered when it is.
     pub fn drive_action(&mut self, client: u32, serial: u32, action: DriveAction, path: String) {
         let Some(done) = self.drives.done.clone() else {
-            return self.bus_send(client, ServerMsg::Error { serial, code: ErrorCode::Failed, message: "the drives are not watched in this session".into() });
+            return self.bus_send(
+                client,
+                ServerMsg::Error {
+                    serial,
+                    code: ErrorCode::Failed,
+                    message: "the drives are not watched in this session".into(),
+                },
+            );
         };
         let known = self.drives.list.iter().find(|d| d.path == path).cloned();
         // Only drives the list has are ejected or mounted; an image is any file
         // (vergence-media checks it, and the FreeBSD helper again as root).
         if action != DriveAction::MountImage && known.is_none() {
-            return self.bus_send(client, ServerMsg::Error { serial, code: ErrorCode::Failed, message: format!("{path} is not a drive this session knows") });
+            return self.bus_send(
+                client,
+                ServerMsg::Error {
+                    serial,
+                    code: ErrorCode::Failed,
+                    message: format!("{path} is not a drive this session knows"),
+                },
+            );
         }
-        let name = known.as_ref().map_or_else(|| std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), |d| d.name.clone());
+        let name = known.as_ref().map_or_else(
+            || std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            |d| d.name.clone(),
+        );
         let kind = known.as_ref().map(|d| d.kind);
         let started = std::thread::Builder::new().name("drive action".into()).spawn(move || {
             let p = std::path::Path::new(&path);
@@ -195,7 +231,8 @@ fn is_disk_node(line: &str) -> bool {
     }
     rest.split_whitespace().filter_map(|w| w.strip_prefix("cdev=")).any(|c| {
         let base: String = c.chars().take_while(|x| x.is_ascii_alphabetic()).collect();
-        matches!(base.as_str(), "da" | "cd" | "mmcsd" | "sdda" | "md") || ["msdosfs/", "iso9660/", "label/", "ext2fs/", "ntfs/", "exfat/", "ufs/"].iter().any(|d| c.starts_with(d))
+        matches!(base.as_str(), "da" | "cd" | "mmcsd" | "sdda" | "md")
+            || ["msdosfs/", "iso9660/", "label/", "ext2fs/", "ntfs/", "exfat/", "ufs/"].iter().any(|d| c.starts_with(d))
     })
 }
 

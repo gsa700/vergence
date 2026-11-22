@@ -15,10 +15,10 @@
 use std::time::Duration;
 
 pub mod drives;
-#[cfg(target_os = "linux")]
-mod udisks;
 #[cfg(target_os = "freebsd")]
 mod freebsd;
+#[cfg(target_os = "linux")]
+mod udisks;
 #[cfg(target_os = "freebsd")]
 pub use freebsd::HELPER;
 
@@ -49,7 +49,11 @@ pub fn eject(path: &std::path::Path) -> Result<bool, String> {
 
 /// One plain name: letters, digits, `._-` and spaces; not `.` or `..`.
 fn plain_name(name: &str) -> bool {
-    !name.is_empty() && name.len() <= 255 && name != "." && name != ".." && name.chars().all(|c| c.is_ascii_alphanumeric() || "._- ".contains(c))
+    !name.is_empty()
+        && name.len() <= 255
+        && name != "."
+        && name != ".."
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || "._- ".contains(c))
 }
 
 /// Whether `arg` is a path the eject helper may unmount: `/media/<name>`
@@ -65,7 +69,8 @@ pub const IMAGES: &str = "/mnt/";
 /// made plain (anything else a `_`), under [`IMAGES`].
 pub fn image_mount_point(image: &std::path::Path) -> Option<String> {
     let stem = image.file_stem()?.to_string_lossy();
-    let name: String = stem.chars().map(|c| if c.is_ascii_alphanumeric() || "._- ".contains(c) { c } else { '_' }).take(64).collect();
+    let name: String =
+        stem.chars().map(|c| if c.is_ascii_alphanumeric() || "._- ".contains(c) { c } else { '_' }).take(64).collect();
     let name = name.trim_matches([' ', '.']).to_string();
     plain_name(&name).then(|| format!("{IMAGES}{name}"))
 }
@@ -127,8 +132,11 @@ pub fn helper_main(args: Vec<std::ffi::OsString>) -> i32 {
         };
     }
     let [arg] = args.as_slice() else { return fail("usage: media-eject /media/NAME, or media-eject attach IMAGE") };
-    let Some(arg) = arg.to_str().filter(|a| helper_may_eject(a)) else { return fail("only a drive under /media or an image under /mnt is ejected here") };
-    let table = run("/sbin/mount", &["-p"]).map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+    let Some(arg) = arg.to_str().filter(|a| helper_may_eject(a)) else {
+        return fail("only a drive under /media or an image under /mnt is ejected here");
+    };
+    let table =
+        run("/sbin/mount", &["-p"]).map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
     let device = table.lines().find_map(|l| {
         let mut f = l.split_whitespace();
         let dev = f.next()?;
@@ -137,13 +145,20 @@ pub fn helper_main(args: Vec<std::ffi::OsString>) -> i32 {
     let Some(device) = device else {
         // Listed but never looked into: nothing is mounted; the drive is
         // ejected all the same (found by its name or its label).
-        if let Some(disk) = std::path::Path::new(arg).file_name().and_then(drives::device_of).and_then(|node| disk_of(&node.to_string_lossy(), &run)) {
+        if let Some(disk) = std::path::Path::new(arg)
+            .file_name()
+            .and_then(drives::device_of)
+            .and_then(|node| disk_of(&node.to_string_lossy(), &run))
+        {
             eject_disk(&disk, &table, &run);
         }
         return 0;
     };
     // Under /mnt: only an image this attached (an md device), nothing else mounted there.
-    let md_unit = device.strip_prefix("/dev/md").filter(|u| !u.is_empty() && u.chars().all(|c| c.is_ascii_digit())).map(str::to_string);
+    let md_unit = device
+        .strip_prefix("/dev/md")
+        .filter(|u| !u.is_empty() && u.chars().all(|c| c.is_ascii_digit()))
+        .map(str::to_string);
     if arg.starts_with(IMAGES) && md_unit.is_none() {
         return fail("only a disk image is ejected from /mnt here");
     }
@@ -170,7 +185,9 @@ pub fn helper_main(args: Vec<std::ffi::OsString>) -> i32 {
 /// "/dev/msdosfs/USB" (by `glabel status`) are on "da0". Only da, cd and
 /// sdda disks (CAM's, which camcontrol ejects).
 fn disk_of(node: &str, run: &dyn Fn(&str, &[&str]) -> std::io::Result<std::process::Output>) -> Option<String> {
-    let labels = run("/sbin/glabel", &["status", "-s"]).map(|o| drives::parse_glabel(&String::from_utf8_lossy(&o.stdout))).unwrap_or_default();
+    let labels = run("/sbin/glabel", &["status", "-s"])
+        .map(|o| drives::parse_glabel(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or_default();
     removable_disk(drives::provider_of(node, &labels))
 }
 
@@ -200,7 +217,10 @@ fn eject_disk(disk: &str, table: &str, run: &dyn Fn(&str, &[&str]) -> std::io::R
 
 /// The attach: the checks, mdconfig, the mount point, mount_cd9660; the md
 /// device let go of again if the mount fails.
-fn attach(image: &std::ffi::OsStr, run: &dyn Fn(&str, &[&str]) -> std::io::Result<std::process::Output>) -> Result<String, String> {
+fn attach(
+    image: &std::ffi::OsStr,
+    run: &dyn Fn(&str, &[&str]) -> std::io::Result<std::process::Output>,
+) -> Result<String, String> {
     use std::io::Read;
     use std::os::unix::fs::MetadataExt;
     unsafe extern "C" {
@@ -229,7 +249,8 @@ fn attach(image: &std::ffi::OsStr, run: &dyn Fn(&str, &[&str]) -> std::io::Resul
         return Err("not an ISO image (only ISO 9660 images are mounted)".into());
     }
     let at = image_mount_point(&path).ok_or("the image's name makes no folder name")?;
-    let table = run("/sbin/mount", &["-p"]).map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+    let table =
+        run("/sbin/mount", &["-p"]).map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
     if table.lines().any(|l| l.split_whitespace().nth(1).map(|m| m.replace("\\040", " ")) == Some(at.clone())) {
         return Err(format!("something is mounted at {at} already"));
     }
@@ -275,7 +296,21 @@ mod tests {
         for ok in ["/media/VTEST", "/media/da0s1", "/media/My Stick", "/media/a.b-c_d"] {
             assert!(super::helper_may_eject(ok), "{ok}");
         }
-        for bad in ["/media", "/media/", "/media/..", "/media/a/b", "/mnt", "/mnt/", "/mnt/a/b", "/mnt/..", "/media/x;rm", "/media/$(id)", "/home/u", "media/x", "/media/\u{e9}"] {
+        for bad in [
+            "/media",
+            "/media/",
+            "/media/..",
+            "/media/a/b",
+            "/mnt",
+            "/mnt/",
+            "/mnt/a/b",
+            "/mnt/..",
+            "/media/x;rm",
+            "/media/$(id)",
+            "/home/u",
+            "media/x",
+            "/media/\u{e9}",
+        ] {
             assert!(!super::helper_may_eject(bad), "{bad}");
         }
         assert!(super::helper_may_eject("/mnt/Fedora-45"), "an image's mount point");
@@ -287,7 +322,10 @@ mod tests {
     fn mounts_and_ejects_a_real_image_if_given_one() {
         let Some(iso) = std::env::var_os("VERGENCE_TEST_ISO") else { return };
         let at = super::mount_image(std::path::Path::new(&iso)).expect("mounted");
-        eprintln!("mounted at {at:?}: {:?}", std::fs::read_dir(&at).map(|d| d.flatten().map(|e| e.file_name()).collect::<Vec<_>>()));
+        eprintln!(
+            "mounted at {at:?}: {:?}",
+            std::fs::read_dir(&at).map(|d| d.flatten().map(|e| e.file_name()).collect::<Vec<_>>())
+        );
         assert!(std::fs::read_dir(&at).is_ok_and(|mut d| d.next().is_some()), "something in {at:?}");
         assert_eq!(super::eject(&at), Ok(true));
         let table = std::fs::read_to_string("/proc/mounts").unwrap_or_default();
@@ -308,7 +346,11 @@ mod tests {
     #[test]
     fn an_image_mounts_at_a_plain_name_and_must_be_iso9660() {
         use std::path::Path;
-        assert_eq!(super::image_mount_point(Path::new("/home/u/Downloads/Fedora-Everything-netinst-x86_64-45-1.4.iso")).as_deref(), Some("/mnt/Fedora-Everything-netinst-x86_64-45-1.4"));
+        assert_eq!(
+            super::image_mount_point(Path::new("/home/u/Downloads/Fedora-Everything-netinst-x86_64-45-1.4.iso"))
+                .as_deref(),
+            Some("/mnt/Fedora-Everything-netinst-x86_64-45-1.4")
+        );
         assert_eq!(super::image_mount_point(Path::new("/x/we$ird;name.iso")).as_deref(), Some("/mnt/we_ird_name"));
         assert_eq!(super::image_mount_point(Path::new("/x/...iso")), None);
         let mut head = vec![0u8; 32774];

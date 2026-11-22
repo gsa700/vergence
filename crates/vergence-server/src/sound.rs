@@ -18,7 +18,13 @@ const SHOWN_MS: i32 = 1500;
 /// A volume a step from `now`: to the nearest multiple of 5, within 0 to 100.
 pub fn stepped(now: u8, step: i8) -> u8 {
     let n = now as i32;
-    let next = if step > 0 { (n / 5 + 1) * 5 } else if n % 5 == 0 { n - 5 } else { n / 5 * 5 };
+    let next = if step > 0 {
+        (n / 5 + 1) * 5
+    } else if n % 5 == 0 {
+        n - 5
+    } else {
+        n / 5 * 5
+    };
     next.clamp(0, 100) as u8
 }
 
@@ -34,7 +40,9 @@ impl Server {
         let result = match step {
             0 => sound.set_muted(&out.id, !out.muted),
             _ if !out.adjustable => Ok(()),
-            s => sound.set_volume(&out.id, stepped(out.volume, s)).and_then(|_| if s > 0 && out.muted { sound.set_muted(&out.id, false) } else { Ok(()) }),
+            s => sound
+                .set_volume(&out.id, stepped(out.volume, s))
+                .and_then(|_| if s > 0 && out.muted { sound.set_muted(&out.id, false) } else { Ok(()) }),
         };
         if let Err(e) = result {
             return tracing::warn!("volume key on {}: {e}", out.id);
@@ -47,7 +55,15 @@ impl Server {
         } else {
             "Volume is set on the device".to_string()
         };
-        let req = Request { app: "Sound".into(), replaces: self.volume_note, summary, body: now.name.clone(), urgency: 0, timeout_ms: SHOWN_MS, actions: Vec::new() };
+        let req = Request {
+            app: "Sound".into(),
+            replaces: self.volume_note,
+            summary,
+            body: now.name.clone(),
+            urgency: 0,
+            timeout_ms: SHOWN_MS,
+            actions: Vec::new(),
+        };
         self.volume_note = self.notify(Origin::Server, req);
         // The Sound tile says so at once (applets.rs).
         self.sound_tile_now();

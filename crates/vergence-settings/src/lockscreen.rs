@@ -14,7 +14,16 @@
 
 use super::*;
 
-const LOCK_CHOICES: [(&str, i64); 8] = [("Not on its own", 0), ("1 minute", 1), ("2 minutes", 2), ("5 minutes", 5), ("10 minutes", 10), ("15 minutes", 15), ("30 minutes", 30), ("1 hour", 60)];
+const LOCK_CHOICES: [(&str, i64); 8] = [
+    ("Not on its own", 0),
+    ("1 minute", 1),
+    ("2 minutes", 2),
+    ("5 minutes", 5),
+    ("10 minutes", 10),
+    ("15 minutes", 15),
+    ("30 minutes", 30),
+    ("1 hour", 60),
+];
 
 /// [lock]'s switches and minutes, with their defaults.
 pub fn lock_settings(d: &toml::Table) -> (bool, i64, bool) {
@@ -25,7 +34,8 @@ pub fn lock_settings(d: &toml::Table) -> (bool, i64, bool) {
 }
 
 /// The grace after the screens' timeout (Dave's list, 2026-11-16).
-const GRACE_CHOICES: [(&str, i64); 4] = [("At once", 0), ("After 10 seconds", 10), ("After 30 seconds", 30), ("After 1 minute", 60)];
+const GRACE_CHOICES: [(&str, i64); 4] =
+    [("At once", 0), ("After 10 seconds", 10), ("After 30 seconds", 30), ("After 1 minute", 60)];
 
 fn lock_grace(d: &toml::Table) -> i64 {
     d.get("lock").and_then(|n| n.get("grace")).and_then(|v| v.as_integer()).unwrap_or(0)
@@ -52,7 +62,8 @@ fn vdm_socket() -> &'static str {
 /// One line to vdm, its one-line answer.
 pub fn ask_vdm(line: &str) -> Result<String, String> {
     use std::io::{BufRead, BufReader, Write};
-    let mut s = std::os::unix::net::UnixStream::connect(vdm_socket()).map_err(|_| "vdm is not running here".to_string())?;
+    let mut s =
+        std::os::unix::net::UnixStream::connect(vdm_socket()).map_err(|_| "vdm is not running here".to_string())?;
     let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(5)));
     s.write_all(format!("{line}\n").as_bytes()).map_err(|e| e.to_string())?;
     let mut answer = String::new();
@@ -79,10 +90,12 @@ pub fn parse_login_state(line: &str) -> Option<LoginState> {
                 seen = true;
             }
             Some(("autologin", v)) => st.autologin = (v != "-").then(|| v.to_string()),
-            Some(("allowed", v)) => st.allowed = match v.strip_prefix("no: ") {
-                Some(why) => Err(why.to_string()),
-                None => Ok(v.to_string()),
-            },
+            Some(("allowed", v)) => {
+                st.allowed = match v.strip_prefix("no: ") {
+                    Some(why) => Err(why.to_string()),
+                    None => Ok(v.to_string()),
+                }
+            }
             _ => {}
         }
     }
@@ -130,7 +143,9 @@ impl App {
             }
             LockMsg::AutologinOff => self.elevate(vec!["autologin.off".into()]),
             LockMsg::AutologinOn(user) => self.elevate(vec!["autologin.on".into(), user]),
-            LockMsg::LoginScreen(on) => self.elevate(vec![if on { "login-screen.on" } else { "login-screen.off" }.into()]),
+            LockMsg::LoginScreen(on) => {
+                self.elevate(vec![if on { "login-screen.on" } else { "login-screen.off" }.into()])
+            }
             LockMsg::Elevated(r) => {
                 self.status = match r {
                     Ok(t) => format!("Done: {t}."),
@@ -183,12 +198,34 @@ impl App {
                     switch(st.login_screen, |on| Message::Lock(LockMsg::LoginScreen(on))).name("The login screen at boot"),
                 )]));
                 let (what, control): (String, Element<Message>) = match (&st.autologin, &st.allowed) {
-                    (Some(user), Ok(_)) => (format!("On for {user}: the machine starts straight into {user}'s session, without a password, at boot only."), button(label("Turn Off…").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Lock(LockMsg::AutologinOff)).name("Turn automatic login off")),
-                    (Some(user), Err(why)) => (format!("Set for {user}, but not done: {why}."), button(label("Turn Off…").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Lock(LockMsg::AutologinOff)).name("Turn automatic login off")),
-                    (None, Ok(user)) => (format!("Off. It can be on here, for {user}."), button(label("Turn On…").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Lock(LockMsg::AutologinOn(user.clone()))).name("Turn automatic login on")),
+                    (Some(user), Ok(_)) => (
+                        format!(
+                            "On for {user}: the machine starts straight into {user}'s session, without a password, at boot only."
+                        ),
+                        button(label("Turn Off…").size(12.0))
+                            .padding(Padding::hv(4.0, 12.0))
+                            .on_press(Message::Lock(LockMsg::AutologinOff))
+                            .name("Turn automatic login off"),
+                    ),
+                    (Some(user), Err(why)) => (
+                        format!("Set for {user}, but not done: {why}."),
+                        button(label("Turn Off…").size(12.0))
+                            .padding(Padding::hv(4.0, 12.0))
+                            .on_press(Message::Lock(LockMsg::AutologinOff))
+                            .name("Turn automatic login off"),
+                    ),
+                    (None, Ok(user)) => (
+                        format!("Off. It can be on here, for {user}."),
+                        button(label("Turn On…").size(12.0))
+                            .padding(Padding::hv(4.0, 12.0))
+                            .on_press(Message::Lock(LockMsg::AutologinOn(user.clone())))
+                            .name("Turn automatic login on"),
+                    ),
                     (None, Err(why)) => (format!("Off, and it cannot be on here: {why}."), label("Off")),
                 };
-                groups.push(self.group(Some("Automatic login"), vec![setting("Log in without a password", &what, control)]));
+                groups.push(
+                    self.group(Some("Automatic login"), vec![setting("Log in without a password", &what, control)]),
+                );
                 groups.push(self.group(None, vec![setting(
                     "The rules",
                     "Automatic login is only ever allowed where exactly one person can log in and nothing on the machine is encrypted; both are checked again at every boot. The lock still asks for the password. Every change here asks an administrator's password first.",
@@ -211,7 +248,10 @@ mod tests {
         assert!(st.login_screen);
         assert_eq!(st.autologin, None);
         assert_eq!(st.allowed, Ok("derickson".into()));
-        let st = parse_login_state("login-screen=off\tautologin=derickson\tallowed=no: storage here is encrypted (dm-0 (LUKS2)): x").unwrap();
+        let st = parse_login_state(
+            "login-screen=off\tautologin=derickson\tallowed=no: storage here is encrypted (dm-0 (LUKS2)): x",
+        )
+        .unwrap();
         assert_eq!(st.autologin.as_deref(), Some("derickson"));
         assert!(st.allowed.unwrap_err().starts_with("storage here is encrypted"));
         assert!(parse_login_state("no: nonsense").is_none());
