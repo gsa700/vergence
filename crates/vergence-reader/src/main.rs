@@ -1,23 +1,28 @@
-//! Reader (Reader milestone 1; docs/reader-milestone-1.md): PDF documents
-//! in an app of their own, split from Close-Up, since a PDF wants a
-//! different window from a picture. Close-Up keeps pictures and hands PDFs here.
+//! Reader, Vergence's PDF app: documents in tabs, read and drawn by vergence-pdf's confined
+//! helper.
 //!
-//! - **Documents** are read and drawn by vergence-pdf's confined helper,
-//!   never in this process (pdf.rs): pages in a column, scrolled
-//!   continuously, fit to the width (the default), the whole page, actual
-//!   size or any zoom; drawn at the screen's pixels; a sidebar (S) with the
-//!   pages' thumbnails and the outline; links followed (an address outside
-//!   the document is asked about first); passwords asked for; each
-//!   document's page and zoom remembered; text selected by dragging on it,
-//!   copied (Ctrl+C), the page's text selected (Ctrl+A), and Find (Ctrl+F)
-//!   across the whole document, every match marked.
-//! - **Windows and tabs**: one process (hand.rs); each document in a tab
-//!   (the server's), each tab with its own view; dragged out of the row a
-//!   tab is a window of its own, dropped on another window it joins it.
-//!   Files handed over, chosen in Open… or dropped open in tabs. Files
-//!   changed on disk are read again, the view kept.
-//! - **Its settings** (Ctrl+,): the ground around the pages, the style and
-//!   the bar; desktop.toml `[reader]`.
+//! Reader milestone 1; docs/reader-milestone-1.md. Split from Close-Up, since a PDF wants a
+//! different window from a picture; Close-Up keeps pictures and hands PDFs here.
+//!
+//! - **Documents** are read and drawn by vergence-pdf's confined helper, never in this process
+//!   (pdf.rs): pages in a column, scrolled continuously, fit to the width (the default), the
+//!   whole page, actual size or any zoom; drawn at the screen's pixels; a sidebar (S) with the
+//!   pages' thumbnails and the outline; links followed (an address outside the document is
+//!   asked about first); passwords asked for; each document's page and zoom remembered; text
+//!   selected by dragging on it, copied (Ctrl+C), the page's text selected (Ctrl+A), and Find
+//!   (Ctrl+F) across the whole document, every match marked.
+//! - **Windows and tabs**: one process (hand.rs); each document in a tab (the server's), each
+//!   tab with its own view; dragged out of the row a tab is a window of its own, dropped on
+//!   another window it joins it. Files handed over, chosen in Open… or dropped open in tabs.
+//!   Files changed on disk are read again, the view kept.
+//! - **Its settings** (Ctrl+,): the ground around the pages, the style and the bar;
+//!   desktop.toml `[reader]`.
+//!
+//! Uses vergence-pdf (its helper's client), vergence-widgets and vergence-ui (the window) and
+//! vergence-types. Start reading: this file (the app), tab.rs (a document in a tab), pdf.rs
+//! (pages from the helper), view.rs (the window drawn), then hand.rs.
+//!
+//! Rule: no PDF is parsed in this process; every page, text and outline comes from the helper.
 
 mod commands;
 mod hand;

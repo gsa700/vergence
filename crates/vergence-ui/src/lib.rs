@@ -1,40 +1,47 @@
-//! A window and its input (whitepaper §6.10; toolkit milestone 1, step 2).
+//! A window and its input: the toolkit's lowest layer, which opens a window, draws a scene into
+//! it and delivers input.
 //!
-//! The first piece of the toolkit proper. A program says what its window
-//! looks like at a size ([`App::scene`]) and what it does with input
-//! ([`App::input`]); this crate asks the server for the window, learns its
-//! size and the exact scale of the monitor it is on, draws the scene at that
-//! scale and hands the server the pixels, once for each frame the server
-//! asks for and only when something changed.
+//! Whitepaper §6.10; toolkit milestone 1, step 2. Used by vergence-widgets (the widgets are
+//! built on it) and so by every Vergence app; the terminal also uses it directly. Uses
+//! vergence-scene, vergence-render and vergence-text (drawing), vergence-protocol (the native
+//! road), vergence-wl (the Wayland road), vergence-bar and vergence-look (its own bar where the
+//! server draws none).
 //!
-//! **Input arrives in order and at the place it happened.** Every pointer
-//! and key event is given to the program as it is read, a button press with
-//! the position the pointer had at that press, never at a later one, and
-//! none waits for a frame to be drawn. A program that wants a new picture
-//! says so ([`Window::redraw`]); however many events ask, one frame is drawn.
+//! A program says what its window looks like at a size ([`App::scene`]) and what it does with
+//! input ([`App::input`]); this crate asks the server for the window, learns its size and the
+//! exact scale of the monitor it is on, draws the scene at that scale and hands the server the
+//! pixels, once for each frame the server asks for and only when something changed.
 //!
-//! **Frames are drawn on the GPU** where there is one and the server takes
-//! its buffers (linux-dmabuf): the scene is drawn into memory on the card
-//! and the server shows that memory as it is. Otherwise, and for any frame
-//! the GPU renderer cannot draw yet, the CPU renderer draws into memory
-//! shared with the server (`wl_shm`). `VERGENCE_RENDER=cpu` in the
-//! environment keeps to the CPU. There are no widgets yet.
+//! **Input arrives in order and at the place it happened.** Every pointer and key event is given
+//! to the program as it is read, a button press with the position the pointer had at that press,
+//! never at a later one, and none waits for a frame to be drawn. A program that wants a new
+//! picture says so ([`Window::redraw`]); however many events ask, one frame is drawn.
 //!
-//! **The clipboard** is text for now. [`Window::copy`] puts text on it; the
-//! text is written to whoever asks on a thread of its own, so a slow reader
-//! never holds the window up. [`Window::paste`] asks for what is there; it
-//! arrives as [`Input::Paste`] when the other program has written it, read
-//! in pieces between other events, with a limit on its size and on the wait.
+//! **Frames are drawn on the GPU** where there is one and the server takes its buffers
+//! (linux-dmabuf): the scene is drawn into memory on the card and the server shows that memory
+//! as it is. Otherwise, and for any frame the GPU renderer cannot draw yet, the CPU renderer
+//! draws into memory shared with the server (`wl_shm`). `VERGENCE_RENDER=cpu` in the environment
+//! keeps to the CPU. Widgets are vergence-widgets', on top of this.
 //!
-//! Sizes and positions a program sees are in reference units (whitepaper
-//! Contract 1). It is never told to scale anything: the same scene is drawn
-//! sharper on a denser monitor, and drawn again when the window moves to
-//! another.
+//! **The clipboard** is text for now. [`Window::copy`] puts text on it; the text is written to
+//! whoever asks on a thread of its own, so a slow reader never holds the window up.
+//! [`Window::paste`] asks for what is there; it arrives as [`Input::Paste`] when the other
+//! program has written it, read in pieces between other events, with a limit on its size and on
+//! the wait.
 //!
-//! **Two roads** (native milestone 1, step 5): in a Vergence session the
-//! window opens on the project's own protocol ([`native`]); elsewhere, or if
-//! the server will not, over Wayland (the rest of this file). A program
-//! cannot tell which: the same calls and the same input either way.
+//! Sizes and positions a program sees are in reference units (whitepaper Contract 1). It is
+//! never told to scale anything: the same scene is drawn sharper on a denser monitor, and drawn
+//! again when the window moves to another.
+//!
+//! **Two roads** (native milestone 1, step 5): in a Vergence session the window opens on the
+//! project's own protocol (native.rs); elsewhere, or if the server will not, over Wayland (the
+//! rest of this file). A program cannot tell which: the same calls and the same input either
+//! way. `VERGENCE_UI_WAYLAND=1` keeps to Wayland.
+//!
+//! Start reading: [`App`] and [`run`], then [`Window`] and [`Input`], then native.rs (the
+//! native road) and the Wayland road below in this file.
+//!
+//! Rule: the two roads behave alike event for event; a change to one is made in the other.
 
 /// The bar, in its own crate since bar milestone 1 so the server draws the same one.
 pub use vergence_bar as bar;

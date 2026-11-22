@@ -1,32 +1,38 @@
-//! Text for the toolkit and the server (whitepaper §6.10; toolkit milestone 1,
-//! step 1): which font, which glyph, where it goes, and what it looks like.
+//! Text for the toolkit and the server: which font, which glyph, where it goes, and what it looks
+//! like.
+//!
+//! Whitepaper §6.10; toolkit milestone 1, step 1; text milestone 1. Used by vergence-render (the
+//! glyph cache), vergence-ui and vergence-widgets (measuring and laying out text), the server's
+//! own drawing, vergence-bar, vergence-pdf (fonts) and the apps that draw on their own.
 //!
 //! [`Fonts`] is the whole of it:
 //!
-//! - [`Fonts::face`] finds a face by family (or "monospace", "sans-serif",
-//!   "serif"), weight and slant among the fonts on this machine (db.rs). A
-//!   variable font is set to the weight asked for.
-//! - [`Fonts::glyph`] turns a character into a glyph of that face, or of the
-//!   nearest face that has the character (fallback), remembered per character.
-//! - [`Fonts::layout`] places a line of text: runs of glyphs, one run per
-//!   face, with kerning (the font's `GPOS` kerning, read by kern.rs, else
-//!   its legacy `kern` table). Sizes and positions are in whatever unit the size
-//!   was given in (reference units for a scene).
-//! - [`Fonts::raster`] is the glyph cache: a glyph's coverage as a bitmap for
-//!   one size in pixels and one of four sub-pixel positions. **Color is not
-//!   part of the key**, so a glyph is rasterized once however many colors
-//!   it is drawn in; the renderer tints the coverage.
+//! - [`Fonts::face`] finds a face by family (or "monospace", "sans-serif", "serif"), weight and
+//!   slant among the fonts on this machine (db.rs). A variable font is set to the weight asked
+//!   for.
+//! - [`Fonts::glyph`] turns a character into a glyph of that face, or of the nearest face that
+//!   has the character (fallback), remembered per character.
+//! - [`Fonts::layout`] places a line of text: runs of glyphs, one run per face, with kerning
+//!   (the font's `GPOS` kerning, read by kern.rs, else its legacy `kern` table). Sizes and
+//!   positions are in whatever unit the size was given in (reference units for a scene).
+//! - [`Fonts::raster`] is the glyph cache: a glyph's coverage as a bitmap for one size in pixels
+//!   and one of four sub-pixel positions. **Color is not part of the key**, so a glyph is
+//!   rasterized once however many colors it is drawn in; the renderer tints the coverage.
 //!
-//! Plain text only: left to right, one character one glyph, combining marks
-//! as their fonts place them (zero advance, drawn over the glyph before).
-//! Shaping for scripts that need it, right-to-left text and input methods are
-//! open (whitepaper §10, question 8). Outlines are not hinted; small text
-//! has its x-height put on a whole pixel and its strokes darkened instead
+//! Plain text only: left to right, one character one glyph, combining marks as their fonts place
+//! them (zero advance, drawn over the glyph before). Shaping for scripts that need it,
+//! right-to-left text and input methods are open (whitepaper §10, question 8). Outlines are not
+//! hinted; small text has its x-height put on a whole pixel and its strokes darkened instead
 //! (hint.rs, text milestone 1).
 //!
-//! Glyph outlines are read and rasterized by ab_glyph (borrowed, whitepaper
-//! §8). The font files' own descriptions are read by sfnt.rs, which is ours
-//! and treats every file as untrusted.
+//! Uses ab_glyph (borrowed, whitepaper §8) to read and rasterize glyph outlines; no other
+//! vergence crate.
+//!
+//! Start reading: [`Fonts`], then db.rs (finding faces), sfnt.rs (a font file's own
+//! description), kern.rs and hint.rs.
+//!
+//! Rule: every font file is untrusted; sfnt.rs, which is ours, bounds-checks every read, and
+//! the fuzz tests (fuzz.rs) feed it damage.
 
 pub mod db;
 pub mod hint;

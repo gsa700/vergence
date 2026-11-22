@@ -1,22 +1,26 @@
-//! File types (files milestone 1, step 1): what a file is, and which
-//! applications open it.
+//! File types: what a file is, and which applications open it.
 //!
-//! - **What a file is**: its name against our own table ([`table`]: the
-//!   longest matching pattern wins), then, when the name says nothing, its
-//!   first bytes ([`of_bytes`]: the signatures of the formats in the table),
-//!   then whether it reads as text. A folder is `inode/directory`; anything
-//!   else unknown is `application/octet-stream`.
-//! - **Kinds of kinds**: a type's parents ([`ancestors`]): a shell script
-//!   is also plain text, a Word document also a zip archive; every text type
-//!   is plain text, and everything is a binary file. An application that
-//!   opens plain text is offered for a shell script.
-//! - **Which applications open it**: what each application's desktop entry
-//!   says it opens (its MimeType line), and the user's choices in the XDG
-//!   `mimeapps.list` files ([`MimeApps`], [`lists`]), Vergence's own first:
-//!   `~/.config/vergence-mimeapps.list` (see docs/files-milestone-1.md), so a choice made
-//!   here holds in a Vergence session whatever else rewrites the shared one.
+//! Files milestone 1, step 1. Used by every program that handles files: File Viewer, Close-Up,
+//! Reader, the editor, the settings app's Default apps page, the server (Open, the portal),
+//! vergence-shell (`vergence-open`), vergence-widgets (the Open and Save dialog),
+//! vergence-thumbs, vergence-decode and vergence-pdf. No dependencies.
+//!
+//! - **What a file is**: its name against our own table ([`table`]: the longest matching
+//!   pattern wins), then, when the name says nothing, its first bytes ([`of_bytes`]: the
+//!   signatures of the formats in the table), then whether it reads as text. A folder is
+//!   `inode/directory`; anything else unknown is `application/octet-stream`.
+//! - **Kinds of kinds**: a type's parents ([`ancestors`]): a shell script is also plain text, a
+//!   Word document also a zip archive; every text type is plain text, and everything is a binary
+//!   file. An application that opens plain text is offered for a shell script.
+//! - **Which applications open it**: what each application's desktop entry says it opens (its
+//!   MimeType line), and the user's choices in the XDG `mimeapps.list` files ([`MimeApps`],
+//!   [`lists`]), Vergence's own first: `~/.config/vergence-mimeapps.list` (see
+//!   docs/files-milestone-1.md), so a choice made here holds in a Vergence session whatever else
+//!   rewrites the shared one.
 //!
 //! Our own code and data; nothing here reads the system's shared-mime-info.
+//!
+//! Start reading: [`of_file`], then [`table`], then [`ancestors`] and [`apps_for`].
 
 pub mod table;
 

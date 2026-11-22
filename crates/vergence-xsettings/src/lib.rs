@@ -1,17 +1,22 @@
-//! The XSETTINGS wire format (freedesktop.org XSETTINGS specification 0.5):
-//! the bytes a settings manager puts in its `_XSETTINGS_SETTINGS` property,
-//! read by GTK (theme, fonts, window scale, DPI...).
+//! The XSETTINGS wire format: the bytes a settings manager puts in its `_XSETTINGS_SETTINGS`
+//! property for X11 apps.
 //!
-//! Encoding and decoding only, no X connection: vergd (milestone 4) and the
-//! phase 2 display server (which must serve XSETTINGS to X11 apps under
-//! Xwayland) both use it.
+//! The freedesktop.org XSETTINGS specification 0.5, read by GTK (theme, fonts, window scale,
+//! DPI...). Encoding and decoding only, no X connection: the server serves XSETTINGS to X11 apps
+//! under Xwayland (its xsettings.rs), and the settings app edits the settings in their TOML
+//! form (theme.rs); phase 1's vergd used it too. No dependencies.
 //!
-//! Layout: byte order (0 = LSB first, 1 = MSB first), 3 unused bytes, serial
-//! (u32), number of settings (u32), then per setting: type (0 integer,
-//! 1 string, 2 color), 1 unused byte, name length (u16), the name padded to
-//! 4 bytes, the serial it last changed in (u32), and the value: i32; or
-//! length (u32) and bytes padded to 4; or red, blue, green, alpha (u16 each,
-//! in that order).
+//! Layout: byte order (0 = LSB first, 1 = MSB first), 3 unused bytes, serial (u32), number of
+//! settings (u32), then per setting: type (0 integer, 1 string, 2 color), 1 unused byte, name
+//! length (u16), the name padded to 4 bytes, the serial it last changed in (u32), and the value:
+//! i32; or length (u32) and bytes padded to 4; or red, blue, green, alpha (u16 each, in that
+//! order).
+//!
+//! Start reading: [`Settings`], [`Setting`] and [`Value`], then [`Settings::decode`] and
+//! [`Settings::encode`]; [`to_toml`] and [`from_toml`] for the form settings.toml keeps.
+//!
+//! Rule: decoded bytes are untrusted (another X client may have written them); a bad blob is an
+//! [`Error`], never a panic.
 
 use std::collections::BTreeMap;
 use std::fmt;

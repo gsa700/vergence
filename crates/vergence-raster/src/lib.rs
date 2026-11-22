@@ -1,17 +1,22 @@
-//! Our own vector rasterizer (PDF milestone 1, step 2;
-//! docs/pdf-milestone-1.md): what PDF pages need and Vergence's scenes do
-//! not have. Paths of lines and cubic curves (geom.rs), filled by the
-//! non-zero or even-odd rule with exact-area anti-aliasing (raster.rs),
-//! stroked with widths, caps, joins, a miter limit and dashes (stroke.rs),
-//! clipped by any path (a [`Mask`]), and pictures drawn through any
-//! transform with smoothing. A [`Canvas`] holds premultiplied RGBA and
-//! paints in any of PDF's blend modes (blend.rs, step 9).
+//! Our own vector rasterizer: paths filled, stroked and clipped, pictures drawn through any
+//! transform, PDF's blend modes.
 //!
-//! **Input is untrusted** (it comes from PDF files): segment counts,
-//! areas and canvas sizes are bounded, numbers that are not finite drop
-//! what they belong to, and nothing here panics on any input (the fuzz
-//! test). Not constant-time, not SIMD: correct first, measured later.
-//! (Later it can stand in for resvg's renderer too: docs/borrowed-review.md.)
+//! PDF milestone 1, step 2; docs/pdf-milestone-1.md: what PDF pages need and Vergence's scenes
+//! do not have. Used by vergence-pdf; no dependencies. (Later it can stand in for resvg's
+//! renderer too: docs/borrowed-review.md.)
+//!
+//! Paths of lines and cubic curves (geom.rs), filled by the non-zero or even-odd rule with
+//! exact-area anti-aliasing (raster.rs), stroked with widths, caps, joins, a miter limit and
+//! dashes (stroke.rs), clipped by any path (a [`Mask`]), and pictures drawn through any
+//! transform with smoothing. A [`Canvas`] holds premultiplied RGBA and paints in any of PDF's
+//! blend modes (blend.rs, step 9). Not constant-time, not SIMD: correct first, measured later.
+//!
+//! Start reading: [`geom`], then [`raster`] (coverage), [`stroke`], then [`Canvas`] and
+//! [`blend`].
+//!
+//! Rule: **input is untrusted** (it comes from PDF files): segment counts, areas and canvas
+//! sizes are bounded, numbers that are not finite drop what they belong to, and nothing here
+//! panics on any input (the fuzz test).
 
 pub mod blend;
 pub mod geom;

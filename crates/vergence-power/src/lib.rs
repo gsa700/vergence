@@ -1,14 +1,21 @@
-//! Vergence's power (the settings app's Battery page; later the dock's
-//! battery tile): the batteries and mains power, and whether each GPU is
-//! awake.
+//! Vergence's power: the batteries and mains power, and whether each GPU is awake.
+//!
+//! Used by the settings app's Battery page, the server (the battery's history, battery.rs),
+//! the dock's battery tile (vergence-shell's tiles.rs) and the Hardware app. No dependencies;
+//! [`history`] keeps the battery's longer history for the charts.
 //!
 //! Where the systems differ, and how:
-//! - Linux: `/sys/class/power_supply/*` (type Battery, Mains), energy in µWh
-//!   or charge in µAh with the voltage in µV, power in µW or current in µA;
-//!   the GPUs are the display-class PCI devices in `/sys/bus/pci/devices`,
-//!   awake or asleep by their runtime power state.
-//! - FreeBSD: ACPI's sysctls `hw.acpi.battery.{life,time,state,rate}` and
-//!   `hw.acpi.acline`; no per-GPU sleep (the GPU list is empty there).
+//! - Linux: `/sys/class/power_supply/*` (type Battery, Mains), energy in µWh or charge in µAh
+//!   with the voltage in µV, power in µW or current in µA; the GPUs are the display-class PCI
+//!   devices in `/sys/bus/pci/devices`, awake or asleep by their runtime power state.
+//! - FreeBSD: ACPI's sysctls `hw.acpi.battery.{life,time,state,rate}` and `hw.acpi.acline`; no
+//!   per-GPU sleep (the GPU list is empty there).
+//!
+//! Start reading: [`Power`] and [`Battery`], then the `sys` module for your system, then
+//! [`history`].
+//!
+//! Rule: the platform code stays behind this crate's types; callers never read /sys or sysctls
+//! themselves.
 
 pub mod history;
 

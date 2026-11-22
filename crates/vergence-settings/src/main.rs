@@ -1,32 +1,34 @@
-// Vergence settings, on the project's own toolkit (vergence-widgets; moved
-// from iced 2026-11-10, toolkit milestone 2, which had replaced Slint on
-// 2026-11-08).
-//
-// THE FORMAT: like macOS's System Settings, made for a desktop and not for
-// phones, with its colors (see docs/settings-milestone-1.md): a warm gray
-// sidebar of pages, the selected one filled with the desktop's accent; the page
-// on a lighter ground, its heading centered in a card, settings in soft gray
-// cards with the name on the left and the control on the right. Every change
-// applies at once.
-//
-// Pages: Appearance; Theme and fonts; Windows (title bar controls, either side,
-// chosen buttons); Dock (place, gap, hiding, opacity, applets);
-// Keyboard (key repeat: on, delay, rate, a box to try it); Mouse (speed,
-// acceleration, scrolling lines, natural scrolling, primary button, middle
-// click, double-click speed); Touchpad (tapping, scrolling, right click) and
-// Touchscreen (which screen a panel is on), each shown once the machine has
-// had one (the server's inputs.rs remembers; pointer.rs applies the
-// settings); Wallpaper; Accessibility; Energy (screens off and sleep after
-// idle, the sleep command); Screens (several screens: an overview to arrange
-// them and the size preference) with a page per screen (scale); About.
-//
-// Files: ~/.config/vergence/desktop.toml ([appearance], [keyboard], [mouse],
-// [touchpad], [touch], [shelf], [wallpaper],
-// [pictures], [displays]) and settings.toml (theme, fonts, the title bar
-// layout); the server applies both within a second. The screens come from the
-// session bus (crates/vergence-protocol), followed live, on a thread of their
-// own; previews are drawn on threads too. Both reach the window through a
-// channel and the toolkit's waker.
+//! Vergence's settings app (System Settings): every desktop setting in one window, each change
+//! applied at once.
+//!
+//! On the project's own toolkit (vergence-widgets, toolkit milestone 2). Like macOS's System
+//! Settings, made for a desktop and not for phones, with its colors (see
+//! docs/settings-milestone-1.md): a warm gray sidebar of pages, the selected one filled with the
+//! desktop's accent; the page on a lighter ground, its heading centered in a card, settings in
+//! soft gray cards with the name on the left and the control on the right. Only one runs at a
+//! time (single.rs).
+//!
+//! Pages (a module each): Appearance, Theme and fonts, Windows, Dock, Keyboard, Mouse, Touchpad
+//! and Touchscreen (each shown once the machine has had one), Wallpaper, Accessibility (Zoom
+//! among it), Energy, Battery, Sound, Wi-Fi, Network (cables and a phone by USB),
+//! Notifications, Screenshots, Screens (an overview to arrange them, a page per screen),
+//! Default apps, Apps, Session, Privacy, Lock Screen and Login, Date & Time, About.
+//!
+//! Files: ~/.config/vergence/desktop.toml (a section per page) and settings.toml (theme, fonts,
+//! the title bar layout); the server applies both within a second. The screens come from the
+//! session bus (vergence-protocol), followed live, on a thread of their own; previews are drawn
+//! on threads too. Both reach the window through a channel and the toolkit's waker.
+//!
+//! Uses vergence-widgets and vergence-ui (the window), vergence-protocol (the bus),
+//! vergence-profile (screens), vergence-net (Wi-Fi), vergence-power, vergence-sound,
+//! vergence-dm (lock screen and login), vergence-xsettings, vergence-shell and vergence-types
+//! (apps and default apps), vergence-decode (wallpaper previews).
+//!
+//! Start reading: this file (the app, its pages and messages), then sidebar.rs and look.rs (the
+//! layout every page shares), then one page module (keyboard.rs is a small one).
+//!
+//! Rule: every change applies at once (the file is written, or the bus asked, as the control
+//! moves); there is no Apply button.
 
 mod battery;
 mod datetime;

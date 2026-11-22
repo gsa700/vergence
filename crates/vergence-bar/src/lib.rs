@@ -1,18 +1,24 @@
-//! The window bar: the window's buttons where the desktop's layout puts
-//! them, and either tabs with a + (the terminal: [`Layout::new`]) or the
-//! window's title ([`Layout::plain`]). It was the terminal's own until
-//! 2026-11-10, then the toolkit's, and since bar milestone 1
-//! (docs/bar-milestone-1.md) a crate of its own: the server draws every bar
-//! from it (its title bars, native windows' tabs) and vergence-ui draws the
-//! same bar where the server draws none. Its sizes and colors are the
-//! desktop's one look (vergence-look).
+//! The window bar, drawn alike by the server and the toolkit: the window's buttons, and tabs or
+//! the title.
 //!
-//! Where everything sits is worked out in one place ([`Layout::new`]) and
-//! used both to draw the bar and to say what is under the pointer, so the
-//! two can never disagree. Tabs share the room there is: each is at most
-//! [`TAB_W`] wide and they shrink together as more are opened, so + is
-//! always in the window (the first terminal's fixed-width tabs pushed it
-//! off at six).
+//! The window's buttons sit where the desktop's layout puts them, beside either tabs with a +
+//! (the terminal: [`Layout::new`]) or the window's title ([`Layout::plain`]). A crate of its own
+//! since bar milestone 1 (docs/bar-milestone-1.md): the server draws every bar from it (its title
+//! bars, native windows' tabs), and vergence-ui draws the same bar where the server draws none
+//! (re-exported there as `vergence_ui::bar`, which the terminal uses).
+//!
+//! Uses vergence-scene (a bar is drawn as scene commands), vergence-text, vergence-render, and
+//! vergence-look for its sizes and colors, the desktop's one look.
+//!
+//! Where everything sits is worked out in one place ([`Layout::new`]) and used both to draw the
+//! bar and to say what is under the pointer, so the two can never disagree. Tabs share the room
+//! there is: each is at most [`TAB_W`] wide and they shrink together as more are opened, so + is
+//! always in the window.
+//!
+//! Start reading: [`Layout`] (where each part sits), [`Part`] (what a point is over), then
+//! [`Look`] (how it is drawn); [`TabDrag`] for tabs dragged between windows.
+//!
+//! Rule: drawing and hit testing both go through [`Layout`]; never place a part anywhere else.
 
 use vergence_render::text;
 use vergence_scene::{Color, Point, Rect, Scene};

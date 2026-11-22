@@ -1,14 +1,21 @@
-//! Sound (docs/sound-milestone-1.md): the machine's outputs by the names
-//! people know, which one sound goes to, and each one's volume and mute.
-//! Used by the settings app's Sound page and the server's volume keys.
+//! Sound: the machine's outputs by the names people know, which one sound goes to, and each
+//! one's volume and mute.
 //!
-//! One interface, [`Sound`], and a back end per system, chosen at run time:
-//! OSS on FreeBSD ([`oss`], step 1); ALSA on Linux without a sound server
-//! (step 2); with one (PipeWire or PulseAudio, the platform's standard on
-//! Fedora), the PulseAudio protocol both speak ([`pulse`], our own client;
-//! docs/sound-milestone-1.md).
-//! Volume and mute need no privilege on either; FreeBSD's default output
-//! needs root: the helper `sound-default` (step 5, [`oss::helper_main`]).
+//! docs/sound-milestone-1.md. Used by the settings app's Sound page, the server's volume keys
+//! and File Viewer's sound preview (playing, [`stream`]). No dependencies. Its programs
+//! (src/bin): `vsound` (the outputs from a terminal) and `sound-default` (FreeBSD's root helper).
+//!
+//! One interface, [`Sound`], and a back end per system, chosen at run time ([`open`]): OSS on
+//! FreeBSD (`oss`, step 1); ALSA on Linux without a sound server ([`alsa`], step 2); with one
+//! (PipeWire or PulseAudio, the platform's standard on Fedora), the PulseAudio protocol both
+//! speak ([`pulse`], our own client). Volume and mute need no privilege on either; FreeBSD's
+//! default output needs root: the helper `sound-default` (step 5, `oss::helper_main`).
+//!
+//! Start reading: [`Sound`] and [`open`], then the back end for your system ([`pulse`],
+//! [`alsa`] or `oss`).
+//!
+//! Rule: callers see only [`Sound`] and [`Output`]; nothing outside this crate knows which back
+//! end runs.
 
 use std::io;
 

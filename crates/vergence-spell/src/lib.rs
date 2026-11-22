@@ -1,22 +1,24 @@
-//! Spelling (editor milestone 1, step 7): our own checker, reading the list
-//! Vergence ships (data/words/en_US.txt, made from SCOWL by
-//! tools/make-words.py), shipped with Vergence rather than taken from the
-//! system (see docs/editor-milestone-1.md).
+//! Spelling: our own checker and completions, reading the word list Vergence ships.
 //!
-//! - **Checking** a word: as listed, or capitalized at a sentence's start
-//!   ("The" for "the"), or all in capitals ("THE", "NASA"); a name stays a
-//!   name ("paris" is not "Paris"). Curly apostrophes count as straight.
-//! - **Suggestions**: listed words one or two edits away (a letter left
-//!   out, one too many, one wrong, two swapped), the nearest first; among
-//!   them, a slip to a neighboring key and the commoner word (the list's
-//!   size levels) first; in the case the word was typed in.
-//! - **Completions** for the text area's autocomplete: listed words
-//!   starting with what is typed, commoner first.
-//! - **The user's own words**, shared by every app:
-//!   ~/.local/share/vergence/words.txt (owner only), one a line; read again
-//!   when it changes.
+//! Editor milestone 1, step 7. The list is data/words/en_US.txt, made from SCOWL by
+//! tools/make-words.py, shipped with Vergence rather than taken from the system (see
+//! docs/editor-milestone-1.md). Used by vergence-widgets (the text area's spelling and
+//! autocomplete, so the editor and every text field); no dependencies.
+//!
+//! - **Checking** a word: as listed, or capitalized at a sentence's start ("The" for "the"), or
+//!   all in capitals ("THE", "NASA"); a name stays a name ("paris" is not "Paris"). Curly
+//!   apostrophes count as straight.
+//! - **Suggestions**: listed words one or two edits away (a letter left out, one too many, one
+//!   wrong, two swapped), the nearest first; among them, a slip to a neighboring key and the
+//!   commoner word (the list's size levels) first; in the case the word was typed in.
+//! - **Completions** for the text area's autocomplete: listed words starting with what is
+//!   typed, commoner first.
+//! - **The user's own words**, shared by every app: ~/.local/share/vergence/words.txt (owner
+//!   only), one a line; read again when it changes.
 //!
 //! The list is read once per process, the first time it is wanted.
+//!
+//! Start reading: [`Speller`].
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};

@@ -1,11 +1,16 @@
-//! What the machine is doing (tools milestone 1, the Hardware app): its
-//! processors and their load, frequency and temperatures, its memory, its
-//! file systems and how busy its disks are, its name and system. Our own
-//! code, read the way each system offers it: Linux from /proc and /sys,
-//! FreeBSD from sysctls (sysctlbyname, from the C library every program
-//! links); how full each file system is from `df -kP`, which both systems
-//! have. The parsers are plain functions of the text, tested here against
-//! samples of it.
+//! What the machine is doing: processors, memory, file systems, disks, temperatures, its name and
+//! system.
+//!
+//! Tools milestone 1, the Hardware app. Used by the Hardware app (vergence-hw), the server and
+//! the terminal. Our own code, no dependencies, read the way each system offers it: Linux from
+//! /proc and /sys, FreeBSD from sysctls (sysctlbyname, from the C library every program links);
+//! how full each file system is from `df -kP`, which both systems have.
+//!
+//! Start reading: the types at the top ([`Cpu`], [`Memory`], [`FileSystem`], [`DiskIo`]), then
+//! the `os` module for your system.
+//!
+//! Rule: the parsers are plain functions of the text, tested here against samples of it; keep
+//! reading and parsing apart so they stay testable.
 
 use std::path::Path;
 

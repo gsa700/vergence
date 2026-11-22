@@ -1,34 +1,37 @@
-//! Hymie, AlbumWall's audio engine, ported to Rust (preview milestone 1,
-//! docs/preview-milestone-1.md): its decoders already exist and are proven,
-//! so Vergence reuses them rather than writing new ones. The source is Spindle's
-//! `src/Spindle.Codecs` (C#, at 005f289), which played bit-identical to mpv
-//! (2026-10-26). Each decoder keeps Hymie's structure, so a fix in one can be
-//! carried to the other.
+//! Hymie, AlbumWall's audio engine, ported to Rust: decoders for WAV, FLAC, MP3 and ALAC, tags,
+//! cover art and waveforms.
 //!
-//! A [`Track`] is one file open for playing: its rate, channels and length,
-//! its ReplayGain, interleaved samples as floats from -1 to 1, and seeking to
-//! an exact frame. [`open`] chooses the decoder by the file's first bytes.
-//! [`Tags`] gives the words and the cover art a preview shows. [`peaks`]
-//! decodes a whole track into a waveform's min/max per slice.
+//! Preview milestone 1, docs/preview-milestone-1.md: its decoders already exist and are proven,
+//! so Vergence reuses them rather than writing new ones. The source is Spindle's
+//! `src/Spindle.Codecs` (C#, at 005f289), which played bit-identical to mpv (2026-10-26). Each
+//! decoder keeps Hymie's structure, so a fix in one can be carried to the other. Used by File
+//! Viewer (a sound file's preview, through the helper) and by vergence-hymie-aac; uses
+//! vergence-decode for the helper's confinement.
+//!
+//! A [`Track`] is one file open for playing: its rate, channels and length, its ReplayGain,
+//! interleaved samples as floats from -1 to 1, and seeking to an exact frame. [`open`] chooses
+//! the decoder by the file's first bytes. [`Tags`] gives the words and the cover art a preview
+//! shows. [`peaks`] decodes a whole track into a waveform's min/max per slice.
 //!
 //! The formats and where each came from:
 //! - WAV and FLAC (Deadwax's decoder, written from RFC 9639): our own.
-//! - MP3, MPEG-1, 2 and 2.5 Layer III: minimp3 (CC0), gapless by the LAME
-//!   tag as FFmpeg does it.
-//! - ALAC in an MP4 (.m4a): Apple's own decoder (Copyright (c) 2011 Apple
-//!   Inc., Apache-2.0, licenses/alac-LICENSE.txt) by way of Hymie's Alac.cs;
-//!   the MP4 container, gapless by its edit list and iTunSMPB as FFmpeg does
-//!   it, and its iTunes tags (ilst atoms): our own.
+//! - MP3, MPEG-1, 2 and 2.5 Layer III: minimp3 (CC0), gapless by the LAME tag as FFmpeg does it.
+//! - ALAC in an MP4 (.m4a): Apple's own decoder (Copyright (c) 2011 Apple Inc., Apache-2.0,
+//!   licenses/alac-LICENSE.txt) by way of Hymie's Alac.cs; the MP4 container, gapless by its
+//!   edit list and iTunSMPB as FFmpeg does it, and its iTunes tags (ilst atoms): our own.
 //! - AAC (FAAD2, GPL-2.0-or-later) lives in its own crate and helper program
-//!   (crates/vergence-hymie-aac, libexec/vergence/vergence-hymie-aac), so
-//!   this one stays under Vergence's license: here an AAC .m4a is refused
-//!   with [`Error::NeedsAac`] (its tags and cover are still read), and the
-//!   client ([`helper::Sound`]) hands such a file to the AAC helper. That
-//!   helper reuses this crate's MP4 reader through [`open_with`] and the
+//!   (crates/vergence-hymie-aac, libexec/vergence/vergence-hymie-aac), so this one stays under
+//!   Vergence's license: here an AAC .m4a is refused with [`Error::NeedsAac`] (its tags and
+//!   cover are still read), and the client ([`helper::Sound`]) hands such a file to the AAC
+//!   helper. That helper reuses this crate's MP4 reader through [`open_with`] and the
 //!   [`FrameDecoder`] trait, which say nothing of AAC's own workings.
 //!
-//! Files are parsed in a confined helper, never in an app's own process
-//! (whitepaper §6.10): this crate is that helper's library.
+//! Start reading: [`open`] and [`Track`], then [`helper`] (the confined helper and its client),
+//! then a decoder module (flac.rs is the smallest whole one).
+//!
+//! Rules: files are parsed in a confined helper, never in an app's own process (whitepaper
+//! §6.10): this crate is that helper's library. No AAC or other GPL-only code comes into this
+//! crate.
 
 mod alac;
 mod flac;

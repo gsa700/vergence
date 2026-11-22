@@ -1,10 +1,14 @@
-//! A small EDID parser: the 128-byte base block and the descriptors Vergence
-//! needs (identity, physical size, native mode). Extension blocks are kept in
-//! the raw bytes but not parsed.
+//! A small EDID parser: the 128-byte base block and the descriptors Vergence needs (identity,
+//! physical size, native mode).
 //!
-//! An EDID comes from hardware and is not trusted: every read is bounds
-//! checked, and a short blob, a bad header or a bad checksum is an error, not
-//! a guess.
+//! Extension blocks are kept in the raw bytes but not parsed. Used by vergence-server (each
+//! monitor's identity and size, drm.rs) and vergence-harness (sweeps over the linuxhw EDID
+//! database, fake monitors); [`fake`] writes EDIDs for test monitors. No dependencies.
+//!
+//! Start reading: [`Edid::parse`], then [`DetailedTiming`], then [`fake`].
+//!
+//! Rule: an EDID comes from hardware and is not trusted: every read is bounds checked, and a
+//! short blob, a bad header or a bad checksum is an error, not a guess.
 
 pub mod fake;
 

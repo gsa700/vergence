@@ -1,37 +1,41 @@
-//! The display list (whitepaper §6.6, §6.10; toolkit milestone 1, step 1).
+//! The display list: what a window looks like, as data in reference units, drawn by whoever
+//! renders it.
 //!
-//! A [`Scene`] is what a window looks like, as data: a list of drawing
-//! commands in **reference units** (points at 96 to the inch, whitepaper
-//! Contract 1), with the window's top-left corner at 0,0 and y downwards. It
-//! holds no pixels of its own making and names no scale: whoever renders it
-//! decides the density, so the same scene is sharp on every monitor, can be
-//! drawn again at any size, and can be sent to another machine as it is.
+//! Whitepaper §6.6, §6.10; toolkit milestone 1, step 1. Used by every crate that draws:
+//! vergence-render (draws it), vergence-ui and vergence-widgets (build it), the server (draws
+//! windows from their scenes, display lists milestone 1), vergence-bar and the apps. No
+//! dependencies.
 //!
-//! Version 1 has what the terminal needs:
+//! A [`Scene`] is a list of drawing commands in **reference units** (points at 96 to the inch,
+//! whitepaper Contract 1), with the window's top-left corner at 0,0 and y downwards. It holds no
+//! pixels of its own making and names no scale: whoever renders it decides the density, so the
+//! same scene is sharp on every monitor, can be drawn again at any size, and can be sent to
+//! another machine as it is.
 //!
-//! - [`Command::Fill`] and [`Command::Stroke`]: a rectangle, corners rounded
-//!   or not, filled or outlined;
+//! The commands ([`Command`]):
+//!
+//! - [`Command::Fill`] and [`Command::Stroke`]: a rectangle, corners rounded or not, filled or
+//!   outlined;
 //! - [`Command::Line`]: a straight line of a given width, round ends;
-//! - [`Command::Glyphs`]: glyphs of one font at one size in one color, each
-//!   placed by the toolkit's text code. The font is named by family, weight
-//!   and slant in the scene's font table, so a renderer anywhere can find it;
-//! - [`Command::Image`]: a picture from the scene's image table, stretched
-//!   to a rectangle;
-//! - [`Command::PushClip`] / [`Command::PopClip`]: everything between them is
-//!   kept inside a (rounded) rectangle;
-//! - [`Command::Cells`]: a grid of equal cells, each with its own ground,
-//!   ink and glyph: a terminal's screen in one command of sixteen bytes a
-//!   cell, where fills and glyph runs would take two commands for every
-//!   cell whose colors are its own (added 2026-11-10, toolkit step 5).
+//! - [`Command::Glyphs`]: glyphs of one font at one size in one color, each placed by the
+//!   toolkit's text code. The font is named by family, weight and slant in the scene's font
+//!   table, so a renderer anywhere can find it;
+//! - [`Command::Image`]: a picture from the scene's image table, stretched to a rectangle;
+//! - [`Command::PushClip`] / [`Command::PopClip`]: everything between them is kept inside a
+//!   (rounded) rectangle;
+//! - [`Command::Cells`]: a grid of equal cells, each with its own ground, ink and glyph: a
+//!   terminal's screen in one command of sixteen bytes a cell, where fills and glyph runs would
+//!   take two commands for every cell whose colors are its own.
 //!
-//! Layers with their own opacity, gradients and paths come when a tool needs
-//! them.
+//! Layers with their own opacity, gradients and paths come when a tool needs them.
 //!
-//! **A scene is untrusted input wherever it is read.** [`Scene::validate`]
-//! checks every number, index and count against the limits below, and
-//! [`Scene::decode`] (wire.rs) never returns a scene that fails it. A renderer
-//! may rely on a validated scene: indices are in range, numbers are finite and
-//! bounded, clips are balanced.
+//! Start reading: [`Command`], then [`Scene`] and [`Scene::validate`], then wire.rs (the
+//! encoding, [`Scene::decode`]).
+//!
+//! Rule: **a scene is untrusted input wherever it is read.** [`Scene::validate`] checks every
+//! number, index and count against the limits below, and [`Scene::decode`] never returns a
+//! scene that fails it. A renderer may rely on a validated scene: indices are in range, numbers
+//! are finite and bounded, clips are balanced.
 
 pub mod wire;
 

@@ -1,9 +1,25 @@
-//! Vergence's native protocol (whitepaper §6): the message types and wire
-//! format the server and its clients share. The session bus (§6.8) is the
-//! first part; windows, placement (Contract 2) and accessibility (Contract 3)
-//! join it on the same connection later.
+//! Vergence's native protocol: the session bus and native windows, the messages and wire format
+//! the server and its clients share.
+//!
+//! Whitepaper §6. The session bus (§6.8, [`bus`]) and native windows ([`window`]: pictures,
+//! input, the clipboard, placement under Contract 2, meaning under Contract 3) share one
+//! connection; [`agent`] is the agent interface, [`tile`] the dock's live tiles, [`commands`]
+//! an app's menu commands by role. Used by vergence-server (the other end), vergence-ui (the
+//! toolkit's native road), vergence-wl, vergence-widgets, vergence-shell, vergence-media and the
+//! apps that talk to the bus. Its own programs (src/bin): `vbus` (the bus from a shell),
+//! `vagent` and `vergence-agent-mcp` (the agent interface), `vtile` (a live tile from a script),
+//! `vergence-screenshot`.
 //!
 //! Our own code, with no dependencies (§8, "Our own parts").
+//!
+//! Start reading: [`wire`] (frames and field encoding), [`bus`] (the bus messages and the
+//! version history), [`Client`] (connecting and the Hello), then [`window`] and [`sock`]
+//! (descriptors beside the bytes).
+//!
+//! Rules: **the server and the apps speak one exact bus protocol version** (`bus::VERSION`; the
+//! server refuses any other), so any change to a message bumps it, and the server and the apps
+//! are installed together (each package requires the other at the same version). Every frame
+//! from a peer is untrusted: decoding never panics (the fuzz tests run with `cargo test`).
 
 pub mod agent;
 pub mod bus;

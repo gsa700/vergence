@@ -1,52 +1,39 @@
-//! Vergence's terminal, on the project's own toolkit (toolkit milestone 1).
+//! Vergence's terminal, on the project's own toolkit: tabs, panes, scrollback, selection and
+//! xterm's sequences.
 //!
-//! The screen, the escape-sequence parser and the pty (grid.rs, vt.rs,
-//! pty.rs) are the ones written for the first terminal, whose interface was
-//! built on a borrowed toolkit (iced, 2026-11-08) and retired on 2026-11-10
-//! when this one passed the stress test that one failed. This interface was
-//! written beside it under the name `vterm`, which the plan's Progress and
-//! the stress test's scripts still use. What it does differently:
+//! Toolkit milestone 1. The screen, the escape-sequence parser and the pty (grid.rs, vt.rs,
+//! pty.rs) are the ones written for the first terminal, whose interface was built on a borrowed
+//! toolkit and retired once this one passed the stress test that one failed. This interface was
+//! written beside it under the name `vterm`, which the plan's Progress and the stress test's
+//! scripts still use. What it does differently:
 //!
-//! - **The program's output is parsed on a thread of its own**, into the
-//!   screen behind a lock. The window's thread never parses and is never
-//!   held up by a flood: when the screen has changed it is woken, asks for a
-//!   frame, and the frame shows whatever the screen holds when the monitor
-//!   is ready for it. However fast the output, at most one frame is drawn
-//!   for each the monitor shows.
-//! - **The picture is a scene** (vergence-scene), drawn on the GPU or, where
-//!   that is not to be had, in software: a terminal's screen is one grid of
-//!   cells, each with its ground, its ink and its glyph, found in the font
-//!   or in the nearest font that has it.
-//! - **Keys arrive in order** through the toolkit and go to the program as
-//!   xterm's sequences.
+//! - **The program's output is parsed on a thread of its own**, into the screen behind a lock.
+//!   The window's thread never parses and is never held up by a flood: when the screen has
+//!   changed it is woken, asks for a frame, and the frame shows whatever the screen holds when
+//!   the monitor is ready for it. However fast the output, at most one frame is drawn for each
+//!   the monitor shows.
+//! - **The picture is a scene** (vergence-scene), drawn on the GPU or, where that is not to be
+//!   had, in software: a terminal's screen is one grid of cells, each with its ground, its ink
+//!   and its glyph, found in the font or in the nearest font that has it.
+//! - **Keys arrive in order** through the toolkit and go to the program as xterm's sequences.
 //!
-//! So far: terminals in tabs under a bar of the window's own (the toolkit's, vergence_ui::bar), with
-//! the window's buttons on the side the desktop's settings say and tabs
-//! that shrink to fit; typing, paste, the scrollback (wheel,
-//! Shift+PageUp/PageDown, Shift+Home/End), resizing, titles, the program's own copies (OSC
-//! 52), the fonts and color scheme from the desktop's settings. Ctrl+Shift+T
-//! opens a tab, Ctrl+Shift+W closes one, Ctrl+PageUp/PageDown and
-//! Ctrl+Tab/Ctrl+Shift+Tab change tab.
-//! The mouse selects text (select.rs): a drag by characters, a second press
-//! by words, a third by lines, Shift and a press to extend; held past the
-//! top or bottom edge the view scrolls under it. Ctrl+Shift+C copies. A
-//! program that asked for the mouse gets it (mouse.rs: presses, releases,
-//! moves and the wheel, as xterm reports them) unless Shift is held, which
-//! keeps the mouse for selecting.
-//! A thin scrollbar at the right edge (scrollbar.rs) shows where the view
-//! is in the scrollback and can be dragged.
-//! The desktop's settings are followed while the terminal runs: the two
-//! files are looked at once a second, and a change of fonts, colors or
-//! button side shows at the next frame.
-//! The right button opens a menu (menu.rs) with copy, paste and the tab
-//! commands; where a program has the mouse, Shift and the right button.
-//! A tab's room can be divided among several terminals (panes.rs):
-//! Ctrl+Shift+R side by side, Ctrl+Shift+D one above the other, as often
-//! as wanted; a press makes a pane the one the keys go to, the line between
-//! two can be dragged, and Ctrl+Shift+W closes the pane (the tab with its
-//! last).
-//! Ctrl+C copies when text is selected (and is the interrupt key when
-//! none is); Ctrl+V pastes. Ctrl+Shift+C and Ctrl+Shift+V do the same.
+//! What it has: tabs under a bar of the window's own (vergence-bar, through `vergence_ui::bar`)
+//! and panes in a tab (panes.rs: Ctrl+Shift+R side by side, Ctrl+Shift+D one above the other);
+//! typing, paste, the scrollback, resizing, titles, the program's own copies (OSC 52); text
+//! selected with the mouse (select.rs), the mouse for programs that ask (mouse.rs, Shift keeps it
+//! for selecting), a scrollbar (scrollbar.rs), a right-click menu (menu.rs); the fonts, colors
+//! and button side from the desktop's settings, followed while it runs (settings.rs). Ctrl+C
+//! copies when text is selected and is the interrupt key when none is; Ctrl+V pastes.
+//!
+//! Uses vergence-ui and vergence-widgets (window, settings window), vergence-scene,
+//! vergence-text and vergence-render (drawing), vergence-look, vergence-sysinfo.
+//!
+//! Start reading: this file (the app and its loop), session.rs (one terminal: the parsing thread
+//! and its screen), grid.rs and vt.rs (the screen and the parser), draw.rs (a frame), then
+//! input.rs.
+//!
+//! Rules: the window's thread never parses the program's output. Random escape sequences must
+//! never panic the parser (fuzz.rs runs with `cargo test`).
 
 mod commands;
 mod confirm;

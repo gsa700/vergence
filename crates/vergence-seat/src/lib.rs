@@ -1,32 +1,35 @@
-//! The seat: who gets each pointer, keyboard and touch event, as plain
-//! decisions (docs/seat-milestone-1.md, step 1; whitepaper §6.3).
+//! The seat: who gets each pointer, keyboard and touch event, as plain decisions the server
+//! applies.
 //!
-//! The server tells the seat what is under a point ([`Target`]) and what the
-//! hand did; the seat answers with what is to happen ([`Out`]), and the
-//! server applies it **after** the call, never inside one. Nothing here
-//! looks at windows, draws, or knows Smithay: a window is a number the
+//! docs/seat-milestone-1.md, step 1; whitepaper §6.3. Used by vergence-server only (dispatch.rs
+//! and input.rs first); no dependencies, so every rule is tested without a display.
+//!
+//! The server tells the seat what is under a point ([`Target`]) and what the hand did; the seat
+//! answers with what is to happen ([`Out`]), and the server applies it **after** the call, never
+//! inside one. Nothing here looks at windows, draws, or knows Smithay: a window is a number the
 //! server gave it, and so is a Wayland surface.
 //!
 //! The rules, each with its tests:
 //!
-//! - **Pointer focus and the implicit grab** ([`pointer`]): the target under
-//!   the pointer has it, except while a button is held: then the target the
-//!   first press went to keeps every motion and every release. Enter and
-//!   leave come from one place.
-//! - **Grabs as states** ([`Grab`]): moving or resizing a window, a menu or
-//!   the apps popup open (a press outside closes it and goes no further),
-//!   and the edge's (a Wayland drag and drop, Smithay's until it ends). One
-//!   at a time.
-//! - **The keyboard** ([`keyboard`]): the server's own keys are filtered
-//!   first (Ctrl+Alt+Backspace, the consoles, the volume keys, Super tapped
-//!   alone, Escape for a menu, everything while the popup is open, Alt+Tab
-//!   and Alt+` switching windows, Super with an arrow for the window keys),
-//!   then the focused window has them. The seat keeps the order in which
-//!   windows last had the keyboard (windows milestone 1).
-//! - **Touch** ([`touch`]): a finger on a window is the window's from its
-//!   first contact to its last; the first finger anywhere else is the
-//!   pointer with its left button held; a long, still press there is the
-//!   right button.
+//! - **Pointer focus and the implicit grab** ([`pointer`](mod@pointer)): the target under the
+//!   pointer has it, except while a button is held: then the target the first press went to
+//!   keeps every motion and every release. Enter and leave come from one place.
+//! - **Grabs as states** ([`Grab`]): moving or resizing a window, a menu or the apps popup open
+//!   (a press outside closes it and goes no further), and the edge's (a Wayland drag and drop,
+//!   Smithay's until it ends). One at a time.
+//! - **The keyboard** ([`keyboard`]): the server's own keys are filtered first
+//!   (Ctrl+Alt+Backspace, the consoles, the volume keys, Super tapped alone, Escape for a menu,
+//!   everything while the popup is open, Alt+Tab and Alt+` switching windows, Super with an
+//!   arrow for the window keys), then the focused window has them. The seat keeps the order in
+//!   which windows last had the keyboard (windows milestone 1).
+//! - **Touch** ([`touch`]): a finger on a window is the window's from its first contact to its
+//!   last; the first finger anywhere else is the pointer with its left button held; a long,
+//!   still press there is the right button.
+//!
+//! Start reading: [`Seat`], [`Target`] and [`Out`], then [`pointer`](mod@pointer), [`keyboard`],
+//! [`touch`].
+//!
+//! Rule: the seat only decides; it never calls back into the server or holds a reference to it.
 
 pub mod keyboard;
 pub mod pointer;

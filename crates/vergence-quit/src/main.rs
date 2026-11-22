@@ -1,9 +1,17 @@
-//! Vergence's Force Quit (tools milestone 1, docs/tools-milestone-1.md: named
-//! as on the Mac, and kept very simple; the terminal is for anything harder): the
-//! user's running applications, with their icons, and one of them ended at
-//! once after a question. The list and the ending are the server's
-//! (forcequit.rs) over the session bus; this is only the window. Opened from
-//! the launcher, or by Ctrl+Alt+Escape anywhere.
+//! Vergence's Force Quit: the user's running applications, and one of them ended at once after a
+//! question.
+//!
+//! Tools milestone 1, docs/tools-milestone-1.md: named as on the Mac, and kept very simple; the
+//! terminal is for anything harder. Shows the apps with their icons. The list and the ending are
+//! the server's (its forcequit.rs) over the session bus (vergence-protocol); this is only the
+//! window, on vergence-widgets and vergence-ui. Opened from the launcher, or by Ctrl+Alt+Escape
+//! anywhere.
+//!
+//! Start reading: this one file, from `main` to the program's `view` and `update`, then the
+//! server's forcequit.rs for what happens on the other side.
+//!
+//! Rule: the app decides nothing about processes; it asks the server, which ends only the
+//! user's own applications.
 
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};

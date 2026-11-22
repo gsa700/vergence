@@ -1,16 +1,21 @@
-//! The look of the desktop's own drawing, in one place, so it is consistent
-//! throughout (see docs/look-milestone-1.md).
+//! The look of the desktop's own drawing, in one place, so it is consistent throughout.
 //!
-//! The server draws title bars and borders; the toolkit draws window bars,
-//! tabs, buttons, menus and scrollbars. They are to look like one thing, so
-//! the numbers both draw with live here, and neither keeps a copy: a change
-//! here changes both. Lengths are in reference units (points at 96 to the
-//! inch, whitepaper Contract 1); colors are sRGB.
+//! See docs/look-milestone-1.md. The server draws title bars and borders; the toolkit draws
+//! window bars, tabs, buttons, menus and scrollbars. They are to look like one thing, so the
+//! numbers both draw with live here, and neither keeps a copy: a change here changes both.
+//! Lengths are in reference units (points at 96 to the inch, whitepaper Contract 1); colors are
+//! sRGB. Used by vergence-server, vergence-bar, vergence-ui, vergence-widgets, vergence-shell
+//! and the apps that draw on their own (the terminal, the calculator, the settings app). No
+//! dependencies.
 //!
-//! Bars and borders come in a dark and a light style ([`BarLook`]); the
-//! rest are the defaults of a dark desktop so far. What the user's settings
-//! choose (the accent, light or dark, contrast) is applied by whoever
-//! draws; this crate knows nothing of settings.
+//! Bars and borders come in a dark and a light style ([`BarLook`]); the rest are the defaults of
+//! a dark desktop so far. What the user's settings choose (the accent, light or dark, contrast)
+//! is applied by whoever draws; this crate knows nothing of settings.
+//!
+//! Start reading: [`BarLook`], then [`Palette`] and [`ShelfLook`].
+//!
+//! Rule: a size or color the server and the toolkit both draw is defined here once; never copy
+//! it into either.
 
 /// A color, sRGB, opaque.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

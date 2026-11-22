@@ -1,11 +1,17 @@
-//! Vergence's Hardware app (tools milestone 1, docs/tools-milestone-1.md;
-//! details on the CPU, GPU, network, memory and the rest, as listed in
-//! docs/apps-roadmap.md): a page for each part of the machine with what it is and what it
-//! is doing now, the last minute charted. Read-only; the readings are
-//! vergence-sysinfo's (processors, memory, file systems, disks,
-//! temperatures), vergence-net's (interfaces and their traffic) and
-//! vergence-power's (batteries, mains, the GPUs and whether they are awake),
-//! once a second.
+//! Vergence's Hardware app: a page for each part of the machine, what it is and what it is doing
+//! now.
+//!
+//! Tools milestone 1, docs/tools-milestone-1.md; details on the CPU, GPU, network, memory and
+//! the rest, as listed in docs/apps-roadmap.md. Each page charts the last minute. Read-only; the
+//! readings are vergence-sysinfo's (processors, memory, file systems, disks, temperatures),
+//! vergence-net's (interfaces and their traffic) and vergence-power's (batteries, mains, the GPUs
+//! and whether they are awake), once a second. The window is on vergence-widgets and
+//! vergence-ui; the charts are vergence-widgets' chart.rs.
+//!
+//! Start reading: this one file, from `main` to the program's state and its `view`, which
+//! builds a page from the latest readings.
+//!
+//! Rule: read-only; the app reads what the system offers to any user and changes nothing.
 
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;

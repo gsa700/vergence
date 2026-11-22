@@ -1,18 +1,22 @@
-//! Thumbnails (files milestone 1, step 10; docs/files-milestone-1.md §5) by
-//! the freedesktop thumbnail spec, so they are shared with other desktops:
-//! `$XDG_CACHE_HOME/thumbnails/large/<md5 of the file's URI>.png`, at most
-//! 256 pixels a side, carrying `Thumb::URI` and `Thumb::MTime` (the file's
-//! modification time in seconds); one whose time differs is stale and made
-//! again. A picture that cannot be made into one is marked in
-//! `fail/vergence/` so it is not tried again until it changes.
+//! Thumbnails by the freedesktop thumbnail spec, so they are shared with other desktops.
 //!
-//! Decoding stays apart (§3): the pixels of the picture and of a cached
-//! thumbnail (which any program could have written) go through
-//! vergence-decode's helper; this crate only walks a cached file's chunks
-//! for its text, without inflating anything, and writes PNGs of pixels it
-//! made. [`Thumbnailer`] keeps a queue for two worker threads, newest asks
-//! first, so a folder of a thousand photos does not start a thousand
-//! helpers.
+//! Files milestone 1, step 10; docs/files-milestone-1.md §5. Used by File Viewer (the icon view
+//! and the preview pane). Uses vergence-decode (all pixels, decoded apart), vergence-pdf (a
+//! document's first page, through its helper), vergence-types and vergence-scene.
+//!
+//! `$XDG_CACHE_HOME/thumbnails/large/<md5 of the file's URI>.png`, at most 256 pixels a side,
+//! carrying `Thumb::URI` and `Thumb::MTime` (the file's modification time in seconds); one whose
+//! time differs is stale and made again. A picture that cannot be made into one is marked in
+//! `fail/vergence/` so it is not tried again until it changes. [`Thumbnailer`] keeps a queue for
+//! two worker threads, newest asks first, so a folder of a thousand photos does not start a
+//! thousand helpers.
+//!
+//! Start reading: [`get`] (one thumbnail, cached or made), then [`Thumbnailer`].
+//!
+//! Rule: decoding stays apart (§3): the pixels of the picture and of a cached thumbnail (which
+//! any program could have written) go through vergence-decode's helper; this crate only walks a
+//! cached file's chunks for its text, without inflating anything, and writes PNGs of pixels it
+//! made.
 
 mod md5;
 

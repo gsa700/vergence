@@ -1,30 +1,45 @@
-//! vergence-harness: test tool, separate from the daemon (milestone 1, test
-//! automation). The harness may need root; vergd never does.
+//! vergence-harness: the project's test tool for EDIDs, monitors and screenshots, apart from the
+//! desktop's own programs.
 //!
-//!   vergence-harness parse <edid-db>
-//!       Parse every EDID in a linuxhw/EDID checkout (github.com/linuxhw/EDID)
-//!       and report what kinds of monitors and faults it holds. No X needed.
+//! Run by test scripts (tools/display-check.sh and the display suite, tools/lab) and by
+//! tools/install.sh, which has it draw Vergence's pointers and lay out its icon theme. Only
+//! `live` needs root; the desktop's own programs never do for a test. Uses vergence-edid and
+//! vergence-profile (EDIDs and profile keys), vergence-decode (screenshots are read through the
+//! confined helper) and vergence-shell (the icon names). Each command is a module of its own:
+//! start with main.rs's dispatch, then the command's module; db.rs reads the EDID database.
 //!
-//!   vergence-harness live <edid-db> --conn HDMI-A-1 --output HDMI-1
-//!                         [--sample N] [--vergd PATH]
-//!       Root, X display in DISPLAY/XAUTHORITY. For N EDIDs spread evenly over
-//!       the database: write it to the connector's debugfs edid_override,
-//!       force the connector on, make X re-probe, and check that X shows the
-//!       same bytes and that `vergd probe` prints the expected profile key.
-//!       Then unplug the fake again.
+//! ```text
+//! vergence-harness parse <edid-db>
+//!     Parse every EDID in a linuxhw/EDID checkout (github.com/linuxhw/EDID)
+//!     and report what kinds of monitors and faults it holds. No X needed.
 //!
-//!   vergence-harness fake --name N --product 0x9902 --serial 2
-//!                         --mode 4k30|1080p60 --size-mm WxH --out FILE
-//!       Write a fake monitor's EDID (milestone 4: fakes of other densities).
+//! vergence-harness live <edid-db> --conn HDMI-A-1 --output HDMI-1
+//!                       [--sample N] [--vergd PATH]
+//!     Root, X display in DISPLAY/XAUTHORITY (phase 1's vergd). For N EDIDs spread evenly
+//!     over the database: write it to the connector's debugfs edid_override,
+//!     force the connector on, make X re-probe, and check that X shows the
+//!     same bytes and that `vergd probe` prints the expected profile key.
+//!     Then unplug the fake again.
 //!
-//!   vergence-harness measure <window title>...
-//!   vergence-harness seams <shot.png> --scale S --window X Y W H [--bar H]
-//!   vergence-harness same <a.png> <b.png> [--at X Y] [--corners R] [--top N] [--tolerance T]
-//!   vergence-harness zoomed <plain.png> <zoomed.png> <px> <py> <level> [--tolerance T]
-//!   vergence-harness sharper <a.png> <b.png> <x> <y> <w> <h> [--by R]
-//!   vergence-harness cursors <theme directory>   (Vergence's pointers as an Xcursor theme)
-//!       Find each size box (tools/lab/sizebox) and print its size on the panel
-//!       in millimeters (milestone 4, acceptance 3).
+//! vergence-harness fake --name N --product 0x9902 --serial 2
+//!                       --mode 4k30|1080p60 --size-mm WxH --out FILE
+//!     Write a fake monitor's EDID (milestone 4: fakes of other densities).
+//!
+//! vergence-harness measure <window title>...
+//!     Find each size box (tools/lab/sizebox) and print its size on the panel
+//!     in millimeters (milestone 4, acceptance 3).
+//!
+//! vergence-harness seams <shot.png> --scale S --window X Y W H [--bar H]
+//! vergence-harness same <a.png> <b.png> [--at X Y] [--corners R] [--top N] [--tolerance T]
+//! vergence-harness zoomed <plain.png> <zoomed.png> <px> <py> <level> [--tolerance T]
+//! vergence-harness sharper <a.png> <b.png> <x> <y> <w> <h> [--by R]
+//! vergence-harness grid <scale>
+//!     Checks on screenshots and scales, for the display suite.
+//!
+//! vergence-harness cursors <theme directory>   (Vergence's pointers as an Xcursor theme)
+//! vergence-harness icons | icon-theme <source> <dest>   (Vergence's icons, laid out)
+//! vergence-harness iso <out> <label>   (a small ISO 9660 image, for the disk-image check)
+//! ```
 
 mod cursors;
 mod db;

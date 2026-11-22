@@ -1,16 +1,23 @@
-//! Removable drives (files milestone 1, step 10, docs/files-milestone-1.md:
-//! udisks2 on Linux, the automounter on FreeBSD): a USB stick or card is
-//! mounted when it is plugged in, so the desktop and File Viewer show it,
-//! and Eject lets go of it.
+//! Removable drives: a USB stick or card is mounted when it is plugged in, and Eject lets go of
+//! it.
 //!
-//! Linux: the udisks2 system daemon, over the system bus (our own client,
-//! vergence-dbus): [`automount`] watches for new file systems and mounts
-//! those udisks says are meant to be (HintAuto, not HintIgnore or
-//! HintSystem), under /run/media/<user>, noexec (and udisks's nosuid,
-//! nodev); [`eject`] unmounts and powers the
-//! drive off. Permission is udisks's (polkit: the active local session may).
-//! FreeBSD: the base system's automounter (autofs, the `-media` map under
-//! /media); see freebsd.rs.
+//! Files milestone 1, step 10, docs/files-milestone-1.md; drives milestone 1. Mounted so the
+//! desktop and File Viewer show it. Used by vergence-server (which mounts and lists drives for
+//! the session) and vergence-widgets (the drives in the file list's sidebar). Uses
+//! vergence-dbus (its client, for udisks2) and vergence-protocol.
+//!
+//! Linux: the udisks2 system daemon, over the system bus (our own client, vergence-dbus):
+//! [`automount`] watches for new file systems and mounts those udisks says are meant to be
+//! (HintAuto, not HintIgnore or HintSystem), under `/run/media/<user>`, noexec (and udisks's
+//! nosuid, nodev); [`eject`] unmounts and powers the drive off. Permission is udisks's (polkit:
+//! the active local session may). FreeBSD: the base system's automounter (autofs, the `-media`
+//! map under /media), with the setuid eject helper `media-eject` ([`helper_main`]); see
+//! freebsd.rs.
+//!
+//! Start reading: [`automount`] and [`eject`], then udisks.rs or freebsd.rs, then [`drives`]
+//! (the mount table and disks).
+//!
+//! Rule: the setuid helper does only what [`helper_may_eject`] allows; anything else is refused.
 
 use std::time::Duration;
 

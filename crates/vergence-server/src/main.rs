@@ -1,4 +1,36 @@
 // Based on Smithay's smallvil example (MIT; see LICENSE-smithay.txt), adapted for Vergence.
+//! vergence-server, Vergence's display server: the Wayland compositor, window manager, session
+//! bus and desktop shell in one process.
+//!
+//! Built on Smithay (whitepaper §6; docs/server-milestone-1.md and the milestones after it). It
+//! shows Wayland, X11 (rootless Xwayland) and native windows (the project's own protocol), draws
+//! their title bars and tabs (vergence-bar), and runs the desktop around them: the dock and
+//! launcher, menus, notifications, the overview, the lock screen and the login screen
+//! (`--greeter`, started by vdm), screenshots, the magnifier. It serves the session bus and
+//! native windows (vergence-protocol), a D-Bus edge with the desktop portal (vergence-dbus),
+//! XSETTINGS for X11 apps (vergence-xsettings), and the desktop settings. Started by
+//! `vergence-session` (from a text console with `--drm`), nested in another desktop (no
+//! argument), or `--headless` for tests.
+//!
+//! Uses vergence-seat (who gets each input event), vergence-scene, vergence-render,
+//! vergence-text and vergence-look (its own drawing), vergence-shell (the dock's and launcher's
+//! arithmetic, applications), vergence-edid and vergence-profile (monitors and what each setup
+//! remembers), vergence-dm (lock, login, elevation), vergence-decode (pictures, decoded apart),
+//! vergence-media, vergence-net, vergence-power, vergence-sound, vergence-sysinfo and
+//! vergence-types.
+//!
+//! Start reading: main.rs (`main`: the three back ends), state.rs (`Server`, everything the
+//! server holds), win.rs (a window as the server keeps it), then native.rs (native windows),
+//! bus.rs (the session bus), input.rs and dispatch.rs (input through the seat), and drm.rs (real
+//! monitors). handlers/ holds the Wayland and X11 protocol handlers.
+//!
+//! Rules: the security rules of whitepaper §7.3: no network socket; every socket (bus, D-Bus
+//! edge, control) checks the peer's uid; the control socket (`vctl`) exists only when started
+//! with `VERGENCE_CONTROL=1`; saved state is owner-only (0600). The server and the apps speak
+//! one exact bus version (vergence-protocol `bus::VERSION`). No file's bytes are parsed here
+//! (pictures go to vergence-decode's helper). Linux-only interfaces stay out of the core; where
+//! the platforms differ, the code says so. Files based on Smithay's examples keep their MIT
+//! notice (LICENSE-smithay.txt).
 #![allow(irrefutable_let_patterns)]
 
 mod capture;

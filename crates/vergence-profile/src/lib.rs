@@ -1,24 +1,29 @@
-//! Profile keys: one key per set of connected monitors (milestone 1).
+//! Profile keys and what each profile remembers: one key per set of connected monitors.
 //!
-//! The key is SHA-256 over the sorted EDID blobs, so it does not depend on
-//! which port each monitor is in. Each blob is prefixed with its length so
-//! two different sets can never hash the same byte stream.
+//! Milestone 1 (phase 1, now used by the server). Used by vergence-server (screen arrangement,
+//! window memory, scaling), vergence-settings (the Screens pages) and vergence-harness. No
+//! dependencies.
 //!
-//! Each blob is first cut to the blocks its base block declares
-//! ([`canonical`]): some drivers always read 256 bytes, and a monitor with a
-//! 128-byte EEPROM then returns its base block twice (47% of the linuxhw
-//! database has such trailing bytes). The key must not depend on how much a
+//! The key is SHA-256 over the sorted EDID blobs, so it does not depend on which port each
+//! monitor is in. Each blob is prefixed with its length so two different sets can never hash
+//! the same byte stream.
+//!
+//! Each blob is first cut to the blocks its base block declares ([`canonical`]): some drivers
+//! always read 256 bytes, and a monitor with a 128-byte EEPROM then returns its base block twice
+//! (47% of the linuxhw database has such trailing bytes). The key must not depend on how much a
 //! driver read.
 //!
-//! Open question (docs/milestone-1.md): two identical monitors without serial
-//! numbers have identical EDIDs. The key still differs from a one-monitor
-//! setup (both blobs are hashed), but swapping them cannot be told apart.
-//! [`duplicate_count`] reports that case so `vergd` can say so.
+//! Open question (docs/milestone-1.md): two identical monitors without serial numbers have
+//! identical EDIDs. The key still differs from a one-monitor setup (both blobs are hashed), but
+//! swapping them cannot be told apart. [`duplicate_count`] reports that case so a caller can say
+//! so.
 //!
-//! Milestone 2 adds [`arrangement`]: what each profile remembers (modes,
-//! positions, primary) and the file that holds the profiles. Milestone 3
-//! adds [`windows`]: where each window was on each setup. Milestone 4 adds
-//! [`scaling`]: each monitor's scale from its physical size, and Mode A.
+//! Start reading: [`profile_key`], then [`arrangement`] (what each profile remembers: modes,
+//! positions, primary, and the file that holds the profiles), [`windows`] (where each window was
+//! on each setup) and [`scaling`] (each monitor's scale from its physical size, and Mode A).
+//!
+//! Rule: saved profiles are found by their key, so a change to how a key is computed loses every
+//! saved profile.
 
 pub mod arrangement;
 pub mod scaling;

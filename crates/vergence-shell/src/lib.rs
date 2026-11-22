@@ -1,15 +1,28 @@
-//! The shell's arithmetic and, later, its knowledge of applications
-//! (whitepaper §6.9; docs/shelf-milestone-1.md).
+//! The shell's arithmetic and its knowledge of applications: the dock, work area, launcher,
+//! overview, snapping and app entries.
 //!
-//! Step 2 is the applications a system has ([`apps`], from desktop
-//! entries read by [`desktop`]) and their icons ([`icons`]).
+//! Whitepaper §6.9; docs/shelf-milestone-1.md and the dock, overview and windows milestones.
+//! Plain functions and data, with no drawing and no windows, so each rule is tested here; the
+//! server draws and applies them. Used by vergence-server, vergence-settings, vergence-files,
+//! vergence-widgets and vergence-harness. Uses vergence-types (file types), vergence-look,
+//! vergence-net and vergence-power (the live tiles), vergence-protocol. Its programs (src/bin):
+//! `vergence-open` (open files and links with the chosen apps) and `vshell` (what the shelf
+//! sees on this machine).
 //!
-//! Step 1 is here: the dock, along an edge of its screen or floating on it
-//! ([`Placement`]), the band it stands in at an edge, the **work area** the band leaves (what maximizing, placing and fitting windows,
-//! the desktop menu and notification cards keep inside), and moving a
-//! remembered window clear of the strip. Rectangles are in points, in the
-//! desktop's own space (a screen's rectangle is where the arrangement put
-//! it).
+//! - The dock, along an edge of its screen or floating on it ([`Placement`]), the band it stands
+//!   in at an edge, the **work area** the band leaves (what maximizing, placing and fitting
+//!   windows, the desktop menu and notification cards keep inside), and moving a remembered
+//!   window clear of the strip. Rectangles are in points, in the desktop's own space (a
+//!   screen's rectangle is where the arrangement put it).
+//! - The applications a system has ([`apps`], from desktop entries read by [`desktop`]), their
+//!   icons ([`icons`]), what is running ([`running`]), what opens which files ([`open`]), and
+//!   what starts with the session ([`autostart`], [`session`]).
+//! - The launcher's search ([`launcher`]), the overview's arrangement ([`overview`]), snapping
+//!   ([`snap`]), live tiles ([`tiles`]), named actions ([`actions`]), the app menu
+//!   ([`appmenu`]).
+//!
+//! Start reading: [`Placement`] and [`work_area`] in this file, then [`apps`] and [`desktop`],
+//! then [`open`].
 
 pub mod actions;
 pub mod appmenu;

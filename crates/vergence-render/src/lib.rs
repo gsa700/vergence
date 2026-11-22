@@ -1,25 +1,29 @@
-//! A scene into pixels (whitepaper §6.10; toolkit milestone 1).
+//! A scene into pixels: the CPU renderer (the reference) and the GPU renderer, which must agree.
 //!
-//! Two renderers are planned for one scene format, and they must agree:
+//! Whitepaper §6.10; toolkit milestone 1. Used by vergence-ui (every toolkit window), the server
+//! (windows drawn from their scenes, its own drawing), vergence-bar and the apps that draw on
+//! their own. Uses vergence-scene (what to draw) and vergence-text (glyphs).
 //!
-//! - **the CPU renderer** ([`Cpu`], cpu.rs), the reference: plain software,
-//!   in horizontal bands across the cores. It is what tests compare against,
-//!   what draws on a machine without a GPU, and what draws a window that
-//!   changes once;
-//! - **the GPU renderer** (step 3 of the milestone), for everything else.
+//! - **the CPU renderer** ([`Cpu`], cpu.rs), the reference: plain software, in horizontal bands
+//!   across the cores. It is what tests compare against, what draws on a machine without a GPU,
+//!   and what draws a window that changes once;
+//! - **the GPU renderer** ([`Gpu`], gpu.rs; the system's graphics interfaces in gl.rs), for
+//!   everything else: the same prepared shapes, with the same coverage arithmetic.
 //!
-//! A scene is in reference units; a renderer is told the scale (pixels per
-//! unit) of the monitor it draws for, so the same scene comes out sharp at
-//! any density. Glyphs come from `vergence_text`'s cache, rasterized at the
-//! exact pixel size and tinted here, so color costs nothing.
+//! A scene is in reference units; a renderer is told the scale (pixels per unit) of the monitor
+//! it draws for, so the same scene comes out sharp at any density. Glyphs come from
+//! `vergence_text`'s cache, rasterized at the exact pixel size and tinted here, so color costs
+//! nothing.
 //!
-//! The result is a [`Pixmap`]: 8-bit RGBA with alpha multiplied in, rows
-//! from the top. Colors are blended as they are stored (sRGB values, no
-//! linearization), which is what toolkits and terminals do and what the GPU
-//! renderer will match.
+//! The result is a [`Pixmap`]: 8-bit RGBA with alpha multiplied in, rows from the top. Colors
+//! are blended as they are stored (sRGB values, no linearization), which is what toolkits and
+//! terminals do and what the GPU renderer matches.
 //!
-//! A renderer takes a scene from anyone: it validates before it draws, and
-//! refuses sizes that would need an absurd buffer.
+//! Start reading: [`Pixmap`], then cpu.rs (the reference), then gpu.rs; blur.rs and round.rs
+//! for the frost and rounded corners.
+//!
+//! Rules: a renderer takes a scene from anyone: it validates before it draws, and refuses sizes
+//! that would need an absurd buffer. A change to one renderer's output is made in the other too.
 
 pub mod blur;
 pub mod cpu;

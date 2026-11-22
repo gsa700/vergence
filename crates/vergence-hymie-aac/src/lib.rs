@@ -1,17 +1,23 @@
-//! Hymie's AAC-LC decoder, ported from C# (Spindle's
-//! src/Spindle.Codecs/Aac.cs at 005f289) to Rust, and what its helper
-//! program needs to play an AAC .m4a.
+//! Hymie's AAC-LC decoder, ported from C# to Rust, and what its helper program needs to play an
+//! AAC .m4a.
 //!
-//! LICENSE: GPL-2.0-or-later, unlike the rest of Vergence (Apache-2.0 OR
-//! GPL-2.0-or-later). The decoder is ported from FAAD2 (github.com/knik0/faad2,
-//! libfaad at 521d105, GPL-2.0-or-later; licenses/faad2-COPYING.txt), its LC
-//! path only. Code from FAAD2 is copyright (c) Nero AG, www.nero.com. So this
-//! crate is used ONLY by its own helper program,
-//! libexec/vergence/vergence-hymie-aac, never linked into vergence-hymie or
-//! any app (see docs/preview-milestone-1.md). It depends on vergence-hymie (dual-licensed,
-//! so it may be combined into this GPL program) for the MP4 reader, the
-//! track, and the helper's protocol and confinement; vergence-hymie holds no
-//! AAC code, only the [`FrameDecoder`] trait this decoder plugs into.
+//! The source is Spindle's src/Spindle.Codecs/Aac.cs at 005f289. It depends on vergence-hymie
+//! (dual-licensed, so it may be combined into this GPL program) for the MP4 reader, the track,
+//! and the helper's protocol and confinement; vergence-hymie holds no AAC code, only the
+//! [`FrameDecoder`] trait this decoder plugs into. Used only by its own helper program,
+//! libexec/vergence/vergence-hymie-aac (src/bin), which vergence-hymie's client starts for an
+//! AAC file.
+//!
+//! Start reading: [`AacDecoder`] (aac.rs), then src/bin/vergence-hymie-aac.rs; tables.rs holds
+//! the spec's tables.
+//!
+//! LICENSE: GPL-2.0-or-later, unlike the rest of Vergence (Apache-2.0 OR GPL-2.0-or-later). The
+//! decoder is ported from FAAD2 (github.com/knik0/faad2, libfaad at 521d105, GPL-2.0-or-later;
+//! licenses/faad2-COPYING.txt), its LC path only. Code from FAAD2 is copyright (c) Nero AG,
+//! www.nero.com.
+//!
+//! Rule: this crate is used ONLY by its own helper program, never linked into vergence-hymie or
+//! any app (see docs/preview-milestone-1.md).
 
 mod aac;
 mod tables;

@@ -1,10 +1,18 @@
-//! Vergence's own D-Bus wire protocol (whitepaper §6.8): authentication,
-//! values, messages and match rules, for the D-Bus front end at the session
-//! bus's edge, and a small client (client.rs: the system bus, for udisks2).
-//! The bus logic (names, routing, the org.freedesktop.DBus methods) lives
-//! in the server, which owns the connections.
+//! Vergence's own D-Bus wire protocol: authentication, values, messages and match rules.
+//!
+//! For the D-Bus front end at the session bus's edge (whitepaper §6.8), which vergence-server
+//! runs so that programs written for D-Bus reach the desktop, and a small client
+//! ([`client`]: the system bus, for udisks2 in vergence-media). The bus logic (names, routing,
+//! the org.freedesktop.DBus methods) lives in the server (its dbus.rs), which owns the
+//! connections.
 //!
 //! Written from the D-Bus specification; no dependencies (§8).
+//!
+//! Start reading: [`value`] (signatures and marshalling), [`message`] (header and body),
+//! [`auth`] (SASL EXTERNAL, server side), then [`matchrule`] and [`client`].
+//!
+//! Rule: every byte from a peer is untrusted; a bad message is an error, never a panic (the fuzz
+//! tests run with `cargo test`).
 
 pub mod auth;
 pub mod client;

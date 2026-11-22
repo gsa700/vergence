@@ -1,27 +1,30 @@
-//! Close-Up (files milestone 1, step 5; docs/files-milestone-1.md §4):
-//! the step after File Viewer's Preview, a file's contents in full: a
-//! picture, video and PDF viewer, connected to the file manager by file type
-//! association but a standalone app (see docs/apps-roadmap.md).
+//! Close-Up, the picture viewer: a file's contents in full, in a standalone app.
 //!
-//! - **Pictures** (decoded apart by vergence-decode's helper, never in this
-//!   process): fitted to the window, or at any zoom (scroll or the keys,
-//!   about the pointer), panned by dragging, a double click between fitted
-//!   and actual size; turned a quarter either way; GIF and WebP animations
-//!   played; transparency over a checkerboard. Left and Right step through
-//!   the pictures of the file's folder in File Viewer's order.
-//! - **PDFs** go to Reader (Reader milestone 1, 2026-11-20): documents
-//!   have their own app; a window with nothing else in it closes.
-//! - **Text**: shown read-only in the toolkit's text area, with "Open in Text
-//!   Editor".
+//! The step after File Viewer's Preview (files milestone 1, step 5; docs/files-milestone-1.md
+//! §4), connected to the file manager by file type association (see docs/apps-roadmap.md).
+//!
+//! - **Pictures** (decoded apart by vergence-decode's helper, never in this process): fitted to
+//!   the window, or at any zoom (scroll or the keys, about the pointer), panned by dragging, a
+//!   double click between fitted and actual size; turned a quarter either way; GIF and WebP
+//!   animations played; transparency over a checkerboard. Left and Right step through the
+//!   pictures of the file's folder in File Viewer's order.
+//! - **PDFs** go to Reader (Reader milestone 1): documents have their own app; a window with
+//!   nothing else in it closes.
+//! - **Text**: shown read-only in the toolkit's text area, with "Open in Text Editor".
 //! - **Anything else**: says what it is and offers the app chosen for it.
 //! - **Windows**: one process (hand.rs), one file a window, no tabs (see
-//!   docs/files-milestone-2.md). A file dropped on a window
-//!   takes its place; files handed over or chosen in Open… open in the
-//!   window if it shows nothing, else each in a window of its own.
-//! - **Preview** (`--preview FILE`): one file in a small window, for File
-//!   Viewer's space bar; Space or Escape closes it, Enter opens it in full.
-//! - **Its settings** (Ctrl+,): the ground around a picture, whether small
-//!   pictures stay at actual size, animations; desktop.toml `[closeup]`.
+//!   docs/files-milestone-2.md). A file dropped on a window takes its place; files handed over
+//!   or chosen in Open… open in the window if it shows nothing, else each in a window of its own.
+//! - **Preview** (`--preview FILE`): one file in a small window, for File Viewer's space bar;
+//!   Space or Escape closes it, Enter opens it in full.
+//! - **Its settings** (Ctrl+,): the ground around a picture, whether small pictures stay at
+//!   actual size, animations; desktop.toml `[closeup]`.
+//!
+//! Uses vergence-widgets and vergence-ui for the window, vergence-decode for pictures and
+//! vergence-types for what a file is. Start reading: this file (the app and its messages), then
+//! pictures.rs (zoom levels and drawing), then hand.rs (one process, many windows).
+//!
+//! Rule: no file's bytes are parsed in this process; pictures go through vergence-decode.
 
 mod hand;
 mod pictures;

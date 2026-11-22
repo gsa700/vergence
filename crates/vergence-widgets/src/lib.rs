@@ -1,24 +1,37 @@
-//! Widgets (whitepaper §6.10; toolkit milestone 2).
+//! Widgets: the toolkit's layer that apps are written in, a tree of elements built from the
+//! program's state.
 //!
-//! A program says what its window holds as a tree of [`Element`]s built
-//! from its state ([`Program::view`]), and what to do with the messages its
-//! widgets send ([`Program::update`]). The tree is built again only when
-//! something changed, laid out at the window's size, drawn into the scene
-//! `vergence-ui` shows, and kept until the next build: input is judged
-//! against the tree that was on the screen when it happened.
+//! Whitepaper §6.10; toolkit milestone 2. Used by every Vergence app (the settings app, File
+//! Viewer, the editor, Reader, Close-Up, the terminal's settings window, the tools). Built on
+//! vergence-ui; uses vergence-scene, vergence-text, vergence-render and vergence-look (drawing),
+//! vergence-spell (the text area), vergence-types, vergence-shell, vergence-media and
+//! vergence-decode (the Open and Save dialog and the file list), vergence-protocol. Its program
+//! (src/bin): `vergence-choose`, the Open and Save dialog for apps that are not ours.
 //!
-//! What a widget remembers between builds (the pointer over it, a press on
-//! it, the focus) is kept under its **id**: its place in the tree, or the
-//! [key](Element::key) the program gave it.
+//! A program says what its window holds as a tree of [`Element`]s built from its state
+//! ([`Program::view`]), and what to do with the messages its widgets send
+//! ([`Program::update`]). The tree is built again only when something changed, laid out at the
+//! window's size, drawn into the scene `vergence-ui` shows, and kept until the next build:
+//! input is judged against the tree that was on the screen when it happened.
 //!
-//! **Meaning is built in** (Contract 3): as the tree is laid out every
-//! widget has a role, a name, a value, its states and its bounds
-//! ([`Ui::meaning`]). `VERGENCE_UI_TREE=1` in the environment prints it
-//! each time the tree is laid out; `VERGENCE_UI_FRAMES=1` prints how long
+//! What a widget remembers between builds (the pointer over it, a press on it, the focus) is
+//! kept under its **id**: its place in the tree, or the [key](Element::key) the program gave it.
+//!
+//! **Meaning is built in** (Contract 3): as the tree is laid out every widget has a role, a
+//! name, a value, its states and its bounds ([`Ui::meaning`]). `VERGENCE_UI_TREE=1` in the
+//! environment prints it each time the tree is laid out; `VERGENCE_UI_FRAMES=1` prints how long
 //! each frame took to draw, and with what.
 //!
-//! Timers: a program's own ids for [`Window::wake_at`] are below 2^63; the
-//! toolkit keeps those above for its widgets.
+//! Larger pieces: the text area ([`textarea`]), the Open and Save dialog ([`filedialog`],
+//! [`files`]), an app's settings window ([`prefs`]), the toolbar ([`toolbar`]), charts
+//! ([`chart`]), the About window ([`about`]).
+//!
+//! Start reading: [`Program`] and [`run`], then element.rs (what a program builds), layout.rs
+//! (rectangles), ui.rs (input against the laid-out tree); vergence-quit is a small app to read
+//! beside it.
+//!
+//! Rule: timers: a program's own ids for [`Window::wake_at`] are below 2^63; the toolkit keeps
+//! those above for its widgets.
 
 pub mod about;
 pub mod chart;

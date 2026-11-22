@@ -1,28 +1,36 @@
-//! Pictures decoded apart (files milestone 1, step 4; whitepaper §6.10:
-//! decoding untrusted input happens in a process that can do nothing else).
+//! Pictures decoded apart, in a confined helper process, never in the program that shows them.
 //!
-//! A program asks with [`decode_file`]: the file is opened here and given
-//! to the helper `vergence-decode` (libexec) as its standard input, so the
-//! helper needs no file system at all. The helper ([`helper_main`]) reads
-//! it, then limits itself before decoding: on FreeBSD it enters Capsicum
-//! capability mode (`cap_enter`: no file system, no network, no new
-//! descriptors); on Linux it sets no-new-privileges and enters a seccomp
-//! filter that allows only memory, the standard descriptors, locks and the
-//! end (x86_64; another processor is refused until it has its list); on
-//! both it closes every other descriptor and lowers its limits: CPU time,
-//! memory, file size, open files (three: no new one). A limit that cannot
-//! be set ends it before it decodes. It writes the picture to standard output and ends. A crash, a
-//! hang (killed after [`TIMEOUT`]) or an error in a bad file is an error
-//! here, never a crash of the program that asked.
+//! Files milestone 1, step 4; whitepaper §6.10: decoding untrusted input happens in a process
+//! that can do nothing else. Used by every program that shows a picture (Close-Up, File Viewer,
+//! the settings app, the server's wallpaper, vergence-thumbs, the toolkit's file dialog), and its
+//! confinement ([`confine`]) is shared by the sound helper (vergence-hymie) and the PDF helper
+//! (vergence-pdf). Uses vergence-types to tell formats apart.
 //!
-//! Formats: PNG, JPEG (turned upright by its orientation tag), GIF and
-//! WebP (with their animation frames) by the `image` crate (borrowed, in
-//! docs/borrowed-review.md); SVG by resvg, with no outside resources; BMP by
-//! our own decoder (bmp.rs). By the file's bytes, not its name.
+//! A program asks with [`decode_file`]: the file is opened here and given to the helper
+//! `vergence-decode` (libexec) as its standard input, so the helper needs no file system at all.
+//! The helper ([`helper_main`]) reads it, then limits itself before decoding: on FreeBSD it
+//! enters Capsicum capability mode (`cap_enter`: no file system, no network, no new
+//! descriptors); on Linux it sets no-new-privileges and enters a seccomp filter that allows only
+//! memory, the standard descriptors, locks and the end (x86_64; another processor is refused
+//! until it has its list); on both it closes every other descriptor and lowers its limits: CPU
+//! time, memory, file size, open files (three: no new one). A limit that cannot be set ends it
+//! before it decodes. It writes the picture to standard output and ends. A crash, a hang (killed
+//! after [`TIMEOUT`]) or an error in a bad file is an error here, never a crash of the program
+//! that asked.
 //!
-//! The answer on the pipe: `VDEC1`, then width, height and the number of
-//! frames (u32, little-endian), then each frame: its delay in milliseconds
-//! and width x height x 4 bytes of straight RGBA.
+//! Formats: PNG, JPEG (turned upright by its orientation tag), GIF and WebP (with their
+//! animation frames) by the `image` crate (borrowed, in docs/borrowed-review.md); SVG by resvg,
+//! with no outside resources; BMP by our own decoder (bmp.rs). By the file's bytes, not its name.
+//!
+//! The answer on the pipe: `VDEC1`, then width, height and the number of frames (u32,
+//! little-endian), then each frame: its delay in milliseconds and width x height x 4 bytes of
+//! straight RGBA.
+//!
+//! Start reading: [`decode_file`] (the client), [`helper_main`] and [`confine`] (the helper),
+//! then the seccomp module (Linux's allow list).
+//!
+//! Rule: a new format is decoded only inside the helper, after [`confine`]; never add a decoder
+//! that runs in the caller.
 
 pub mod bmp;
 

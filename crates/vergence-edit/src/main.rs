@@ -1,18 +1,24 @@
-//! Vergence's text editor (editor milestone 1, docs/editor-milestone-1.md):
-//! a native editor like TextEdit on the Mac or GNOME's Text Editor, with
-//! autocomplete and line numbers. Plain text for now (other formats, such as
-//! Markdown and RTF, later), on the toolkit's text area.
+//! Vergence's text editor: a native plain-text editor with tabs, autocomplete and line numbers.
 //!
-//! - **Windows and tabs**: one process for all its windows (hand.rs); a
-//!   document a tab, in the bar the server draws; tabs dragged between
-//!   windows or out into their own. A tab shows its file's name, with a dot
-//!   while it has changes not saved.
-//! - **Files** (files.rs): UTF-8, line endings and a final newline kept as
-//!   found; saving writes a new file and renames it over the old, so a
-//!   crash never leaves half a file. Text that is not UTF-8 opens read-only.
+//! Editor milestone 1, docs/editor-milestone-1.md: an editor like TextEdit on the Mac or GNOME's
+//! Text Editor. Plain text for now (other formats, such as Markdown and RTF, later), on the
+//! toolkit's text area.
+//!
+//! - **Windows and tabs**: one process for all its windows (hand.rs); a document a tab, in the
+//!   bar the server draws; tabs dragged between windows or out into their own. A tab shows its
+//!   file's name, with a dot while it has changes not saved.
+//! - **Files** (files.rs): UTF-8, line endings and a final newline kept as found; saving writes
+//!   a new file and renames it over the old, so a crash never leaves half a file. Text that is
+//!   not UTF-8 opens read-only.
 //! - **Closing with changes asks first**: Save, Don't save, Cancel.
-//! - **Its settings** (Ctrl+,): font, text size, line numbers, wrapping,
-//!   tabs, the current line's shade, its look; desktop.toml `[editor]`.
+//! - **Its settings** (Ctrl+,): font, text size, line numbers, wrapping, tabs, the current
+//!   line's shade, its look; desktop.toml `[editor]`.
+//!
+//! Uses vergence-widgets (the text area, the file dialog, spelling through vergence-spell),
+//! vergence-ui for the window and vergence-types for what a file is. Start reading: this file
+//! (the app), tab.rs (a document in a tab), files.rs (reading and saving), then hand.rs.
+//!
+//! Rule: a save never overwrites in place; it writes a new file and renames it over the old.
 
 mod commands;
 mod files;

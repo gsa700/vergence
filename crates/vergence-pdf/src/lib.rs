@@ -1,23 +1,28 @@
-//! Our own PDF reader (PDF milestone 1, docs/pdf-milestone-1.md, step 1).
+//! Our own PDF reader: a file's objects, pages, text and pictures, drawn by vergence-raster.
 //!
-//! [`Document::open`] takes a file's bytes and finds its objects: the
-//! cross-reference sections from `startxref` (tables, PDF 1.5 streams, the
-//! hybrid kind), or, when they are missing or wrong, a repair scan
-//! (xref.rs). [`Document::get`] reads an object where the table says,
-//! inside an object stream if it is there; [`Document::stream`] undoes a
-//! stream's filters (filter/); [`Document::pages`] walks the page tree
-//! with what pages inherit from it.
+//! PDF milestone 1, docs/pdf-milestone-1.md. Used by Reader (vergence-reader), File Viewer's
+//! preview and vergence-thumbs (a first page), always through the confined helper
+//! ([`helper`], libexec/vergence/vergence-pdf). Uses vergence-raster (drawing),
+//! vergence-text (fonts), vergence-decode (images and the helper's confinement) and
+//! vergence-types.
 //!
-//! **Every PDF is untrusted input.** Nothing here may panic, loop or grow
-//! without bound on any file: nesting and reference chains are limited,
-//! decoded streams are capped, reference cycles are cut, and the fuzz tests
-//! (tests.rs) feed it damage. In Vergence this runs inside the sandboxed
-//! helper, never in Close-Up itself.
+//! [`Document::open`] takes a file's bytes and finds its objects: the cross-reference sections
+//! from `startxref` (tables, PDF 1.5 streams, the hybrid kind), or, when they are missing or
+//! wrong, a repair scan (xref.rs). [`Document::get`] reads an object where the table says,
+//! inside an object stream if it is there; [`Document::stream`] undoes a stream's filters
+//! (filter/); [`Document::pages`] walks the page tree with what pages inherit from it.
 //!
-//! Encrypted files (the standard security handler, crypt/): opened with
-//! the empty user password when that works, as most are;
-//! [`Document::needs_password`] and [`Document::unlock`] for the rest.
-//! Strings are decrypted as objects are read, streams before their filters.
+//! Encrypted files (the standard security handler, crypt/): opened with the empty user password
+//! when that works, as most are; [`Document::needs_password`] and [`Document::unlock`] for the
+//! rest. Strings are decrypted as objects are read, streams before their filters.
+//!
+//! Start reading: [`Document`], then [`object`] and [`lexer`], then [`content`] and [`render`]
+//! (a page's drawing), then [`helper`] (the process boundary).
+//!
+//! Rule: **every PDF is untrusted input.** Nothing here may panic, loop or grow without bound on
+//! any file: nesting and reference chains are limited, decoded streams are capped, reference
+//! cycles are cut, and the fuzz tests (tests.rs) feed it damage. In Vergence this runs inside
+//! the sandboxed helper, never in an app's own process.
 
 pub mod ccitt;
 pub mod color;

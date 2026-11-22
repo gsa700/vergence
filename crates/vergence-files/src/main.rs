@@ -1,31 +1,41 @@
-//! File Viewer (files milestone 1, step 7; docs/files-milestone-1.md §5):
-//! Vergence's file manager, named after NeXTSTEP's Workspace Manager window,
-//! with Space to preview as in macOS's Finder, and remote file systems
-//! through the system's own tools (see docs/apps-roadmap.md).
+//! File Viewer, Vergence's file manager: folders as lists or icons, Space to preview, file
+//! operations, tabs.
 //!
-//! - **The window**: the toolbar (Back, Forward, Up, the folder's path,
-//!   List or Icons, the preview pane, hidden files, a field that narrows the
-//!   folder as you type), the places sidebar, the folder as a list or icons
-//!   (vergence-widgets files.rs, shared with the Open dialog), the preview
-//!   pane at the right. A folder a tab in the bar (tabs back in files
-//!   milestone 3, after milestone 2 had taken them out; see docs/files-milestone-3.md):
-//!   torn off into windows of their own and joined again; a folder handed
-//!   over opens in a tab of the window last used; each window's tabs kept
-//!   across restarts (keep.rs). One process for all of them (hand.rs).
-//! - **Preview**: Space shows the chosen file large over the list (pictures
-//!   decoded apart by vergence-decode, the start of text, else its mark and
-//!   facts); the arrows move on and it follows; Space or Escape closes it.
-//! - **Opening**: Enter or a double click opens a folder here, and a file
-//!   with the app chosen for its type (the server's Open, as the dock does).
-//! - **Choosing**: a click chooses one, Ctrl+click adds or takes away,
-//!   Shift+click a run; the arrows move the choice.
-//! - **File operations** (ops.rs): New Folder (Ctrl+Shift+N), Rename (F2),
-//!   Cut, Copy, Paste (Ctrl+X, C, V; a clash asks: Replace, Keep both,
-//!   Skip), Duplicate (Ctrl+D), Move to Trash (Delete), Delete for good
-//!   (Shift+Delete, after a question); long copies and moves on a worker
-//!   with a progress strip and Stop; Undo (Ctrl+Z) for each. The freedesktop
-//!   Trash, shared with other desktops: Restore puts a file back where it
-//!   was; Empty Trash asks first.
+//! Files milestone 1, step 7; docs/files-milestone-1.md §5. Named after NeXTSTEP's Workspace
+//! Manager window, with Space to preview as in macOS's Finder, and remote file systems through
+//! the system's own tools (see docs/apps-roadmap.md). It also draws the desktop's icons
+//! (`--desktop`, desktop.rs).
+//!
+//! - **The window**: the toolbar (Back, Forward, Up, the folder's path, List or Icons, the
+//!   preview pane, hidden files, a field that narrows the folder as you type), the places
+//!   sidebar, the folder as a list or icons (vergence-widgets files.rs, shared with the Open
+//!   dialog), the preview pane at the right. A folder a tab in the bar (see
+//!   docs/files-milestone-3.md): torn off into windows of their own and joined again; a folder
+//!   handed over opens in a tab of the window last used; each window's tabs kept across
+//!   restarts (keep.rs). One process for all of them (hand.rs).
+//! - **Preview**: Space shows the chosen file large over the list (pictures decoded apart by
+//!   vergence-decode, the start of text, else its mark and facts); the arrows move on and it
+//!   follows; Space or Escape closes it.
+//! - **Opening**: Enter or a double click opens a folder here, and a file with the app chosen for
+//!   its type (the server's Open, as the dock does).
+//! - **Choosing**: a click chooses one, Ctrl+click adds or takes away, Shift+click a run; the
+//!   arrows move the choice.
+//! - **File operations** (ops.rs): New Folder (Ctrl+Shift+N), Rename (F2), Cut, Copy, Paste
+//!   (Ctrl+X, C, V; a clash asks: Replace, Keep both, Skip), Duplicate (Ctrl+D), Move to Trash
+//!   (Delete), Delete for good (Shift+Delete, after a question); long copies and moves on a
+//!   worker with a progress strip and Stop; Undo (Ctrl+Z) for each. The freedesktop Trash,
+//!   shared with other desktops: Restore puts a file back where it was; Empty Trash asks first.
+//!
+//! Uses vergence-widgets and vergence-ui (the window), vergence-types (file types),
+//! vergence-shell (which app opens what), vergence-thumbs and vergence-decode (pictures),
+//! vergence-pdf and vergence-hymie (PDF and sound previews, in their helpers), vergence-sound
+//! (playing a preview) and vergence-protocol (the bus: Open, drives, drag and drop).
+//!
+//! Start reading: this file (the app and its messages), tab.rs (what a tab shows), view.rs (the
+//! window drawn), then ops.rs (file operations) and hand.rs (one process, many windows).
+//!
+//! Rule: no file's contents are parsed in this process; pictures, PDFs and sound go to their
+//! confined helpers.
 
 mod actions;
 mod commands;
