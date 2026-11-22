@@ -18,6 +18,16 @@
 //! Rule: decoded bytes are untrusted (another X client may have written them); a bad blob is an
 //! [`Error`], never a panic.
 
+
+/// The desktop's fonts when settings.toml names none, as "Family Size" in
+/// points (text milestone 1, step 5): Vergence's own, which install.sh ships
+/// and registers with fontconfig. One copy, which the server publishes and
+/// the settings app shows (defaults milestone 1: the page showed nothing
+/// chosen on a fresh account).
+pub const DEFAULT_FONT: &str = "Inter Variable 10";
+pub const DEFAULT_MONO: &str = "JetBrains Mono 12";
+/// GTK's own theme, built into GTK 3, so no folder names it.
+pub const DEFAULT_GTK_THEME: &str = "Adwaita";
 use std::collections::BTreeMap;
 use std::fmt;
 

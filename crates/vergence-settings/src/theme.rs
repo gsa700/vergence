@@ -34,9 +34,29 @@ pub fn read() -> Settings {
         .unwrap_or_default()
 }
 
+/// A setting as the desktop has it: settings.toml's value, else what the
+/// desktop uses when none is chosen (a fresh account has no settings.toml, and
+/// the page showed nothing chosen while Inter was in use).
 pub fn get(s: &Settings, key: &str) -> String {
     match s.get(key) {
-        Some(Value::Str(v)) => v.clone(),
+        Some(Value::Str(v)) if !v.is_empty() => v.clone(),
+        _ => default_for(key),
+    }
+}
+
+/// What applies when settings.toml names nothing: Vergence's fonts; GTK's
+/// built-in theme; Vergence's icons and pointers where they are installed (as
+/// our apps and the server's pointer choose them), else Adwaita's.
+pub fn default_for(key: &str) -> String {
+    let ours_or_adwaita = |installed: Vec<String>| {
+        if installed.iter().any(|n| n == "Vergence") { "Vergence".to_string() } else { "Adwaita".to_string() }
+    };
+    match key {
+        FONT => vergence_xsettings::DEFAULT_FONT.into(),
+        MONO => vergence_xsettings::DEFAULT_MONO.into(),
+        THEME => vergence_xsettings::DEFAULT_GTK_THEME.into(),
+        ICONS => ours_or_adwaita(icon_themes()),
+        CURSOR => ours_or_adwaita(cursor_themes()),
         _ => String::new(),
     }
 }
@@ -103,7 +123,13 @@ fn names(dirs: &[PathBuf], keep: impl Fn(&Path) -> bool) -> Vec<String> {
 
 /// Applications themes: those with a GTK 3 part.
 pub fn gtk_themes() -> Vec<String> {
-    names(&theme_dirs("themes"), |p| p.join("gtk-3.0").is_dir())
+    let mut list = names(&theme_dirs("themes"), |p| p.join("gtk-3.0").is_dir());
+    // Adwaita is built into GTK 3: offered whether or not a folder names it.
+    if !list.iter().any(|n| n == vergence_xsettings::DEFAULT_GTK_THEME) {
+        list.push(vergence_xsettings::DEFAULT_GTK_THEME.into());
+        list.sort_by_key(|n| n.to_lowercase());
+    }
+    list
 }
 
 /// Icon themes: an index.theme that names icon folders (not just a pointer theme).
