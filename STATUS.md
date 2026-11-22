@@ -11,11 +11,10 @@ tested yet; NVIDIA's own driver waits for explicit sync.
 
 ## In progress
 
-- **Tree milestone 1** (docs/tree-milestone-1.md): the source tree made
-  approachable before the first package: one format (done), the big files
-  split by part (done), comments that keep the why (done), the lab's tools
-  apart (done), the documents a newcomer reads (this page, ARCHITECTURE.md,
-  CONTRIBUTING.md, crate docs: in progress).
+Nothing: tree milestone 1 closed 2026-11-22 (the source tree made
+approachable: one format, the big files split, comments that keep the why,
+the lab's tools apart, the newcomer's documents, `cargo doc` clean, a cold
+read). Next is AlbumWall for Vergence.
 
 ## Next
 
@@ -47,6 +46,7 @@ tested yet; NVIDIA's own driver waits for explicit sync.
 | Apps | Edit, FileView (tabs, sidebar, drives, disk images, the Space preview), Reader (PDF on our own engine), Close-Up, Terminal, Calculator, Hardware, Force Quit, Screenshot | editor-, files-milestone-1..3, reader-, pdf-, tools-, screenshots-milestone-1 |
 | Drives | One drive list kept by the server, eject that lets a stick go | drives-milestone-1 |
 | Preview | Space's window shaped for what it shows; Hymie (WAV, FLAC, MP3, ALAC, AAC) in Rust | preview-milestone-1 |
+| The tree | One format, files split by part, comments that keep the why, these documents | tree-milestone-1 |
 
 ## Built, with checks by hand still open
 

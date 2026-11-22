@@ -1,6 +1,7 @@
 # Tree milestone 1: the source tree, made approachable
 
-Status: **planned 2026-11-21** (Dave: "do the space preview fix, then the
+Status: **closed 2026-11-22** (Dave: "update the whitepaper, then close the
+milestone"; the whitepaper is Draft 0.25). Before that: **planned 2026-11-21** (Dave: "do the space preview fix, then the
 tree work"), **answered the same night**: width 120, the quotes move to the
 docs, CLAUDE.md split, one STATUS.md (all four as Claude leaned). Starts
 after preview milestone 1. This is part 2 of
@@ -116,7 +117,6 @@ and changing behavior are out too.
    ran a headless session and the suite, and found three named things in
    3 to 5 minutes each) and its fixes.
 
-Left for Dave: four whitepaper passages the code has outgrown (§7.3 display
-lists drawn in the server, under budgets, not in a sandboxed process; §6.5
-agents are built; §6.9 the desktop has icons; §6.10 the toolkit's native
-road is the default), and the vendored drm-rs's one warning.
+At the close the whitepaper's outgrown passages were brought up to date
+(Draft 0.25: §6.5, §6.9, §6.10, §7.3, the Abstract). Left: the vendored
+drm-rs's one warning.
