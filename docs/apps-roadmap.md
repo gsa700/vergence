@@ -457,3 +457,15 @@ of our apps and others could too."
 - Music does not need it (Navidrome and LRCLIB are JSON APIs); Music needs
   an HTTP client with TLS: Claude's lean is the system's TLS library
   (OpenSSL in FreeBSD's base system), to decide at the start of Music.
+
+## Wish list: AMD testing (Dave, 2026-11-21 night)
+
+**AMD graphics, tested.** Today Intel is the daily driver (FreeBSD and
+Void), NVIDIA runs as a second GPU through Mesa (nouveau/NVK) on Hubble,
+NVIDIA's own driver waits for explicit sync (whitepaper §8.3), and AMD has
+never been tried (it should work through Mesa's radeonsi as Intel does).
+**The problem: no AMD hardware in the lab** (Dave). Nothing stands in for it:
+a VM's virtual GPU is not AMD's driver. Ways to get some, for Dave to weigh:
+a used AMD card in techbench's PCIe slot (the slot the GTX 960 was meant
+for), or a small Ryzen machine with Radeon graphics as a test box. To check
+before buying: which AMD generations FreeBSD's drm-kmod (amdgpu) supports.
