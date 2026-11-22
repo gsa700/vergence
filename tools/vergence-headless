@@ -61,6 +61,10 @@ after = 0
 
 [x11]
 enabled = false
+
+# Agents are off by default (defaults milestone 1); the agent checks need them.
+[agents]
+enabled = true
 EOF
     fi
     [ $# -gt 0 ] || set -- --screen "1920x1080 531x299@60"
@@ -68,6 +72,7 @@ EOF
     PATH=$(dirname "$bin"):$PATH
     env -u WAYLAND_DISPLAY -u VERGENCE_BUS -u DBUS_SESSION_BUS_ADDRESS -u DISPLAY \
         HOME="$home" XDG_RUNTIME_DIR="$run" VERGENCE_CONTROL=1 PATH="$PATH" \
+        VERGENCE_DEFAULTS="${VERGENCE_DEFAULTS:-none}" \
         RUST_LOG="${RUST_LOG:-info}" \
         "$bin" --headless "$@" >"$base/server.log" 2>&1 &
     echo $! >"$pidfile"

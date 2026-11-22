@@ -50,7 +50,8 @@ use crate::{Server, decor::SceneElement};
 pub const TIMED_MINUTES: u64 = 60;
 
 /// desktop.toml's `[agents]`: whether agents may ask at all (Privacy > Agents'
-/// switch, on by default) and how long a timed grant lasts (15 minutes to
+/// switch, off by default since defaults milestone 1: a person who never uses
+/// agents never sees a prompt) and how long a timed grant lasts (15 minutes to
 /// a day).
 pub fn agents_settings() -> (bool, u64) {
     // Read at most once a second (Fable's review: not a file read per request).
@@ -71,7 +72,7 @@ fn read_agents_settings() -> (bool, u64) {
     let text = vergence_config::effective_text_with(crate::wallpaper::desktop_path().as_deref());
     let table = text.parse::<toml::Table>().ok();
     let t = table.as_ref().and_then(|t| t.get("agents")).and_then(|a| a.as_table());
-    let enabled = t.and_then(|t| t.get("enabled")).and_then(|v| v.as_bool()).unwrap_or(true);
+    let enabled = t.and_then(|t| t.get("enabled")).and_then(|v| v.as_bool()).unwrap_or(false);
     let minutes = t
         .and_then(|t| t.get("timed-minutes"))
         .and_then(|v| v.as_integer())

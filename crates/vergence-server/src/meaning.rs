@@ -361,8 +361,8 @@ impl Server {
     }
 }
 
-/// Whether agents may use the interface: Privacy > Agents' switch (on by
-/// default; every app is still asked about first, agents.rs).
+/// Whether agents may use the interface: Privacy > Agents' switch (off by
+/// default; once on, every app is still asked about first, agents.rs).
 pub fn agents_allowed() -> bool {
     crate::agents::agents_settings().0
 }

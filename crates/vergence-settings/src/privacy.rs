@@ -1,5 +1,5 @@
 // Privacy > Agents (meaning milestone 1, step 4, part 2): whether agents
-// may ask to use apps at all (desktop.toml [agents] enabled, on by default),
+// may ask to use apps at all (desktop.toml [agents] enabled, off by default),
 // how long a timed grant lasts ([agents] timed-minutes), and every grant
 // the person gave, read from the server over the bus (`ListGrants`), each
 // with Take back, and Take back all (`RevokeGrants`). Taking back asks
@@ -21,7 +21,7 @@ const TIMED_CHOICES: [(&str, i64); 7] = [
 /// desktop.toml's `[agents]`: on, and the timed length in minutes.
 pub fn agents_settings(d: &toml::Table) -> (bool, i64) {
     let t = d.get("agents").and_then(|a| a.as_table());
-    let on = t.and_then(|t| t.get("enabled")).and_then(|v| v.as_bool()).unwrap_or(true);
+    let on = t.and_then(|t| t.get("enabled")).and_then(|v| v.as_bool()).unwrap_or(false);
     let minutes = t.and_then(|t| t.get("timed-minutes")).and_then(|v| v.as_integer()).unwrap_or(60);
     (on, minutes)
 }

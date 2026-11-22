@@ -42,6 +42,9 @@ pub struct Bus {
     /// The monitors as last sent, so unchanged layouts aren't re-sent.
     last_outputs: Option<Vec<OutputInfo>>,
     pub path: Option<PathBuf>,
+    /// Agents told this session that agents are off (one notification per
+    /// name, so a program asking again and again cannot nag).
+    agents_off_told: HashSet<String>,
 }
 
 struct Conn {
@@ -417,6 +420,24 @@ impl Server {
             ClientMsg::Agent(vergence_protocol::agent::AgentRequest::Hello { serial, name }) => {
                 let name = crate::agents::clean_agent_name(&name);
                 if !crate::meaning::agents_allowed() {
+                    // Off by default (defaults milestone 1, Dave 2026-11-22):
+                    // the person is told once that an agent asked, and where
+                    // to turn agents on, rather than the agent failing unseen.
+                    if self.bus.agents_off_told.insert(name.clone()) {
+                        let shown = if name.is_empty() { "An agent".to_string() } else { format!("\u{201c}{name}\u{201d}") };
+                        self.notify(
+                            crate::notify::Origin::Server,
+                            crate::notify::Request {
+                                app: "Agents".into(),
+                                replaces: 0,
+                                summary: format!("{shown} asked to use your apps"),
+                                body: "Agents are off. Settings > Privacy > Agents turns them on; each app is still asked about first.".into(),
+                                urgency: 1,
+                                timeout_ms: -1,
+                                actions: Vec::new(),
+                            },
+                        );
+                    }
                     return self.bus_send(
                         id,
                         ServerMsg::Error {

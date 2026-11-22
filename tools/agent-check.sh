@@ -24,6 +24,14 @@ H=$HOME/.cache/vergence-headless/home
 "$ROOT/tools/vergence-headless" stop >/dev/null 2>&1
 rm -rf "$H/.local/state/vergence/edit" "$H/.local/state/vergence/agents.tsv"
 [ -f "$H/.config/vergence/desktop.toml" ] && sed -i.bak '/^\[agents\]/,/^\[/{/^enabled/d;}' "$H/.config/vergence/desktop.toml"
+# Agents are off by default (defaults milestone 1): on for these checks.
+if grep -q '^\[agents\]' "$H/.config/vergence/desktop.toml" 2>/dev/null; then
+    sed -i.bak '/^\[agents\]/a\
+enabled = true
+' "$H/.config/vergence/desktop.toml"
+else
+    printf '\n[agents]\nenabled = true\n' >>"$H/.config/vergence/desktop.toml"
+fi
 VERGENCE_SERVER=$T/vergence-server "$ROOT/tools/vergence-headless" start >/dev/null || { echo "FAIL no headless session"; exit 1; }
 eval "$("$ROOT/tools/vergence-headless" env)"
 vctl() { sh "$ROOT/tools/vctl" "$@"; }
@@ -119,11 +127,11 @@ r=$(call find "{\"path\":\"$rtitle > drawing:Pages\"}")
 check "$(yes_if "echo '$r' | grep -q 'Page 3 of'")" "Reader ($rtitle): page 3 by the page field, read back from the page view: $(echo "$r" | grep -o 'Page[s]* [0-9][^\\]*' | head -1 | cut -c1-60)"
 
 # Agents turned off: everything refused, whatever was allowed.
-printf '\n[agents]\nenabled = false\n' >>"$H/.config/vergence/desktop.toml"
+sed -i.bak '/^\[agents\]/,/^\[/s/^enabled = true/enabled = false/' "$H/.config/vergence/desktop.toml"
 sleep 1.6
 r=$(call act '{"action":"set","path":"Untitled > text area:Untitled","value":"not this"}')
 check "$(yes_if "echo '$r' | grep -q '\"isError\":true' && echo '$r' | grep -qi 'turned off'")" "agents off: refused though Edit was allowed: $(echo "$r" | cut -c1-120)"
-sed -i.bak '/^\[agents\]/,$d' "$H/.config/vergence/desktop.toml"
+sed -i.bak '/^\[agents\]/,/^\[/s/^enabled = false/enabled = true/' "$H/.config/vergence/desktop.toml"
 
 # The log has it all.
 log=$H/.local/state/vergence/agents.log
