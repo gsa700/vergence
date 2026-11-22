@@ -36,7 +36,8 @@ an AI collaborator must know to work here safely.
   encrypted: **no autologin there, ever.** Restarts of its session only when
   he agrees.
 - **kepler** (FreeBSD, Lenovo Tiny, i5-8500T, UHD 630, the 14" 4K touch
-  monitor): only when needed (slower hardware, touch). Its touch panel needs
+  monitor): the FreeBSD box for every change (Dave, 2026-11-22), once
+  techbench is on Void; also slower hardware and touch. Its touch panel needs
   the devd rule that sets `dev.hconf.N.input_mode=2`. Passwordless sudo.
   Clippy is not installed there: run it on Hubble.
 - **canary** (a FreeBSD VM, no GPU): runs the display suite in software when
@@ -49,8 +50,8 @@ an AI collaborator must know to work here safely.
   `~/src/vergence`, keeping the host's build output). After a sync cargo may
   skip edits that look older than its last build: touch the changed files on
   the box if a change seems not to take.
-- **Build and test on Hubble and techbench for every change** (kepler only
-  when needed): `. ~/.cargo/env 2>/dev/null; cd ~/src/vergence;
+- **Build and test on Hubble, techbench and kepler for every change**
+  (kepler is the FreeBSD one once techbench is on Void): `. ~/.cargo/env 2>/dev/null; cd ~/src/vergence;
   CARGO_TARGET_DIR=target-check cargo test -q --workspace` (Rust is rustup's
   on techbench and kepler, hence `~/.cargo/env`; Hubble's is Void's package). Test builds always go to target-check: a
   rebuilt target/release under a running session broke techbench once.
