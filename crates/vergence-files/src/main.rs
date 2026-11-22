@@ -3162,21 +3162,19 @@ impl Program for Viewer {
             self.drives_last = drives;
             return true;
         }
-        // A tab on a drive under /media the server does not list as mounted
-        // (ejected elsewhere, pulled out) goes home without being looked into:
-        // a look would have FreeBSD's automounter mount it again.
+        // A drive ejected or pulled out leaves the server's list, and its tabs
+        // go home above. One under /media the list does not show as mounted
+        // yet is not looked into again here: a look has FreeBSD's automounter
+        // mount it (an ejected stick came back that way). Not sent home: a
+        // stick just clicked is mounting, and the server sees it at its next
+        // look (Dave, 2026-11-21: clicking the stick "dumped" him at Home).
         let mounted: Vec<PathBuf> = files::drive_list().into_iter().filter(|d| d.mounted).map(|d| PathBuf::from(d.path)).collect();
         let off = |d: &Path| d.starts_with("/media/") && !mounted.iter().any(|m| d.starts_with(m));
-        let mut moved = false;
-        for t in self.tabs.iter_mut().filter(|t| t.dir().is_some_and(off)) {
-            t.go(Showing::Folder(home()));
-            moved = true;
-        }
-        if moved {
-            return true;
-        }
         // The folder changed on disk: read again.
         let Some(t) = self.front_mut() else { return false };
+        if t.dir().is_some_and(off) {
+            return false;
+        }
         let now = t.dir().and_then(|d| std::fs::metadata(d).and_then(|m| m.modified()).ok());
         if t.dir().is_some() && now != t.stamp {
             t.read();
