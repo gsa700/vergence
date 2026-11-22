@@ -1163,16 +1163,66 @@ fn disks_of(table: &[Mount]) -> Vec<PathBuf> {
         && let Ok(rd) = fs::read_dir("/media")
     {
         // A name stays listed after its drive is pulled out: kept only while
-        // it is mounted or its device is there (by name, or by its label).
+        // it is mounted or its device is there (by name, or by its label),
+        // and not while it is a drive ejected and still plugged in (the
+        // same device node as when it was ejected: FreeBSD does not power
+        // a stick off; Dave, 2026-11-21, an ejected stick stayed listed).
         let mounted: Vec<&Path> = table.iter().map(|m| m.at.as_path()).collect();
-        let present = |name: &std::ffi::OsStr| {
-            std::iter::once(PathBuf::from("/dev").join(name)).chain(["msdosfs", "ufs", "ext2fs", "ntfs", "exfat", "iso9660", "label", "gpt"].iter().map(|d| PathBuf::from("/dev").join(d).join(name))).any(|p| p.exists())
-        };
-        out.extend(rd.flatten().map(|e| e.path()).filter(|p| mounted.contains(&p.as_path()) || p.file_name().is_some_and(present)));
+        let ejected = ejected_now();
+        out.extend(rd.flatten().map(|e| e.path()).filter(|p| {
+            if mounted.contains(&p.as_path()) {
+                return true;
+            }
+            let Some(name) = p.file_name() else { return false };
+            match device_of(name) {
+                Some(node) => !ejected.iter().any(|(n, ino)| n.as_os_str() == name && Some(*ino) == node_ino(&node)),
+                None => false,
+            }
+        }));
     }
     out.sort();
     out.dedup();
     out
+}
+
+/// The device node of a drive the automounter lists under /media by
+/// `name` (by name, or by its label), if it is there.
+fn device_of(name: &std::ffi::OsStr) -> Option<PathBuf> {
+    std::iter::once(PathBuf::from("/dev").join(name)).chain(["msdosfs", "ufs", "ext2fs", "ntfs", "exfat", "iso9660", "label", "gpt"].iter().map(|d| PathBuf::from("/dev").join(d).join(name))).find(|p| p.exists())
+}
+
+fn node_ino(p: &Path) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    fs::metadata(p).ok().map(|m| m.ino())
+}
+
+/// ~/.local/state/vergence/ejected: drives ejected (their /media name and
+/// device node's inode), hidden while that node is there; plugged in again,
+/// a drive has a new node and shows.
+fn ejected_file() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| home().map(|h| h.join(".local/state")))?;
+    Some(base.join("vergence/ejected"))
+}
+
+fn ejected_now() -> Vec<(PathBuf, u64)> {
+    let text = ejected_file().and_then(|p| fs::read_to_string(p).ok()).unwrap_or_default();
+    text.lines().filter_map(|l| l.split_once('\t')).filter_map(|(n, i)| Some((PathBuf::from(n), i.parse().ok()?))).collect()
+}
+
+/// Notes a drive under /media as ejected (its device node now), so the lists
+/// leave it out until it is plugged in again.
+fn note_ejected(path: &Path) {
+    let (Some(name), Some(file)) = (path.strip_prefix("/media").ok().and_then(|n| n.file_name()), ejected_file()) else { return };
+    let Some(ino) = device_of(name).and_then(|d| node_ino(&d)) else { return };
+    let mut all = ejected_now();
+    all.retain(|(n, _)| n.as_os_str() != name);
+    all.push((PathBuf::from(name), ino));
+    let keep = all.len().saturating_sub(32);
+    let text: String = all[keep..].iter().map(|(n, i)| format!("{}\t{i}\n", n.to_string_lossy().replace(['\t', '\n'], " "))).collect();
+    if let Some(d) = file.parent() {
+        let _ = fs::create_dir_all(d);
+    }
+    let _ = fs::write(file, text);
 }
 
 /// What the system has mounted over the network, anywhere (files
@@ -1209,6 +1259,10 @@ pub fn eject(path: &Path) -> Result<(), String> {
     // A drive the system's media service mounted (udisks2 on Linux, the
     // automounter on FreeBSD) is let go of through it, and powered off.
     if vergence_media::eject(path)? {
+        // FreeBSD leaves the stick plugged in and listed: noted, so it is not.
+        if path.starts_with("/media/") {
+            note_ejected(path);
+        }
         return Ok(());
     }
     let kind = mounts().into_iter().find(|m| m.at == path).map(|m| m.kind).unwrap_or_default();
@@ -1334,6 +1388,18 @@ mod tests {
         // Not looked into: by the name alone, nothing.
         assert_eq!(Entry::of_looking(d.join("Vergence-wishlist-2"), false).unwrap().mime, None);
         fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// Against the real system, given a drive under /media in
+    /// VERGENCE_TEST_EJECT: looked into (mounted), ejected, and then left out
+    /// of the disks while it stays plugged in.
+    #[test]
+    fn an_ejected_drive_is_left_out_if_given_one() {
+        let Some(at) = std::env::var_os("VERGENCE_TEST_EJECT").map(PathBuf::from) else { return };
+        let _ = fs::read_dir(&at).map(|d| d.count());
+        assert!(mounted_disks().contains(&at), "listed while mounted: {:?}", mounted_disks());
+        eject(&at).expect("ejected");
+        assert!(!mounted_disks().contains(&at), "left out once ejected: {:?}", mounted_disks());
     }
 
     #[test]
