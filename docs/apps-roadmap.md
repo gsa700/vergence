@@ -465,7 +465,10 @@ Void), NVIDIA runs as a second GPU through Mesa (nouveau/NVK) on Hubble,
 NVIDIA's own driver waits for explicit sync (whitepaper §8.3), and AMD has
 never been tried (it should work through Mesa's radeonsi as Intel does).
 **The problem: no AMD hardware in the lab** (Dave). Nothing stands in for it:
-a VM's virtual GPU is not AMD's driver. Ways to get some, for Dave to weigh:
-a used AMD card in techbench's PCIe slot (the slot the GTX 960 was meant
-for), or a small Ryzen machine with Radeon graphics as a test box. To check
-before buying: which AMD generations FreeBSD's drm-kmod (amdgpu) supports.
+a VM's virtual GPU is not AMD's driver. **Decided: a Ryzen mini PC**
+(Dave: "mini pc it is"), not a card in techbench: a test box of its own, as
+kepler is for Intel, so his workstation stays out of it; its graphics built
+into the processor (an APU), what most people with AMD have (laptops, mini
+PCs, handhelds); it can be the slower-hardware machine too and run FreeBSD
+or Void as needed. To check before buying: FreeBSD drm-kmod's (amdgpu)
+support for its graphics generation (Radeon 680M/780M are recent).
