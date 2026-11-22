@@ -75,6 +75,10 @@ reads well; getting started depends on knowing the lab):
 
 ## 3. Going public (Dave's call)
 
+*Dave, 2026-11-22: "once we have the installation part figured out, we will
+make the repo public"*: after packaging milestone 1
+(docs/packaging-milestone-1.md). The checks below are done before then.
+
 - **A digestible summary of the design** (Dave, 2026-11-22: "boil it down to a
   more digestible summary highlighting why Vergence isn't just another Wayland
   compositor. And how awesome it is in general"): a few pages, ahead of the

@@ -43,6 +43,19 @@ settles the release pathway's open packaging questions (§1.2 to §1.6).
    release is cut; an independent review of the template and
    vergence-setup (they run as root).
 
+## Dave's answers (2026-11-22)
+
+"yes to all six, go ahead. Proceed with the assumption that once we have the
+installation part figured out, we will make the repo public." So: one
+`vergence` package; prefix `/usr`; version 0.1.0 by hand, the bus protocol
+its own number; `vergence-setup` run once after installing, asking before
+each change, shared with install.sh; the template in our tree, a local
+repository for now, offered to void-packages once public, a signed
+repository of our own if not; a `git archive` tarball while private.
+**Going public follows this milestone** (release pathway §3): the template
+is written for public release tarballs from the start, the local tarball
+only standing in for one.
+
 ## Questions for Dave
 
 1. **One package or several** (release pathway §1.2). Lean: **one**,
