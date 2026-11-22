@@ -1,5 +1,7 @@
 # Defaults milestone 1: what a new user sees first
 
+**CLOSED 2026-11-22.** All steps in: the layered defaults file (5c10271), the standard folders (824bf75), our wallpapers and the defaults (0b0738a, 6f62afa), Theme and fonts / Screens / Sound (353eb7b, 0f3a55f, 52daa78), agents off by default (70b676b), idle sleep through vdm (01a3c07), the color-only tint at 25% (c582668), the login screen's picture and the lock's (e192a89, ceecb0a), SVG text (ffaa2f5); an independent review of the root side, ten findings fixed (a94fa04). Tests: Hubble 996, techbench 996, kepler 985; display suite 18/18 on Hubble and techbench.
+
 *Drafted 2026-11-22, from the first clean install (techbench, stock Void,
 set up from CONTRIBUTING alone). Dave: "some of the defaults are now
 obviously lacking since this is our first clean install we see them now for

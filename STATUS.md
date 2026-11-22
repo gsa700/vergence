@@ -5,26 +5,30 @@ is in docs/<area>-milestone-N.md; the order of work and its reasons are in
 the whitepaper's §9 (docs/Vergence-Whitepaper.md); wishes and what comes
 after are in docs/apps-roadmap.md.
 
-Vergence runs as the daily desktop on FreeBSD and Void Linux machines,
-Intel graphics first; NVIDIA works as a second GPU through Mesa; AMD is not
-tested yet; NVIDIA's own driver waits for explicit sync.
+Vergence runs as the daily desktop on Void Linux and FreeBSD machines (Void
+first since 2026-11-22), Intel graphics first; NVIDIA works as a second GPU
+through Mesa; AMD is not tested yet; NVIDIA's own driver waits for explicit
+sync.
 
 ## In progress
 
-Nothing: tree milestone 1 closed 2026-11-22 (the source tree made
-approachable: one format, the big files split, comments that keep the why,
-the lab's tools apart, the newcomer's documents, `cargo doc` clean, a cold
-read). Next is AlbumWall for Vergence.
+**Packaging milestone 1** (docs/packaging-milestone-1.md): the xbps package
+for Void, and `vergence-setup` for the system setup a package does not do.
+Going public follows it. Defaults milestone 1 closed 2026-11-22 (what a new
+user sees first: wallpapers, the dock's apps, the standard folders, the
+layered defaults file, the color-only tint, the login screen's picture).
 
 ## Next
 
-1. **AlbumWall for Vergence** (generic name Music): AlbumWall's wall of
+1. **Going public** (docs/release-pathway.md §3), once installing from the
+   package works.
+2. **AlbumWall for Vergence** (generic name Music): AlbumWall's wall of
    covers and player rebuilt in Rust on the toolkit and Hymie
    (crates/vergence-hymie), for Vergence (docs/apps-roadmap.md).
-2. **The web component**: WebKit (WPE) as a component any app can embed,
+3. **The web component**: WebKit (WPE) as a component any app can embed,
    likely a service the server composites; then Mail and a browser on it.
-3. **Packages**: a FreeBSD port first, then an xbps template; then going
-   public (docs/release-pathway.md).
+4. **The Vergence system** (release pathway §4): our installer and ISO on a
+   Void base, after the package; then a FreeBSD port.
 
 ## Built
 
