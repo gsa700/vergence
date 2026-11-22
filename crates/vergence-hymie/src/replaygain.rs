@@ -22,8 +22,8 @@ const MISSING: i32 = i32::MIN;
 impl ReplayGain {
     /// From tags whose keys are upper case.
     pub fn from_tags(tags: &HashMap<String, String>) -> ReplayGain {
-        let get = |k: &str, missing: i32| tags.get(k).map_or(missing, |v| parse(v, missing));
-        ReplayGain::from_raw(get("REPLAYGAIN_TRACK_GAIN", MISSING), get("REPLAYGAIN_TRACK_PEAK", 0), get("REPLAYGAIN_ALBUM_GAIN", MISSING), get("REPLAYGAIN_ALBUM_PEAK", 0))
+        let [tg, tp, ag, ap] = raw(tags);
+        ReplayGain::from_raw(tg, tp, ag, ap)
     }
 
     /// From the four values as FFmpeg keeps them, in hundred-thousandths.
@@ -56,6 +56,14 @@ impl ReplayGain {
         let (gain, peak) = if album { (self.album_gain, self.album_peak) } else { (self.track_gain, self.track_peak) };
         10f32.powf(gain / 20.0).min(1.0 / peak)
     }
+}
+
+/// The four values FFmpeg keeps (ff_replaygain_export; Hymie's
+/// ReplayGain.Raw), in hundred-thousandths, a missing gain as i32::MIN and a
+/// missing peak as 0. An MP3 takes its LAME tag's when these have no gain.
+pub(crate) fn raw(tags: &HashMap<String, String>) -> [i32; 4] {
+    let get = |k: &str, missing: i32| tags.get(k).map_or(missing, |v| parse(v, missing));
+    [get("REPLAYGAIN_TRACK_GAIN", MISSING), get("REPLAYGAIN_TRACK_PEAK", 0), get("REPLAYGAIN_ALBUM_GAIN", MISSING), get("REPLAYGAIN_ALBUM_PEAK", 0)]
 }
 
 /// FFmpeg's parse_value: a whole number, then up to five decimals, in

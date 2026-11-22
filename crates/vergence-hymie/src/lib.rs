@@ -13,8 +13,9 @@
 //!
 //! The formats and where each came from:
 //! - WAV and FLAC (Deadwax's decoder, written from RFC 9639): our own.
-//! - MP3 (minimp3, CC0), ALAC (Apple's, Apache-2.0) and the MP4 container
-//!   follow, one at a time.
+//! - MP3, MPEG-1, 2 and 2.5 Layer III: minimp3 (CC0), gapless by the LAME
+//!   tag as FFmpeg does it.
+//! - ALAC (Apple's, Apache-2.0) and the MP4 container follow, one at a time.
 //! - AAC (FAAD2, GPL-2.0-or-later) lives in its own crate and helper program
 //!   (vergence-hymie-aac), so this one stays under Vergence's license.
 //!
@@ -24,6 +25,8 @@
 mod flac;
 pub mod helper;
 mod md5;
+mod mp3;
+mod mp3_tables;
 mod replaygain;
 mod tags;
 mod wav;
@@ -105,6 +108,8 @@ pub fn read_file(path: &std::path::Path) -> Result<Vec<u8>, Error> {
 pub enum Format {
     Wav,
     Flac,
+    /// MPEG audio: Layer III is played, Layers I and II are refused by name.
+    Mp3,
 }
 
 pub fn format_of(data: &[u8]) -> Option<Format> {
@@ -115,6 +120,9 @@ pub fn format_of(data: &[u8]) -> Option<Format> {
     if data.len() >= at + 4 && &data[at..at + 4] == b"fLaC" {
         return Some(Format::Flac);
     }
+    if mp3::sniff(data) {
+        return Some(Format::Mp3);
+    }
     None
 }
 
@@ -123,6 +131,7 @@ pub fn open(data: Vec<u8>) -> Result<Box<dyn Track>, Error> {
     let track: Box<dyn Track> = match format_of(&data) {
         Some(Format::Wav) => Box::new(wav::WavTrack::new(data)?),
         Some(Format::Flac) => Box::new(flac::FlacTrack::new(data)?),
+        Some(Format::Mp3) => Box::new(mp3::Mp3Track::new(data)?),
         None => return Err(Error::Unsupported("Not a sound file Hymie plays.".into())),
     };
     if !(1..=MAX_RATE).contains(&track.rate()) || !(1..=MAX_CHANNELS).contains(&track.channels()) {
@@ -136,6 +145,7 @@ pub fn tags(data: &[u8]) -> Tags {
     match format_of(data) {
         Some(Format::Flac) => flac::tags(data),
         Some(Format::Wav) => wav::tags(data),
+        Some(Format::Mp3) => mp3::tags(data),
         None => Tags::default(),
     }
 }
