@@ -97,12 +97,17 @@ pub fn disks_of(table: &[Mount]) -> Vec<PathBuf> {
         // a stick off; Dave, 2026-11-21, an ejected stick stayed listed).
         let mounted: Vec<&Path> = table.iter().map(|m| m.at.as_path()).collect();
         let ejected = ejected_now();
+        let on_images = image_labels();
         out.extend(rd.flatten().map(|e| e.path()).filter(|p| {
             if mounted.contains(&p.as_path()) {
                 return true;
             }
             let Some(name) = p.file_name() else { return false };
             match device_of(name) {
+                // A label on a disk image's own partitions (Dave, 2026-11-21: the
+                // Fedora ISO brought /media/ANACONDA and its volume as drives): the
+                // image is listed by where it is mounted, not as a stick.
+                Some(node) if node.strip_prefix("/dev").is_ok_and(|l| on_images.iter().any(|i| Path::new(i) == l)) => false,
                 Some(node) => !ejected.iter().any(|(n, ino)| n.as_os_str() == name && Some(*ino) == node_ino(&node)),
                 None => false,
             }
@@ -117,6 +122,33 @@ pub fn disks_of(table: &[Mount]) -> Vec<PathBuf> {
 /// `name` (by name, or by its label), if it is there.
 fn device_of(name: &std::ffi::OsStr) -> Option<PathBuf> {
     std::iter::once(PathBuf::from("/dev").join(name)).chain(["msdosfs", "ufs", "ext2fs", "ntfs", "exfat", "iso9660", "label", "gpt"].iter().map(|d| PathBuf::from("/dev").join(d).join(name))).find(|p| p.exists())
+}
+
+/// FreeBSD: the labels ("iso9660/NAME", "msdosfs/NAME") whose provider is
+/// an md device or a partition of one, from `glabel status -s`.
+fn image_labels() -> Vec<String> {
+    if !cfg!(target_os = "freebsd") {
+        return Vec::new();
+    }
+    std::process::Command::new("glabel")
+        .args(["status", "-s"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map(|o| labels_on_images(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or_default()
+}
+
+/// `glabel status -s`'s lines, "NAME STATUS COMPONENT": the names on md devices.
+fn labels_on_images(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|l| {
+            let w: Vec<&str> = l.split_whitespace().collect();
+            let (name, component) = (w.first()?, w.last()?);
+            let base: String = component.chars().take_while(|c| c.is_ascii_alphabetic()).collect();
+            (w.len() >= 3 && base == "md").then(|| name.to_string())
+        })
+        .collect()
 }
 
 fn node_ino(p: &Path) -> Option<u64> {
@@ -184,6 +216,7 @@ pub fn network_mounts() -> Vec<PathBuf> {
 /// ejected; everything else can.
 pub fn scan() -> Vec<DriveInfo> {
     let table = mounts();
+    let on_images = image_labels();
     let mut out: Vec<DriveInfo> = Vec::new();
     for at in disks_of(&table) {
         let m = table.iter().find(|m| m.at == at);
@@ -196,6 +229,8 @@ pub fn scan() -> Vec<DriveInfo> {
         let device = m.map(|m| m.what.clone()).or_else(|| at.file_name().and_then(device_of).map(|p| p.to_string_lossy().into_owned())).unwrap_or_default();
         let kind = match m {
             Some(_) if device.starts_with("/dev/md") || device.starts_with("/dev/loop") => DriveKind::Image,
+            // A disk image's own partition, mounted by the automounter under its label.
+            Some(_) if device.strip_prefix("/dev/").is_some_and(|l| on_images.iter().any(|i| i == l)) => DriveKind::Image,
             Some(m) if matches!(m.kind.as_str(), "cd9660" | "iso9660" | "udf") => DriveKind::Optical,
             // Listed by the automounter and not mounted yet: a drive plugged in.
             None => DriveKind::Removable,
@@ -262,6 +297,12 @@ mod tests {
         }
         assert!(removable("/dev/da0s1") && removable("/dev/msdosfs/USB") && removable("/dev/cd0"));
         assert!(!removable("/dev/ada0p2") && !removable("/dev/nvd0p1") && !removable("zroot/usr/home"));
+    }
+
+    #[test]
+    fn labels_on_a_disk_image_are_told_apart() {
+        let text = "iso9660/Fedora-E-dvd-x86_64-45  N/A  md0\n msdosfs/ANACONDA  N/A  md0p2\nmsdosfs/USB  N/A  da0s1\ngpt/efiboot0  N/A  nda0p1\n";
+        assert_eq!(labels_on_images(text), vec!["iso9660/Fedora-E-dvd-x86_64-45", "msdosfs/ANACONDA"]);
     }
 
     #[test]
