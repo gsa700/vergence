@@ -48,7 +48,11 @@ pub fn link(entry: Entry) -> LinkRef {
 const TEXT_MAX: u64 = 1 << 20;
 const PAGES_MAX: usize = 24;
 /// A PDF page's width when drawn, in pixels, and the thumbnail strip's width.
-const PAGE_PX: f32 = 900.0;
+/// Pages are drawn at twice their width in points (sharp at 133% and 200%;
+/// Dave, 2026-11-22: drawn once at 900 px, a larger window blurred them), and
+/// again when the window grows by a quarter.
+const PAGE_SHARP: f32 = 2.0;
+const PAGE_REDRAW: f32 = 1.25;
 const STRIP_W: f32 = 112.0;
 const PAD: f32 = 12.0;
 /// The frost shown around the content card, below the bar too, and the
@@ -83,6 +87,9 @@ struct Pages {
     /// Which drawing this is: a drawing started again (another file, or the
     /// same once the waker came) stops the one before.
     run: u64,
+    /// The file drawn, and the width its pages were drawn at, in pixels.
+    path: PathBuf,
+    px: f32,
     sizes: Vec<(f32, f32)>,
     drawn: Vec<Arc<Image>>,
     count: usize,
@@ -216,11 +223,19 @@ impl Peek {
 
     /// The PDF's pages drawn by the helper, one after another, each told as it comes.
     fn draw_pages(&self, path: PathBuf) {
+        let px = self.pages_px();
         let (out, waker) = (self.pages.clone(), self.waker.clone());
         let run = {
             let mut p = out.lock().unwrap_or_else(|e| e.into_inner());
             let run = p.run + 1;
-            *p = Pages { run, ..Pages::default() };
+            // Drawn again larger: the old pages stay up until each new one
+            // replaces it. Another file starts clean.
+            if p.path != path {
+                *p = Pages::default();
+                p.path = path.clone();
+            }
+            p.run = run;
+            p.px = px;
             run
         };
         std::thread::spawn(move || {
@@ -238,13 +253,18 @@ impl Peek {
                 p.sizes = sizes.iter().take(PAGES_MAX).copied().collect();
             }
             for (i, (w, _)) in sizes.iter().take(PAGES_MAX).enumerate() {
-                let Ok(t) = v.render(i, (PAGE_PX / w.max(1.0)).clamp(0.05, 8.0), None) else { break };
+                let Ok(t) = v.render(i, (px / w.max(1.0)).clamp(0.05, 8.0), None) else { break };
                 let mut p = out.lock().unwrap_or_else(|e| e.into_inner());
                 // Started again meanwhile (another file): stop.
                 if p.run != run {
                     return;
                 }
-                p.drawn.push(Arc::new(Image { width: t.width, height: t.height, rgba: t.rgba }));
+                let img = Arc::new(Image { width: t.width, height: t.height, rgba: t.rgba });
+                if i < p.drawn.len() {
+                    p.drawn[i] = img;
+                } else {
+                    p.drawn.push(img);
+                }
                 drop(p);
                 if let Some(w) = &waker {
                     w.wake();
@@ -289,6 +309,13 @@ impl Peek {
     }
 
     /// The card's width: the window's less the frost's margins.
+    /// The width to draw pages at, in pixels: the shown width in points (720
+    /// before the window has a size) times [`PAGE_SHARP`].
+    fn pages_px(&self) -> f32 {
+        let shown = if self.size.0 > 0.0 { (self.card_w() - STRIP_W - 3.0 * PAD).max(100.0) } else { 720.0 };
+        (shown * PAGE_SHARP).clamp(600.0, 4000.0)
+    }
+
     fn card_w(&self) -> f32 {
         self.size.0 - 2.0 * MARGIN
     }
@@ -519,6 +546,13 @@ impl Program for Peek {
 
     fn resized(&mut self, width: f32, height: f32) {
         self.size = (width, height);
+        // Grown by a quarter or more: the pages drawn again at the new size.
+        if let (Shows::Pages, Some(e)) = (&self.shows, &self.entry) {
+            let drawn_at = self.pages.lock().unwrap_or_else(|e| e.into_inner()).px;
+            if self.pages_px() > drawn_at * PAGE_REDRAW {
+                self.draw_pages(e.path.clone());
+            }
+        }
         match self.given {
             // The answer to the window's own ask (or its opening size).
             None => self.given = Some((width, height)),
