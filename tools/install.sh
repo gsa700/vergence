@@ -22,6 +22,8 @@
 #   share/doc/vergence/                      LICENSE-APACHE, LICENSE-GPL, THIRD-PARTY-NOTICES.md
 #   share/vergence/words/                    the spelling list (data/words/en_US.txt, from SCOWL) and its terms
 #   share/vergence/fonts/                    Inter, JetBrains Mono and Liberation (data/fonts), with their licenses
+#   share/vergence/defaults/desktop.toml     every account's defaults: wallpaper, the dock's apps, energy (data/defaults)
+#   share/backgrounds/vergence/              Vergence's wallpapers (data/backgrounds, drawn by the project)
 #   share/vergence/icons/{places,kinds}/     Vergence's own icons for places and files (data/icons)
 #   share/icons/Vergence/                    the Vergence icon theme: our apps, places, kinds of files, and the pointers (drawn at install)
 #   libexec/vergence/ups-tile, vtile-demo  lab tiles on the dock from scripts (tools/lab)
@@ -79,6 +81,8 @@ libexec=$destdir$prefix/libexec/vergence
 sbin=$destdir$prefix/sbin
 words=$destdir$prefix/share/vergence/words
 fonts=$destdir$prefix/share/vergence/fonts
+defaults=$destdir$prefix/share/vergence/defaults
+backgrounds=$destdir$prefix/share/backgrounds/vergence
 # Vergence's own icons for places and kinds of files (tools/make-icons.py).
 ownicons=$destdir$prefix/share/vergence/icons
 # Vergence's pointers, an Xcursor theme (vergence-harness cursors).
@@ -104,7 +108,8 @@ if [ -n "$uninstall" ]; then
     rm -f "$libexec/sound-default" "$libexec/vergence-choose" "$libexec/vergence-decode" "$libexec/vergence-hymie" "$libexec/vergence-hymie-aac" "$libexec/vergence-pdf" "$words/en_US.txt" "$words/SCOWL-COPYRIGHT.txt"
     [ -z "$destdir" ] && rm -f /etc/fonts/conf.d/90-vergence-fonts.conf /usr/local/etc/fonts/conf.d/90-vergence-fonts.conf
     rm -f "$fonts"/InterVariable*.ttf "$fonts"/JetBrainsMono-Variable*.ttf "$fonts"/Liberation*.ttf "$fonts"/Inter-OFL.txt "$fonts"/JetBrainsMono-OFL.txt "$fonts"/Liberation-OFL.txt
-    rm -rf "$ownicons" "$cursortheme"
+    rm -rf "$ownicons" "$cursortheme" "$backgrounds"
+    rm -f "$defaults/desktop.toml"; rmdir "$defaults" 2>/dev/null || true
     rmdir "$words" "$fonts" "$destdir$prefix/share/vergence" 2>/dev/null || true
     rmdir "$libexec" 2>/dev/null || true
     rmdir "$docs" 2>/dev/null || true
@@ -172,6 +177,11 @@ if [ -x "$release/vergence-harness" ]; then
     chmod -R a+rX "$cursortheme" 2>/dev/null
 fi
 for f in "$root"/data/fonts/*; do install -m 644 "$f" "$fonts/"; done
+# Every account's defaults (read under /etc's and each person's own) and the
+# wallpapers they name; the prefix written in, so the default picture is found.
+mkdir -p "$defaults" "$backgrounds"
+sed "s#@PREFIX@#$prefix#g" "$root/data/defaults/desktop.toml" > "$defaults/desktop.toml" && chmod 644 "$defaults/desktop.toml"
+for f in "$root"/data/backgrounds/*.svg; do install -m 644 "$f" "$backgrounds/"; done
 # Every app on the machine may use them (GTK, Qt, Firefox find fonts through
 # fontconfig): its conf.d gets our directory, after the system's own.
 if [ -z "$destdir" ]; then

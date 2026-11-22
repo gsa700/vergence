@@ -188,22 +188,50 @@ fn walk(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Every picture to offer: the system's backgrounds, then the user's folders
-/// and files (each group sorted), without repeats.
+/// Vergence's own wallpapers (data/backgrounds): beside the program, then the
+/// usual prefixes.
+fn ours() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(bin) = exe.parent()
+    {
+        dirs.push(bin.join("../share/backgrounds/vergence"));
+    }
+    dirs.push("/usr/local/share/backgrounds/vergence".into());
+    dirs.push("/usr/share/backgrounds/vergence".into());
+    // One folder by two names (beside the program and /usr/local) must not
+    // list its pictures twice: the real path of each, once.
+    let mut real: Vec<PathBuf> = dirs.into_iter().filter_map(|d| std::fs::canonicalize(d).ok()).collect();
+    real.dedup();
+    real
+}
+
+/// Every picture to offer: Vergence's own first, then the rest of the system's
+/// backgrounds, then the user's (~/Pictures/Wallpaper when it exists, without
+/// being added: defaults milestone 1), then the folders and files they added;
+/// each group sorted, without repeats.
 pub fn pictures(folders: &[PathBuf], files: &[PathBuf]) -> Vec<PathBuf> {
+    let mut vergence = Vec::new();
+    for d in ours() {
+        walk(&d, 0, &mut vergence);
+    }
+    vergence.sort();
     let mut system = Vec::new();
     for r in ["/usr/local/share/backgrounds", "/usr/share/backgrounds"] {
         walk(Path::new(r), 0, &mut system);
     }
     system.sort();
     let mut own = Vec::new();
+    if let Some(home) = std::env::var_os("HOME") {
+        walk(&Path::new(&home).join("Pictures/Wallpaper"), 0, &mut own);
+    }
     for f in folders {
         walk(f, 0, &mut own);
     }
     own.extend(files.iter().filter(|f| f.is_file()).cloned());
     own.sort();
     let mut out = Vec::new();
-    for p in system.into_iter().chain(own) {
+    for p in vergence.into_iter().chain(system).chain(own) {
         if !out.contains(&p) {
             out.push(p);
         }

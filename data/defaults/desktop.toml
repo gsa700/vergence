@@ -1,0 +1,23 @@
+# Vergence's defaults for every account (defaults milestone 1, 2026-11-22).
+# tools/install.sh installs this as $prefix/share/vergence/defaults/desktop.toml,
+# @PREFIX@ replaced. Read under the machine's /etc/vergence/desktop.toml
+# (FreeBSD: /usr/local/etc/vergence/desktop.toml) and each person's own
+# ~/.config/vergence/desktop.toml, which win key by key. A distribution, or
+# Vergence's own installer, changes defaults here, not in the code.
+
+[wallpaper]
+image = "@PREFIX@/share/backgrounds/vergence/vergence-dusk.svg"
+mode = "fill"
+color = "#14152a"
+
+[shelf]
+# By desktop entry id; one whose app is not installed is skipped.
+pinned = ["vergence-files", "firefox", "vergence-edit", "vergence-term", "vergence-settings"]
+
+[energy]
+screens-off = 10
+sleep = 0
+
+[energy.battery]
+screens-off = 5
+sleep = 30
