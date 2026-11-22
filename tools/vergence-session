@@ -15,6 +15,31 @@
 # session had running (session restore; a restart within the session restores).
 clean=
 [ "$1" = "--clean" ] && clean=1
+# The standard folders (defaults milestone 1, 2026-11-22; Dave: "create a set
+# of folders if they don't exist as is standard for most desktops"): the
+# freedesktop user directories, named in user-dirs.dirs so other programs
+# (Firefox's downloads, GTK's file chooser) find them. A file already there,
+# with other names or in another language, is kept as it is; only the folders
+# it names that are missing are made. A name set to $HOME alone means "none".
+config_home=${XDG_CONFIG_HOME:-$HOME/.config}
+if [ ! -f "$config_home/user-dirs.dirs" ]; then
+    mkdir -p "$config_home"
+    {
+        echo "# The folders for Desktop, Downloads and the rest (written by Vergence's session; edit freely)."
+        for pair in DESKTOP:Desktop DOCUMENTS:Documents DOWNLOAD:Downloads MUSIC:Music PICTURES:Pictures VIDEOS:Videos; do
+            echo "XDG_${pair%%:*}_DIR=\"\$HOME/${pair#*:}\""
+        done
+    } > "$config_home/user-dirs.dirs"
+fi
+sed -n 's/^XDG_[A-Z]*_DIR="\(.*\)"$/\1/p' "$config_home/user-dirs.dirs" | while IFS= read -r d; do
+    case $d in
+        '$HOME' | '$HOME/') continue ;;
+        '$HOME/'*) d=$HOME/${d#\$HOME/} ;;
+        /*) ;;
+        *) continue ;;
+    esac
+    [ -d "$d" ] || mkdir -p "$d"
+done
 here=$(dirname "$(realpath "$0")")
 installed=
 if [ -n "$VERGENCE_SERVER" ]; then
