@@ -97,7 +97,7 @@ pub fn disks_of(table: &[Mount]) -> Vec<PathBuf> {
         // a stick off; Dave, 2026-11-21, an ejected stick stayed listed).
         let mounted: Vec<&Path> = table.iter().map(|m| m.at.as_path()).collect();
         let ejected = ejected_now();
-        let on_images = image_labels();
+        let on_images = labels_on_images(&label_providers());
         out.extend(rd.flatten().map(|e| e.path()).filter(|p| {
             if mounted.contains(&p.as_path()) {
                 return true;
@@ -124,9 +124,9 @@ fn device_of(name: &std::ffi::OsStr) -> Option<PathBuf> {
     std::iter::once(PathBuf::from("/dev").join(name)).chain(["msdosfs", "ufs", "ext2fs", "ntfs", "exfat", "iso9660", "label", "gpt"].iter().map(|d| PathBuf::from("/dev").join(d).join(name))).find(|p| p.exists())
 }
 
-/// FreeBSD: the labels ("iso9660/NAME", "msdosfs/NAME") whose provider is
-/// an md device or a partition of one, from `glabel status -s`.
-fn image_labels() -> Vec<String> {
+/// FreeBSD: each label and the GEOM provider under it ("msdosfs/USB",
+/// "da0s1"), from `glabel status -s`.
+fn label_providers() -> Vec<(String, String)> {
     if !cfg!(target_os = "freebsd") {
         return Vec::new();
     }
@@ -135,20 +135,55 @@ fn image_labels() -> Vec<String> {
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .output()
-        .map(|o| labels_on_images(&String::from_utf8_lossy(&o.stdout)))
+        .map(|o| parse_glabel(&String::from_utf8_lossy(&o.stdout)))
         .unwrap_or_default()
 }
 
-/// `glabel status -s`'s lines, "NAME STATUS COMPONENT": the names on md devices.
-fn labels_on_images(text: &str) -> Vec<String> {
+/// `glabel status -s`'s lines, "NAME STATUS COMPONENT".
+fn parse_glabel(text: &str) -> Vec<(String, String)> {
     text.lines()
         .filter_map(|l| {
             let w: Vec<&str> = l.split_whitespace().collect();
-            let (name, component) = (w.first()?, w.last()?);
-            let base: String = component.chars().take_while(|c| c.is_ascii_alphabetic()).collect();
-            (w.len() >= 3 && base == "md").then(|| name.to_string())
+            (w.len() >= 3).then(|| (w[0].to_string(), w[w.len() - 1].to_string()))
         })
         .collect()
+}
+
+/// The labels whose provider is an md device or a partition of one.
+fn labels_on_images(labels: &[(String, String)]) -> Vec<String> {
+    labels
+        .iter()
+        .filter(|(_, c)| c.chars().take_while(|x| x.is_ascii_alphabetic()).collect::<String>() == "md")
+        .map(|(n, _)| n.clone())
+        .collect()
+}
+
+/// The provider a device is: a label's node is the provider under it.
+fn provider_of<'a>(device: &'a str, labels: &'a [(String, String)]) -> &'a str {
+    let dev = device.strip_prefix("/dev/").unwrap_or(device);
+    labels.iter().find(|(n, _)| n == dev).map_or(dev, |(_, c)| c.as_str())
+}
+
+/// One entry per drive: the automounter lists a stick by its label and,
+/// once looked up by it, by its device name too (/media/USB and
+/// /media/da0s1). The mounted one is kept, else the one by its label.
+fn one_per_device(list: &mut Vec<DriveInfo>, labels: &[(String, String)]) {
+    let keys: Vec<String> = list.iter().map(|d| provider_of(&d.device, labels).to_string()).collect();
+    let rank = |d: &DriveInfo| (d.mounted, !d.path.ends_with(&format!("/{}", provider_of(&d.device, labels))));
+    let mut keep = vec![true; list.len()];
+    for i in 0..list.len() {
+        if list[i].kind != DriveKind::Removable || keys[i].is_empty() {
+            continue;
+        }
+        for j in 0..list.len() {
+            if i != j && keep[j] && keys[i] == keys[j] && list[j].kind == DriveKind::Removable && (rank(&list[j]), j < i) > (rank(&list[i]), false) {
+                keep[i] = false;
+                break;
+            }
+        }
+    }
+    let mut k = keep.into_iter();
+    list.retain(|_| k.next().unwrap_or(true));
 }
 
 fn node_ino(p: &Path) -> Option<u64> {
@@ -216,7 +251,8 @@ pub fn network_mounts() -> Vec<PathBuf> {
 /// ejected; everything else can.
 pub fn scan() -> Vec<DriveInfo> {
     let table = mounts();
-    let on_images = image_labels();
+    let labels = label_providers();
+    let on_images = labels_on_images(&labels);
     let mut out: Vec<DriveInfo> = Vec::new();
     for at in disks_of(&table) {
         let m = table.iter().find(|m| m.at == at);
@@ -244,6 +280,7 @@ pub fn scan() -> Vec<DriveInfo> {
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
     out.dedup_by(|a, b| a.path == b.path);
+    one_per_device(&mut out, &labels);
     out
 }
 
@@ -302,7 +339,29 @@ mod tests {
     #[test]
     fn labels_on_a_disk_image_are_told_apart() {
         let text = "iso9660/Fedora-E-dvd-x86_64-45  N/A  md0\n msdosfs/ANACONDA  N/A  md0p2\nmsdosfs/USB  N/A  da0s1\ngpt/efiboot0  N/A  nda0p1\n";
-        assert_eq!(labels_on_images(text), vec!["iso9660/Fedora-E-dvd-x86_64-45", "msdosfs/ANACONDA"]);
+        assert_eq!(labels_on_images(&parse_glabel(text)), vec!["iso9660/Fedora-E-dvd-x86_64-45", "msdosfs/ANACONDA"]);
+    }
+
+    #[test]
+    fn a_stick_by_its_label_and_its_device_is_one_drive() {
+        let labels = parse_glabel("msdosfs/USB  N/A  da0s1\n");
+        let d = |path: &str, device: &str, mounted: bool| DriveInfo { name: path.rsplit('/').next().unwrap().into(), path: path.into(), kind: DriveKind::Removable, mounted, ejectable: true, device: device.into() };
+        // Neither mounted: the one by its label.
+        let mut l = vec![d("/media/USB", "/dev/msdosfs/USB", false), d("/media/da0s1", "/dev/da0s1", false)];
+        one_per_device(&mut l, &labels);
+        assert_eq!(l.iter().map(|x| x.path.as_str()).collect::<Vec<_>>(), ["/media/USB"]);
+        // Mounted by its label (the label node withers then): that one.
+        let mut l = vec![d("/media/USB", "/dev/da0s1", true), d("/media/da0s1", "/dev/da0s1", false)];
+        one_per_device(&mut l, &[]);
+        assert_eq!(l.iter().map(|x| x.path.as_str()).collect::<Vec<_>>(), ["/media/USB"]);
+        // Mounted by its device name: that one.
+        let mut l = vec![d("/media/USB", "/dev/msdosfs/USB", false), d("/media/da0s1", "/dev/da0s1", true)];
+        one_per_device(&mut l, &labels);
+        assert_eq!(l.iter().map(|x| x.path.as_str()).collect::<Vec<_>>(), ["/media/da0s1"]);
+        // Two sticks stay two.
+        let mut l = vec![d("/media/USB", "/dev/msdosfs/USB", false), d("/media/da1s1", "/dev/da1s1", false)];
+        one_per_device(&mut l, &labels);
+        assert_eq!(l.len(), 2);
     }
 
     #[test]
