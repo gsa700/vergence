@@ -135,10 +135,10 @@ impl App {
                     setting("Size of controls", "Window bars, tabs and buttons. A screen with a touch panel uses Large unless its own setting says otherwise (Screens).", choice(controls_names, Some(controls), Message::Controls).width(Length::Fixed(160.0)).name("Size of controls")),
                     setting(
                         "Tint windows with the wallpaper's color",
-                        "In dark style, a window takes some of the color of the wallpaper behind it: 0 (off) to 10%; 3% unless set. Off with Reduce transparency and High contrast.",
+                        "In dark style, a window takes on the color (not the brightness) of the wallpaper behind it: 0 (off) to 60%; 25% unless set. Off with Reduce transparency and High contrast.",
                         row(vec![
-                            slider(0.0, 10.0, self.tint_pct, Message::TintSlide).step(0.5).on_release(Message::TintDone).width(Length::Fixed(160.0)).name("Tint windows with the wallpaper's color"),
-                            label(if self.tint_pct <= 0.0 { "Off".to_string() } else if self.tint_pct.fract() == 0.0 { format!("{:.0}%", self.tint_pct) } else { format!("{:.1}%", self.tint_pct) }).width(Length::Fixed(44.0)).align(Align::End),
+                            slider(0.0, 60.0, self.tint_pct, Message::TintSlide).step(5.0).on_release(Message::TintDone).width(Length::Fixed(160.0)).name("Tint windows with the wallpaper's color"),
+                            label(if self.tint_pct <= 0.0 { "Off".to_string() } else { format!("{:.0}%", self.tint_pct) }).width(Length::Fixed(44.0)).align(Align::End),
                         ])
                         .spacing(8.0)
                         .align(Align::Center),
@@ -184,21 +184,16 @@ impl App {
             }),
             Message::TintSlide(v) => self.tint_pct = v,
             Message::TintDone => {
-                // 0 is off (the server's switch); otherwise the percentage, in halves.
-                let p = (self.tint_pct * 2.0).round() / 2.0;
+                // 0 is off (the server's switch); otherwise the strength in fives
+                // (tint-strength, the color-only tint; the old tint-amount goes).
+                let p = (self.tint_pct / 5.0).round() * 5.0;
                 self.save_appearance(|t| {
                     t.insert("wallpaper-tint".into(), (p > 0.0).into());
+                    t.remove("tint-amount");
                     if p > 0.0 {
-                        t.insert(
-                            "tint-amount".into(),
-                            if p.fract() == 0.0 {
-                                toml::Value::Integer(p as i64)
-                            } else {
-                                toml::Value::Float(p as f64)
-                            },
-                        );
+                        t.insert("tint-strength".into(), toml::Value::Integer(p as i64));
                     } else {
-                        t.remove("tint-amount");
+                        t.remove("tint-strength");
                     }
                 });
             }

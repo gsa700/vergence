@@ -41,7 +41,7 @@ pub struct Theme {
     /// (desktop.toml `[text] spellcheck`, or the app's own `spellcheck`).
     pub spell: bool,
     /// How much of the wallpaper's color a tinted window's grounds take
-    /// (desktop.toml `[appearance] tint-amount`: subtle, standard, strong).
+    /// (desktop.toml `[appearance] tint-strength`: subtle, standard, strong).
     pub tint_mix: f32,
 }
 
@@ -128,7 +128,7 @@ impl Theme {
         t.set_fonts(&vergence_ui::DesktopFonts::current());
         t.opacity = vergence_ui::opacity_setting(text, section);
         let on = |v: Option<String>| v.map(|v| v != "false");
-        t.tint_mix = tint_amount(vergence_ui::table_value(text, "[appearance]", "tint-amount").as_deref());
+        t.tint_mix = tint_amount(vergence_ui::table_value(text, "[appearance]", "tint-strength").as_deref());
         t.spell = on(vergence_ui::table_value(text, section, "spellcheck"))
             .or_else(|| on(vergence_ui::table_value(text, "[text]", "spellcheck")))
             .unwrap_or(true);
@@ -148,34 +148,88 @@ impl Theme {
         Color { a: (self.opacity.clamp(0.0, 1.0) * 255.0).round() as u8, ..self.page }
     }
 
-    /// The theme with a little of `tint` (the wallpaper's color behind the
-    /// window) in its grounds: the page, the sidebar and the cards, by the
-    /// desktop's amount (3% unless it says otherwise). Text keeps its colors.
+    /// The theme with some of `tint` (the wallpaper's color behind the window)
+    /// in its grounds: the page, the sidebar and the cards, by the desktop's
+    /// strength (25% unless it says otherwise). Text keeps its colors.
+    ///
+    /// The wallpaper's color only, not its brightness (defaults milestone 1,
+    /// Dave 2026-11-22: "color only"): each ground moves toward the tint's hue
+    /// and saturation at the ground's own lightness. Mixing the raw color did
+    /// nothing under a dark wallpaper (Dusk's average moved the dark page by
+    /// one level) and only lightened dark windows under a light one.
     pub fn tinted(&self, tint: Color) -> Theme {
-        let k = self.tint_mix.clamp(0.0, 0.3);
+        let k = self.tint_mix.clamp(0.0, 0.6);
+        let (th, _, ts) = hls(tint);
         let mix = |c: Color| {
-            let m = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * k).round() as u8;
-            Color { r: m(c.r, tint.r), g: m(c.g, tint.g), b: m(c.b, tint.b), a: c.a }
+            let (_, gl, _) = hls(c);
+            let target = from_hls(th, gl, ts);
+            let m = |a: u8, b: f32| (a as f32 + (b - a as f32) * k).round().clamp(0.0, 255.0) as u8;
+            Color { r: m(c.r, target.0), g: m(c.g, target.1), b: m(c.b, target.2), a: c.a }
         };
         Theme { page: mix(self.page), sidebar: mix(self.sidebar), card: mix(self.card), ..self.clone() }
     }
 }
 
 /// How much of the wallpaper's color a tinted window's grounds take unless
-/// the desktop says: 3% (8% was too strong, and is now "standard").
-pub const TINT_MIX: f32 = 0.03;
+/// the desktop says: 25% (Dave chose it from a swatch sheet, 2026-11-22).
+pub const TINT_MIX: f32 = 0.25;
 
-/// The tint's amount, which the user can tone down (see docs/apps-roadmap.md):
-/// a percentage 0 to 10 in halves (Settings' slider), or a name
-/// (subtle 4%, standard 8%, strong 14%).
+/// The tint's strength (desktop.toml `[appearance] tint-strength`): a
+/// percentage 0 to 60 (Settings' slider, in fives), or a name (subtle 15%,
+/// standard 25%, strong 40%). A new key with the color-only tint: the old
+/// `tint-amount` (0 to 10% of the raw color) meant something else, so it is
+/// not read.
 pub fn tint_amount(value: Option<&str>) -> f32 {
     match value {
-        Some("subtle") => 0.04,
-        Some("standard") => 0.08,
-        Some("strong") => 0.14,
-        Some(v) => v.trim().parse::<f32>().map_or(TINT_MIX, |p| (p / 100.0).clamp(0.0, 0.2)),
+        Some("subtle") => 0.15,
+        Some("standard") => 0.25,
+        Some("strong") => 0.40,
+        Some(v) => v.trim().parse::<f32>().map_or(TINT_MIX, |p| (p / 100.0).clamp(0.0, 0.6)),
         None => TINT_MIX,
     }
+}
+
+/// A color as hue, lightness and saturation, each 0 to 1 (HLS).
+fn hls(c: Color) -> (f32, f32, f32) {
+    let (r, g, b) = (c.r as f32 / 255.0, c.g as f32 / 255.0, c.b as f32 / 255.0);
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    let l = (max + min) / 2.0;
+    if max - min < 1e-6 {
+        return (0.0, l, 0.0);
+    }
+    let d = max - min;
+    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+    let h = if max == r {
+        ((g - b) / d).rem_euclid(6.0)
+    } else if max == g {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    } / 6.0;
+    (h, l, s)
+}
+
+/// Hue, lightness and saturation back to 0-255 channels (unrounded).
+fn from_hls(h: f32, l: f32, s: f32) -> (f32, f32, f32) {
+    if s < 1e-6 {
+        return (l * 255.0, l * 255.0, l * 255.0);
+    }
+    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let p = 2.0 * l - q;
+    let channel = |t: f32| {
+        let t = t.rem_euclid(1.0);
+        let v = if t < 1.0 / 6.0 {
+            p + (q - p) * 6.0 * t
+        } else if t < 0.5 {
+            q
+        } else if t < 2.0 / 3.0 {
+            p + (q - p) * (2.0 / 3.0 - t) * 6.0
+        } else {
+            p
+        };
+        v * 255.0
+    };
+    (channel(h + 1.0 / 3.0), channel(h), channel(h - 1.0 / 3.0))
 }
 
 impl Default for Theme {
@@ -207,17 +261,45 @@ pub fn parse_hex(s: &str) -> Option<Color> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn the_tint_amount_comes_from_the_desktop() {
+    fn the_tint_strength_comes_from_the_desktop() {
         let t = |text: &str| Theme::from_desktop(text, true, "[x]").tint_mix;
         assert_eq!(t(""), TINT_MIX);
-        assert_eq!(t("[appearance]\ntint-amount = \"subtle\"\n"), 0.04);
-        assert_eq!(t("[appearance]\ntint-amount = \"standard\"\n"), 0.08);
-        assert_eq!(t("[appearance]\ntint-amount = \"strong\"\n"), 0.14);
-        assert_eq!(t("[appearance]\ntint-amount = 5\n"), 0.05);
-        assert_eq!(t("[appearance]\ntint-amount = 90\n"), 0.2, "at most 20%");
-        let base = Theme::from_desktop("[appearance]\ntint-amount = \"strong\"\n", true, "[x]");
+        assert_eq!(t("[appearance]\ntint-strength = \"subtle\"\n"), 0.15);
+        assert_eq!(t("[appearance]\ntint-strength = \"standard\"\n"), 0.25);
+        assert_eq!(t("[appearance]\ntint-strength = \"strong\"\n"), 0.40);
+        assert_eq!(t("[appearance]\ntint-strength = 35\n"), 0.35);
+        assert_eq!(t("[appearance]\ntint-strength = 90\n"), 0.6, "at most 60%");
+        assert_eq!(t("[appearance]\ntint-amount = 8\n"), TINT_MIX, "the old key is not read");
+        let base = Theme::from_desktop("[appearance]\ntint-strength = \"strong\"\n", true, "[x]");
         let red = base.tinted(Color::rgb(255, 0, 0));
         assert!(red.page.r > base.page.r, "the page takes some red");
+    }
+
+    #[test]
+    fn the_tint_is_color_not_brightness() {
+        let base = Theme::new(true, Color::rgb(0, 122, 255), false);
+        let lum = |c: Color| 0.2126 * c.r as f32 + 0.7152 * c.g as f32 + 0.0722 * c.b as f32;
+        // A light gray wallpaper: no hue, so a dark window keeps its grounds.
+        let mist = base.tinted(Color::rgb(0xe0, 0xe0, 0xe0));
+        assert_eq!(mist.page, base.page, "a gray wallpaper does not lighten a dark window");
+        // A dark indigo wallpaper (Dusk): the page turns bluer at about its own lightness.
+        let dusk = base.tinted(Color::rgb(0x23, 0x28, 0x49));
+        assert!(dusk.page.b > dusk.page.r, "the page takes the indigo");
+        assert!((lum(dusk.page) - lum(base.page)).abs() < 3.0, "and keeps its lightness");
+    }
+
+    #[test]
+    fn hls_goes_both_ways() {
+        for c in
+            [Color::rgb(0x23, 0x28, 0x49), Color::rgb(255, 0, 0), Color::rgb(0x1c, 0x1c, 0x1e), Color::rgb(8, 46, 56)]
+        {
+            let (h, l, s) = hls(c);
+            let (r, g, b) = from_hls(h, l, s);
+            assert!(
+                (r - c.r as f32).abs() < 1.0 && (g - c.g as f32).abs() < 1.0 && (b - c.b as f32).abs() < 1.0,
+                "{c:?}"
+            );
+        }
     }
 
     use super::*;

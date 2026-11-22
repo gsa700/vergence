@@ -581,9 +581,9 @@ impl App {
             let a = app.desktop.get("appearance");
             let on = a.and_then(|a| a.get("wallpaper-tint")).and_then(|v| v.as_bool()).unwrap_or(true);
             let amount = a
-                .and_then(|a| a.get("tint-amount"))
+                .and_then(|a| a.get("tint-strength"))
                 .map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()));
-            if on { ((vergence_widgets::tint_amount(amount.as_deref()) * 200.0).round() / 2.0).min(10.0) } else { 0.0 }
+            if on { ((vergence_widgets::tint_amount(amount.as_deref()) * 20.0).round() * 5.0).min(60.0) } else { 0.0 }
         };
         app.repeat_rate = keyboard_int(&app.desktop, "repeat-rate", REPEAT_RATE) as f32;
         app.dock_from_file();
@@ -1074,7 +1074,7 @@ impl Program for App {
         // app reads them (Theme::from_desktop), so the slider is obeyed here
         // too: even a 1% tint shows, and a fixed 8% was far too strong.
         t.tint_mix =
-            vergence_widgets::tint_amount(vergence_ui::table_value(&text, "[appearance]", "tint-amount").as_deref());
+            vergence_widgets::tint_amount(vergence_ui::table_value(&text, "[appearance]", "tint-strength").as_deref());
         t.spell = vergence_ui::table_value(&text, "[settings]", "spellcheck")
             .or_else(|| vergence_ui::table_value(&text, "[text]", "spellcheck"))
             .is_none_or(|v| v != "false");
