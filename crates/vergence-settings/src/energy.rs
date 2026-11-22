@@ -91,8 +91,9 @@ impl App {
         let sleep = energy_int(&self.desktop, "sleep", 0);
         let (off_list, off_now) = minute_choices(&OFF_CHOICES, off);
         let (sleep_list, sleep_now) = minute_choices(&SLEEP_CHOICES, sleep);
-        let default_cmd = if Path::new("/run/systemd/system").is_dir() { "systemctl suspend" } else { "sudo -n zzz" };
-        let detail = format!("Empty: {default_cmd}. zzz needs root: a sudoers line for it, without a password.");
+        // Empty: vdm puts the machine to sleep (defaults milestone 1), as the
+        // session dialog's Sleep does; a command here replaces that.
+        let detail = "Empty: Vergence puts the machine to sleep itself. A command here is run instead.".to_string();
         let minutes = |list: Vec<String>, now: &str, f: fn(String) -> Message, name: &str| {
             let at = list.iter().position(|l| l == now);
             let options = list.clone();

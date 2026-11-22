@@ -4,9 +4,11 @@
 //   [energy]
 //   screens-off = 15          minutes without input before every monitor is turned off (0: never)
 //   sleep = 60                minutes without input before the machine is put to sleep (0: never)
-//   sleep-command = "..."     what puts it to sleep; empty: `systemctl suspend` where systemd
-//                             runs the machine, else `sudo -n zzz` (FreeBSD, Void: zzz needs root;
-//                             a sudoers line `user ALL=(root) NOPASSWD: /usr/bin/zzz` does it)
+//   sleep-command = "..."     what puts it to sleep; empty: vdm does it as root (its power
+//                             socket, as the session dialog's Sleep; defaults milestone 1),
+//                             and only where vdm is not running `systemctl suspend` where
+//                             systemd runs the machine, else `sudo -n zzz` (which needs a
+//                             sudoers line `user ALL=(root) NOPASSWD: /usr/bin/zzz`)
 //
 //   [energy.battery]          the same two times while the machine runs on its battery
 //   screens-off = 5           (settings milestone 2, 2026-11-14); a key left out, or the
@@ -272,8 +274,15 @@ impl Server {
                 self.lock_for_idle("sleep");
             }
             self.energy.slept = true;
+            // No command of the user's: vdm (root, already locking every session
+            // before sleep), so a new account's machine sleeps with no sudoers line.
+            let through_vdm = c.sleep_command.is_empty();
             let cmd = sleep_command(&c).to_string();
-            tracing::info!("energy: no input for {}; sleep: {cmd}", minutes(idle));
+            tracing::info!(
+                "energy: no input for {}; sleep: {}",
+                minutes(idle),
+                if through_vdm { "through vdm" } else { cmd.as_str() }
+            );
             if !self.energy.screens_off {
                 self.energy.screens_off = true;
                 crate::drm::screens_off(self);
@@ -285,6 +294,13 @@ impl Server {
             // review, finding 5: started from the console's session, it could
             // register with vdm as if it were the server).
             std::thread::spawn(move || {
+                if through_vdm {
+                    // vdm starts the system's command and answers at once.
+                    match vergence_dm::power::ask(vergence_dm::power::Power::Sleep) {
+                        Ok(()) => return tracing::info!("energy: vdm puts the machine to sleep"),
+                        Err(e) => tracing::warn!("energy: vdm could not ({e}); trying {cmd}"),
+                    }
+                }
                 let mut c = std::process::Command::new("sh");
                 c.args(["-c", &cmd]).stdin(std::process::Stdio::null());
                 crate::no_terminal(&mut c);
@@ -309,7 +325,7 @@ fn log_config(c: &Config) {
         minutes(c.sleep),
         minutes(boff),
         minutes(bsleep),
-        sleep_command(c)
+        if c.sleep_command.is_empty() { "through vdm" } else { c.sleep_command.as_str() }
     );
 }
 
