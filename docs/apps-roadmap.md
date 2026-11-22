@@ -406,3 +406,23 @@ it is today:
    uBlock Origin Lite does on Safari). Worth it, and when?
 6. **Agentic apps**: generated code runs as the user; a sandbox and a
    permission model first, or a trusted-agent-only start?
+
+## Vergence Music (Dave, 2026-11-21 night)
+
+**Decided:** AlbumWall becomes **Vergence Music**, a Vergence app in Rust on
+the toolkit and Hymie (vergence-hymie, ported in preview milestone 1), for
+Vergence only for now (Dave: "let's just develop Vergence Music for
+Vergence. Later we have the option of porting that new app to the other
+platforms. And in the meantime we have high quality apps there today").
+The Avalonia apps (AlbumWall, Deadwax, Marginal) stay as they are on the
+Mac, Windows and the Pi kiosk; Avalonia on FreeBSD is not pursued.
+
+- Why: Vergence is becoming a set of components (Dave: "This is GOOD IMO
+  because it facilitates reuse and efficiency"): the decoders, tags, cover
+  art, waveform and playback exist; the app is the interface and the art.
+- When: after preview milestone 1 and tree milestone 1.
+- Open for its plan: Navidrome over HTTP or HTTPS (TLS would be a borrowing
+  question); the library scanner and the wall of covers from AlbumWall's
+  design; later, toolkit roads for macOS (AppKit) and Windows (Win32) would
+  let it and every Vergence app run there (roughly a toolkit milestone each;
+  Hymie's AudioQueue and WASAPI outputs to port with them).
