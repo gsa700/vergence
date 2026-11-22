@@ -27,7 +27,7 @@ conf_files="/etc/pam.d/vdm /etc/pam.d/vdm-unlock /etc/pam.d/vdm-elevate
 # The workspace's binaries, built by the cargo style; installed by the
 # project's own tools/install.sh (staged, so it touches nothing outside
 # DESTDIR), then the files a Void system needs. Nothing is enabled:
-# vergence-setup does that, run once by the administrator (INSTALL.msg).
+# vergence-setup does that, run once by the administrator (INSTALL says so).
 do_install() {
 	VERGENCE_RELEASE_DIR="target/${RUST_TARGET}/release" \
 		./tools/install.sh --prefix /usr --destdir "${DESTDIR}"
