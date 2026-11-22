@@ -20,7 +20,9 @@
 //!
 //! Formats: PNG, JPEG (turned upright by its orientation tag), GIF and WebP (with their
 //! animation frames) by the `image` crate (borrowed, in docs/borrowed-review.md); SVG by resvg,
-//! with no outside resources; BMP by our own decoder (bmp.rs). By the file's bytes, not its name.
+//! with no outside resources but Vergence's own fonts for its text (read into memory before the
+//! helper confines itself, and only for a drawing with text); BMP by our own decoder (bmp.rs). By
+//! the file's bytes, not its name.
 //!
 //! The answer on the pipe: `VDEC1`, then width, height and the number of frames (u32,
 //! little-endian), then each frame: its delay in milliseconds and width x height x 4 bytes of
@@ -266,6 +268,51 @@ pub fn jpeg_samples(data: &[u8]) -> Result<(u32, u32, u8, Vec<u8>), String> {
 
 /// Decodes a picture's bytes, here (the helper's work; tests call it too).
 pub fn decode_bytes(data: &[u8], at_least: Option<(u32, u32)>) -> Result<Picture, String> {
+    decode_bytes_with(data, at_least, &[])
+}
+
+/// Whether an SVG draws text, so its fonts are worth reading.
+pub fn svg_has_text(data: &[u8]) -> bool {
+    data.windows(5).any(|w| w == b"<text")
+}
+
+/// Vergence's own fonts, read whole (the helper reads them before it confines
+/// itself, and opens nothing after): the first of the installed folder beside
+/// the helper ($prefix/libexec/vergence -> $prefix/share/vergence/fonts), a
+/// checkout's data/fonts, and the usual prefixes. At most 4 MB a file and
+/// 16 MB in all.
+pub fn own_fonts() -> Vec<Vec<u8>> {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(bin) = exe.parent()
+    {
+        dirs.push(bin.join("../../share/vergence/fonts"));
+        dirs.push(bin.join("../../data/fonts"));
+    }
+    dirs.push("/usr/local/share/vergence/fonts".into());
+    dirs.push("/usr/share/vergence/fonts".into());
+    let Some(dir) = dirs.into_iter().find(|d| d.is_dir()) else { return Vec::new() };
+    let mut files: Vec<std::path::PathBuf> =
+        std::fs::read_dir(&dir).map(|r| r.flatten().map(|e| e.path()).collect()).unwrap_or_default();
+    files.retain(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("ttf") || e.eq_ignore_ascii_case("otf")));
+    files.sort();
+    let (mut out, mut total) = (Vec::new(), 0usize);
+    for f in files {
+        let Ok(bytes) = std::fs::read(&f) else { continue };
+        if bytes.len() > 4 << 20 || total + bytes.len() > 16 << 20 {
+            continue;
+        }
+        total += bytes.len();
+        out.push(bytes);
+    }
+    out
+}
+
+/// As [`decode_bytes`], an SVG's text drawn in `fonts` (font files' bytes):
+/// sans-serif is Inter, serif Liberation Serif, monospace JetBrains Mono, as
+/// the desktop's own (defaults milestone 1: every <text> vanished, the font
+/// database being empty).
+pub fn decode_bytes_with(data: &[u8], at_least: Option<(u32, u32)>, fonts: &[Vec<u8>]) -> Result<Picture, String> {
     use image::{AnimationDecoder, ImageDecoder};
     let mime = vergence_types::of_bytes(data).unwrap_or(vergence_types::BINARY);
     let still = |w: u32, h: u32, rgba: Vec<u8>| -> Picture {
@@ -330,8 +377,19 @@ pub fn decode_bytes(data: &[u8], at_least: Option<(u32, u32)>) -> Result<Picture
             Ok(still(w, h, rgba))
         }
         "image/svg+xml" => {
-            // No outside files or fonts: what the drawing holds itself.
-            let opt = resvg::usvg::Options::default();
+            // No outside files: what the drawing holds itself, and the fonts
+            // given (Vergence's own, read before the helper was confined).
+            let mut opt = resvg::usvg::Options::default();
+            if !fonts.is_empty() {
+                let db = opt.fontdb_mut();
+                for f in fonts {
+                    db.load_font_data(f.clone());
+                }
+                db.set_sans_serif_family("Inter Variable");
+                db.set_serif_family("Liberation Serif");
+                db.set_monospace_family("JetBrains Mono");
+                opt.font_family = "Inter Variable".into();
+            }
             let tree = resvg::usvg::Tree::from_data(data, &opt).map_err(|e| e.to_string())?;
             let (sw, sh) = (tree.size().width(), tree.size().height());
             // A drawing has no pixels of its own: drawn at its size, or as large as asked.
@@ -558,8 +616,15 @@ pub fn helper_main() -> std::process::ExitCode {
         eprintln!("the file is larger than {} MB", MAX_FILE >> 20);
         return std::process::ExitCode::from(1);
     }
+    // A drawing's text needs fonts, which can only be read before the helper
+    // confines itself (no file system after); only when it has text.
+    let fonts = if vergence_types::of_bytes(&data) == Some("image/svg+xml") && svg_has_text(&data) {
+        own_fonts()
+    } else {
+        Vec::new()
+    };
     limit_self();
-    match decode_bytes(&data, at_least) {
+    match decode_bytes_with(&data, at_least, &fonts) {
         Ok(p) => {
             let mut out = std::io::stdout().lock();
             if out.write_all(&encode(&p)).and_then(|_| out.flush()).is_err() {
@@ -611,6 +676,17 @@ mod tests {
     #[test]
     fn what_is_not_a_picture_is_refused() {
         assert!(decode_bytes(b"just some text", None).unwrap_err().contains("not a picture"));
+        // An SVG's text: nothing without fonts, ink with Vergence's own.
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40"><text x="4" y="30" font-family="sans-serif" font-size="28" fill="#ffffff">Hello</text></svg>"##;
+        assert!(svg_has_text(svg));
+        let ink = |p: &Picture| p.frames[0].rgba.chunks_exact(4).filter(|px| px[3] > 0).count();
+        assert_eq!(ink(&decode_bytes(svg, None).unwrap()), 0, "no fonts, no text");
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/fonts");
+        let fonts: Vec<Vec<u8>> = ["InterVariable.ttf", "LiberationSerif-Regular.ttf", "JetBrainsMono-Variable.ttf"]
+            .iter()
+            .map(|f| std::fs::read(dir.join(f)).unwrap())
+            .collect();
+        assert!(ink(&decode_bytes_with(svg, None, &fonts).unwrap()) > 100, "the text is drawn");
         assert!(decode_bytes(b"\x89PNG\r\n\x1a\nbroken", None).is_err());
         assert!(decode_bytes(b"GIF89a\x01", None).is_err());
     }

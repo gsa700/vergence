@@ -91,7 +91,7 @@ Apps, Keyboard and Mouse, Accessibility, Date & Time, Lock Screen, Session.
     chooses the login screen's wallpaper (default: Vergence's default);
     Lock Screen gets "Show: my wallpaper / the login screen's".
 14. **About: bling and the Hardware app** (later, not this milestone).
-16. **SVG text is never drawn** (found 2026-11-22, a labeled swatch sheet
+16. *Done 2026-11-22.* **SVG text is never drawn** (found 2026-11-22, a labeled swatch sheet
     in Close-Up showed no words): vergence-decode gives resvg an empty font
     database, so every `<text>` in an SVG vanishes, in Close-Up, previews
     and wallpapers alike. Fix: load the system's fonts and Vergence's own
