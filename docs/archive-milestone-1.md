@@ -1,6 +1,9 @@
 # Archive milestone 1: archives in FileView, extracted and made
 
-Status: **drafted 2026-11-23, waiting for Dave's answers.** Queued
+Status: **answered 2026-11-23** (Dave: "all leans, go ahead"): libarchive
+through FFI (the borrowing agreed), one top folder kept as it is, the
+archive stays, the caps with "Extract anyway", passwords later, Compress to
+.zip only, .iso stays a disk image, browsing later. Building. Queued
 2026-11-22 (Dave: "queue it after the terminal fixes"; STATUS Next #1).
 Dave, 2026-11-23: "i installed zip and unzip but it would be nice if we
 didn't have too": so this milestone also *makes* archives, and needs no
