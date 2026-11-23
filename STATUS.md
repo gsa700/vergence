@@ -21,18 +21,27 @@ Defaults milestone 1 closed the same day.
 
 ## Next
 
-1. **Remote access** (Dave, 2026-11-22: the next milestone after Terminal on
+1. **Extracting archives in FileView** (Dave, 2026-11-22: "queue it after
+   the terminal fixes"): double-click a .zip, .tar.*, .7z to extract it beside
+   itself into a folder of its name, and "Extract here" in the item's menu;
+   by bsdtar (libarchive: base tar on FreeBSD, the `bsdtar` package on Void,
+   added to the package's depends), in a confined helper, nothing written
+   outside the target (no `..`, absolute paths or symlinks out), caps
+   against archive bombs, progress as for copies. Later: an archive browsed
+   as a folder, and Space previewing its list.
+2. **Remote access** (Dave, 2026-11-22: the next milestone after Terminal on
    the agent interface): the protocol and its client(s); display lists, not
    video (whitepaper phase 4, principle 8: transport by SSH or WireGuard,
-   logins through vdm). Plan drafted: docs/remote-milestone-1.md (a remote
-   screen with three modes: extend, mirror, take over); its questions are
-   still open.
-2. **AlbumWall for Vergence** (generic name Music): AlbumWall's wall of
+   logins through vdm). Plan: docs/remote-milestone-1.md (a remote screen
+   with three modes: extend, mirror, take over; the Vergence side and client
+   first, all three modes, attach and own login), then a portable build of
+   Vergence apps with the client as its first (the Mac first).
+3. **AlbumWall for Vergence** (generic name Music): AlbumWall's wall of
    covers and player rebuilt in Rust on the toolkit and Hymie
    (crates/vergence-hymie), for Vergence (docs/apps-roadmap.md).
-3. **The web component**: WebKit (WPE) as a component any app can embed,
+4. **The web component**: WebKit (WPE) as a component any app can embed,
    likely a service the server composites; then Mail and a browser on it.
-4. **The Vergence system** (release pathway §4): our installer and ISO on a
+5. **The Vergence system** (release pathway §4): our installer and ISO on a
    Void base, after the package; then a FreeBSD port.
 
 ## Built
