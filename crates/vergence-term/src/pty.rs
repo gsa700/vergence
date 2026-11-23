@@ -23,14 +23,20 @@ unsafe extern "C" {
     fn tcgetattr(fd: i32, termios: *mut u8) -> i32;
 }
 
-/// struct termios's c_lflag (after c_iflag, c_oflag and c_cflag, each 32
-/// bits) and its ECHO bit, the same on Linux and FreeBSD; ICANON's differs.
+/// struct termios's c_lflag (after c_iflag, c_oflag and c_cflag, each a
+/// 32-bit tcflag_t on Linux and FreeBSD) and its ECHO bit (8 on both);
+/// ICANON's differs: 2 on Linux's common layout, 0x100 on FreeBSD and on
+/// Linux's powerpc (alpha too, which Rust does not build for). Any other system (macOS's tcflag_t is 64 bits)
+/// must be added here, read from its headers: a wrong bit would read every
+/// password prompt as none (the security review of 2026-11-22).
 const LFLAG_AT: usize = 12;
 const ECHO: u32 = 0o10;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(any(target_arch = "powerpc", target_arch = "powerpc64"))))]
 const ICANON: u32 = 0o2;
-#[cfg(not(target_os = "linux"))]
+#[cfg(any(target_os = "freebsd", all(target_os = "linux", any(target_arch = "powerpc", target_arch = "powerpc64"))))]
 const ICANON: u32 = 0x100;
+#[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+compile_error!("vergence-term: struct termios's layout is not known for this system (pty.rs)");
 
 const O_RDWR: i32 = 2;
 // Close-on-exec: the terminal's end of a pty must not be handed down to the

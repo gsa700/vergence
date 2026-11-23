@@ -140,6 +140,8 @@ const WORKING_SECS: u64 = 120;
 const ENDING_MINUTES: u64 = 5;
 /// The most requests waiting for the person's answer.
 const PENDING_MAX: usize = 256;
+/// The most paged reads a connection may make a second (meaning.rs).
+const READS_PER_SECOND: u32 = 64;
 
 /// How long a grant lasts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,13 +173,60 @@ pub enum Level {
     Act,
 }
 
-/// What a request on a shell-access window is about: the tab (its node id
-/// and title, for the dialog) and the level it needs.
+/// What a request on a shell-access window is about: the window (its
+/// program's bus connection and its id), the tab (its node id and title, for
+/// the dialog) and the level it needs.
+///
+/// A tab's grant is kept by the window's bus connection and the tab's node,
+/// never by the app: every terminal process counts its tabs from 1, so "tab
+/// 1 of Terminal" is in every terminal there is (the security review of
+/// 2026-11-22: a grant for an agent's own terminal let it type into the
+/// person's). Bus connection ids are never reused in a session.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Scope {
+    pub client: u32,
+    pub window: u32,
     pub id: u64,
     pub tab: String,
     pub level: Level,
+    /// Where, for the dialog: the window ("the window “~/src: vim”") or, for
+    /// a terminal of its own, the folder it would start in.
+    pub place: String,
+}
+
+/// A tab's mark in the bar (decor.rs): its node, the agents' names, the
+/// first one's color, and whether one may type there.
+pub type TabMark = (u64, String, (u8, u8, u8), bool);
+
+/// A tab's grant: how long, the level, and what the person was told (the
+/// app's key, the window's id and the tab's title then) for Privacy.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TabGrant {
+    pub span: Span,
+    pub level: Level,
+    pub app: String,
+    pub window: u32,
+    pub tab: String,
+}
+
+impl TabGrant {
+    /// Whether it holds now for the agent on bus client `agent_client`.
+    fn live(&self, agent_client: u32) -> bool {
+        match self.span {
+            Span::Connection(c) => c == agent_client,
+            Span::Until(t) => now_secs() < t,
+            _ => false,
+        }
+    }
+
+    /// Whether it holds now for some connection (Privacy, the tab marks).
+    fn alive(&self) -> bool {
+        match self.span {
+            Span::Connection(_) => true,
+            Span::Until(t) => now_secs() < t,
+            _ => false,
+        }
+    }
 }
 
 /// The scope a request for a terminal of the agent's own is asked under
@@ -208,8 +257,21 @@ pub struct WaitingTerminal {
 pub fn gate_key(app: &str, scope: Option<&Scope>) -> String {
     match scope {
         None => app.to_string(),
-        Some(s) => format!("{app}\u{0}tab {} {:?}", s.id, s.level),
+        Some(s) => format!("{app}\u{0}tab {} {} {:?}", s.client, s.id, s.level),
     }
+}
+
+/// A tab grant's key in Privacy's list (`Grant::app`): the app's key, then the
+/// window's connection and the tab's node, so Take back ends that one.
+fn privacy_tab_key(app: &str, client: u32, tab: u64) -> String {
+    format!("{app}\u{0}tab {client} {tab}")
+}
+
+/// The window's connection and the tab's node from Privacy's key, if it is one.
+fn parse_privacy_tab_key(key: &str) -> Option<(&str, u32, u64)> {
+    let (app, rest) = key.split_once("\u{0}tab ")?;
+    let (c, t) = rest.split_once(' ')?;
+    Some((app, c.parse().ok()?, t.parse().ok()?))
 }
 
 /// The buttons, left to right.
@@ -287,12 +349,24 @@ impl Question {
 pub struct Agents {
     /// By (agent, app id).
     grants: HashMap<(Who, String), Span>,
-    /// Shell access, by (agent, app, tab node id): how long, and the level.
-    /// In memory only.
-    scoped: HashMap<(Who, String, u64), (Span, Level)>,
-    /// Tabs the person stopped an agent in (Escape twice, the mark's click):
-    /// refused, saying so, for the cool-down.
-    stopped: HashMap<(Who, String, u64), Instant>,
+    /// Shell access, by (agent, the window's bus client, tab node id): see
+    /// [`Scope`]. In memory only.
+    scoped: HashMap<(Who, u32, u64), TabGrant>,
+    /// Tabs the person stopped an agent in (Escape twice, the mark's click),
+    /// by the same key: refused, saying so, for the cool-down.
+    stopped: HashMap<(Who, u32, u64), Instant>,
+    /// A terminal of its own allowed, by (agent, the terminal program's app
+    /// key): the grant goes to the new window's tab when it comes.
+    new_terminal: HashMap<(Who, String), Span>,
+    /// Windows that ever said "shell-access": scoped for as long as they live,
+    /// whatever their tree says later.
+    pub shell_windows: std::collections::HashSet<(u32, u32)>,
+    /// The tabs each shell window was last told agents hold (bus v39).
+    tabs_told: HashMap<(u32, u32), Vec<vergence_protocol::window::AgentTab>>,
+    /// The tab the agent tile's last use was in, if it was in one.
+    last_tab: Option<(u32, u64)>,
+    /// Paged reads by agent connection: when its second began, how many in it.
+    reads: HashMap<u32, (Instant, u32)>,
     /// Terminals started for agents, waiting for their windows (bus v38).
     pub terminals: Vec<WaitingTerminal>,
     /// When the person last said Don't allow to an agent about an app.
@@ -474,25 +548,38 @@ impl Agents {
         }
     }
 
-    /// What agent `agent` may do in tab `scope.id` of shell-access `app` at
-    /// `scope.level` now. A Read grant asks again for Act; an Act grant
+    /// What agent `agent` (on bus client `agent_client`) may do in tab
+    /// `scope.id` of the window on bus client `scope.client`, at
+    /// `scope.level`, now. A Read grant asks again for Act; an Act grant
     /// covers Read. An app-wide grant, Always included, counts for nothing.
-    fn may_scoped(&mut self, agent: &Who, client: u32, app: &str, scope: &Scope) -> May {
-        let key = (agent.clone(), app.to_string(), scope.id);
-        let refused = (agent.clone(), gate_key(app, Some(scope)));
-        match self.scoped.get(&key).copied() {
-            None if self.refused.get(&refused).is_some_and(|t| t.elapsed().as_secs() < COOL_DOWN_SECS) => May::No,
+    fn may_scoped(&mut self, agent: &Who, agent_client: u32, app: &str, scope: &Scope) -> May {
+        let key = (agent.clone(), scope.client, scope.id);
+        let cooling = self
+            .refused
+            .get(&(agent.clone(), gate_key(app, Some(scope))))
+            .is_some_and(|t| t.elapsed().as_secs() < COOL_DOWN_SECS)
+            || self.stopped_lately(agent, scope.client, scope.id);
+        // A terminal of its own: the answer kept until the terminal starts.
+        if scope.id == NEW_TERMINAL {
+            return match self.new_terminal.get(&(agent.clone(), app.to_string())).copied() {
+                Some(Span::Connection(c)) if c == agent_client => May::Yes,
+                Some(Span::Until(t)) if now_secs() < t => May::Yes,
+                _ if cooling => May::No,
+                _ => May::Ask,
+            };
+        }
+        match self.scoped.get(&key).cloned() {
+            None if cooling => May::No,
             None => May::Ask,
-            Some((_, level)) if level < scope.level => {
-                if self.refused.get(&refused).is_some_and(|t| t.elapsed().as_secs() < COOL_DOWN_SECS) {
+            Some(g) if g.level < scope.level => {
+                if cooling {
                     May::No
                 } else {
                     May::Ask
                 }
             }
-            Some((Span::Connection(c), _)) if c == client => May::Yes,
-            Some((Span::Until(t), _)) if now_secs() < t => May::Yes,
-            Some((Span::Until(_), _)) => {
+            Some(g) if g.live(agent_client) => May::Yes,
+            Some(TabGrant { span: Span::Until(_), .. }) => {
                 self.scoped.remove(&key);
                 May::Expired
             }
@@ -500,59 +587,92 @@ impl Agents {
         }
     }
 
-    /// The tabs of shell-access `app` an agent holds a live grant for, at
-    /// `level` or more.
-    pub fn scopes_held(&self, agent: &Who, client: u32, app: &str, level: Level) -> Vec<u64> {
+    /// The tabs of the window on bus client `app_client` the agent (on bus
+    /// client `agent_client`) holds a live grant for, at `level` or more.
+    pub fn scopes_held(&self, agent: &Who, agent_client: u32, app_client: u32, level: Level) -> Vec<u64> {
         self.scoped
             .iter()
-            .filter(|((a, p, _), (span, l))| {
-                a == agent
-                    && p == app
-                    && *l >= level
-                    && match span {
-                        Span::Connection(c) => *c == client,
-                        Span::Until(t) => now_secs() < *t,
-                        _ => false,
-                    }
-            })
+            .filter(|((a, c, _), g)| a == agent && *c == app_client && g.level >= level && g.live(agent_client))
             .map(|((_, _, id), _)| *id)
             .collect()
     }
 
-    /// Every agent's grant for a tab ends now (the stop keys, step 4): each
-    /// is refused there for the cool-down, told the person stopped it, rather
-    /// than asked again at once.
-    pub fn revoke_scope(&mut self, app: &str, scope: u64) -> usize {
-        let gone: Vec<Who> =
-            self.scoped.keys().filter(|(_, p, id)| p == app && *id == scope).map(|(a, _, _)| a.clone()).collect();
-        self.scoped.retain(|(_, p, id), _| !(p == app && *id == scope));
+    /// Every agent's grant for tab `scope` of the window on bus client
+    /// `app_client` ends now (the stop keys, step 4): each is refused there
+    /// for the cool-down, told the person stopped it, rather than asked again
+    /// at once. The agents it ended for.
+    pub fn revoke_scope(&mut self, app_client: u32, scope: u64) -> Vec<Who> {
+        let gone: Vec<Who> = self
+            .scoped
+            .keys()
+            .filter(|(_, c, id)| *c == app_client && *id == scope)
+            .map(|(a, _, _)| a.clone())
+            .collect();
+        self.scoped.retain(|(_, c, id), _| !(*c == app_client && *id == scope));
         let now = Instant::now();
         for a in &gone {
-            for level in [Level::Read, Level::Act] {
-                let sc = Scope { id: scope, tab: String::new(), level };
-                self.refused.insert((a.clone(), gate_key(app, Some(&sc))), now);
-            }
-            self.stopped.insert((a.clone(), app.to_string(), scope), now);
+            self.stopped.insert((a.clone(), app_client, scope), now);
         }
-        gone.len()
+        gone
+    }
+
+    /// The person stopped every agent in this tab, whether it held a grant or
+    /// not (one asking for it now is refused too, for the cool-down).
+    pub fn stop_all_in(&mut self, app_client: u32, scope: u64, agents: impl IntoIterator<Item = Who>) {
+        let now = Instant::now();
+        for a in agents {
+            self.stopped.insert((a, app_client, scope), now);
+        }
     }
 
     /// Whether the person stopped this agent in this tab, lately.
-    pub fn stopped_lately(&self, agent: &Who, app: &str, scope: u64) -> bool {
-        self.stopped
-            .get(&(agent.clone(), app.to_string(), scope))
-            .is_some_and(|t| t.elapsed().as_secs() < COOL_DOWN_SECS)
+    pub fn stopped_lately(&self, agent: &Who, app_client: u32, scope: u64) -> bool {
+        self.stopped.get(&(agent.clone(), app_client, scope)).is_some_and(|t| t.elapsed().as_secs() < COOL_DOWN_SECS)
     }
 
     /// The grant given for a terminal of the agent's own, taken to move to
     /// its tab once it exists.
     pub fn take_new_terminal(&mut self, agent: &Who, app: &str) -> Option<Span> {
-        self.scoped.remove(&(agent.clone(), app.to_string(), NEW_TERMINAL)).map(|(s, _)| s)
+        self.new_terminal.remove(&(agent.clone(), app.to_string()))
     }
 
     /// A tab's grant at the typing level (the agent's own terminal).
-    pub fn grant_tab(&mut self, agent: &Who, app: &str, tab: u64, span: Span) {
-        self.scoped.insert((agent.clone(), app.to_string(), tab), (span, Level::Act));
+    pub fn grant_tab(&mut self, agent: &Who, scope: &Scope, app: &str, span: Span) {
+        self.scoped.insert(
+            (agent.clone(), scope.client, scope.id),
+            TabGrant { span, level: Level::Act, app: app.to_string(), window: scope.window, tab: scope.tab.clone() },
+        );
+    }
+
+    /// A live grant for this tab by any agent, if there is one.
+    fn tabs_of_any(&self, tab: Option<(u32, u64)>) -> Option<&TabGrant> {
+        let (c, id) = tab?;
+        self.scoped.iter().find(|((_, gc, gid), g)| *gc == c && *gid == id && g.alive()).map(|(_, g)| g)
+    }
+
+    /// The tabs agents hold a live grant for in window (`app_client`,
+    /// `window`): one entry a tab, typing if any agent may type there, the
+    /// agents' names joined.
+    pub fn tabs_of(&self, app_client: u32, window: u32) -> Vec<vergence_protocol::window::AgentTab> {
+        let mut by_tab: std::collections::BTreeMap<u64, (Vec<String>, bool)> = Default::default();
+        for ((a, c, id), g) in &self.scoped {
+            if *c != app_client || g.window != window || !g.alive() {
+                continue;
+            }
+            let e = by_tab.entry(*id).or_default();
+            let name = clean_agent_name(&a.name);
+            if !e.0.contains(&name) {
+                e.0.push(name);
+            }
+            e.1 |= g.level == Level::Act;
+        }
+        by_tab
+            .into_iter()
+            .map(|(node, (mut names, typing))| {
+                names.sort();
+                vergence_protocol::window::AgentTab { node, agent: names.join(", "), typing }
+            })
+            .collect()
     }
 
     /// The minutes a timed grant has left, if the agent has one for the app.
@@ -589,6 +709,7 @@ impl Server {
         match may {
             May::Yes => {
                 self.agents.last = Some((agent, app.to_string(), Instant::now()));
+                self.agents.last_tab = scope.as_ref().map(|sc| (sc.client, sc.id));
                 self.agent_tile();
                 Some(true)
             }
@@ -631,28 +752,125 @@ impl Server {
         self.agents.may(&agent, client, app) == May::Yes
     }
 
-    /// The tabs of shell-access `app` the agent on `client` may read now.
-    pub fn agent_scopes(&mut self, client: u32, app: &str, level: Level) -> Vec<u64> {
+    /// Whether the agent on `client` may read another page now: at most
+    /// READS_PER_SECOND a second (each page is the window's work; a loop
+    /// asking for pages must not hold an app).
+    pub fn agent_read_allowed(&mut self, client: u32) -> bool {
+        let now = Instant::now();
+        let e = self.agents.reads.entry(client).or_insert((now, 0));
+        if now.duration_since(e.0) >= std::time::Duration::from_secs(1) {
+            *e = (now, 0);
+        }
+        e.1 += 1;
+        e.1 <= READS_PER_SECOND
+    }
+
+    /// The tabs of the shell-access window on bus client `app_client` the
+    /// agent on `client` may use at `level` now.
+    pub fn agent_scopes(&mut self, client: u32, app_client: u32, level: Level) -> Vec<u64> {
         let Some(agent) = self.bus_agent_who(client) else { return Vec::new() };
-        self.agents.scopes_held(&agent, client, app, level)
+        self.agents.scopes_held(&agent, client, app_client, level)
     }
 
     /// Every agent's grant for tab `scope` of the shell-access window
-    /// (`app_client`, `window`) ends now: the stop keys (step 4). How many.
+    /// (`app_client`, `window`) ends now: the stop keys (step 4). Agents
+    /// connected now that held none are stopped there too, so one whose
+    /// question is on its way cannot slip in. How many grants ended.
     pub fn agent_revoke_tab(&mut self, app_client: u32, window: u32, scope: u64) -> usize {
-        let Some(app) = self
-            .natives
-            .get(&(app_client, window))
-            .and_then(|w| w.native())
-            .map(|n| self.agent_app_key(n.client, &n.app_id))
-        else {
+        if !self.natives.contains_key(&(app_client, window)) {
             return 0;
-        };
-        let n = self.agents.revoke_scope(&app, scope);
-        if n > 0 {
-            tracing::info!("agents: {n} grant(s) for tab {scope} of {app:?} revoked");
         }
-        n
+        let gone = self.agents.revoke_scope(app_client, scope);
+        let connected: Vec<Who> = self.bus_agents_connected();
+        self.agents.stop_all_in(app_client, scope, connected);
+        // Its questions about that tab go, refused.
+        let asked: Vec<u32> = self
+            .agents
+            .asking
+            .iter()
+            .filter(|q| q.scope.as_ref().is_some_and(|sc| sc.client == app_client && sc.id == scope))
+            .map(|q| q.client)
+            .collect();
+        if !asked.is_empty() {
+            let was_first = self
+                .agents
+                .asking
+                .front()
+                .is_some_and(|q| q.scope.as_ref().is_some_and(|sc| sc.client == app_client && sc.id == scope));
+            self.agents
+                .asking
+                .retain(|q| !q.scope.as_ref().is_some_and(|sc| sc.client == app_client && sc.id == scope));
+            if was_first {
+                self.agents.focus = DEFAULT;
+                self.agents.armed = Some(Instant::now());
+                self.agents.picture = None;
+            }
+            self.redraw_all();
+        }
+        if !gone.is_empty() {
+            let app = self
+                .natives
+                .get(&(app_client, window))
+                .and_then(|w| w.native())
+                .map(|n| self.agent_app_key(n.client, &n.app_id))
+                .unwrap_or_default();
+            tracing::info!("agents: {} grant(s) for tab {scope} of {app:?} revoked", gone.len());
+            for a in &gone {
+                self.agent_log_named(&a.name, &app, &format!("stopped by the person in tab #{scope}"));
+            }
+        }
+        self.agent_tabs_sync();
+        gone.len()
+    }
+
+    /// Each shell window told which of its tabs agents hold a grant for, when
+    /// that changed (bus v39: its stop keys), and its bar drawn again (the
+    /// tab marks, decor.rs). Grants that ran out go first.
+    pub fn agent_tabs_sync(&mut self) {
+        let now = now_secs();
+        self.agents.scoped.retain(|_, g| !matches!(g.span, Span::Until(t) if t <= now));
+        let windows: std::collections::HashSet<(u32, u32)> = self
+            .agents
+            .scoped
+            .iter()
+            .map(|((_, c, _), g)| (*c, g.window))
+            .chain(self.agents.tabs_told.keys().copied())
+            .collect();
+        for (c, w) in windows {
+            if !self.natives.contains_key(&(c, w)) {
+                self.agents.tabs_told.remove(&(c, w));
+                continue;
+            }
+            let tabs = self.agents.tabs_of(c, w);
+            if self.agents.tabs_told.get(&(c, w)).map_or(tabs.is_empty(), |t| *t == tabs) {
+                continue;
+            }
+            if tabs.is_empty() {
+                self.agents.tabs_told.remove(&(c, w));
+            } else {
+                self.agents.tabs_told.insert((c, w), tabs.clone());
+            }
+            self.bus_send(
+                c,
+                vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::AgentTabs {
+                    window: w,
+                    tabs,
+                }),
+            );
+            self.redraw_all();
+        }
+    }
+
+    /// The tab marks a shell window's bar shows (decor.rs).
+    pub fn agent_tab_marks(&self, app_client: u32, window: u32) -> Vec<TabMark> {
+        self.agents
+            .tabs_of(app_client, window)
+            .into_iter()
+            .map(|t| {
+                let color = ring_color(t.agent.split(", ").next().unwrap_or(&t.agent));
+                (t.node, t.agent, color, t.typing)
+            })
+            .collect()
     }
 
     /// One line in agents.log: who, what app, what, how it went.
@@ -672,14 +890,24 @@ impl Server {
         }
     }
 
-    /// An agent's connection ended: its "Just now" grants go, and its waiting requests.
+    /// A bus connection ended. An agent's: its "Just now" grants go, and its
+    /// waiting requests. A window's program's: every tab grant in its windows
+    /// goes (its ids mean nothing once it is gone).
     pub fn agents_forget(&mut self, client: u32) {
         self.agents.grants.retain(|_, s| *s != Span::Connection(client));
-        self.agents.scoped.retain(|_, (s, _)| *s != Span::Connection(client));
+        self.agents.scoped.retain(|(_, c, _), g| g.span != Span::Connection(client) && *c != client);
+        self.agents.stopped.retain(|(_, c, _), _| *c != client);
+        self.agents.shell_windows.retain(|(c, _)| *c != client);
+        self.agents.tabs_told.retain(|(c, _), _| *c != client);
+        self.agents.new_terminal.retain(|_, s| *s != Span::Connection(client));
+        self.agents.reads.remove(&client);
+        if self.agents.last_tab.is_some_and(|(c, _)| c == client) {
+            self.agents.last_tab = None;
+        }
         self.agents.pending.retain(|(c, _, _)| *c != client);
         let before = self.agents.asking.len();
         let was_first = self.agents.asking.front().is_some_and(|q| q.client == client);
-        self.agents.asking.retain(|q| q.client != client);
+        self.agents.asking.retain(|q| q.client != client && q.scope.as_ref().is_none_or(|sc| sc.client != client));
         if self.agents.asking.len() != before {
             if was_first {
                 self.agents.focus = DEFAULT;
@@ -688,6 +916,7 @@ impl Server {
             }
             self.redraw_all();
         }
+        self.agent_tabs_sync();
     }
 
     fn agent_dialog_open(&mut self) {
@@ -730,8 +959,20 @@ impl Server {
         }
         match (span, &q.scope) {
             // A tab's grant: in memory, at its level (never Always or the session).
+            (Some(s @ (Span::Connection(_) | Span::Until(_))), Some(sc)) if sc.id == NEW_TERMINAL => {
+                self.agents.new_terminal.insert((q.agent.clone(), q.app.clone()), s);
+            }
             (Some(s @ (Span::Connection(_) | Span::Until(_))), Some(sc)) => {
-                self.agents.scoped.insert((q.agent.clone(), q.app.clone(), sc.id), (s, sc.level));
+                // A Read answer never lowers a typing grant already held.
+                let key = (q.agent.clone(), sc.client, sc.id);
+                let level = match self.agents.scoped.get(&key) {
+                    Some(g) if g.live(q.client) && g.level > sc.level => g.level,
+                    _ => sc.level,
+                };
+                self.agents.scoped.insert(
+                    key,
+                    TabGrant { span: s, level, app: q.app.clone(), window: sc.window, tab: sc.tab.clone() },
+                );
             }
             (Some(_), Some(_)) => {}
             (Some(s), None) => {
@@ -787,6 +1028,7 @@ impl Server {
         if let Some(next) = self.agents.asking.front() {
             tracing::info!("agents: asking whether {:?} may use {:?}", next.agent, next.app);
         }
+        self.agent_tabs_sync();
         self.redraw_all();
     }
 
@@ -879,6 +1121,8 @@ impl Server {
     /// The tile while an agent works (with the dock's tick, once a second).
     pub fn agents_tick(&mut self) {
         self.agents_time_told();
+        // Tab grants that ran out: their marks and stop keys go.
+        self.agent_tabs_sync();
         if self.agents.tile_up
             && self.agents.last.as_ref().is_none_or(|(_, _, t)| t.elapsed().as_secs() >= WORKING_SECS)
         {
@@ -899,16 +1143,31 @@ impl Server {
 
     fn agent_tile(&mut self) {
         let Some((agent, app, _)) = self.agents.last.clone() else { return };
-        let shown = self.app_shown_name(&app);
-        let minutes = self.agents.minutes_left(&agent, &app);
+        // Its last use was in a tab: that tab's grant is what the tile shows.
+        let tab = self.agents.last_tab.and_then(|(c, id)| self.agents.scoped.get(&(agent.clone(), c, id)).cloned());
+        let shown = match &tab {
+            Some(g) => format!(
+                "{} (the tab \u{201c}{}\u{201d})",
+                self.app_shown_name(&app),
+                clean(&g.tab).chars().take(32).collect::<String>()
+            ),
+            None => self.app_shown_name(&app),
+        };
+        let minutes = match &tab {
+            Some(TabGrant { span: Span::Until(t), .. }) => Some(t.saturating_sub(now_secs()).div_ceil(60)),
+            Some(_) => None,
+            None => self.agents.minutes_left(&agent, &app),
+        };
         let left = minutes.map(|m| format!(", {m} min left")).unwrap_or_default();
         // Its last minutes: the tile in trouble, and one more span at a press.
         let ending = minutes.is_some_and(|m| m <= ENDING_MINUTES);
         let (state, label) = match minutes {
             Some(m) if ending => (vergence_protocol::tile::TileState::Problem, format!("{m} min left")),
-            _ => (vergence_protocol::tile::TileState::Warning, format!("using {shown}")),
+            // The label under the dock's tile is short: the app alone.
+            _ => (vergence_protocol::tile::TileState::Warning, format!("using {}", self.app_shown_name(&app))),
         };
-        let controls = if minutes.is_some() {
+        // More time is offered only for an app's grant: a tab's is asked again.
+        let controls = if minutes.is_some() && tab.is_none() {
             let more = timed_label(agents_settings().1).replacen("For ", "", 1);
             vec![vergence_protocol::tile::Control {
                 id: "extend".into(),
@@ -933,7 +1192,17 @@ impl Server {
             card: vergence_protocol::tile::Card {
                 title,
                 big: String::new(),
-                rows: vec![("Allowed".into(), format!("{}{left}", self.agent_span_word(&agent, &app)))],
+                rows: vec![(
+                    "Allowed".into(),
+                    match &tab {
+                        Some(g) => format!(
+                            "{}, {}{left}",
+                            if g.level == Level::Act { "reading and typing" } else { "reading" },
+                            if matches!(g.span, Span::Until(_)) { "for a time" } else { "just now" }
+                        ),
+                        None => format!("{}{left}", self.agent_span_word(&agent, &app)),
+                    },
+                )],
                 chart: Vec::new(),
                 controls,
                 note: "Settings > Privacy > Agents takes it back.".into(),
@@ -1093,16 +1362,28 @@ impl Server {
                 ("Program", if program.is_empty() { "not known".into() } else { program }),
                 ("App", {
                     let p = app_program_of(&q.app);
+                    let place: String = q
+                        .scope
+                        .as_ref()
+                        .map(|sc| clean_agent_name(&sc.place))
+                        .filter(|p| !p.is_empty())
+                        .map_or(String::new(), |p| format!(" \u{b7} {}", p.chars().take(44).collect::<String>()));
                     let p = p.rsplit('/').next().unwrap_or(p);
-                    format!(
-                        "{shown} ({}{})",
-                        app_id_of(&q.app).chars().take(32).collect::<String>(),
-                        if p.is_empty() {
-                            String::new()
-                        } else {
-                            format!(", {}", p.chars().take(24).collect::<String>())
-                        }
-                    )
+                    if q.scope.is_some() {
+                        // A tab's question names the window instead of the
+                        // program's path: which terminal is the question.
+                        format!("{shown}{place}")
+                    } else {
+                        format!(
+                            "{shown} ({}{})",
+                            app_id_of(&q.app).chars().take(32).collect::<String>(),
+                            if p.is_empty() {
+                                String::new()
+                            } else {
+                                format!(", {}", p.chars().take(24).collect::<String>())
+                            }
+                        )
+                    }
                 }),
             ];
             for (k, (label, value)) in rows.iter().enumerate() {
@@ -1119,11 +1400,14 @@ impl Server {
                 );
             }
             let line = match &q.scope {
+                // Honest about what typing is: running commands as the person.
+                // The desktop keeps a rule-following agent to the tab; nothing
+                // in a shell stops a command from reaching further.
                 Some(sc) if sc.id == NEW_TERMINAL => {
-                    "In a window of its own: what it types runs as you. Password prompts and root shells refuse it."
+                    "A window of its own, but what it types runs as you, with all your access."
                 }
                 Some(sc) if sc.level == Level::Act => {
-                    "This tab only: what it types runs as you. Password prompts and root shells refuse it."
+                    "What it types runs as you, with all your access. Escape twice in the tab stops it."
                 }
                 Some(_) => "This tab only: its screen and what scrolled by. Other tabs stay hidden from it.",
                 None if q.expired => {
@@ -1235,6 +1519,35 @@ impl Server {
                 }
             })
             .collect();
+        // An app-wide grant for a shell-access app (Terminal) gives nothing:
+        // its windows are granted a tab at a time. Said, so no one counts on it.
+        for g in out.iter_mut() {
+            if app_id_of(&g.app) == "vergence-term" {
+                g.shown = format!("{} (no effect: Terminal is allowed a tab at a time)", g.shown);
+            }
+        }
+        // Tabs (in memory, never kept): each one its own row.
+        for ((a, c, id), g) in &self.agents.scoped {
+            if !g.alive() {
+                continue;
+            }
+            let (span, left) = match g.span {
+                Span::Until(t) => ("timed", t.saturating_sub(now).div_ceil(60) as u32),
+                _ => ("just now", 0),
+            };
+            let level = if g.level == Level::Act { "reading and typing" } else { "reading" };
+            let tab: String = clean(&g.tab).chars().take(48).collect();
+            out.push(vergence_protocol::bus::Grant {
+                agent: a.name.clone(),
+                program: a.program.clone(),
+                app: privacy_tab_key(&g.app, *c, *id),
+                shown: format!("{}, the tab \u{201c}{tab}\u{201d} ({level})", self.app_shown_name(&g.app)),
+                span: span.into(),
+                minutes_left: left,
+                working: self.agents.last_tab == Some((*c, *id))
+                    && working.as_ref().is_some_and(|(w, p)| w == a && *p == g.app),
+            });
+        }
         out.sort_by_key(|g| (g.agent.to_lowercase(), g.shown.to_lowercase()));
         out
     }
@@ -1243,6 +1556,30 @@ impl Server {
     /// or all (both empty). The agent tile goes if its agent lost its grant.
     pub fn agents_revoke(&mut self, agent: &str, program: &str, app: &str) {
         self.agents.load();
+        // Tab grants: one (Privacy's key names it), an app's, an agent's or all.
+        let tab = parse_privacy_tab_key(app);
+        let scoped_before = self.agents.scoped.len();
+        self.agents.scoped.retain(|(a, c, id), g| {
+            !((agent.is_empty() || a.name == agent)
+                && (program.is_empty() || a.program == program)
+                && match tab {
+                    Some((_, tc, tid)) => *c == tc && *id == tid,
+                    None => app.is_empty() || g.app == app,
+                })
+        });
+        if self.agents.scoped.len() != scoped_before {
+            tracing::info!("agents: tab grants taken back ({agent:?}, {program:?}, {app:?})");
+            let shown = tab.map_or(app, |t| t.0).to_string();
+            self.agent_log_named(agent, &shown, &format!("tab grant(s) taken back from Privacy > Agents ({program})"));
+            if self.agents.last_tab.is_some() && self.agents.tabs_of_any(self.agents.last_tab).is_none() {
+                self.agents.last_tab = None;
+                if self.agents.tile_up {
+                    self.agents.tile_up = false;
+                    self.tile_remove(crate::tiles::Owner::Desktop, "agent");
+                }
+            }
+            self.agent_tabs_sync();
+        }
         let before = self.agents.grants.len();
         self.agents.grants.retain(|(a, p), _| {
             !((agent.is_empty() || a.name == agent)
@@ -1416,14 +1753,18 @@ impl Server {
             })
             .collect();
         // Tabs of shell-access apps (memory only).
-        out.extend(self.agents.scoped.iter().map(|((a, p, id), (s, l))| match s {
-            Span::Until(t) => format!(
-                "{:?} ({}) {p:?} tab #{id} {l:?}: for {} more min",
-                a.name,
-                a.program,
-                t.saturating_sub(now_secs()).div_ceil(60)
-            ),
-            s => format!("{:?} ({}) {p:?} tab #{id} {l:?}: {s:?}", a.name, a.program),
+        out.extend(self.agents.scoped.iter().map(|((a, c, id), g)| {
+            let (p, l) = (&g.app, g.level);
+            match g.span {
+                Span::Until(t) => format!(
+                    "{:?} ({}) {p:?} window {c}/{} tab #{id} {l:?}: for {} more min",
+                    a.name,
+                    a.program,
+                    g.window,
+                    t.saturating_sub(now_secs()).div_ceil(60)
+                ),
+                s => format!("{:?} ({}) {p:?} window {c}/{} tab #{id} {l:?}: {s:?}", a.name, a.program, g.window),
+            }
         }));
         out.sort();
         if let Some(q) = self.agents.asking.front() {
@@ -1526,42 +1867,84 @@ mod tests {
         assert_eq!(a.may(&c, 4, "term"), May::Ask);
     }
 
+    /// A tab of the window on bus client `client` (window 1), at a level.
+    fn tab_on(client: u32, id: u64, level: Level) -> Scope {
+        Scope { client, window: 1, id, tab: "zsh".into(), level, place: String::new() }
+    }
+
+    fn grant(span: Span, level: Level, app: &str) -> TabGrant {
+        TabGrant { span, level, app: app.into(), window: 1, tab: "zsh".into() }
+    }
+
     #[test]
     fn a_tab_s_grant() {
         let mut a = Agents { loaded: true, ..Default::default() };
         let c = who("Claude");
-        let tab = |id: u64, level: Level| Scope { id, tab: "zsh".into(), level };
+        // The window's program is bus client 20; the agent is client 3 or 4.
+        let tab = |id: u64, level: Level| tab_on(20, id, level);
         let app = "vergence-term @ /usr/bin/vergence-term";
         assert_eq!(a.may_scoped(&c, 3, app, &tab(10, Level::Read)), May::Ask);
         // An Always for the whole app, kept from before, counts for nothing here.
         a.grants.insert((c.clone(), app.into()), Span::Always);
         assert_eq!(a.may_scoped(&c, 3, app, &tab(10, Level::Read)), May::Ask);
         // Read granted: reading yes, typing asks again, another tab asks.
-        a.scoped.insert((c.clone(), app.into(), 10), (Span::Connection(3), Level::Read));
+        a.scoped.insert((c.clone(), 20, 10), grant(Span::Connection(3), Level::Read, app));
         assert_eq!(a.may_scoped(&c, 3, app, &tab(10, Level::Read)), May::Yes);
         assert_eq!(a.may_scoped(&c, 3, app, &tab(10, Level::Act)), May::Ask, "reading is not typing");
         assert_eq!(a.may_scoped(&c, 3, app, &tab(11, Level::Read)), May::Ask, "one tab, not the app");
         assert_eq!(a.may_scoped(&c, 4, app, &tab(10, Level::Read)), May::Ask, "Just now is this connection's");
         // Typing granted: it covers reading.
-        a.scoped.insert((c.clone(), app.into(), 10), (Span::Until(now_secs() + 600), Level::Act));
+        a.scoped.insert((c.clone(), 20, 10), grant(Span::Until(now_secs() + 600), Level::Act, app));
         assert_eq!(a.may_scoped(&c, 4, app, &tab(10, Level::Read)), May::Yes);
         assert_eq!(a.may_scoped(&c, 4, app, &tab(10, Level::Act)), May::Yes);
-        assert_eq!(a.scopes_held(&c, 4, app, Level::Read), vec![10]);
-        assert!(a.scopes_held(&who("Other"), 4, app, Level::Read).is_empty(), "per agent");
+        assert_eq!(a.scopes_held(&c, 4, 20, Level::Read), vec![10]);
+        assert!(a.scopes_held(&who("Other"), 4, 20, Level::Read).is_empty(), "per agent");
         // A refusal is the tab's and the level's.
         a.refused.insert((c.clone(), gate_key(app, Some(&tab(11, Level::Read)))), Instant::now());
         assert_eq!(a.may_scoped(&c, 4, app, &tab(11, Level::Read)), May::No);
         assert_eq!(a.may_scoped(&c, 4, app, &tab(12, Level::Read)), May::Ask);
         // Timed out: asked again, saying so; the stop keys revoke at once.
-        a.scoped.insert((c.clone(), app.into(), 13), (Span::Until(now_secs().saturating_sub(1)), Level::Act));
+        a.scoped.insert((c.clone(), 20, 13), grant(Span::Until(now_secs().saturating_sub(1)), Level::Act, app));
         assert_eq!(a.may_scoped(&c, 4, app, &tab(13, Level::Read)), May::Expired);
-        assert_eq!(a.revoke_scope(app, 10), 1);
+        assert_eq!(a.revoke_scope(20, 10), vec![c.clone()]);
         // Stopped by the person: refused there for the cool-down, saying so,
         // at both levels, not asked again at once (step 4).
         assert_eq!(a.may_scoped(&c, 4, app, &tab(10, Level::Read)), May::No);
         assert_eq!(a.may_scoped(&c, 4, app, &tab(10, Level::Act)), May::No);
-        assert!(a.stopped_lately(&c, app, 10));
-        assert!(!a.stopped_lately(&c, app, 11));
+        assert!(a.stopped_lately(&c, 20, 10));
+        assert!(!a.stopped_lately(&c, 20, 11));
+        // A stop for an agent that held nothing there yet holds too.
+        a.stop_all_in(20, 14, [c.clone()]);
+        assert_eq!(a.may_scoped(&c, 4, app, &tab(14, Level::Read)), May::No);
+    }
+
+    /// The review's critical finding: two terminal processes count their tabs
+    /// from 1 alike, under one app key. A grant for tab 1 of one is nothing in
+    /// the other.
+    #[test]
+    fn the_same_tab_id_in_two_terminals_is_two_tabs() {
+        let mut a = Agents { loaded: true, ..Default::default() };
+        let c = who("Claude");
+        let app = "vergence-term @ /usr/bin/vergence-term";
+        let tab1 = 1 << 60 | 1;
+        // The agent's own terminal is bus client 30; the person's, client 31.
+        let (own, persons) = (tab_on(30, tab1, Level::Act), tab_on(31, tab1, Level::Act));
+        a.grant_tab(&c, &own, app, Span::Connection(3));
+        assert_eq!(a.may_scoped(&c, 3, app, &own), May::Yes);
+        assert_eq!(a.may_scoped(&c, 3, app, &persons), May::Ask, "the person's tab 1 is asked about");
+        assert_eq!(a.may_scoped(&c, 3, app, &tab_on(31, tab1, Level::Read)), May::Ask, "not even read");
+        assert!(a.scopes_held(&c, 3, 31, Level::Read).is_empty());
+        assert_eq!(a.scopes_held(&c, 3, 30, Level::Act), vec![tab1]);
+        // Their questions and refusals are kept apart too.
+        assert_ne!(gate_key(app, Some(&own)), gate_key(app, Some(&persons)));
+        // Stopping the agent in the person's tab 1 leaves its own alone.
+        a.stop_all_in(31, tab1, [c.clone()]);
+        assert_eq!(a.may_scoped(&c, 3, app, &own), May::Yes);
+        assert_eq!(a.may_scoped(&c, 3, app, &persons), May::No);
+        // The marks: only the window that holds the grant has one.
+        assert_eq!(a.tabs_of(30, 1).len(), 1);
+        assert!(a.tabs_of(31, 1).is_empty());
+        assert!(a.tabs_of(30, 2).is_empty(), "another window of the same program");
     }
 
     /// A terminal of the agent's own (step 4): the grant asked under
@@ -1570,16 +1953,57 @@ mod tests {
     fn a_terminal_of_its_own() {
         let mut a = Agents { loaded: true, ..Default::default() };
         let c = who("Claude");
-        let tab = |id: u64, level: Level| Scope { id, tab: "zsh".into(), level };
         let app = "vergence-term @ /usr/bin/vergence-term";
         assert_eq!(a.take_new_terminal(&c, app), None, "nothing granted");
-        a.scoped.insert((c.clone(), app.into(), NEW_TERMINAL), (Span::Connection(3), Level::Act));
+        let new = Scope {
+            client: 0,
+            window: 0,
+            id: NEW_TERMINAL,
+            tab: "a terminal of its own".into(),
+            level: Level::Act,
+            place: String::new(),
+        };
+        assert_eq!(a.may_scoped(&c, 3, app, &new), May::Ask);
+        a.new_terminal.insert((c.clone(), app.into()), Span::Connection(3));
+        // The answer lets the request that asked run (not asked again).
+        assert_eq!(a.may_scoped(&c, 3, app, &new), May::Yes);
+        assert_eq!(a.may_scoped(&c, 4, app, &new), May::Ask, "Just now is that connection's");
         let span = a.take_new_terminal(&c, app).unwrap();
         assert_eq!(a.take_new_terminal(&c, app), None, "taken once");
-        a.grant_tab(&c, app, 42, span);
-        assert_eq!(a.may_scoped(&c, 3, app, &tab(42, Level::Act)), May::Yes);
-        assert_eq!(a.scopes_held(&c, 3, app, Level::Act), vec![42]);
-        assert_eq!(a.may_scoped(&who("Other"), 3, app, &tab(42, Level::Read)), May::Ask, "its own, no one else's");
+        a.grant_tab(&c, &tab_on(20, 42, Level::Act), app, span);
+        assert_eq!(a.may_scoped(&c, 3, app, &tab_on(20, 42, Level::Act)), May::Yes);
+        assert_eq!(a.scopes_held(&c, 3, 20, Level::Act), vec![42]);
+        assert_eq!(
+            a.may_scoped(&who("Other"), 3, app, &tab_on(20, 42, Level::Read)),
+            May::Ask,
+            "its own, no one else's"
+        );
+    }
+
+    #[test]
+    fn the_tabs_a_window_is_told() {
+        let mut a = Agents { loaded: true, ..Default::default() };
+        let app = "vergence-term @ x";
+        a.scoped.insert((who("Claude"), 20, 10), grant(Span::Connection(3), Level::Read, app));
+        a.scoped.insert((who("Helper"), 20, 10), grant(Span::Connection(4), Level::Act, app));
+        a.scoped.insert((who("Claude"), 20, 11), grant(Span::Until(now_secs() + 60), Level::Read, app));
+        a.scoped.insert((who("Claude"), 20, 12), grant(Span::Until(now_secs().saturating_sub(1)), Level::Act, app));
+        let tabs = a.tabs_of(20, 1);
+        assert_eq!(
+            tabs,
+            vec![
+                vergence_protocol::window::AgentTab { node: 10, agent: "Claude, Helper".into(), typing: true },
+                vergence_protocol::window::AgentTab { node: 11, agent: "Claude".into(), typing: false },
+            ],
+            "one entry a tab; typing if any may; a grant that ran out is none"
+        );
+    }
+
+    #[test]
+    fn privacy_s_key_for_a_tab() {
+        let k = privacy_tab_key("vergence-term @ /usr/bin/vergence-term", 31, 1 << 60 | 2);
+        assert_eq!(parse_privacy_tab_key(&k), Some(("vergence-term @ /usr/bin/vergence-term", 31, 1 << 60 | 2)));
+        assert_eq!(parse_privacy_tab_key("vergence-edit @ /usr/bin/vergence-edit"), None);
     }
 
     #[test]
@@ -1592,7 +2016,7 @@ mod tests {
             expired: false,
             scope,
         };
-        let shell = q(Some(Scope { id: 10, tab: "zsh".into(), level: Level::Act }));
+        let shell = q(Some(tab_on(20, 10, Level::Act)));
         let words: Vec<&str> = shell.buttons().iter().map(|b| b.1).collect();
         assert_eq!(words, vec!["Don't allow", "Just now", "For an hour"]);
         assert!(!shell.buttons().iter().any(|b| matches!(b.0, Button::Always | Button::Session)));

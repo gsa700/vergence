@@ -958,6 +958,14 @@ pub enum WinEvent {
         node: u64,
         agent: String,
     },
+    /// The tabs agents hold a grant for in this window now (bus v39), sent
+    /// whenever that changes: each tab's meaning node, the agent's name and
+    /// whether it may type there (else only read). The window's stop keys
+    /// (Escape twice) are for these tabs, used or not.
+    AgentTabs {
+        window: u32,
+        tabs: Vec<AgentTab>,
+    },
     /// Send the text of meaning node `node` (its value, else its name) from
     /// character `offset`, at most `len` characters (bus v37, paged reading:
     /// the tree cuts every text at [`MEANING_TEXT_MAX`] characters). Answered
@@ -974,6 +982,18 @@ pub enum WinEvent {
 /// The most characters a page of text carries ([`WinEvent::ReadText`]): with
 /// four bytes a character at worst, well inside a frame.
 pub const TEXT_PAGE_MAX: u32 = 8192;
+
+/// A tab an agent holds a grant for ([`WinEvent::AgentTabs`], bus v39).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTab {
+    pub node: u64,
+    pub agent: String,
+    pub typing: bool,
+}
+
+/// Room kept for an AgentTabs list before it is read (the count says more
+/// only if the frame holds that many).
+const AGENT_TABS_MAX: usize = 256;
 /// What the tree cuts every name and value at (the toolkit's meaning request).
 pub const MEANING_TEXT_MAX: usize = 512;
 
@@ -1049,6 +1069,7 @@ pub(crate) mod op {
     pub const SESSION_ENDING: u16 = 136;
     pub const READ_TEXT: u16 = 137;
     pub const AGENT_ACTING: u16 = 138;
+    pub const AGENT_TABS: u16 = 139;
 
     /// Whether an opcode is a window message's (either way).
     pub fn is_window(opcode: u16) -> bool {
@@ -1919,6 +1940,14 @@ impl WinEvent {
                 e.u32(*window).u64(*node).str(agent);
                 e
             }
+            WinEvent::AgentTabs { window, tabs } => {
+                let mut e = Encoder::frame(op::AGENT_TABS);
+                e.u32(*window).count(tabs.len());
+                for t in tabs {
+                    e.u64(t.node).str(&t.agent).bool(t.typing);
+                }
+                e
+            }
             WinEvent::ReadText { window, serial, node, offset, len } => {
                 let mut e = Encoder::frame(op::READ_TEXT);
                 e.u32(*window).u32(*serial).u64(*node).u32(*offset).u32(*len);
@@ -2073,6 +2102,15 @@ impl WinEvent {
             op::SCENES_OFF => WinEvent::ScenesOff { window: d.u32()?, why: d.str()? },
             op::SESSION_ENDING => WinEvent::SessionEnding { window: d.u32()? },
             op::AGENT_ACTING => WinEvent::AgentActing { window: d.u32()?, node: d.u64()?, agent: d.str()? },
+            op::AGENT_TABS => {
+                let window = d.u32()?;
+                let n = d.count(13)?;
+                let mut tabs = Vec::with_capacity(n.min(AGENT_TABS_MAX));
+                for _ in 0..n {
+                    tabs.push(AgentTab { node: d.u64()?, agent: d.str()?, typing: d.bool()? });
+                }
+                WinEvent::AgentTabs { window, tabs }
+            }
             op::READ_TEXT => WinEvent::ReadText {
                 window: d.u32()?,
                 serial: d.u32()?,
@@ -2503,6 +2541,14 @@ mod tests {
             WinEvent::Act { window: 1, serial: 13, node: 7, action: Action::Type("echo hi\n".into()) },
             WinEvent::Act { window: 1, serial: 14, node: 7, action: Action::Key("ctrl+c".into()) },
             WinEvent::AgentActing { window: 1, node: 1 << 60 | 3, agent: "Claude".into() },
+            WinEvent::AgentTabs { window: 1, tabs: vec![] },
+            WinEvent::AgentTabs {
+                window: 1,
+                tabs: vec![
+                    AgentTab { node: 1 << 60 | 3, agent: "Claude".into(), typing: true },
+                    AgentTab { node: 1 << 60 | 4, agent: "Helper".into(), typing: false },
+                ],
+            },
         ];
         for m in all {
             let (bytes, fds) = m.encode().unwrap();

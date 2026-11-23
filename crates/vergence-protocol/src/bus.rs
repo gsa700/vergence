@@ -78,11 +78,13 @@
 //! `agent::AgentEvent::Terminal`, an agent's terminal of its own;
 //! `window::WinEvent::AgentActing`, who types; `window::WinRequest::RevokeAgent`,
 //! the person's stop.
+//! Version 39 (terminal agent milestone 1, the security review): `window::WinEvent::AgentTabs`,
+//! the tabs agents hold a grant for, for the window's stop keys.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 38;
+pub const VERSION: u32 = 39;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

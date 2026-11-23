@@ -60,6 +60,25 @@ name, in the window it names or a new one); close its own tab.
 - The refusals: password prompt (answer 1), root tab (answer 4), a tab not
   granted (answer 5); each is an error the agent sees, in plain words.
 
+**What a typing grant is** (the security review, 2026-11-22): typing in a
+shell is running commands as the person, with all of the person's access. A
+command typed into one tab can reach any file, any other terminal and the
+network; the desktop's tab scoping holds an agent to a tab only while the
+agent follows the rules (asks through the interface, types only where it is
+granted). It is a visible, revocable boundary for a cooperating agent, not a
+sandbox against a hostile one. The dialog says so ("What it types runs as
+you, with all your access"), and the safeguards below narrow mistakes and
+races; none of them turns a shell into a jail.
+
+**This tab only, with a visual** (Dave, 2026-11-22): a tab an agent holds any
+grant for, reading or typing, is marked in the bar for as long as the grant
+lasts, and only that tab: outlined in the agent's own color (its rings'),
+the agent's name before the title; a typing grant also tints the tab and
+draws a band along its top. The server draws it from its own record (the
+program cannot leave it out), and over a root tab's red too: an agent may
+read a root tab, never type in one, so a root tab with a read grant shows
+both. Ungranted tabs show nothing.
+
 **The dialog** (server-drawn, as now), for Terminal: "Claude wants to read
 this tab" or "Claude wants to type in this tab: anything it types runs as
 you", naming the tab; buttons Don't allow, Just now, For an hour.
@@ -212,3 +231,58 @@ All questions answered: ready to build.
   terminal not found by `find`. Shots of the dialog, the badge and the note
   looked at. Workspace tests on Hubble: 1,013 passed. Not run: kepler and
   techbench (not synced in this step), agent-check's terminal part.
+- **The security review's fixes** (bus v39, 2026-11-22; in git, not
+  installed). An independent review of b5bc87d..a8f69e6 found 14 points,
+  one critical; all fixed:
+  1. *(critical)* Tab grants were kept by app and tab id, and every terminal
+     process numbers its tabs from 1: a grant for the agent's own terminal
+     let it type into tab 1 of the person's. Grants, stops and refusals are
+     now kept by the window's bus connection and the tab's node (connection
+     ids are never reused in a session) and dropped when that program's
+     connection ends. Tested with two terminals sharing tab ids.
+  2. A burst's later steps were written without looking again (`sudo -s` then
+     a queued line went into a root shell). Now every 16 ms step checks the
+     pane again and drops the rest, telling the agent; a new act while a
+     burst runs is refused ("still typing"), and so is one within 0.3 s of a
+     line going in; keys go through the same gate; more than one line at once
+     goes only to a program that asked for bracketed paste.
+  3. Privacy > Agents lists tab grants (one row each, "Terminal, the tab
+     “zsh” (reading)") and Take back ends them; the agent tile shows a tab's
+     grant. `WinEvent::AgentTabs` tells the window which tabs agents hold
+     grants for, so Escape twice ends a Read grant or one not yet used.
+  4. The terminal keeps its own 60 s refusal after a stop, so an act already
+     on its way when the person stopped it is refused too; the server also
+     stops agents that held nothing in the tab yet, and drops their
+     questions about it.
+  5. Refused while the foreground is ssh, mosh, telnet, tmux, screen, su,
+     sudo, doas, login, passwd, ksu, pkexec or a pinentry; root is asked
+     afresh at each act (not the red tab's two-second answer); a prompt is
+     also known by its text ("Password:", "Enter passphrase for key", "PIN",
+     "Verification code"). The dialog and this document say what typing is.
+  6. Terminal windows are scoped from the start (by app id, and for life once
+     a tree says shell-access): before the first tree "Terminal is starting:
+     ask again in a moment", never the app-wide fallback. Windows shows a
+     terminal's title only while the agent holds the tab in front (else
+     "Terminal"). An app-wide grant for Terminal shows in Privacy as having
+     no effect.
+  7. The caret is logged with the tab in front when it moved, and an agent
+     hears of it only for its own tabs; tree changes name the tabs that
+     changed and reach only agents holding one of them.
+  8. Find matches a terminal window only as "Terminal", never by its title.
+  9. Typed text loses Escape, other C0 and C1 controls and DEL (keys go by
+     name); "\r\n", "\r" and "\n" are each one line end for pacing and
+     bytes alike.
+  10. agents.log keeps a typed text's length and first word only.
+  11. `--for-agent=NAME` is one argument; an empty name is refused; the grant
+      attaches in the first tree that has the tab, not only the first tree.
+  12. The dialog names the window ("Terminal · the window “~/src: vim”") and,
+      for a terminal of its own, the folder it starts in.
+  13. Paged reading indexes every 4,096th character once per text (no walk
+      from the start for each page); 64 pages a second at most a connection;
+      the tree's key reads pane states at most every 0.25 s.
+  14. Escape twice is documented above and works in any granted tab; the
+      pill stays the click target (the bar's tab click selects the tab).
+  Also: termios's ICANON bit per system with a `compile_error!` for any
+  system not listed. See "This tab only, with a visual" above for the tab
+  marks.
+

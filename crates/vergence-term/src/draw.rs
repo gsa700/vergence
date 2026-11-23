@@ -143,6 +143,7 @@ impl Terminal {
                     titles: &titles,
                     alerts: &alerts,
                     edited: &[],
+                    grants: &[],
                     title: "",
                     shown: self.shown,
                     hover: self.hover,

@@ -45,10 +45,14 @@ pub enum Change {
     Window { client: u32, window: u32 },
     /// The focused widget in a window moved (0: none).
     Focus { client: u32, window: u32, node: u64 },
-    /// A window's text caret moved, on the screens (logical points).
-    Caret { client: u32, window: u32, at: Option<Rect4> },
-    /// A window's tree changed (widgets, values, states).
-    Tree { client: u32, window: u32 },
+    /// A window's text caret moved, on the screens (logical points). In a
+    /// shell-access window, the tab in front when it moved (an agent hears of
+    /// it only if it holds that tab: decided by when it moved, not by which
+    /// tab is in front when the agent asks).
+    Caret { client: u32, window: u32, at: Option<Rect4>, scope: Option<u64> },
+    /// A window's tree changed (widgets, values, states). In a shell-access
+    /// window, the tabs whose part changed (an agent hears only of its own).
+    Tree { client: u32, window: u32, scopes: Option<Vec<u64>> },
     /// An agent's timed grant for an app is running out, or has (0): only
     /// that agent hears it (agents.rs).
     Time { agent: crate::agents::Who, app: String, minutes_left: u32 },
@@ -222,15 +226,20 @@ impl Server {
         {
             self.zoom_follow("focus", (origin.0 + n.x + n.w / 2.0, origin.1 + n.y + n.h / 2.0));
         }
+        let shell = self.agents.shell_windows.contains(&(client, window));
         if old_caret != new.1 {
             let at = new.1.map(|(x, y, w, h)| (origin.0 + x, origin.1 + y, w, h));
             if keyboard && let Some((x, y, w, h)) = at {
                 self.zoom_follow("caret", (x + w / 2.0, y + h / 2.0));
             }
-            self.meaning_log.push(Change::Caret { client, window, at });
+            let scope = if shell { Some(selected_scope(&new.2).map_or(0, |s| s.0)) } else { None };
+            self.meaning_log.push(Change::Caret { client, window, at, scope });
         }
         if old_nodes != Some(&new.2) {
-            self.meaning_log.push(Change::Tree { client, window });
+            let scopes = shell.then(|| changed_scopes(old_nodes.map(|n| n.as_slice()), &new.2));
+            if scopes.as_ref().is_none_or(|s| !s.is_empty()) {
+                self.meaning_log.push(Change::Tree { client, window, scopes });
+            }
         }
     }
 
@@ -301,7 +310,12 @@ impl Server {
         let (wpart, parts) = parse(path);
         let mut out = Vec::new();
         for l in self.meaning_windows() {
-            if !window_matches(&wpart, &l.title, &l.app_id) {
+            // For an agent a shell-access window is "Terminal": its title is
+            // the tab in front's, which may be one it holds nothing for (a
+            // search by title would tell it whether that tab says "vim").
+            let shell = only.is_some() && l.win.native().is_some_and(|n| self.is_shell_window((n.client, n.id)));
+            let title = if shell { "Terminal" } else { l.title.as_str() };
+            if !window_matches(&wpart, title, &l.app_id) {
                 continue;
             }
             if let (Some(set), Some(n)) = (only, l.win.native())
@@ -433,6 +447,26 @@ pub fn scoped_nodes(nodes: &[Node], scopes: &[u64]) -> Vec<Node> {
         .collect()
 }
 
+/// The tabs (scopes) of a shell-access tree whose part differs between two
+/// trees: a tab's own node or anything under it. The window's root alone is
+/// not counted (agents see it as plain "Terminal").
+pub fn changed_scopes(old: Option<&[Node]>, new: &[Node]) -> Vec<u64> {
+    fn group(nodes: &[Node]) -> std::collections::BTreeMap<u64, Vec<&Node>> {
+        let mut by: std::collections::BTreeMap<u64, Vec<&Node>> = Default::default();
+        for n in nodes {
+            if let Some(s) = scope_of(nodes, n.id) {
+                by.entry(s).or_default().push(n);
+            }
+        }
+        by
+    }
+    let new_by = group(new);
+    let old_by = old.map(group).unwrap_or_default();
+    let mut out: Vec<u64> = new_by.iter().filter(|(s, ns)| old_by.get(s) != Some(ns)).map(|(s, _)| *s).collect();
+    out.extend(old_by.keys().filter(|s| !new_by.contains_key(s)));
+    out
+}
+
 /// A node moved onto the screens.
 fn on_screens(n: &Node, origin: (f64, f64)) -> Node {
     let mut n = n.clone();
@@ -525,7 +559,7 @@ impl Server {
             .filter(|(k, key)| match self.shell_tree(*k) {
                 // A shell-access window: only through a tab of its it may read.
                 Some(nodes) => {
-                    let held = self.agent_scopes(id, key, crate::agents::Level::Read);
+                    let held = self.agent_scopes(id, k.0, crate::agents::Level::Read);
                     nodes.iter().any(|n| held.contains(&n.id))
                 }
                 None => self.agent_may_quietly(id, key),
@@ -534,10 +568,25 @@ impl Server {
             .collect()
     }
 
-    /// A native window's tree, if it says shell access (Terminal).
+    /// Whether a native window is granted a tab at a time: Terminal's (by its
+    /// app id, before it has sent any tree), or one that ever said "shell-access"
+    /// (it stays so: a later tree without the word changes nothing).
+    pub fn is_shell_window(&self, k: (u32, u32)) -> bool {
+        self.agents.shell_windows.contains(&k)
+            || self
+                .natives
+                .get(&k)
+                .and_then(|w| w.native())
+                .is_some_and(|n| n.app_id == "vergence-term" || n.meaning().is_some_and(|m| shell_access(&m.2)))
+    }
+
+    /// A shell-access window's tree (empty while it has sent none yet), or
+    /// None for any other window.
     pub fn shell_tree(&self, k: (u32, u32)) -> Option<Vec<Node>> {
-        let nodes = self.natives.get(&k).and_then(|w| w.native()).and_then(|n| n.meaning()).map(|m| m.2)?;
-        shell_access(&nodes).then_some(nodes)
+        if !self.is_shell_window(k) {
+            return None;
+        }
+        Some(self.natives.get(&k).and_then(|w| w.native()).and_then(|n| n.meaning()).map(|m| m.2).unwrap_or_default())
     }
 
     /// An agent's request (it has said who it is; bus.rs checks).
@@ -558,6 +607,7 @@ impl Server {
         let mut apps: Vec<(String, Option<Scope>)> = Vec::new();
         let key_of = |s: &Server, w: &Win| w.native().map(|n| s.agent_app_key(n.client, &n.app_id));
         let not_in_tab = "not in a tab you may use".to_string();
+        let starting = "Terminal is starting: ask again in a moment".to_string();
         match &r {
             AgentRequest::Tree { client, window, .. }
             | AgentRequest::Act { client, window, .. }
@@ -565,6 +615,9 @@ impl Server {
                 if let Some(w) = self.natives.get(&(*client, *window)).cloned() {
                     let key = key_of(self, &w);
                     match (self.shell_tree((*client, *window)), key) {
+                        (Some(nodes), _) if nodes.is_empty() => {
+                            return refuse(self, r.serial(), ErrorCode::Failed, starting);
+                        }
                         (Some(nodes), Some(key)) => {
                             let level = if matches!(r, AgentRequest::Act { .. }) { Level::Act } else { Level::Read };
                             let named = match &r {
@@ -582,13 +635,20 @@ impl Server {
                             // A node in a tab it holds nothing for, and not the
                             // tab in front: refused, not asked (it could only
                             // have the id by guessing).
-                            let held = self.agent_scopes(id, &key, Level::Read);
+                            let held = self.agent_scopes(id, *client, Level::Read);
                             if named.is_some() && !held.contains(&scope) && front.as_ref().map(|f| f.0) != Some(scope) {
                                 self.agent_log(id, &key, &format!("refused: tab #{scope} not granted"));
                                 return refuse(self, r.serial(), ErrorCode::Denied, not_in_tab);
                             }
                             let tab = scope_name(&nodes, scope);
-                            apps.push((key, Some(Scope { id: scope, tab, level })));
+                            let place = format!(
+                                "the window \u{201c}{}\u{201d}",
+                                w.native().map(|n| n.title()).unwrap_or_default()
+                            );
+                            apps.push((
+                                key,
+                                Some(Scope { client: *client, window: *window, id: scope, tab, level, place }),
+                            ));
                         }
                         (None, Some(key)) => apps.push((key, None)),
                         _ => {}
@@ -601,6 +661,9 @@ impl Server {
                 {
                     let k = w.native().map(|n| (n.client, n.id)).unwrap_or_default();
                     match self.shell_tree(k) {
+                        Some(nodes) if nodes.is_empty() => {
+                            return refuse(self, r.serial(), ErrorCode::Failed, starting);
+                        }
                         Some(nodes) => {
                             let focus = w.native().and_then(|n| n.meaning()).map(|m| m.0).unwrap_or(0);
                             let scope = scope_of(&nodes, focus).or_else(|| selected_scope(&nodes).map(|f| f.0));
@@ -608,7 +671,14 @@ impl Server {
                                 return refuse(self, r.serial(), ErrorCode::Denied, not_in_tab);
                             };
                             let tab = scope_name(&nodes, scope);
-                            apps.push((key, Some(Scope { id: scope, tab, level: Level::Read })));
+                            let place = format!(
+                                "the window \u{201c}{}\u{201d}",
+                                w.native().map(|n| n.title()).unwrap_or_default()
+                            );
+                            apps.push((
+                                key,
+                                Some(Scope { client: k.0, window: k.1, id: scope, tab, level: Level::Read, place }),
+                            ));
                         }
                         None => apps.push((key, None)),
                     }
@@ -616,13 +686,26 @@ impl Server {
             }
             // A terminal of its own (bus v38): asked once, at the typing level,
             // about the terminal program that would be started.
-            AgentRequest::OpenTerminal { .. } => {
+            AgentRequest::OpenTerminal { cwd, .. } => {
                 let Some(program) = terminal_program() else {
                     return refuse(self, r.serial(), ErrorCode::Failed, "no vergence-term to start".into());
                 };
+                if self.bus_agent_name(id).is_none_or(|n| clean_agent_name(&n).is_empty()) {
+                    return refuse(self, r.serial(), ErrorCode::Denied, "an agent with no name has no terminal".into());
+                }
+                let dir = terminal_dir(cwd);
+                if !dir.is_dir() {
+                    return refuse(self, r.serial(), ErrorCode::Failed, format!("no folder {cwd}"));
+                }
                 let key = format!("vergence-term @ {}", program.display());
-                let scope =
-                    Scope { id: crate::agents::NEW_TERMINAL, tab: "a terminal of its own".into(), level: Level::Act };
+                let scope = Scope {
+                    client: 0,
+                    window: 0,
+                    id: crate::agents::NEW_TERMINAL,
+                    tab: "a terminal of its own".into(),
+                    level: Level::Act,
+                    place: format!("starting in {}", dir.display()),
+                };
                 apps.push((key, Some(scope)));
             }
             // A search in named windows asks about their apps; one across
@@ -656,7 +739,7 @@ impl Server {
                     self.agent_log(id, app, "refused: not allowed");
                     let name = self.bus_agent_name(id).unwrap_or_default();
                     let stopped = scope.as_ref().is_some_and(|sc| {
-                        self.bus_agent_who(id).is_some_and(|who| self.agents.stopped_lately(&who, app, sc.id))
+                        self.bus_agent_who(id).is_some_and(|who| self.agents.stopped_lately(&who, sc.client, sc.id))
                     });
                     if stopped {
                         return refuse(
@@ -684,11 +767,26 @@ impl Server {
                     let at = (g.loc.x as f64, g.loc.y as f64, g.size.w as f64, g.size.h as f64);
                     let screen = self.screen_name_at(at.0 + at.2 / 2.0, at.1 + at.3 / 2.0);
                     let key = w.native().map(|n| self.agent_app_key(n.client, &n.app_id)).unwrap_or_default();
-                    let (allowed, minutes_left) = self.agent_grant_for(id, &key);
-                    // A window's title only where the agent may read its app
-                    // (Fable's review: titles are content); else its app's name.
-                    let may = !allowed.is_empty() && allowed != "never";
-                    let title = if may { self.window_title(w) } else { self.app_shown_name(&app_id) };
+                    let shell = self.shell_tree((client, window));
+                    let (allowed, minutes_left, title) = match shell {
+                        // A shell-access window: what its tabs allow ("tab" if it
+                        // holds one), and its title (the tab in front's) only while
+                        // the tab in front is one it holds.
+                        Some(nodes) => {
+                            let held = self.agent_scopes(id, client, crate::agents::Level::Read);
+                            let front = selected_scope(&nodes).is_some_and(|(s, _)| held.contains(&s));
+                            let title = if front { self.window_title(w) } else { "Terminal".to_string() };
+                            (if held.is_empty() { String::new() } else { "tab".into() }, 0, title)
+                        }
+                        None => {
+                            let (allowed, minutes_left) = self.agent_grant_for(id, &key);
+                            // A window's title only where the agent may read its app
+                            // (Fable's review: titles are content); else its app's name.
+                            let may = !allowed.is_empty() && allowed != "never";
+                            let title = if may { self.window_title(w) } else { self.app_shown_name(&app_id) };
+                            (allowed, minutes_left, title)
+                        }
+                    };
                     windows.push(AgentWindow {
                         client,
                         window,
@@ -714,10 +812,9 @@ impl Server {
                     return refuse(self, serial, ErrorCode::Failed, "that window has sent no meaning".into());
                 };
                 // A shell-access window: the root and the tabs it may read.
-                let shell = shell_access(&nodes);
+                let shell = self.is_shell_window((client, window));
                 let nodes = if shell {
-                    let key = self.agent_app_key(n.client, &n.app_id);
-                    scoped_nodes(&nodes, &self.agent_scopes(id, &key, crate::agents::Level::Read))
+                    scoped_nodes(&nodes, &self.agent_scopes(id, client, crate::agents::Level::Read))
                 } else {
                     nodes
                 };
@@ -728,6 +825,13 @@ impl Server {
                     .map(|m| on_screens(m, origin))
                     .take_while(|m| (used + node_size(m) <= REPLY_BUDGET).then(|| used += node_size(m)).is_some())
                     .collect();
+                // The caret only while a tab it holds is in front.
+                let caret = caret.filter(|_| {
+                    !shell
+                        || selected_scope(&nodes).is_some_and(|(s, _)| {
+                            self.agent_scopes(id, client, crate::agents::Level::Read).contains(&s)
+                        })
+                });
                 let caret = caret.map(|(x, y, cw, ch)| (origin.0 + x, origin.1 + y, cw, ch));
                 let title = if shell { "Terminal".to_string() } else { n.title() };
                 reply(self, AgentEvent::Tree { serial, client, window, title, focus, caret, nodes });
@@ -739,13 +843,7 @@ impl Server {
                 let mut allowed: Vec<Found> = Vec::new();
                 for mut f in self.meaning_find_in(&path, Some(&only)) {
                     if let Some(nodes) = self.shell_tree((f.client, f.window)) {
-                        let key = self
-                            .natives
-                            .get(&(f.client, f.window))
-                            .and_then(|w| w.native())
-                            .map(|n| self.agent_app_key(n.client, &n.app_id))
-                            .unwrap_or_default();
-                        let held = self.agent_scopes(id, &key, crate::agents::Level::Read);
+                        let held = self.agent_scopes(id, f.client, crate::agents::Level::Read);
                         if !scope_of(&nodes, f.node.id).is_some_and(|s| held.contains(&s)) {
                             continue;
                         }
@@ -769,7 +867,7 @@ impl Server {
             AgentRequest::Focused { serial } => {
                 let (found, caret) = match self.meaning_focus() {
                     Some((mut f, caret)) => {
-                        if self.shell_tree((f.client, f.window)).is_some() {
+                        if self.is_shell_window((f.client, f.window)) {
                             f.title = "Terminal".into();
                         }
                         (Some(Box::new(self.agent_found(&f))), caret)
@@ -818,18 +916,12 @@ impl Server {
                     );
                 }
                 let app = w.native().map(|n| n.app_id.clone()).unwrap_or_default();
-                // What it typed: how much and how it starts, never all of it (a
-                // paste can hold a secret the agent was given).
+                // What it typed: how much, and its first word (the command),
+                // never more (a command line can hold a token or a password
+                // the agent was given; the security review).
                 let what = match &action {
-                    vergence_protocol::window::Action::Type(t) => {
-                        let start: String = t.chars().take(40).collect();
-                        format!(
-                            "Type {} chars {:?}{}",
-                            t.chars().count(),
-                            start,
-                            if t.chars().count() > 40 { "…" } else { "" }
-                        )
-                    }
+                    vergence_protocol::window::Action::Type(t) => typed_summary(t),
+                    vergence_protocol::window::Action::Set(t) => format!("Set {} chars", t.chars().count()),
                     a => format!("{a:?}"),
                 };
                 self.agent_log(id, &app, &format!("{what} #{node} ({} {:?})", m.role, m.name));
@@ -873,17 +965,17 @@ impl Server {
                 let Some(span) = self.agents.take_new_terminal(&who, &app) else {
                     return refuse(self, serial, ErrorCode::Denied, "not allowed".into());
                 };
-                let dir = if cwd.is_empty() {
-                    std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_else(|| "/".into())
-                } else {
-                    std::path::PathBuf::from(&cwd)
-                };
+                let dir = terminal_dir(&cwd);
                 if !dir.is_dir() {
                     return refuse(self, serial, ErrorCode::Failed, format!("no folder {cwd}"));
                 }
                 let name = clean_agent_name(&who.name);
+                if name.is_empty() {
+                    return refuse(self, serial, ErrorCode::Denied, "an agent with no name has no terminal".into());
+                }
                 let mut cmd = std::process::Command::new(&program);
-                cmd.arg("--for-agent").arg(&name).current_dir(&dir);
+                // One argument, so a name starting with "-" is never an option.
+                cmd.arg(format!("--for-agent={name}")).current_dir(&dir);
                 match crate::spawn(&mut cmd) {
                     Ok(pid) => {
                         self.agent_log(id, &app, &format!("a terminal of its own started (pid {pid})"));
@@ -928,6 +1020,9 @@ impl Server {
                     );
                 }
                 let app = w.native().map(|n| n.app_id.clone()).unwrap_or_default();
+                if !self.agent_read_allowed(id) {
+                    return refuse(self, serial, ErrorCode::Failed, "too many reads at once: slow down".into());
+                }
                 self.agent_log(id, &app, &format!("read #{node} ({} {:?}) from {offset}", m.role, m.name));
                 if self.send_read(&w, node, offset, len, id, serial).is_none() {
                     refuse(self, serial, ErrorCode::Failed, "not a native window".into());
@@ -946,13 +1041,7 @@ impl Server {
                     std::collections::HashMap::new();
                 for k in mine.iter() {
                     if let Some(nodes) = self.shell_tree(*k) {
-                        let key = self
-                            .natives
-                            .get(k)
-                            .and_then(|w| w.native())
-                            .map(|n| self.agent_app_key(n.client, &n.app_id))
-                            .unwrap_or_default();
-                        let held = self.agent_scopes(id, &key, crate::agents::Level::Read);
+                        let held = self.agent_scopes(id, k.0, crate::agents::Level::Read);
                         shell_held.insert(*k, (nodes, held));
                     }
                 }
@@ -960,9 +1049,16 @@ impl Server {
                     Some((nodes, held)) => scope_of(nodes, node).is_some_and(|s| held.contains(&s)),
                     None => true,
                 };
-                let caret_ok = |c: u32, w: u32| match shell_held.get(&(c, w)) {
-                    Some((nodes, held)) => selected_scope(nodes).is_some_and(|(s, _)| held.contains(&s)),
-                    None => true,
+                // The caret by the tab in front when it moved (logged so).
+                let caret_ok = |c: u32, w: u32, scope: Option<u64>| match (shell_held.get(&(c, w)), scope) {
+                    (Some((_, held)), Some(s)) => held.contains(&s),
+                    (Some(_), None) => false,
+                    (None, _) => true,
+                };
+                let tree_ok = |c: u32, w: u32, scopes: &Option<Vec<u64>>| match (shell_held.get(&(c, w)), scopes) {
+                    (Some((_, held)), Some(s)) => s.iter().any(|s| held.contains(s)),
+                    (Some(_), None) => false,
+                    (None, _) => true,
                 };
                 let mut out = Vec::new();
                 let mut upto = since;
@@ -980,12 +1076,14 @@ impl Server {
                             {
                                 AgentChange::Focus { client, window, node }
                             }
-                            Change::Caret { client, window, at }
-                                if seen(client, window) && caret_ok(client, window) =>
+                            Change::Caret { client, window, at, scope }
+                                if seen(client, window) && caret_ok(client, window, scope) =>
                             {
                                 AgentChange::Caret { client, window, at }
                             }
-                            Change::Tree { client, window } if seen(client, window) => {
+                            Change::Tree { client, window, scopes }
+                                if seen(client, window) && tree_ok(client, window, &scopes) =>
+                            {
                                 AgentChange::Tree { client, window }
                             }
                             Change::Focus { .. } | Change::Caret { .. } | Change::Tree { .. } => continue,
@@ -1017,6 +1115,23 @@ fn found_line(f: &Found) -> String {
         "window {index} {:?} #{} {} {:?}{value}{states}{items} at {:.0},{:.0} {:.0}x{:.0} on {screen}",
         f.title, n.id, n.role, n.name, f.at.0, f.at.1, f.at.2, f.at.3
     )
+}
+
+/// What agents.log keeps of typed text: its length and its first word, at
+/// most 24 characters of it.
+pub fn typed_summary(t: &str) -> String {
+    let first: String = t.split_whitespace().next().unwrap_or("").chars().take(24).collect();
+    let more = t.trim().chars().count() > first.chars().count();
+    format!("Type {} chars {first:?}{}", t.chars().count(), if more { " …" } else { "" })
+}
+
+/// The folder an agent's terminal starts in: the one it named, else home.
+fn terminal_dir(cwd: &str) -> std::path::PathBuf {
+    if cwd.is_empty() {
+        std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_else(|| "/".into())
+    } else {
+        std::path::PathBuf::from(cwd)
+    }
 }
 
 /// The terminal program to start for an agent: beside the server (a
@@ -1061,7 +1176,16 @@ impl Server {
             return;
         };
         let t = self.agents.terminals.remove(i);
-        self.agents.grant_tab(&t.agent, &t.app, tab, t.span);
+        let scope = crate::agents::Scope {
+            client,
+            window,
+            id: tab,
+            tab: scope_name(nodes, tab),
+            level: crate::agents::Level::Act,
+            place: String::new(),
+        };
+        self.agents.grant_tab(&t.agent, &scope, &t.app, t.span);
+        self.agent_tabs_sync();
         tracing::info!("agents: {:?}'s own terminal is {client}/{window}, tab #{tab}", t.agent.name);
         self.bus_send(
             t.client,
@@ -1187,7 +1311,7 @@ mod tests {
     fn the_log_keeps_the_latest() {
         let mut log = MeaningLog::default();
         for i in 0..(LOG_KEPT as u32 + 10) {
-            log.push(Change::Tree { client: 1, window: i });
+            log.push(Change::Tree { client: 1, window: i, scopes: None });
         }
         let (all, latest) = log.since(0);
         assert_eq!(latest, LOG_KEPT as u64 + 10);
@@ -1195,5 +1319,37 @@ mod tests {
         let (some, _) = log.since(latest - 3);
         assert_eq!(some.len(), 3);
         assert!(log.since(latest).0.is_empty());
+    }
+
+    #[test]
+    fn only_the_tabs_that_changed() {
+        let old = terminal();
+        // Something in tab 20's pane changed: only 20.
+        let mut new = old.clone();
+        new[5].value = Some("$ ls".into());
+        assert_eq!(changed_scopes(Some(&old), &new), vec![20]);
+        // The window's title alone: no tab (agents see "Terminal").
+        let mut new = old.clone();
+        new[0].name = "~/elsewhere".into();
+        assert!(changed_scopes(Some(&old), &new).is_empty());
+        // The tab in front moved: both tabs' "selected" changed.
+        let mut new = old.clone();
+        new[1].states.push("selected".into());
+        new[4].states.retain(|s| s != "selected");
+        assert_eq!(changed_scopes(Some(&old), &new), vec![10, 20]);
+        // A tab closed: it changed.
+        let new: Vec<Node> = old.iter().filter(|n| ![20, 21, 22].contains(&n.id)).cloned().collect();
+        assert_eq!(changed_scopes(Some(&old), &new), vec![20]);
+        // The first tree: every tab.
+        assert_eq!(changed_scopes(None, &old), vec![10, 20]);
+    }
+
+    #[test]
+    fn the_log_keeps_the_command_not_the_line() {
+        assert_eq!(typed_summary("echo hi\n"), "Type 8 chars \"echo\" …");
+        assert_eq!(typed_summary("ls"), "Type 2 chars \"ls\"");
+        let s = typed_summary("curl -H 'Authorization: Bearer sk-SECRET' https://x");
+        assert!(!s.contains("SECRET") && s.starts_with("Type ") && s.contains("\"curl\""), "{s}");
+        assert!(!typed_summary(&"p".repeat(100)).contains(&"p".repeat(25)), "a first word is cut too");
     }
 }

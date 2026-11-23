@@ -761,6 +761,15 @@ impl Grid {
 }
 
 impl Grid {
+    /// The cursor's row up to the cursor, as text (a password prompt is the
+    /// text just before where typing would go).
+    pub fn cursor_line_text(&self) -> String {
+        let Some(l) = self.lines.get(self.cy) else { return String::new() };
+        let mut text = String::new();
+        l.iter().take(self.cx.min(l.len())).filter(|c| c.width != 0).for_each(|c| c.push_to(&mut text));
+        text
+    }
+
     /// The scrollback as text, oldest first, as [`Grid::text`] makes a row:
     /// the last `max_lines` lines, and no more than `max_bytes` (the oldest
     /// left out first), for the meaning tree's scrollback node.

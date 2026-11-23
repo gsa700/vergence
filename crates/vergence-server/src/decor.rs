@@ -158,6 +158,9 @@ struct Tabs {
     alerts: Vec<bool>,
     /// Which tabs have edits not saved (bus v14).
     edited: Vec<bool>,
+    /// Which tabs an agent holds a grant for (the server's own record, never
+    /// the program's word: terminal agent milestone 1).
+    grants: Vec<Option<vergence_bar::TabGrant>>,
     shown: usize,
     accent: Option<u32>,
     ids: Vec<u32>,
@@ -429,9 +432,36 @@ impl Server {
             buttons.1.retain(|b| *b != vergence_bar::WinButton::Maximize);
         }
         let z = self.bar_sizes(w);
+        let tabs = tabs_of(w).map(|t| self.agent_marked(w, t));
         self.has_title(w)
-            .then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, tabs_of(w), tool_widths(w), z)))
+            .then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, tabs, tool_widths(w), z)))
             .flatten()
+    }
+
+    /// A shell-access window's tabs with the agents' grants marked: each
+    /// granted tab in its agent's color, its title starting with the agent's
+    /// name; no other tab. The tab a grant is for is found through the
+    /// window's tree (a tab node saying "bar:<id>", the id its bar knows).
+    fn agent_marked(&self, w: &Win, mut tabs: Tabs) -> Tabs {
+        let Some(n) = w.native() else { return tabs };
+        let marks = self.agent_tab_marks(n.client, n.id);
+        if marks.is_empty() {
+            return tabs;
+        }
+        let Some((_, _, nodes)) = n.meaning() else { return tabs };
+        for (node, names, color, typing) in marks {
+            let Some(bar_id) = nodes
+                .iter()
+                .find(|m| m.id == node)
+                .and_then(|m| m.states.iter().find_map(|s| s.strip_prefix("bar:")?.parse::<u32>().ok()))
+            else {
+                continue;
+            };
+            let Some(i) = tabs.ids.iter().position(|id| *id == bar_id) else { continue };
+            tabs.grants[i] = Some(vergence_bar::TabGrant { color, typing });
+            tabs.titles[i] = format!("{names} \u{b7} {}", tabs.titles[i]);
+        }
+        tabs
     }
 
     /// The size of controls for a screen (look milestone 1, step 8): its own
@@ -1168,6 +1198,7 @@ impl Server {
                         f.tabs.as_ref().map(|t| (t.titles.clone(), t.shown, t.accent)).unwrap_or_default();
                     let alerts = f.tabs.as_ref().map(|t| t.alerts.clone()).unwrap_or_default();
                     let edited = f.tabs.as_ref().map(|t| t.edited.clone()).unwrap_or_default();
+                    let grants = f.tabs.as_ref().map(|t| t.grants.clone()).unwrap_or_default();
                     // A tab being dragged (dispatch.rs): left in its place, faint; its
                     // ghost follows the pointer and a line shows where it would land
                     // (see docs/bar-milestone-1.md). The row is not reordered under the drag: a
@@ -1187,7 +1218,7 @@ impl Server {
                         active,
                         hover,
                         format!(
-                            "{layout_text}{tools:?}{tool_names:?}{menu_open}{} h{}",
+                            "{layout_text}{tools:?}{tool_names:?}{menu_open}{} h{}{grants:?}",
                             app_icon.is_some(),
                             f.title.size.h
                         ),
@@ -1246,6 +1277,7 @@ impl Server {
                             titles: &titles,
                             alerts: &alerts,
                             edited: &edited,
+                            grants: &grants,
                             title: &title,
                             shown,
                             hover,
@@ -1793,6 +1825,7 @@ fn tabs_of(w: &Win) -> Option<Tabs> {
             titles: tabs.iter().map(|t| t.title.clone()).collect(),
             alerts: tabs.iter().map(|t| t.alert).collect(),
             edited: tabs.iter().map(|t| t.edited).collect(),
+            grants: vec![None; tabs.len()],
             ids: tabs.iter().map(|t| t.id).collect(),
             accent,
         }),

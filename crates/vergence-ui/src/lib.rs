@@ -876,6 +876,11 @@ pub trait App {
     /// tab mark) and let the person stop it ([`Window::revoke_agent`]).
     fn agent_acting(&mut self, _node: u64, _agent: &str, _window: &mut Window) {}
 
+    /// The tabs agents hold a grant for in this window now (bus v39): each
+    /// tab's meaning node, the agent's name, and whether it may type there.
+    /// Sent whenever that changes; the stop keys are for these tabs.
+    fn agent_tabs(&mut self, _tabs: &[(u64, String, bool)], _window: &mut Window) {}
+
     /// A drag is over the window at (x, y) with these kinds: what a drop
     /// would do ([`DROP_NONE`], [`DROP_COPY`], [`DROP_MOVE`]).
     fn drag_over(&mut self, _x: f32, _y: f32, _kinds: &[String], _ctrl: bool) -> u8 {
@@ -2045,6 +2050,7 @@ impl<'a> Runner<'a> {
             titles: &[],
             alerts: &[],
             edited: &[],
+            grants: &[],
             title,
             shown: 0,
             hover: w.bar_hover,

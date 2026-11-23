@@ -664,6 +664,13 @@ impl Server {
         self.bus.clients.get(&id).and_then(|c| c.agent.clone())
     }
 
+    /// Every agent connected now (the stop keys stop each in that tab).
+    pub fn bus_agents_connected(&self) -> Vec<crate::agents::Who> {
+        let mut out: Vec<crate::agents::Who> = self.bus.clients.values().filter_map(|c| c.agent.clone()).collect();
+        out.dedup();
+        out
+    }
+
     fn bus_forget(&mut self, id: u32) {
         if let Some(c) = self.bus.clients.remove(&id) {
             if let Some(t) = c.write_source {

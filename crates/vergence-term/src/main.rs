@@ -486,6 +486,10 @@ impl App for Terminal {
         self.on_agent_acting(node, agent);
     }
 
+    fn agent_tabs(&mut self, tabs: &[(u64, String, bool)], window: &mut Window) {
+        self.on_agent_tabs(tabs, window);
+    }
+
     fn bar(&mut self) -> Option<vergence_ui::Bar> {
         let tabs: Vec<(u32, String, bool)> =
             self.tabs.iter().map(|t| (t.id, self.agent_title(t.id, t.label()), t.as_root())).collect();
@@ -693,6 +697,15 @@ impl App for Terminal {
 static NEXT_PANE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 static NEXT_TAB: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
 
+/// The agent a terminal is for, from "--for-agent=NAME": control characters
+/// left out, at most 24 characters; None without it or with an empty name.
+fn for_agent_name(args: &[String]) -> Option<String> {
+    let name = args.iter().find_map(|a| a.strip_prefix("--for-agent="))?;
+    let name: String = name.chars().filter(|c| !c.is_control()).take(24).collect();
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
 fn main() {
     if std::env::args().any(|a| a == "--version" || a == "-V") {
         println!("vergence-term {}", env!("CARGO_PKG_VERSION"));
@@ -724,9 +737,10 @@ fn main() {
     terminal.open_maximized = args.iter().any(|a| a == "--maximized");
     // A terminal of an agent's own (bus v38): the server starts it so; its
     // window is its own, and its process too (no other start hands over to it).
-    if let Some(name) = args.iter().position(|a| a == "--for-agent").and_then(|i| args.get(i + 1)) {
-        let name: String = name.chars().filter(|c| !c.is_control()).take(24).collect();
-        terminal.for_agent = Some(if name.trim().is_empty() { "Agent".into() } else { name.trim().to_string() });
+    // "--for-agent=NAME", one argument (a name can never be read as another
+    // option); an empty name is no agent's.
+    if let Some(name) = for_agent_name(&args) {
+        terminal.for_agent = Some(name);
     }
     // One process for all the terminal's windows (program.rs), on either road
     // since bar milestone 1, step 4b: a later start asks the running one for a

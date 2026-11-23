@@ -541,6 +541,15 @@ fn icon(scene: &mut Scene, r: &Rect, what: Part, size: f32, ink: Color) {
     }
 }
 
+/// An agent's grant on a tab, as its tab shows it ([`Look::grants`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TabGrant {
+    /// The agent's color (the one its rings use).
+    pub color: (u8, u8, u8),
+    /// It may type there (else only read).
+    pub typing: bool,
+}
+
 /// What the bar is drawn with.
 pub struct Look<'a> {
     /// The style's colors (vergence_look::bar_look: light or dark).
@@ -560,6 +569,12 @@ pub struct Look<'a> {
     pub alerts: &'a [bool],
     /// Which tabs have edits not saved: marked in the look's `edited` color.
     pub edited: &'a [bool],
+    /// Which tabs an agent holds a grant for (the server's, terminal agent
+    /// milestone 1): the agent's own color, and whether it may type there.
+    /// Reading: the tab outlined in that color. Typing: tinted as well, and a
+    /// band at its top. Drawn over a root tab's red too (an agent may read a
+    /// root tab, never type in it), so both show.
+    pub grants: &'a [Option<TabGrant>],
     /// The window's title, for a bar without tabs ([`Layout::plain`]).
     pub title: &'a str,
     pub shown: usize,
@@ -688,7 +703,26 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
         if alert && hovered {
             tab_shape(scene, tab, shape_hover);
         }
-        if !alert && look.edited.get(i).copied().unwrap_or(false) {
+        // An agent's grant: the tab outlined in its color (read), tinted with
+        // a band on top as well (type). Over a root tab's red too.
+        if let Some(Some(g)) = look.grants.get(i) {
+            let (r, gr, b) = g.color;
+            if g.typing {
+                tab_shape(scene, tab, Color::rgba(r, gr, b, if alert { 70 } else { 64 }));
+            }
+            let inner = Rect::new(tab.x + 0.75, tab.y + 0.75, (tab.w - 1.5).max(0.0), tab.h + 12.0);
+            scene.push_clip(Rect::new(tab.x, tab.y, tab.w, tab.h - 0.5), 0.0);
+            scene.stroke(inner, RADIUS, 1.5, Color::rgb(r, gr, b));
+            scene.pop_clip();
+            if g.typing {
+                scene.fill_rounded(
+                    Rect::new(tab.x + 6.0, tab.y + 1.0, (tab.w - 12.0).max(0.0), 3.0),
+                    1.5,
+                    Color::rgb(r, gr, b),
+                );
+            }
+        }
+        if !alert && look.edited.get(i).copied().unwrap_or(false) && look.grants.get(i).is_none_or(|g| g.is_none()) {
             let e = l.edited;
             if !shown {
                 tab_shape(scene, tab, Color::rgba(e.0, e.1, e.2, 56));
@@ -1140,6 +1174,7 @@ mod tests {
                     titles: &[],
                     alerts: &[],
                     edited: &[],
+                    grants: &[],
                     title: "sudo",
                     shown: 0,
                     hover: None,

@@ -113,7 +113,9 @@ an AI collaborator must know to work here safely.
   Terminals (bus v38): `vagent terminal open` asks for a window of the
   agent's own; then `vagent type|key <client> <window> <pane> ...`. "Just
   now" is that connection's, so a second vagent process asks again: answer
-  `vctl agent-answer hour` in scripts. Escape twice in that tab revokes.
+  `vctl agent-answer hour` in scripts. Escape twice in that tab revokes
+  (any tab an agent holds, read or type). Tab grants are per window (bus
+  v39): a grant for the agent's own terminal is nothing in another.
 - Never start the login screen on a machine where Dave is logged in (vdm
   refuses while a session is registered). vdm's log: /var/log/messages on
   FreeBSD, socklog on Void.

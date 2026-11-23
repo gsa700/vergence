@@ -154,7 +154,7 @@ impl Terminal {
                                     (sc.grid.cols, sc.grid.rows, sc.grid.cx, sc.grid.cy, sc.grid.cursor_visible),
                                 )
                             };
-                            (*p, out, grid, s.state().states())
+                            (*p, out, grid, s.state_recent().states())
                         })
                         .collect();
                     (t.id, t.label(), t.active, panes)
@@ -192,18 +192,20 @@ impl Terminal {
             let selected = index == self.shown;
             let tab_id = tab_node(tab.id);
             // "scope": a grant covers this tab and what is under it, nothing else.
-            let mut tab_states = vec!["scope".to_string()];
+            // "bar:<id>": the id the bar knows the tab by, so the server
+            // marks the right tab in the bar for an agent's grant.
+            let mut tab_states = vec!["scope".to_string(), format!("bar:{}", tab.id)];
             if selected {
                 tab_states.push("selected".to_string());
             }
             if let Some(active) = tab.session(tab.active) {
-                tab_states.extend(active.state().states());
+                tab_states.extend(active.state_recent().states());
             }
             nodes.push(node(tab_id, WINDOW_ID, "tab", tab.label(), None, tab_states));
             let areas: HashMap<u64, vergence_scene::Rect> = tab.tree.layout(room).0.into_iter().collect();
             for (number, (pane, session)) in tab.panes.iter().enumerate() {
                 live.push((tab.id, *pane));
-                let mut states = session.state().states();
+                let mut states = session.state_recent().states();
                 let active = *pane == tab.active;
                 if active {
                     states.insert(0, "focused".to_string());

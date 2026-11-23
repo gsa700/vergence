@@ -851,6 +851,11 @@ impl<'a> Native<'a> {
             WinEvent::AgentActing { window, node, agent } => {
                 self.with_window(window, |app, w| app.agent_acting(node, &agent, w))?;
             }
+            // The tabs agents hold a grant for (bus v39).
+            WinEvent::AgentTabs { window, tabs } => {
+                let tabs: Vec<(u64, String, bool)> = tabs.into_iter().map(|t| (t.node, t.agent, t.typing)).collect();
+                self.with_window(window, |app, w| app.agent_tabs(&tabs, w))?;
+            }
             // A page of a widget's whole text, for an agent (bus v37).
             WinEvent::ReadText { window, serial, node, offset, len } => {
                 let page = self
@@ -1219,9 +1224,63 @@ const MEANING_TEXT: usize = 512;
 fn text_page(tree: &MeaningTree, node: u64, offset: u32, len: u32) -> Option<(u32, String)> {
     let n = tree.nodes.iter().find(|n| n.id == node)?;
     let text = n.value.as_deref().unwrap_or(&n.name);
-    let total = text.chars().count().min(u32::MAX as usize) as u32;
     let len = len.min(vergence_protocol::window::TEXT_PAGE_MAX) as usize;
-    Some((total, text.chars().skip(offset as usize).take(len).collect()))
+    // Where each PAGE_STEP-th character starts, made once for a text and kept
+    // while the same text is read on (the security review: a 4 MB text read
+    // whole in pages walked from its start for every page).
+    let probe = text_probe(text);
+    PAGE_INDEX.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        if !cell.as_ref().is_some_and(|p| p.node == node && p.len == text.len() && p.probe == probe) {
+            let mut marks = Vec::new();
+            let mut total = 0;
+            for (i, (b, _)) in text.char_indices().enumerate() {
+                if i % PAGE_STEP == 0 {
+                    marks.push(b);
+                }
+                total = i + 1;
+            }
+            *cell = Some(PageIndex { node, len: text.len(), probe, marks, total });
+        }
+        let p = cell.as_ref()?;
+        let total = p.total.min(u32::MAX as usize) as u32;
+        let off = offset as usize;
+        if off >= p.total {
+            return Some((total, String::new()));
+        }
+        let m = off / PAGE_STEP;
+        let start = p.marks.get(m).copied().filter(|b| text.is_char_boundary(*b))?;
+        Some((total, text[start..].chars().skip(off - m * PAGE_STEP).take(len).collect()))
+    })
+}
+
+/// Every this many characters, where the character starts ([`text_page`]).
+const PAGE_STEP: usize = 4096;
+
+/// The last text read in pages: its node, length, probe, the marks and its
+/// length in characters.
+struct PageIndex {
+    node: u64,
+    len: usize,
+    probe: u64,
+    marks: Vec<usize>,
+    total: usize,
+}
+
+thread_local! {
+    static PAGE_INDEX: std::cell::RefCell<Option<PageIndex>> = const { std::cell::RefCell::new(None) };
+}
+
+/// A cheap fingerprint of a text (its ends and length): the same text read on.
+fn text_probe(text: &str) -> u64 {
+    let b = text.as_bytes();
+    let head = &b[..b.len().min(256)];
+    let tail = &b[b.len().saturating_sub(256)..];
+    let mid = &b[b.len() / 2..(b.len() / 2 + 64).min(b.len())];
+    head.iter()
+        .chain(mid)
+        .chain(tail)
+        .fold(0xcbf2_9ce4_8422_2325u64 ^ b.len() as u64, |h, x| (h ^ u64::from(*x)).wrapping_mul(0x100_0000_01b3))
 }
 
 /// The tree as the protocol's Meaning request, within its limits.
@@ -1333,6 +1392,33 @@ mod tests {
         assert_eq!(text_page(&tree, 2, 0, 10).unwrap().1, node(1, 3).name, "no value: the name");
         let (_, big) = text_page(&tree, 6, 0, u32::MAX).unwrap();
         assert!(big.chars().count() <= vergence_protocol::window::TEXT_PAGE_MAX as usize);
+    }
+
+    #[test]
+    fn pages_past_the_index_marks_match_a_plain_walk() {
+        // Longer than several PAGE_STEPs, with characters of 1 to 4 bytes.
+        let long: String = (0..30_000)
+            .map(|i| match i % 11 {
+                0 => '\u{e9}',
+                1 => '\u{4e2d}',
+                2 => '\u{1f600}',
+                _ => char::from(b'a' + (i % 26) as u8),
+            })
+            .collect();
+        let mut n = node(5, 3);
+        n.value = Some(long.clone());
+        let tree = MeaningTree { focus: 0, caret: None, nodes: vec![node(1, 3), n] };
+        for offset in [0u32, 1, 4095, 4096, 4097, 8191, 12_345, 29_990, 30_000, 40_000] {
+            let (total, page) = text_page(&tree, 6, offset, 100).unwrap();
+            assert_eq!(total, 30_000);
+            let want: String = long.chars().skip(offset as usize).take(100).collect();
+            assert_eq!(page, want, "at {offset}");
+        }
+        // A different text in the same node: the index is made again.
+        let mut n2 = node(5, 3);
+        n2.value = Some("short".into());
+        let tree2 = MeaningTree { focus: 0, caret: None, nodes: vec![node(1, 3), n2] };
+        assert_eq!(text_page(&tree2, 6, 1, 3).unwrap(), (5, "hor".to_string()));
     }
 
     #[test]

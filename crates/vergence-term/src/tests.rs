@@ -191,3 +191,14 @@ fn light_palettes_keep_text_readable() {
     let on_black = readable(rgb(0xeeeeec), rgb(0x000000), LIGHT_FLOOR);
     assert_eq!(on_black, rgb(0xeeeeec));
 }
+
+#[test]
+fn for_agent_is_one_argument_and_a_name() {
+    let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert_eq!(crate::for_agent_name(&a(&["vergence-term", "--for-agent=Claude"])), Some("Claude".into()));
+    // The old two-argument form is not read: a name is never the next option.
+    assert_eq!(crate::for_agent_name(&a(&["vergence-term", "--for-agent", "Claude"])), None);
+    assert_eq!(crate::for_agent_name(&a(&["vergence-term", "--for-agent="])), None, "an empty name");
+    assert_eq!(crate::for_agent_name(&a(&["vergence-term", "--for-agent=  \u{7}"])), None, "nothing but controls");
+    assert_eq!(crate::for_agent_name(&a(&["vergence-term", "--for-agent=-e"])), Some("-e".into()), "just a name");
+}

@@ -1038,13 +1038,16 @@ impl Server {
                     && let Win::Native(n) = &w
                 {
                     let new = (focus, caret, sane_tree(nodes));
+                    // Shell access, once said, holds for the window's life.
+                    if crate::meaning::shell_access(&new.2) || n.app_id == "vergence-term" {
+                        self.agents.shell_windows.insert((client, window));
+                    }
                     let old = n.state.lock().unwrap().meaning.replace(new.clone());
                     let origin = self.meaning_origin(&w);
                     self.meaning_changed(client, window, old.as_ref(), &new, origin);
-                    // A terminal started for an agent: its grant goes to its tab.
-                    if old.is_none() {
-                        self.agent_terminal_arrived(client, window, &new.2);
-                    }
+                    // A terminal started for an agent: its grant goes to its
+                    // tab, in the first tree that has one (not only the first).
+                    self.agent_terminal_arrived(client, window, &new.2);
                 }
             }
             // The person stopped an agent in a tab (bus v38: Escape twice, the

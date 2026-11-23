@@ -112,6 +112,57 @@ pub(crate) struct Session {
     /// The foreground's working directory, the group it was read for and
     /// when (FreeBSD runs procstat for it: at most every two seconds).
     cwd_seen: std::cell::RefCell<Option<(u32, String, Instant)>>,
+    /// Its state as last read for the meaning tree, and when: read at most
+    /// every STATE_EVERY there (each read is several system calls a pane,
+    /// and the tree's key is made at every frame: the security review).
+    state_seen: std::cell::RefCell<Option<(PaneState, Instant)>>,
+}
+
+/// How often the meaning tree reads a pane's state afresh.
+const STATE_EVERY: Duration = Duration::from_millis(250);
+
+/// Programs an agent may never type into, whatever their terminal modes say:
+/// a remote shell (its password prompt is on the far side, where this pane's
+/// modes do not show it), a multiplexer (its panes are other terminals the
+/// grant never named), a program that makes its user someone else, and a
+/// PIN entry.
+pub(crate) const NO_AGENT_PROGRAMS: [&str; 13] = [
+    "ssh",
+    "mosh",
+    "mosh-client",
+    "telnet",
+    "tmux",
+    "screen",
+    "su",
+    "sudo",
+    "doas",
+    "login",
+    "passwd",
+    "ksu",
+    "pkexec",
+];
+
+/// Whether an agent may not type to this foreground program (by name; any
+/// pinentry, and names as the system cuts them).
+pub(crate) fn no_agent_program(name: &str) -> bool {
+    let name = name.rsplit('/').next().unwrap_or(name);
+    NO_AGENT_PROGRAMS.contains(&name) || name.starts_with("pinentry")
+}
+
+/// Whether the text before the cursor reads as a password prompt ("Password:",
+/// "Enter passphrase for key '...':", "[sudo] password for dave:", "PIN:"),
+/// whatever the terminal's modes say (a program that reads a password in raw
+/// mode, as some do, has echo off but no line mode).
+pub(crate) fn password_line(line: &str) -> bool {
+    let l = line.trim_end().to_lowercase();
+    if !(l.ends_with(':') || l.ends_with("):") || l.ends_with('>')) {
+        return false;
+    }
+    let words: Vec<&str> = l.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    ["password", "passphrase", "passcode", "pin", "otp", "passwort", "contraseña"].iter().any(|w| words.contains(w))
+        || l.contains("verification code")
+        || l.contains("one-time")
+        || l.contains("mot de passe")
 }
 
 /// What a terminal is doing, for its meaning (terminal agent milestone 1).
@@ -254,6 +305,7 @@ impl Session {
             root_seen: std::cell::Cell::new(None),
             command: is_command,
             cwd_seen: std::cell::RefCell::new(None),
+            state_seen: std::cell::RefCell::new(None),
         })
     }
 
@@ -293,6 +345,42 @@ impl Session {
         let root = program::group_has_root(group);
         self.root_seen.set(Some((group, root, Instant::now())));
         root
+    }
+
+    /// Its state for the meaning tree: as read in the last STATE_EVERY.
+    pub(crate) fn state_recent(&self) -> PaneState {
+        if let Some((st, at)) = self.state_seen.borrow().as_ref()
+            && at.elapsed() < STATE_EVERY
+        {
+            return st.clone();
+        }
+        let st = self.state();
+        *self.state_seen.borrow_mut() = Some((st.clone(), Instant::now()));
+        st
+    }
+
+    /// Its state for an agent's typing, at the moment of an act: whether the
+    /// foreground runs as the superuser asked afresh (not the two seconds'
+    /// answer the red tab uses), and a password prompt by its text too.
+    pub(crate) fn state_for_typing(&self) -> PaneState {
+        let mut st = self.state();
+        if !st.exited {
+            st.root = self.pty.foreground().is_some_and(program::group_has_root);
+            self.root_seen.set(self.pty.foreground().map(|g| (g, st.root, Instant::now())));
+            st.password |= password_line(&lock(&self.screen).grid.cursor_line_text());
+        }
+        st
+    }
+
+    /// Its state between the steps of a paced burst: the superuser asked
+    /// again whenever the foreground changes (else every two seconds), the
+    /// password prompt by the modes and the text.
+    pub(crate) fn state_between_steps(&self) -> PaneState {
+        let mut st = self.state();
+        if !st.exited {
+            st.password |= password_line(&lock(&self.screen).grid.cursor_line_text());
+        }
+        st
     }
 
     /// What it is doing now, for its meaning.
