@@ -1766,6 +1766,18 @@ impl Server {
                 s => format!("{:?} ({}) {p:?} window {c}/{} tab #{id} {l:?}: {s:?}", a.name, a.program, g.window),
             }
         }));
+        // The tab marks each shell window's bar shows now (decor.rs), for
+        // the display suite: what is drawn, not only what is granted.
+        let mut shells: Vec<(u32, u32)> = self.agents.shell_windows.iter().copied().collect();
+        shells.sort();
+        for (c, w) in shells {
+            for (node, names, _, typing) in self.agent_tab_marks(c, w) {
+                out.push(format!(
+                    "mark: window {c}/{w} tab #{node} {names:?} {}",
+                    if typing { "typing" } else { "reading" }
+                ));
+            }
+        }
         out.sort();
         if let Some(q) = self.agents.asking.front() {
             out.push(format!(
