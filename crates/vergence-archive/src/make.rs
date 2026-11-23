@@ -14,8 +14,9 @@ use std::sync::atomic::Ordering;
 use crate::ffi;
 use crate::unpack::Progress;
 
-// The third field is held for its Drop: the thread's locale put back after the archive is freed.
-struct Writer(*mut ffi::Archive, *mut ffi::Entry, #[allow(dead_code)] Utf8Thread);
+// The last two are held for their Drop, after the archive is freed: the
+// thread's locale put back, the file it wrote closed.
+struct Writer(*mut ffi::Archive, *mut ffi::Entry, #[allow(dead_code)] Utf8Thread, #[allow(dead_code)] Option<fs::File>);
 
 /// This thread's character set made UTF-8 while it writes an archive, and
 /// put back after. libarchive's writers pass names through the locale's
@@ -86,16 +87,27 @@ fn c(b: &[u8]) -> io::Result<CString> {
     CString::new(b).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "a name with a NUL in it"))
 }
 
+/// Where a writer writes: a path it opens (the tests), or a file already open.
+enum To<'a> {
+    Path(&'a Path),
+    File(fs::File),
+}
+
 impl Writer {
-    fn new(to: &Path, format: Format) -> io::Result<Writer> {
+    fn new(to: To, format: Format) -> io::Result<Writer> {
         let utf8 = Utf8Thread::new();
         // SAFETY: archive_write_new and archive_entry_new take nothing; null is checked.
         let (a, e) = unsafe { (ffi::archive_write_new(), ffi::archive_entry_new()) };
-        let w = Writer(a, e, utf8);
+        let (path, file) = match to {
+            To::Path(p) => (Some(c(p.as_os_str().as_bytes())?), None),
+            To::File(f) => (None, Some(f)),
+        };
+        use std::os::fd::AsRawFd;
+        let fd = file.as_ref().map(|f| f.as_raw_fd());
+        let w = Writer(a, e, utf8, file);
         if a.is_null() || e.is_null() {
             return Err(io::Error::other("libarchive could not start"));
         }
-        let path = c(to.as_os_str().as_bytes())?;
         // SAFETY: a live archive; the strings outlive the calls.
         let ok = unsafe {
             match format {
@@ -108,7 +120,12 @@ impl Writer {
                         && ffi::archive_write_add_filter_gzip(a) == ffi::OK
                 }
             }
-        } && unsafe { ffi::archive_write_open_filename(a, path.as_ptr()) } == ffi::OK;
+        } && match (&path, fd) {
+            // SAFETY: a live archive and a NUL-terminated path, or a descriptor this writer keeps open.
+            (Some(p), _) => (unsafe { ffi::archive_write_open_filename(a, p.as_ptr()) }) == ffi::OK,
+            (None, Some(fd)) => (unsafe { ffi::archive_write_open_fd(a, fd) }) == ffi::OK,
+            (None, None) => false,
+        };
         if !ok {
             // SAFETY: a live archive.
             return Err(io::Error::other(unsafe { ffi::error(a, "the archive could not be started") }));
@@ -201,7 +218,7 @@ pub struct Raw {
 
 /// An archive of `entries` as given, at `to` (the tests' hostile archives).
 pub fn write_raw(to: &Path, format: Format, entries: &[Raw]) -> io::Result<()> {
-    let mut w = Writer::new(to, format)?;
+    let mut w = Writer::new(To::Path(to), format)?;
     for r in entries {
         let kind = if r.kind == 0 { ffi::IFREG } else { r.kind };
         let size = r.said.unwrap_or(if kind == ffi::IFREG { r.data.len() as i64 } else { 0 });
@@ -242,9 +259,11 @@ pub fn size_of(items: &[PathBuf]) -> u64 {
 /// item made at `to` meanwhile is never replaced.
 pub fn compress(items: &[PathBuf], to: &Path, progress: &Progress) -> io::Result<()> {
     let dir = to.parent().ok_or_else(|| io::Error::other("no folder"))?;
-    let part = dir.join(format!(".vergence-compress-{}-{}", std::process::id(), to_name(to)));
+    // The hidden file made here, new (never one already there, never through
+    // a link: the review, 2026-11-23), and written through its descriptor.
+    let (part, file) = hidden_file(dir, &to_name(to))?;
     let r = (|| {
-        let mut w = Writer::new(&part, Format::Zip)?;
+        let mut w = Writer::new(To::File(file), Format::Zip)?;
         for item in items {
             let name = item.file_name().ok_or_else(|| io::Error::other("an item with no name"))?;
             add(&mut w, item, name.as_bytes(), progress)?;
@@ -255,6 +274,23 @@ pub fn compress(items: &[PathBuf], to: &Path, progress: &Progress) -> io::Result
     })();
     let _ = fs::remove_file(&part);
     r
+}
+
+fn hidden_file(dir: &Path, name: &str) -> io::Result<(PathBuf, fs::File)> {
+    use std::os::unix::fs::OpenOptionsExt;
+    #[cfg(target_os = "freebsd")]
+    const O_NOFOLLOW: i32 = 0x0100;
+    #[cfg(not(target_os = "freebsd"))]
+    const O_NOFOLLOW: i32 = 0o400000;
+    for n in 0..1000 {
+        let p = dir.join(format!(".vergence-compress-{}-{n}-{name}", std::process::id()));
+        match fs::OpenOptions::new().write(true).create_new(true).custom_flags(O_NOFOLLOW).mode(0o666).open(&p) {
+            Ok(f) => return Ok((p, f)),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(io::Error::other("no hidden file could be made"))
 }
 
 fn to_name(to: &Path) -> String {

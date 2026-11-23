@@ -47,9 +47,24 @@ fn mirror(strip: Arc<ops::Progress>, work: Arc<unpack::Progress>, running: Arc<A
     });
 }
 
-/// `work` run on a worker; the window looks again while it runs (its
-/// ticks) and when it ends.
-fn on_worker(waker: Option<vergence_widgets::Waker>, work: impl FnOnce() + Send + 'static) {
+/// Sets its flag false when dropped: the mirror stops however the work ends.
+struct Ends(Arc<AtomicBool>);
+
+impl Drop for Ends {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Relaxed);
+    }
+}
+
+/// `work` run on a worker, its outcome put in `result`; the window looks
+/// again while it runs (its ticks) and when it ends. A panic in the work is
+/// an outcome too, so the job always ends (else every later one would say
+/// "A copy is still going on": the review, 2026-11-23).
+fn on_worker(
+    waker: Option<vergence_widgets::Waker>,
+    result: JobResult,
+    work: impl FnOnce() -> (ops::Done, Option<String>) + Send + 'static,
+) {
     std::thread::spawn(move || {
         let ticking = Arc::new(AtomicBool::new(true));
         let (t, w) = (ticking.clone(), waker.clone());
@@ -61,7 +76,10 @@ fn on_worker(waker: Option<vergence_widgets::Waker>, work: impl FnOnce() + Send 
                 }
             }
         });
-        work();
+        let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).unwrap_or_else(|_| {
+            (ops::Done::Extracted(Vec::new()), Some("It stopped on an error inside FileView.".into()))
+        });
+        *result.lock().unwrap_or_else(|e| e.into_inner()) = Some(out);
         ticking.store(false, Ordering::Relaxed);
         if let Some(w) = waker {
             w.wake();
@@ -79,9 +97,10 @@ impl Viewer {
     }
 
     /// Extracts `archives`, each beside itself or all into `into`, on a
-    /// worker. `agreed`: the person has said Extract anyway, so the caps
-    /// are not asked about again.
-    pub(crate) fn start_extract(&mut self, archives: Vec<PathBuf>, into: Option<PathBuf>, agreed: bool) {
+    /// worker. `agreed`: the person has said Extract anyway to this total
+    /// and number of entries, so the caps are not asked about again unless
+    /// the archives now hold more (a download still going on).
+    pub(crate) fn start_extract(&mut self, archives: Vec<PathBuf>, into: Option<PathBuf>, agreed: Option<(u64, u64)>) {
         if archives.is_empty() {
             return;
         }
@@ -97,14 +116,12 @@ impl Viewer {
         let progress = Arc::new(ops::Progress::default());
         let result: JobResult = Arc::default();
         let ask: Arc<Mutex<Option<Ask>>> = Arc::default();
-        let (p, r, q) = (progress.clone(), result.clone(), ask.clone());
-        on_worker(self.waker.clone(), move || {
+        let (p, q) = (progress.clone(), ask.clone());
+        on_worker(self.waker.clone(), result.clone(), move || {
             let work = Arc::new(unpack::Progress::default());
-            let running = Arc::new(AtomicBool::new(true));
-            mirror(p.clone(), work.clone(), running.clone());
-            let out = extract_all(&archives, into.as_deref(), agreed, &p, &work, &q);
-            running.store(false, Ordering::Relaxed);
-            *r.lock().unwrap_or_else(|e| e.into_inner()) = Some(out);
+            let running = Ends(Arc::new(AtomicBool::new(true)));
+            mirror(p.clone(), work.clone(), running.0.clone());
+            extract_all(&archives, into.as_deref(), agreed, &p, &work, &q)
         });
         self.job = Some(Job { words, progress, result, ask });
     }
@@ -143,7 +160,7 @@ impl Viewer {
         let Some((archives, dir)) = self.extract_to.lock().unwrap_or_else(|e| e.into_inner()).take() else {
             return false;
         };
-        self.start_extract(archives, Some(dir), false);
+        self.start_extract(archives, Some(dir), None);
         true
     }
 
@@ -171,21 +188,19 @@ impl Viewer {
         let words = format!("Compressing into “{name}”");
         let progress = Arc::new(ops::Progress::default());
         let result: JobResult = Arc::default();
-        let (p, r) = (progress.clone(), result.clone());
-        on_worker(self.waker.clone(), move || {
+        let p = progress.clone();
+        on_worker(self.waker.clone(), result.clone(), move || {
             p.total.store(make::size_of(&chosen).max(1), Ordering::Relaxed);
             let work = Arc::new(unpack::Progress::default());
-            let running = Arc::new(AtomicBool::new(true));
-            mirror(p.clone(), work.clone(), running.clone());
-            let out = match make::compress(&chosen, &to, &work) {
+            let running = Ends(Arc::new(AtomicBool::new(true)));
+            mirror(p.clone(), work.clone(), running.0.clone());
+            match make::compress(&chosen, &to, &work) {
                 Ok(()) => (ops::Done::Made(to), None),
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
                     (ops::Done::Extracted(Vec::new()), Some("Stopped.".into()))
                 }
                 Err(e) => (ops::Done::Extracted(Vec::new()), Some(format!("“{name}” could not be made: {e}."))),
-            };
-            running.store(false, Ordering::Relaxed);
-            *r.lock().unwrap_or_else(|e| e.into_inner()) = Some(out);
+            }
         });
         self.job = Some(Job { words, progress, result, ask: Arc::default() });
     }
@@ -197,7 +212,7 @@ impl Viewer {
 fn extract_all(
     archives: &[PathBuf],
     into: Option<&Path>,
-    agreed: bool,
+    agreed: Option<(u64, u64)>,
     strip: &ops::Progress,
     work: &Arc<unpack::Progress>,
     ask: &Mutex<Option<Ask>>,
@@ -209,18 +224,27 @@ fn extract_all(
             Err(e) => return (ops::Done::Extracted(Vec::new()), Some(said(a, &e))),
         }
     }
-    if !agreed {
-        let why = archives.iter().zip(&listed).find_map(|(a, l)| {
+    let total = listed.iter().fold(0u64, |t, l| t.saturating_add(l.total));
+    let entries = listed.iter().fold(0u64, |t, l| t.saturating_add(l.entries));
+    let why = match agreed {
+        // Agreed to, but it has grown since.
+        Some((t, e)) if total > t || entries > e => Some("The archive has grown since it was asked about.".to_string()),
+        Some(_) => None,
+        None => archives.iter().zip(&listed).find_map(|(a, l)| {
             let size = a.metadata().map(|m| m.len()).unwrap_or(0);
             l.ask(size).map(|w| if archives.len() > 1 { format!("“{}”: {w}", name_of(a)) } else { w })
+        }),
+    };
+    if let Some(why) = why {
+        *ask.lock().unwrap_or_else(|e| e.into_inner()) = Some(Ask::Extract {
+            archives: archives.to_vec(),
+            into: into.map(Path::to_path_buf),
+            why,
+            seen: (total, entries),
         });
-        if let Some(why) = why {
-            *ask.lock().unwrap_or_else(|e| e.into_inner()) =
-                Some(Ask::Extract { archives: archives.to_vec(), into: into.map(Path::to_path_buf), why });
-            return (ops::Done::Extracted(Vec::new()), None);
-        }
+        return (ops::Done::Extracted(Vec::new()), None);
     }
-    strip.total.store(listed.iter().map(|l| l.total).sum::<u64>().max(1), Ordering::Relaxed);
+    strip.total.store(total.max(1), Ordering::Relaxed);
     let (mut made, mut skipped) = (Vec::new(), 0u64);
     for (a, l) in archives.iter().zip(&listed) {
         *strip.now.lock().unwrap_or_else(|e| e.into_inner()) = name_of(a);

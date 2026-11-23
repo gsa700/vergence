@@ -118,7 +118,7 @@ impl Viewer {
         // Archives opened are extracted beside themselves (archive milestone 1).
         if !chosen.is_empty() && chosen.iter().all(files::is_archive) && !self.trash_window && !self.in_trash() {
             let archives = chosen.iter().map(|e| e.path.clone()).collect();
-            self.start_extract(archives, None, false);
+            self.start_extract(archives, None, None);
             return;
         }
         let paths: Vec<PathBuf> = chosen.iter().filter(|e| !e.dir).map(|e| e.path.clone()).collect();
@@ -281,7 +281,7 @@ impl Viewer {
             cmd::COMPRESS => self.compress(),
             cmd::EXTRACT_HERE => {
                 let archives = self.chosen_archives();
-                self.start_extract(archives, None, false);
+                self.start_extract(archives, None, None);
             }
             cmd::EXTRACT_TO => self.extract_to_dialog(window),
             cmd::INFO => {

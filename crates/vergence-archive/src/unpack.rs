@@ -8,10 +8,15 @@
 //! - A name with `..`, an absolute name or a drive letter is skipped;
 //!   backslashes count as separators.
 //! - Links are made last, after every file and folder, so nothing is
-//!   ever written through one; a symbolic link is made only when it points
-//!   inside, a hard link only to a file made here.
-//! - Setuid, setgid and sticky bits are dropped; owners are never set;
-//!   devices and pipes are not made.
+//!   ever written through one. A symbolic link is made only when its target
+//!   stays inside the folder that will be placed and passes through none of
+//!   the archive's other links (it is resolved once more after placing);
+//!   a hard link only to a file made here.
+//! - Names are kept as bytes: two names that are not UTF-8 never become one.
+//! - No more entries, and no more bytes, than the listing said, counted on
+//!   this side too (a compromised helper is not trusted to stop).
+//! - Setuid, setgid and sticky bits are dropped, and nothing is writable by
+//!   others; owners are never set; devices and pipes are not made.
 //! - The listing's sizes are the most it may write (plus a little), so an
 //!   archive that lies about its sizes is stopped.
 
@@ -36,8 +41,6 @@ pub const RATIO_FROM: u64 = 1 << 30;
 /// What an extract may write past the listing's total (its sizes are
 /// what it said; a little room for rounding is all).
 const SLACK: u64 = 1 << 20;
-/// A helper that says nothing for this long is stopped.
-const STALL: Duration = Duration::from_secs(120);
 /// The longest name part, and the deepest path, made.
 const MAX_PART: usize = 255;
 const MAX_DEPTH: usize = 128;
@@ -141,13 +144,16 @@ pub fn helper() -> Option<PathBuf> {
     .find(|p| p.is_file())
 }
 
-/// A running helper, stopped when it stalls or `stop` is set (its pipe
-/// then ends, so a read in progress returns).
+/// A running helper, killed when `stop` is set (its pipe then ends, so a
+/// read in progress returns). The child is shared with the watchdog under a
+/// lock, and reaped under it, so a kill never reaches a process that has
+/// already been reaped (whose pid may be someone else's by then: the
+/// review, 2026-11-23). No timeout of its own: the helper can block on
+/// nothing but its pipe, and its processor time is limited.
 struct Running {
-    child: std::process::Child,
+    child: Arc<std::sync::Mutex<Option<std::process::Child>>>,
     out: io::BufReader<std::process::ChildStdout>,
     alive: Arc<AtomicBool>,
-    heard: Arc<AtomicU64>,
 }
 
 impl Running {
@@ -160,48 +166,36 @@ impl Running {
             .stderr(Stdio::null())
             .spawn()?;
         let out = io::BufReader::with_capacity(1 << 20, child.stdout.take().ok_or(Error::NoHelper)?);
-        let (alive, heard) = (Arc::new(AtomicBool::new(true)), Arc::new(AtomicU64::new(0)));
-        let pid = child.id();
-        let (a, h) = (alive.clone(), heard.clone());
+        let child = Arc::new(std::sync::Mutex::new(Some(child)));
+        let alive = Arc::new(AtomicBool::new(true));
+        let (c, a) = (child.clone(), alive.clone());
         std::thread::spawn(move || {
-            let (mut last, mut quiet) = (u64::MAX, Duration::ZERO);
-            let tick = Duration::from_millis(100);
             while a.load(Ordering::Relaxed) {
-                std::thread::sleep(tick);
-                let now = h.load(Ordering::Relaxed);
-                quiet = if now == last { quiet + tick } else { Duration::ZERO };
-                last = now;
-                if stop.load(Ordering::Relaxed) || quiet >= STALL {
-                    kill(pid);
+                std::thread::sleep(Duration::from_millis(100));
+                if stop.load(Ordering::Relaxed) {
+                    if let Some(ch) = c.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+                        let _ = ch.kill();
+                    }
                     return;
                 }
             }
         });
-        Ok(Running { child, out, alive, heard })
+        Ok(Running { child, out, alive })
     }
 
     fn next(&mut self) -> io::Result<Message> {
-        let m = stream::read_message(&mut self.out);
-        self.heard.fetch_add(1, Ordering::Relaxed);
-        m
+        stream::read_message(&mut self.out)
     }
 }
 
 impl Drop for Running {
     fn drop(&mut self) {
         self.alive.store(false, Ordering::Relaxed);
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Some(mut ch) = self.child.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = ch.kill();
+            let _ = ch.wait();
+        }
     }
-}
-
-fn kill(pid: u32) {
-    unsafe extern "C" {
-        fn kill(pid: i32, sig: i32) -> i32;
-    }
-    // SAFETY: kill(2) with our own child's pid and SIGKILL (9); the child is
-    // reaped by its Running, so the pid is not reused meanwhile.
-    unsafe { kill(pid as i32, 9) };
 }
 
 /// An archive's listing, from its headers (the helper reads it, confined).
@@ -227,11 +221,12 @@ pub fn list_with(helper: &Path, archive: &Path, stop: &Arc<AtomicBool>) -> Resul
                 }
                 if let Some(parts) = clean(&h.name) {
                     let folder = parts.len() > 1 || h.kind == Kind::Dir;
-                    if let Some(t) = l.tops.iter_mut().find(|(n, _)| *n == parts[0]) {
+                    let top = String::from_utf8_lossy(&parts[0]).into_owned();
+                    if let Some(t) = l.tops.iter_mut().find(|(n, _)| *n == top) {
                         t.1 |= folder;
                     } else if l.tops.len() < 2 {
                         // Two are enough to know it is not one folder.
-                        l.tops.push((parts[0].clone(), folder));
+                        l.tops.push((top, folder));
                     }
                 }
             }
@@ -243,51 +238,68 @@ pub fn list_with(helper: &Path, archive: &Path, stop: &Arc<AtomicBool>) -> Resul
     }
 }
 
+/// A name's parts, as bytes (a name need not be UTF-8: an old Windows zip's
+/// are not, and two such names must not become one).
+pub type Parts = Vec<Vec<u8>>;
+
 /// A name's parts, cleaned, or None when it may not be made: an absolute
-/// name, a drive letter, `..`, a part too long, too deep, or nothing.
-pub fn clean(name: &[u8]) -> Option<Vec<String>> {
-    let text = String::from_utf8_lossy(name).replace('\\', "/");
-    if text.starts_with('/') {
+/// name, a drive letter, `..`, a NUL, a part too long, too deep, or nothing.
+/// Backslashes count as separators.
+pub fn clean(name: &[u8]) -> Option<Parts> {
+    let name: Vec<u8> = name.iter().map(|&b| if b == b'\\' { b'/' } else { b }).collect();
+    if name.first() == Some(&b'/') || name.contains(&0) {
         return None;
     }
-    let parts: Vec<String> = text.split('/').filter(|p| !p.is_empty() && *p != ".").map(str::to_string).collect();
-    let drive =
-        parts.first().is_some_and(|p| p.len() == 2 && p.ends_with(':') && p.as_bytes()[0].is_ascii_alphabetic());
-    if parts.is_empty()
-        || drive
-        || parts.len() > MAX_DEPTH
-        || parts.iter().any(|p| p == ".." || p.len() > MAX_PART || p.contains('\0'))
-    {
+    let parts: Parts = name.split(|&b| b == b'/').filter(|p| !p.is_empty() && *p != b".").map(<[u8]>::to_vec).collect();
+    let drive = parts.first().is_some_and(|p| p.len() == 2 && p[1] == b':' && p[0].is_ascii_alphabetic());
+    if parts.is_empty() || drive || parts.len() > MAX_DEPTH || parts.iter().any(|p| p == b".." || p.len() > MAX_PART) {
         return None;
     }
     Some(parts)
 }
 
-/// A symbolic link's target, when it stays inside: the link at `at` (its
-/// parts), the target as the archive has it. Relative only; `..` may climb
-/// no higher than the top.
-fn link_inside(at: &[String], target: &[u8]) -> Option<String> {
-    let text = String::from_utf8_lossy(target).into_owned();
-    if text.is_empty() || text.starts_with('/') || text.contains('\\') || text.contains('\0') {
+fn path_of(root: &Path, parts: &[Vec<u8>]) -> PathBuf {
+    use std::os::unix::ffi::OsStrExt;
+    parts.iter().fold(root.to_path_buf(), |a, p| a.join(std::ffi::OsStr::from_bytes(p)))
+}
+
+/// A symbolic link's target, when it stays inside the folder that will be
+/// placed: the link at `at` (its parts from that folder), the target as the
+/// archive has it, and every symbolic link this archive makes (`links`,
+/// from the same folder). Relative only; `..` may climb no higher than the
+/// placed folder; and the target may not pass *through* another of the
+/// archive's links (it may end at one, which is checked by itself), since
+/// a link in the middle makes the text's depth not the real one (the
+/// review: `a/up -> ..` then `p -> a/up/a/up/../../etc`).
+fn link_inside(at: &[Vec<u8>], target: &[u8], links: &HashSet<Parts>) -> Option<Vec<u8>> {
+    if target.is_empty() || target[0] == b'/' || target.contains(&b'\\') || target.contains(&0) {
         return None;
     }
-    let mut depth = at.len().checked_sub(1)?;
-    for p in text.split('/') {
-        match p {
-            "" | "." => {}
-            ".." => depth = depth.checked_sub(1)?,
-            _ => depth += 1,
+    let mut stack: Parts = at[..at.len().checked_sub(1)?].to_vec();
+    let comps: Vec<&[u8]> = target.split(|&b| b == b'/').filter(|c| !c.is_empty() && *c != b".").collect();
+    for (i, c) in comps.iter().enumerate() {
+        if *c == b".." {
+            stack.pop()?;
+        } else {
+            stack.push(c.to_vec());
+            if i + 1 < comps.len() && links.contains(&stack) {
+                return None;
+            }
+        }
+        if stack.len() > MAX_DEPTH {
+            return None;
         }
     }
-    Some(text)
+    Some(target.to_vec())
 }
 
 /// Whether every folder from `root` down to `parts`' parent is a real
 /// folder (none a link), making the missing ones.
-fn real_parents(root: &Path, parts: &[String]) -> bool {
+fn real_parents(root: &Path, parts: &[Vec<u8>]) -> bool {
     let mut at = root.to_path_buf();
-    for p in &parts[..parts.len() - 1] {
-        at.push(p);
+    use std::os::unix::ffi::OsStrExt;
+    for p in &parts[..parts.len().saturating_sub(1)] {
+        at.push(std::ffi::OsStr::from_bytes(p));
         match at.symlink_metadata() {
             Ok(m) if m.is_dir() => {}
             Ok(_) => return false,
@@ -341,7 +353,8 @@ pub struct Progress {
 /// Extracts `archive` into `into`, as `listing` (from [`list`]) said it
 /// is: one folder at the top is made as it is, anything else goes in a
 /// folder named after the archive. It writes no more than the listing's
-/// total (or, when some size was not said, no more than the cap).
+/// total (or, when some size was not said, no more than the cap), and no
+/// more entries than it listed.
 pub fn extract(archive: &Path, into: &Path, listing: &Listing, progress: &Progress) -> Result<Extracted, Error> {
     extract_with(&helper().ok_or(Error::NoHelper)?, archive, into, listing, progress)
 }
@@ -355,11 +368,12 @@ pub fn extract_with(
 ) -> Result<Extracted, Error> {
     // The most it may write: what it said, or past the cap only if every
     // size was said (the person was asked about the total).
-    let most = if listing.unknown { listing.total.max(ASK_BYTES) } else { listing.total } + SLACK;
+    let most = if listing.unknown { listing.total.max(ASK_BYTES) } else { listing.total }.saturating_add(SLACK);
     let hidden = hidden_folder(into)?;
     let made = (|| {
-        let skipped = write_all(helper, archive, &hidden, listing.entries, most, progress)?;
-        Ok(Extracted { made: place(&hidden, into, archive)?, skipped })
+        let w = write_all(helper, archive, &hidden, listing.entries, most, progress)?;
+        let made = place(&hidden, into, archive, w.top.as_deref())?;
+        Ok(Extracted { made: made.clone(), skipped: w.skipped + recheck_links(&made, &w.links) })
     })();
     if made.is_err() {
         let _ = fs::remove_dir_all(&hidden);
@@ -380,17 +394,15 @@ fn hidden_folder(into: &Path) -> Result<PathBuf, Error> {
     Err(Error::Io(io::Error::other("no hidden folder could be made")))
 }
 
-/// The hidden folder's contents moved into place: its one folder as it is,
-/// or the whole of it under the archive's name. The name is taken first
-/// (an empty folder made here), then the move replaces that empty folder,
-/// so nothing someone else made meanwhile is ever replaced.
-fn place(hidden: &Path, into: &Path, archive: &Path) -> Result<PathBuf, Error> {
-    let inside: Vec<_> = fs::read_dir(hidden)?.filter_map(Result::ok).collect();
-    let (from, name) = match inside.as_slice() {
-        [one] if one.path().symlink_metadata().is_ok_and(|m| m.is_dir()) => {
-            (one.path(), one.file_name().to_string_lossy().into_owned())
-        }
-        _ => (hidden.to_path_buf(), stem(archive)),
+/// The hidden folder's contents moved into place: its one folder `top` as
+/// it is (decided before any link was made, and links were checked against
+/// it), or the whole of it under the archive's name. The name is taken
+/// first (an empty folder made here), then the move replaces that empty
+/// folder, so nothing someone else made meanwhile is ever replaced.
+fn place(hidden: &Path, into: &Path, archive: &Path, top: Option<&[u8]>) -> Result<PathBuf, Error> {
+    let (from, name) = match top {
+        Some(t) => (path_of(hidden, &[t.to_vec()]), String::from_utf8_lossy(t).into_owned()),
+        None => (hidden.to_path_buf(), stem(archive)),
     };
     for _ in 0..100 {
         let to = into.join(folder_name(&name, into));
@@ -411,21 +423,61 @@ fn place(hidden: &Path, into: &Path, archive: &Path) -> Result<PathBuf, Error> {
     Err(Error::Io(io::Error::other("no free name")))
 }
 
-/// The helper's entries made in `root`. How many were skipped.
-fn write_all(helper: &Path, archive: &Path, root: &Path, entries: u64, most: u64, p: &Progress) -> Result<u64, Error> {
-    let args = vec![format!("--max-bytes={most}"), format!("--max-entries={}", entries.saturating_add(16))];
+/// After placing, each symbolic link made is resolved once more: one that
+/// leads outside the placed folder is removed (a second line behind
+/// `link_inside`). A link to nothing stays, as the archive had it. How many
+/// were removed.
+fn recheck_links(made: &Path, links: &[Parts]) -> u64 {
+    let Ok(root) = made.canonicalize() else { return 0 };
+    let mut removed = 0;
+    for parts in links {
+        let p = path_of(made, parts);
+        if let Ok(real) = p.canonicalize()
+            && !real.starts_with(&root)
+        {
+            let _ = fs::remove_file(&p);
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// What [`write_all`] made: how many were skipped, the one folder at the
+/// top (what will be placed, if that is how it is made), and the symbolic
+/// links made (their parts from what is placed).
+struct Written {
+    skipped: u64,
+    top: Option<Vec<u8>>,
+    links: Vec<Parts>,
+}
+
+/// The helper's entries made in `root`. How many were skipped, the one
+/// folder at the top (if that is how it is made: it is what will be
+/// placed), and the symbolic links made (their parts from what is placed).
+fn write_all(
+    helper: &Path,
+    archive: &Path,
+    root: &Path,
+    entries: u64,
+    most: u64,
+    p: &Progress,
+) -> Result<Written, Error> {
+    let most_entries = entries.saturating_add(16);
+    let args = vec![format!("--max-bytes={most}"), format!("--max-entries={most_entries}")];
     let mut run = Running::start(helper, archive, &args, p.stop.clone())?;
-    let (mut skipped, mut written) = (0u64, 0u64);
-    let mut files: HashSet<Vec<String>> = HashSet::new();
-    let mut links: Vec<(Vec<String>, Header)> = Vec::new();
+    let (mut skipped, mut written, mut seen) = (0u64, 0u64, 0u64);
+    let mut files: HashSet<Parts> = HashSet::new();
+    let mut links: Vec<(Parts, Header)> = Vec::new();
     // The file being written, if the last entry is one being made.
     let mut open: Option<(fs::File, PathBuf, Header)> = None;
     let finish = |open: &mut Option<(fs::File, PathBuf, Header)>| -> io::Result<()> {
         if let Some((f, path, h)) = open.take() {
-            f.set_modified(std::time::UNIX_EPOCH + Duration::from_secs(h.mtime.max(0) as u64))?;
+            // A time the file system refuses is no reason to fail the extract.
+            let _ = f.set_modified(std::time::UNIX_EPOCH + Duration::from_secs(h.mtime.max(0) as u64));
             drop(f);
             use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&path, fs::Permissions::from_mode((h.perm & 0o777) | 0o600))?;
+            // Never writable by others: 0o755 at most, the owner's read and write always.
+            fs::set_permissions(&path, fs::Permissions::from_mode((h.perm & 0o755) | 0o600))?;
         }
         Ok(())
     };
@@ -436,24 +488,32 @@ fn write_all(helper: &Path, archive: &Path, root: &Path, entries: u64, most: u64
         }
         match m? {
             Message::Data(d) => {
+                // Every byte counts, written or not: a helper that lies cannot
+                // make this side read without end.
+                written += d.len() as u64;
+                if written > most {
+                    return Err(Error::Unreadable("larger than it says".into()));
+                }
                 if let Some((f, _, _)) = &mut open {
-                    written += d.len() as u64;
-                    if written > most {
-                        return Err(Error::Unreadable("larger than it says".into()));
-                    }
                     f.write_all(&d)?;
                     p.done.fetch_add(d.len() as u64, Ordering::Relaxed);
                 }
             }
             Message::Entry(h) => {
                 finish(&mut open)?;
+                seen += 1;
+                if seen > most_entries {
+                    return Err(Error::Unreadable("more entries than it says".into()));
+                }
                 let Some(parts) = clean(&h.name) else {
                     skipped += 1;
                     continue;
                 };
                 match h.kind {
                     Kind::Dir => {
-                        if !real_parents(root, &[parts.clone(), vec![String::new()]].concat()) {
+                        let mut inside = parts.clone();
+                        inside.push(Vec::new());
+                        if !real_parents(root, &inside) {
                             skipped += 1;
                         }
                     }
@@ -462,7 +522,7 @@ fn write_all(helper: &Path, archive: &Path, root: &Path, entries: u64, most: u64
                             skipped += 1;
                             continue;
                         }
-                        let path = parts.iter().fold(root.to_path_buf(), |a, p| a.join(p));
+                        let path = path_of(root, &parts);
                         // The same name again (a tar may hold a file twice):
                         // the later one wins, if the first was a file made here.
                         if files.contains(&parts) {
@@ -486,24 +546,51 @@ fn write_all(helper: &Path, archive: &Path, root: &Path, entries: u64, most: u64
         }
     }
     finish(&mut open)?;
+    // What will be placed, decided before any link is made: one folder at
+    // the top (everything made, links included, under one name that is a
+    // real folder), or the whole hidden folder.
+    let mut tops: HashSet<Vec<u8>> = links.iter().map(|(parts, _)| parts[0].clone()).collect();
+    use std::os::unix::ffi::OsStrExt;
+    for e in fs::read_dir(root)?.filter_map(Result::ok) {
+        tops.insert(e.file_name().as_bytes().to_vec());
+    }
+    let top = match tops.into_iter().collect::<Vec<_>>().as_slice() {
+        [one] if path_of(root, std::slice::from_ref(one)).symlink_metadata().is_ok_and(|m| m.is_dir()) => {
+            Some(one.clone())
+        }
+        _ => None,
+    };
+    let base = usize::from(top.is_some());
+    let symlinks: HashSet<Parts> =
+        links.iter().filter(|(_, h)| h.kind == Kind::Symlink).map(|(parts, _)| parts[base..].to_vec()).collect();
     // Hard links first (to files made here), then symbolic links: nothing
     // is written after a link is made.
     links.sort_by_key(|(_, h)| h.kind != Kind::Hardlink);
+    let mut made = Vec::new();
     for (parts, h) in links {
-        let path = parts.iter().fold(root.to_path_buf(), |a, p| a.join(p));
+        let path = path_of(root, &parts);
         let ok = match h.kind {
             Kind::Hardlink => clean(&h.link).filter(|t| files.contains(t)).is_some_and(|t| {
-                let target = t.iter().fold(root.to_path_buf(), |a, p| a.join(p));
-                real_parents(root, &parts) && real_parents(root, &t) && fs::hard_link(&target, &path).is_ok()
+                real_parents(root, &parts) && real_parents(root, &t) && fs::hard_link(path_of(root, &t), &path).is_ok()
             }),
-            _ => link_inside(&parts, &h.link)
-                .is_some_and(|t| real_parents(root, &parts) && std::os::unix::fs::symlink(t, &path).is_ok()),
+            _ => {
+                let from_top = &parts[base..];
+                !from_top.is_empty()
+                    && link_inside(from_top, &h.link, &symlinks).is_some_and(|t| {
+                        real_parents(root, &parts)
+                            && std::os::unix::fs::symlink(std::ffi::OsStr::from_bytes(&t), &path).is_ok()
+                    })
+                    && {
+                        made.push(from_top.to_vec());
+                        true
+                    }
+            }
         };
         if !ok {
             skipped += 1;
         }
     }
-    Ok(skipped)
+    Ok(Written { skipped, top, links: made })
 }
 
 /// The helper's own check that it is confined: 4 is confined.

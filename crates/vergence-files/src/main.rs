@@ -108,6 +108,8 @@ enum Ask {
         archives: Vec<PathBuf>,
         into: Option<PathBuf>,
         why: String,
+        /// The total and the number of entries asked about.
+        seen: (u64, u64),
     },
 }
 
@@ -888,7 +890,9 @@ impl Program for Viewer {
                     }
                     self.read_all();
                 }
-                Some(Ask::Extract { archives, into, .. }) if yes => self.start_extract(archives, into, true),
+                Some(Ask::Extract { archives, into, seen, .. }) if yes => {
+                    self.start_extract(archives, into, Some(seen))
+                }
                 Some(Ask::EmptyTrash) if yes => {
                     if let Err(e) = ops::empty_trash() {
                         self.notice = Some(format!("The Trash could not be emptied: {}", files::plain(&e)));

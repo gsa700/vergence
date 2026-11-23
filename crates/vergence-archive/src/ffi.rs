@@ -46,6 +46,7 @@ unsafe extern "C" {
     pub fn archive_write_add_filter_gzip(a: *mut Archive) -> c_int;
     pub fn archive_write_set_options(a: *mut Archive, options: *const c_char) -> c_int;
     pub fn archive_write_open_filename(a: *mut Archive, path: *const c_char) -> c_int;
+    pub fn archive_write_open_fd(a: *mut Archive, fd: c_int) -> c_int;
     pub fn archive_write_header(a: *mut Archive, entry: *mut Entry) -> c_int;
     pub fn archive_write_data(a: *mut Archive, buf: *const c_void, len: usize) -> isize;
     pub fn archive_write_close(a: *mut Archive) -> c_int;

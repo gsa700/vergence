@@ -458,10 +458,34 @@ pub fn confine(cpu_seconds: u64) {
     #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
     let limits: [(i32, u64); 0] = [];
     let _ = cpu_seconds;
-    // Nothing but the three standard descriptors stays open.
-    for fd in 3..1024 {
-        // SAFETY: close(2) on descriptors this process may hold; none is used after.
-        unsafe { close(fd) };
+    // Nothing but the three standard descriptors stays open, however high
+    // an inherited one is (a loop to 1024 missed those above: the archive
+    // review, 2026-11-23).
+    #[cfg(target_os = "linux")]
+    {
+        unsafe extern "C" {
+            fn syscall(n: i64, ...) -> i64;
+        }
+        // SAFETY: close_range(2) (436 on x86_64) from 3 to the highest, no flags.
+        if unsafe { syscall(436, 3u32, u32::MAX, 0u32) } != 0 {
+            for fd in 3..65536 {
+                // SAFETY: close(2) on descriptors this process may hold; none is used after.
+                unsafe { close(fd) };
+            }
+        }
+    }
+    #[cfg(target_os = "freebsd")]
+    {
+        unsafe extern "C" {
+            fn closefrom(low: i32);
+        }
+        // SAFETY: closefrom(2) takes the lowest descriptor to close.
+        unsafe { closefrom(3) };
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+    {
+        let _ = close;
+        refuse("a sandbox (none on this system)");
     }
     for (resource, value) in limits {
         let r = Rlimit { cur: value, max: value };

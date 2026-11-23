@@ -37,6 +37,44 @@ fn utf8_locale() {
     }
 }
 
+/// On FreeBSD, the archive's descriptor may only be read, sought and
+/// looked at, and the two outputs only written: a compromised helper cannot
+/// change the archive's mode, times or locks (the review, 2026-11-23).
+/// Linux's seccomp list already allows no such call.
+#[cfg(target_os = "freebsd")]
+fn limit_pipes() {
+    #[repr(C)]
+    struct Rights {
+        r: [u64; 2],
+    }
+    unsafe extern "C" {
+        fn __cap_rights_init(version: c_int, rights: *mut Rights, ...) -> *mut Rights;
+        fn cap_rights_limit(fd: c_int, rights: *const Rights) -> c_int;
+    }
+    // sys/capsicum.h: CAPRIGHT(0, bit) is (1 << 57) | bit; version 0.
+    const R: u64 = 1 << 57;
+    const READ: u64 = R | 0x1;
+    const WRITE: u64 = R | 0x2;
+    const SEEK: u64 = R | 0x4 | 0x8;
+    const FSTAT: u64 = R | 0x80000;
+    for (fd, a, b, c) in [(0, READ, SEEK, FSTAT), (1, WRITE, FSTAT, 0), (2, WRITE, FSTAT, 0)] {
+        let mut rights = Rights { r: [0; 2] };
+        // SAFETY: cap_rights_init's version 0, a place for the rights, the
+        // rights, and the 0 that ends the list; then cap_rights_limit(2).
+        let ok = unsafe {
+            __cap_rights_init(0, &mut rights, a, b, c, 0u64);
+            cap_rights_limit(fd, &rights)
+        } == 0;
+        if !ok {
+            eprintln!("vergence-unpack: the descriptors' rights could not be limited; not reading");
+            std::process::exit(3);
+        }
+    }
+}
+
+#[cfg(not(target_os = "freebsd"))]
+fn limit_pipes() {}
+
 struct Reader(*mut ffi::Archive);
 
 impl Drop for Reader {
@@ -93,6 +131,7 @@ pub fn helper_main() -> std::process::ExitCode {
         ffi::archive_read_support_filter_all(reader.0);
         ffi::archive_read_support_format_all(reader.0);
     }
+    limit_pipes();
     vergence_decode::confine(CPU_SECONDS);
     let out = std::io::stdout();
     let mut out = std::io::BufWriter::with_capacity(1 << 20, out.lock());
@@ -175,7 +214,12 @@ fn header(e: *mut ffi::Entry) -> Option<Header> {
     let hard = unsafe { ffi::bytes(ffi::archive_entry_hardlink_utf8(e)) }
         .or_else(|| unsafe { ffi::bytes(ffi::archive_entry_hardlink(e)) });
     let kind_bits = u32::from(unsafe { ffi::archive_entry_filetype(e) }) & ffi::IFMT;
+    // A hard link that carries contents (cpio's newc, as in an .rpm, puts
+    // them with the last link) is passed on as a file of its own, or they
+    // would be lost (the review, 2026-11-23).
+    let carries = unsafe { ffi::archive_entry_size_is_set(e) } != 0 && unsafe { ffi::archive_entry_size(e) } > 0;
     let (kind, link) = match (hard, kind_bits) {
+        (Some(_), ffi::IFREG) if carries => (Kind::File, Vec::new()),
         (Some(target), _) => (Kind::Hardlink, target),
         (None, ffi::IFREG) => (Kind::File, Vec::new()),
         (None, ffi::IFDIR) => (Kind::Dir, Vec::new()),

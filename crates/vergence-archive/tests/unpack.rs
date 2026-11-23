@@ -195,11 +195,102 @@ fn compress_makes_a_zip_that_reads_back() {
 
 #[test]
 fn names_are_cleaned() {
-    assert_eq!(unpack::clean(b"./a//b/./c").unwrap(), ["a", "b", "c"]);
+    assert_eq!(unpack::clean(b"./a//b/./c").unwrap(), [b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]);
+    assert!(unpack::clean(b"a\0b").is_none());
     assert!(unpack::clean(b"a/../b").is_none());
     assert!(unpack::clean(b"/a").is_none());
     assert!(unpack::clean(b"c:\\x").is_none());
     assert!(unpack::clean(b"./").is_none());
     assert_eq!(unpack::stem(Path::new("x/Photos.TAR.GZ")), "Photos");
     assert_eq!(unpack::stem(Path::new("a.b.zip")), "a.b");
+}
+
+/// The review (2026-11-23), finding 1: links were checked against the
+/// hidden folder, but only its one folder is placed, so `..` reached beside it.
+#[test]
+fn a_link_cannot_climb_out_of_the_one_folder() {
+    let d = scratch("one-folder-link");
+    fs::create_dir(d.join("Documents")).unwrap();
+    fs::write(d.join("Documents/private.txt"), b"mine").unwrap();
+    let a = d.join("proj.tar.gz");
+    make::write_raw(
+        &a,
+        Format::TarGz,
+        &[
+            dir("proj"),
+            file("proj/file", b"f"),
+            symlink("proj/evil", "../Documents"),
+            symlink("proj/self", "../proj/file"),
+            symlink("proj/fine", "file"),
+        ],
+    )
+    .unwrap();
+    let out = run(&a, &d).unwrap();
+    assert_eq!(out.made, d.join("proj"));
+    assert!(out.made.join("evil").symlink_metadata().is_err(), "a link beside the placed folder not made");
+    assert!(out.made.join("self").symlink_metadata().is_err(), "nor one that climbs out and back by name");
+    assert_eq!(fs::read(out.made.join("fine")).unwrap(), b"f");
+    assert_eq!(out.skipped, 2);
+}
+
+/// Finding 2: a link through another link: `a/up -> ..` makes the text's
+/// depth not the real one.
+#[test]
+fn a_chain_of_links_cannot_climb_out() {
+    let d = scratch("chain");
+    let a = d.join("chain.tar.gz");
+    make::write_raw(
+        &a,
+        Format::TarGz,
+        &[dir("a"), symlink("a/up", ".."), symlink("p", "a/up/a/up/a/up/../../../etc/passwd"), symlink("q", "a/up/x")],
+    )
+    .unwrap();
+    let out = run(&a, &d).unwrap();
+    let m = &out.made;
+    assert_eq!(fs::read_link(m.join("a/up")).unwrap(), Path::new(".."));
+    assert!(m.join("p").symlink_metadata().is_err(), "through a link: not made");
+    assert!(m.join("q").symlink_metadata().is_err(), "through a link even inside: not made");
+    assert_eq!(out.skipped, 2);
+    for e in walk(m) {
+        if let Ok(real) = e.canonicalize() {
+            assert!(real.starts_with(m.canonicalize().unwrap()), "{e:?} leads to {real:?}");
+        }
+    }
+}
+
+fn walk(p: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for e in fs::read_dir(p).unwrap().filter_map(Result::ok) {
+        let path = e.path();
+        out.push(path.clone());
+        if e.file_type().unwrap().is_dir() {
+            out.extend(walk(&path));
+        }
+    }
+    out
+}
+
+/// Finding 7: names that are not UTF-8 stay as bytes, so two of them never
+/// become one; finding 6: nothing is made writable by others.
+#[test]
+fn raw_names_stay_apart_and_nothing_is_writable_by_others() {
+    let d = scratch("raw");
+    let a = d.join("old.tar.gz");
+    make::write_raw(
+        &a,
+        Format::TarGz,
+        &[
+            Raw { name: b"caf\x82.txt".to_vec(), perm: 0o644, data: b"one".to_vec(), ..Default::default() },
+            Raw { name: b"caf\x8a.txt".to_vec(), perm: 0o777, data: b"two".to_vec(), ..Default::default() },
+        ],
+    )
+    .unwrap();
+    let out = run(&a, &d).unwrap();
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::PermissionsExt;
+    let one = out.made.join(std::ffi::OsStr::from_bytes(b"caf\x82.txt"));
+    let two = out.made.join(std::ffi::OsStr::from_bytes(b"caf\x8a.txt"));
+    assert_eq!(fs::read(&one).unwrap(), b"one");
+    assert_eq!(fs::read(&two).unwrap(), b"two");
+    assert_eq!(fs::metadata(&two).unwrap().permissions().mode() & 0o777, 0o755);
 }

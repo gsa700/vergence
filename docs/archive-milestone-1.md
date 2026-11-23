@@ -163,3 +163,49 @@ Dave's hands-on pass.
   techbench 1,043, kepler 1,032; display suite 20 of 20 on Hubble with the
   new scenario 20 (a zip opened: extracted, `..` not made, the left-out
   note, no hidden folder left, one top folder kept).
+
+### The independent review (2026-11-23) and its fixes
+
+A fresh reviewer read the code against the threat model (the archive and
+even the helper hostile). Found and fixed:
+
+1. **High: a symbolic link escaped after "one folder at the top".** Links
+   were checked against the hidden folder, but only its one folder is
+   placed, so one `..` reached beside it (`proj/evil -> ../Documents`).
+   Now what is placed is decided before any link is made, and links are
+   checked against it.
+2. **High: a chain of links climbed out.** The check read a target's text
+   as if every part were a real folder; `a/up -> ..` then `p ->
+   a/up/a/up/a/up/../../../etc/passwd` reached `/etc/passwd`. Now a target
+   may not pass through another of the archive's links, and every link is
+   resolved once more after placing (removed if it leads outside).
+3. A big compressed archive's listing could be killed as "stalled" after
+   two minutes: the stall timeout is gone (the helper blocks on nothing
+   but its pipe; its processor time is limited; Stop still kills it).
+4. The watchdog could kill a pid already reaped (and reused): the child is
+   shared under a lock and killed and reaped under it.
+5. Entries were capped only in the helper: this side counts them too, and
+   counts every data byte, attached to a file or not.
+6. Files could be made writable by others: at most 0o755 now.
+7. Names that are not UTF-8 were mangled and two could become one: names
+   are bytes now.
+8. Hard links carrying contents (cpio's newc, in .rpm) came out empty: the
+   helper passes such a link on as a file.
+9. Compress's hidden file could be opened through a link: it is made new
+   (`O_EXCL`, `O_NOFOLLOW`) and written through its descriptor.
+10. A huge size could overflow (saturating now), and a panic on a worker
+    left the job stuck forever: the outcome is set either way.
+11. A file time the file system refuses no longer fails the extract.
+12. Confinement: every inherited descriptor is closed (close_range on
+    Linux, closefrom on FreeBSD; the loop to 1024 missed higher ones, for
+    the picture and PDF helpers too); on FreeBSD the helper's standard
+    descriptors are limited to read/seek/fstat and write (checked with
+    `procstat -f -C`); on any other system `confine` refuses.
+13. "Extract anyway" now asks again if the archive grew since.
+
+Nothing serious in the FFI declarations, the stream, the file path rules,
+duplicates and cleanup, or FileView's jobs, undo and ask flow. Tests added
+from the review's own archives (the one-folder escape, the chain, raw
+names, permissions); archive tests 12 on Hubble and kepler; workspace
+Hubble 1,046, techbench 1,046, kepler 1,035; display suite 16 and 20 on
+Hubble.
