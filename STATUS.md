@@ -14,7 +14,7 @@ sync.
 
 Terminal on the agent interface (docs/terminal-agent-milestone-1.md): built,
 reviewed and fixed (bus v39), tested on Hubble, kepler (FreeBSD) and techbench;
-ready to close after Dave's hands-on pass. Package vergence-0.1.0_6 waits in
+ready to close after Dave's hands-on pass. Released as v0.2.0 (tag; package vergence-0.2.0_1) waits in
 techbench's local repository for his install; Hubble and kepler are ready to
 install (both need a session restart). **Then the agent layer is frozen**
 (Dave, 2026-11-22): no new agent features unless day-to-day use asks;
