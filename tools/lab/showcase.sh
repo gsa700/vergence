@@ -69,11 +69,33 @@ shot() {
 }
 icons='[files]
 view = "icons"'
+# press <app id> <role> <name prefix>: that widget pressed, as a click would.
+press() {
+    w=$(vctl windows | grep "\"$1\"" | head -1 | cut -d' ' -f1)
+    n=$(vctl tree "$w" | grep -E "$2 \"$3" | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+    [ -n "$n" ] && vctl act "$w" "$n" press >/dev/null
+    sleep 0.6
+}
+# field <app id> <name> <value>: a text field set and Enter pressed in it.
+field() {
+    w=$(vctl windows | grep "\"$1\"" | head -1 | cut -d' ' -f1)
+    n=$(vctl tree "$w" | grep -E "text field \"$2" | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+    [ -n "$n" ] && vctl act "$w" "$n" set "$3" >/dev/null && vctl act "$w" "$n" press >/dev/null
+    sleep 1
+}
+maximized() {
+    front "$1"
+    vctl key super+Up >/dev/null
+    sleep 1.5
+}
 
-# 1. Reader: the whitepaper, on its own PDF engine.
+# 1. Reader: the whitepaper as a book's spread (two pages, pages 2 and 3),
+# on its own PDF engine.
 fresh
 open "vergence-reader $DEMO/Documents/Vergence-Whitepaper.pdf"
-at vergence-reader 560 70
+maximized vergence-reader
+press vergence-reader button "Two pages"
+field vergence-reader "Page number" 3
 shot reader
 
 # 2. Dark style, Tide behind: the windows take its color.
@@ -91,17 +113,28 @@ at vergence-files 1240 520
 front vergence-files
 shot dark-tint
 
-# 3. FileView's preview (Space), on a picture.
-fresh "$icons"
-open "vergence-files $DEMO/Pictures"
-w=$(vctl windows | grep '"vergence-files"' | head -1 | cut -d' ' -f1)
-n=$(vctl tree "$w" | grep -E 'button "vergence-ember' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
-[ -n "$n" ] && vctl act "$w" "$n" press >/dev/null
-sleep 0.4; vctl focus "$w" >/dev/null; vctl key space >/dev/null; sleep 3
+# 3. FileView's preview pane: the list and the chosen file side by side,
+# the whitepaper's first page drawn beside its folder.
+fresh "[files]
+view = \"list\"
+preview-pane = true"
+open "vergence-files $DEMO/Documents"
+at vergence-files 380 220
+press vergence-files button "Vergence-Whitepaper"
+sleep 2
 shot preview
 
-# (Edit and Terminal: left out until vergence-term stays open in a headless
-# session; it closes at once there, 2026-11-22.)
+# 4. Edit and Terminal: the workspace's Cargo.toml beside a terminal
+# building the tree (a fresh target folder, so it is compiling when shot).
+fresh
+open "vergence-edit $ROOT/Cargo.toml"
+open "vergence-term -e sh -c 'cd $ROOT && CARGO_TARGET_DIR=/tmp/vergence-showcase-build cargo build --release; exec sh'"
+at vergence-edit 160 110
+at vergence-term 1140 360
+front vergence-term
+sleep 12
+shot edit-terminal
+rm -rf /tmp/vergence-showcase-build
 
 # 5. The overview (Super+Tab): every window at a glance.
 fresh "$icons"
