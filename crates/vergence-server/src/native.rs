@@ -995,7 +995,7 @@ impl Server {
                     let why: String = why.chars().take(200).collect();
                     entry.2 = Some((ok, why.clone()));
                     if let Some((agent, agent_serial)) = entry.3 {
-                        self.act_logged(agent, agent_serial, client, window, ok, &why);
+                        self.act_logged(agent, serial, client, window, ok, &why);
                         self.bus_send(
                             agent,
                             vergence_protocol::bus::ServerMsg::Agent(vergence_protocol::agent::AgentEvent::Acted {
@@ -1194,14 +1194,14 @@ impl Server {
             }
         }
         let mut tell = Vec::new();
-        for e in self.acts.sent.values_mut() {
+        for (act, e) in self.acts.sent.iter_mut() {
             if e.0 == client && window.is_none_or(|w| w == e.1) && e.2.is_none() {
                 e.2 = Some((false, "the window went away".into()));
-                tell.extend(e.3.map(|(a, s)| (a, s, e.0, e.1)));
+                tell.extend(e.3.map(|(a, s)| (a, s, *act, e.0, e.1)));
             }
         }
-        for (agent, serial, c, w) in tell {
-            self.act_logged(agent, serial, c, w, false, "the window went away");
+        for (agent, serial, act, c, w) in tell {
+            self.act_logged(agent, act, c, w, false, "the window went away");
             self.bus_send(
                 agent,
                 vergence_protocol::bus::ServerMsg::Agent(vergence_protocol::agent::AgentEvent::Acted {
@@ -1224,14 +1224,14 @@ impl Server {
             }
         }
         let mut tell = Vec::new();
-        for e in self.acts.sent.values_mut() {
+        for (act, e) in self.acts.sent.iter_mut() {
             if e.2.is_none() && e.4.elapsed() > ACT_TIMEOUT {
                 e.2 = Some((false, "the window did not answer".into()));
-                tell.extend(e.3.map(|(a, s)| (a, s, e.0, e.1)));
+                tell.extend(e.3.map(|(a, s)| (a, s, *act, e.0, e.1)));
             }
         }
-        for (agent, serial, c, w) in tell {
-            self.act_logged(agent, serial, c, w, false, "the window did not answer");
+        for (agent, serial, act, c, w) in tell {
+            self.act_logged(agent, act, c, w, false, "the window did not answer");
             self.bus_send(
                 agent,
                 vergence_protocol::bus::ServerMsg::Agent(vergence_protocol::agent::AgentEvent::Acted {
@@ -1244,13 +1244,13 @@ impl Server {
     }
 
     /// The window's answer to an agent's act, in agents.log under the same
-    /// act number as the line that asked.
-    fn act_logged(&mut self, agent: u32, agent_serial: u32, client: u32, window: u32, ok: bool, why: &str) {
+    /// act number (the server's, unique in a session) as the line that asked.
+    fn act_logged(&mut self, agent: u32, act: u32, client: u32, window: u32, ok: bool, why: &str) {
         let app = match self.natives.get(&(client, window)) {
             Some(Win::Native(n)) => n.app_id.clone(),
             _ => String::new(),
         };
-        self.agent_log(agent, &app, &crate::meaning::act_answer_line(agent_serial, ok, why));
+        self.agent_log(agent, &app, &crate::meaning::act_answer_line(act, ok, why));
     }
 
     /// An action's answer: None while it has not come (or the serial is unknown).

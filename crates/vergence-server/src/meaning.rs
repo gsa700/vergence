@@ -924,10 +924,7 @@ impl Server {
                     vergence_protocol::window::Action::Set(t) => format!("Set {} chars", t.chars().count()),
                     a => format!("{a:?}"),
                 };
-                // Logged as asked; the window's answer follows as its own line
-                // with the same act number (act_answer_line), so this line never
-                // reads as "typed".
-                self.agent_log(id, &app, &format!("act {serial}: {what} #{node} ({} {:?}), asked", m.role, m.name));
+                let asked = format!("{what} #{node} ({} {:?})", m.role, m.name);
                 // Who types, for the window to show (a terminal's tab mark) and
                 // to stop (bus v38).
                 if matches!(
@@ -953,8 +950,12 @@ impl Server {
                 let agent = self.bus_agent_name(id).unwrap_or_default();
                 let win = (g.loc.x as f64, g.loc.y as f64, g.size.w as f64, g.size.h as f64);
                 self.agent_ring(&agent, (loc.0 + m.x, loc.1 + m.y, m.w, m.h), win);
-                if self.send_act(&w, node, action, Some((id, serial))).is_none() {
-                    reply(self, AgentEvent::Acted { serial, ok: false, why: "not a native window".into() });
+                // Logged as asked under the server's act number; the window's
+                // answer follows as its own line with the same number
+                // (act_answer_line), so this line never reads as "typed".
+                match self.send_act(&w, node, action, Some((id, serial))) {
+                    Some(act) => self.agent_log(id, &app, &format!("act {act}: {asked}, asked")),
+                    None => reply(self, AgentEvent::Acted { serial, ok: false, why: "not a native window".into() }),
                 }
             }
             // A terminal of its own (bus v38): started in a window of its own;
