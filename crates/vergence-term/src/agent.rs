@@ -73,6 +73,9 @@ struct Burst {
     pane: u64,
     bytes: VecDeque<u8>,
     step: usize,
+    /// What it has typed on the current line so far: its own echo, which a
+    /// prompt found by its text must not be (state_between_steps).
+    sent: String,
 }
 
 /// The agents at work in this window.
@@ -274,7 +277,7 @@ impl Terminal {
         self.agents.typing.insert(tab_id, (agent, now));
         if pace {
             let step = bytes.len().div_ceil((PACE.as_millis() / STEP.as_millis()) as usize).max(1);
-            self.agents.bursts.push_back(Burst { tab: tab_id, pane, bytes: bytes.into(), step });
+            self.agents.bursts.push_back(Burst { tab: tab_id, pane, bytes: bytes.into(), step, sent: String::new() });
         } else {
             self.write_agent_bytes(tab_id, pane, &bytes);
         }
@@ -328,10 +331,17 @@ impl Terminal {
             }
         }
         for (tab, pane) in steps {
+            let own = self
+                .agents
+                .bursts
+                .iter()
+                .find(|b| b.tab == tab && b.pane == pane)
+                .map(|b| b.sent.clone())
+                .unwrap_or_default();
             let why = match self.tabs.iter().find(|t| t.id == tab).and_then(|t| t.session(pane)) {
                 None => Some("the pane closed".to_string()),
                 Some(session) => {
-                    let st = session.state_between_steps();
+                    let st = session.state_between_steps(&own);
                     refusal(&st, None).map(|w| format!("stopped typing: {w}; the rest was not typed"))
                 }
             };
@@ -349,6 +359,11 @@ impl Terminal {
             {
                 chunk.push(next);
                 b.bytes.pop_front();
+            }
+            // The line typed so far: from its last line end.
+            b.sent.push_str(&String::from_utf8_lossy(&chunk));
+            if let Some(i) = b.sent.rfind('\r') {
+                b.sent.drain(..=i);
             }
             self.write_agent_bytes(tab, pane, &chunk);
             if let Some(t) = self.agents.typing.get_mut(&tab) {
@@ -520,6 +535,20 @@ mod tests {
         for l in ["$ ", "dave@techbench ~ % ", "vim notes.txt", "Spinning:", "password manager open", "> "] {
             assert!(!password_line(l), "{l:?}");
         }
+    }
+
+    /// Between a burst's steps the text test looks before the agent's own
+    /// echo: its command naming "Password:" is not a prompt, a prompt that
+    /// came up mid-burst (its echo after it) still is.
+    #[test]
+    fn its_own_echo_is_not_a_prompt() {
+        use crate::session::{before_own_echo, password_line};
+        let line = "kepler% printf 'Password:";
+        assert!(password_line(line), "the whole line reads as a prompt");
+        assert!(!password_line(before_own_echo(line, "printf 'Password:")), "but it is the agent's own echo");
+        assert!(password_line(before_own_echo("Password: vis", "vis")), "a prompt before its echo still is one");
+        assert!(password_line(before_own_echo("Password: ", "")), "nothing typed yet: the whole line");
+        assert_eq!(before_own_echo("$ ls", "cat"), "$ ls", "an echo that is not at its end: the whole line");
     }
 
     #[test]

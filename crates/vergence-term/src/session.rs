@@ -153,6 +153,20 @@ pub(crate) fn no_agent_program(name: &str) -> bool {
 /// "Enter passphrase for key '...':", "[sudo] password for dave:", "PIN:"),
 /// whatever the terminal's modes say (a program that reads a password in raw
 /// mode, as some do, has echo off but no line mode).
+/// The cursor line without the agent's own echo at its end (what it typed
+/// on this line so far), if it ends so; else the whole line.
+pub(crate) fn before_own_echo<'a>(line: &'a str, own: &str) -> &'a str {
+    let own = own.trim_end();
+    let l = line.trim_end();
+    if !own.is_empty()
+        && let Some(before) = l.strip_suffix(own)
+    {
+        before
+    } else {
+        line
+    }
+}
+
 pub(crate) fn password_line(line: &str) -> bool {
     let l = line.trim_end().to_lowercase();
     if !(l.ends_with(':') || l.ends_with("):") || l.ends_with('>')) {
@@ -374,11 +388,15 @@ impl Session {
 
     /// Its state between the steps of a paced burst: the superuser asked
     /// again whenever the foreground changes (else every two seconds), the
-    /// password prompt by the modes and the text.
-    pub(crate) fn state_between_steps(&self) -> PaneState {
+    /// password prompt by the modes and the text. `own` is what the burst has
+    /// typed on this line so far: the text test looks at the line before that
+    /// echo, so a command naming "password:" is not a prompt of its own (it
+    /// was cut halfway on kepler, 2026-11-22), while a prompt that came up
+    /// mid-burst, its echo after it, still is.
+    pub(crate) fn state_between_steps(&self, own: &str) -> PaneState {
         let mut st = self.state();
         if !st.exited {
-            st.password |= password_line(&lock(&self.screen).grid.cursor_line_text());
+            st.password |= password_line(before_own_echo(&lock(&self.screen).grid.cursor_line_text(), own));
         }
         st
     }
