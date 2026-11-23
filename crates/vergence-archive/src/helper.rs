@@ -179,6 +179,10 @@ fn run(reader: &Reader, out: &mut impl Write, list: bool, max_bytes: u64, max_en
             continue;
         };
         stream::write_entry(out, &h)?;
+        if list {
+            // Said at once: skipping a big entry says nothing until it is done.
+            out.flush()?;
+        }
         if list || h.kind != Kind::File {
             // SAFETY: a live archive positioned at this entry's contents.
             unsafe { ffi::archive_read_data_skip(a) };
@@ -215,11 +219,12 @@ fn header(e: *mut ffi::Entry) -> Option<Header> {
         .or_else(|| unsafe { ffi::bytes(ffi::archive_entry_hardlink(e)) });
     let kind_bits = u32::from(unsafe { ffi::archive_entry_filetype(e) }) & ffi::IFMT;
     // A hard link that carries contents (cpio's newc, as in an .rpm, puts
-    // them with the last link) is passed on as a file of its own, or they
-    // would be lost (the review, 2026-11-23).
+    // them with the last link) is passed on as a file with its link target,
+    // or they would be lost (the review, 2026-11-23).
     let carries = unsafe { ffi::archive_entry_size_is_set(e) } != 0 && unsafe { ffi::archive_entry_size(e) } > 0;
     let (kind, link) = match (hard, kind_bits) {
-        (Some(_), ffi::IFREG) if carries => (Kind::File, Vec::new()),
+        // Its target goes with it: the app writes the contents there.
+        (Some(target), ffi::IFREG) if carries => (Kind::File, target),
         (Some(target), _) => (Kind::Hardlink, target),
         (None, ffi::IFREG) => (Kind::File, Vec::new()),
         (None, ffi::IFDIR) => (Kind::Dir, Vec::new()),

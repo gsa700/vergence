@@ -209,3 +209,19 @@ from the review's own archives (the one-folder escape, the chain, raw
 names, permissions); archive tests 12 on Hubble and kepler; workspace
 Hubble 1,046, techbench 1,046, kepler 1,035; display suite 16 and 20 on
 Hubble.
+
+The reviewer's second pass (34b4300): both high fixes hold on a
+case-sensitive file system. Fixed after it:
+- **On a file system that ignores case or normalizes names** (an SMB
+  mount, ZFS casesensitivity=insensitive, ext4 casefold), `A/UP` is the
+  link `a/up`, which the byte-for-byte set misses, and the recheck kept a
+  link whose target did not exist yet. The recheck now walks each link's
+  target on the real file system: removed if it passes through any link or
+  climbs above the placed folder, whether the target exists or not.
+- cpio hard links: the one carrying the contents comes with its target;
+  the contents go into the target (a file made here), and the link after.
+- A silence timeout is back, at 30 minutes (listing flushes each entry).
+- A panic in an extract no longer leaves the hidden folder behind.
+
+Tests: archive 12 + 3; workspace Hubble 1,047, techbench 1,047, kepler
+1,036; display suite 20 on Hubble.

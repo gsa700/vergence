@@ -144,17 +144,23 @@ pub fn helper() -> Option<PathBuf> {
     .find(|p| p.is_file())
 }
 
-/// A running helper, killed when `stop` is set (its pipe then ends, so a
-/// read in progress returns). The child is shared with the watchdog under a
-/// lock, and reaped under it, so a kill never reaches a process that has
-/// already been reaped (whose pid may be someone else's by then: the
-/// review, 2026-11-23). No timeout of its own: the helper can block on
-/// nothing but its pipe, and its processor time is limited.
+/// A running helper, killed when `stop` is set or after [`SILENCE`] with
+/// nothing said (its pipe then ends, so a read in progress returns). The
+/// child is shared with the watchdog under a lock, and reaped under it, so
+/// a kill never reaches a process that has already been reaped (whose pid
+/// may be someone else's by then: the review, 2026-11-23).
 struct Running {
     child: Arc<std::sync::Mutex<Option<std::process::Child>>>,
     out: io::BufReader<std::process::ChildStdout>,
     alive: Arc<AtomicBool>,
+    heard: Arc<AtomicU64>,
 }
+
+/// A helper that says nothing for this long is stopped: long, since skipping
+/// one big entry of a compressed archive says nothing until it is done (the
+/// helper sends each listed entry at once), but not the helper's four hours
+/// of processor time for an archive that makes it go round in circles.
+const SILENCE: Duration = Duration::from_secs(30 * 60);
 
 impl Running {
     fn start(helper: &Path, archive: &Path, args: &[String], stop: Arc<AtomicBool>) -> Result<Running, Error> {
@@ -168,11 +174,17 @@ impl Running {
         let out = io::BufReader::with_capacity(1 << 20, child.stdout.take().ok_or(Error::NoHelper)?);
         let child = Arc::new(std::sync::Mutex::new(Some(child)));
         let alive = Arc::new(AtomicBool::new(true));
-        let (c, a) = (child.clone(), alive.clone());
+        let heard = Arc::new(AtomicU64::new(0));
+        let (c, a, h) = (child.clone(), alive.clone(), heard.clone());
         std::thread::spawn(move || {
+            let tick = Duration::from_millis(100);
+            let (mut last, mut quiet) = (u64::MAX, Duration::ZERO);
             while a.load(Ordering::Relaxed) {
-                std::thread::sleep(Duration::from_millis(100));
-                if stop.load(Ordering::Relaxed) {
+                std::thread::sleep(tick);
+                let now = h.load(Ordering::Relaxed);
+                quiet = if now == last { quiet + tick } else { Duration::ZERO };
+                last = now;
+                if stop.load(Ordering::Relaxed) || quiet >= SILENCE {
                     if let Some(ch) = c.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
                         let _ = ch.kill();
                     }
@@ -180,11 +192,13 @@ impl Running {
                 }
             }
         });
-        Ok(Running { child, out, alive })
+        Ok(Running { child, out, alive, heard })
     }
 
     fn next(&mut self) -> io::Result<Message> {
-        stream::read_message(&mut self.out)
+        let m = stream::read_message(&mut self.out);
+        self.heard.fetch_add(1, Ordering::Relaxed);
+        m
     }
 }
 
@@ -370,13 +384,24 @@ pub fn extract_with(
     // size was said (the person was asked about the total).
     let most = if listing.unknown { listing.total.max(ASK_BYTES) } else { listing.total }.saturating_add(SLACK);
     let hidden = hidden_folder(into)?;
+    // Removed however this ends short of placing, a panic included.
+    struct Hidden<'a>(&'a Path);
+    impl Drop for Hidden<'_> {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(self.0);
+        }
+    }
+    let guard = Hidden(&hidden);
     let made = (|| {
         let w = write_all(helper, archive, &hidden, listing.entries, most, progress)?;
         let made = place(&hidden, into, archive, w.top.as_deref())?;
         Ok(Extracted { made: made.clone(), skipped: w.skipped + recheck_links(&made, &w.links) })
     })();
-    if made.is_err() {
-        let _ = fs::remove_dir_all(&hidden);
+    if made.is_ok() {
+        // Placed: what is left of it, if anything, is the empty hidden
+        // folder (its one folder moved out) or nothing (moved whole).
+        std::mem::forget(guard);
+        let _ = fs::remove_dir(&hidden);
     }
     made
 }
@@ -423,23 +448,62 @@ fn place(hidden: &Path, into: &Path, archive: &Path, top: Option<&[u8]>) -> Resu
     Err(Error::Io(io::Error::other("no free name")))
 }
 
-/// After placing, each symbolic link made is resolved once more: one that
-/// leads outside the placed folder is removed (a second line behind
-/// `link_inside`). A link to nothing stays, as the archive had it. How many
-/// were removed.
+/// After placing, each symbolic link made is walked once more on the real
+/// file system, a second line behind `link_inside`: removed if its target
+/// climbs above the placed folder or passes through any link on the way
+/// (whatever the name's case: on a file system that ignores case or
+/// normalizes names, `A/UP` is the link `a/up`, which a byte-for-byte check
+/// misses: the review's second pass, 2026-11-23), whether the target
+/// exists or not. How many were removed.
 fn recheck_links(made: &Path, links: &[Parts]) -> u64 {
-    let Ok(root) = made.canonicalize() else { return 0 };
     let mut removed = 0;
     for parts in links {
         let p = path_of(made, parts);
-        if let Ok(real) = p.canonicalize()
-            && !real.starts_with(&root)
-        {
+        let Ok(target) = fs::read_link(&p) else { continue };
+        if !walk_inside(made, parts, &target) {
             let _ = fs::remove_file(&p);
             removed += 1;
         }
     }
     removed
+}
+
+/// Whether `target`, followed from the link at `parts` under `root` on the
+/// real file system, stays inside: every folder it passes is a real one
+/// (not a link), and `..` never climbs above `root`. A part that does not
+/// exist ends the walk inside (nothing there to lead anywhere).
+fn walk_inside(root: &Path, parts: &[Vec<u8>], target: &Path) -> bool {
+    use std::path::Component;
+    if target.is_absolute() {
+        return false;
+    }
+    let mut depth = parts.len().saturating_sub(1);
+    let mut at = path_of(root, &parts[..depth]);
+    let comps: Vec<Component> = target.components().collect();
+    for (i, c) in comps.iter().enumerate() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                let Some(d) = depth.checked_sub(1) else { return false };
+                depth = d;
+                at.pop();
+            }
+            Component::Normal(n) => {
+                at.push(n);
+                depth += 1;
+                if i + 1 == comps.len() {
+                    break;
+                }
+                match at.symlink_metadata() {
+                    Ok(m) if m.file_type().is_symlink() => return false,
+                    Ok(_) => {}
+                    Err(_) => return true,
+                }
+            }
+            _ => return false,
+        }
+    }
+    true
 }
 
 /// What [`write_all`] made: how many were skipped, the one folder at the
@@ -517,6 +581,24 @@ fn write_all(
                             skipped += 1;
                         }
                     }
+                    // A hard link carrying contents (cpio's newc puts them with
+                    // the last link): written into the file it links to, if made
+                    // here, and linked after (the review's second pass).
+                    Kind::File if !h.link.is_empty() => match clean(&h.link).filter(|t| files.contains(t)) {
+                        Some(t) => {
+                            let target = path_of(root, &t);
+                            match fs::OpenOptions::new().write(true).truncate(true).open(&target) {
+                                Ok(f) => {
+                                    let mut link = h.clone();
+                                    link.kind = Kind::Hardlink;
+                                    links.push((parts, link));
+                                    open = Some((f, target, h));
+                                }
+                                Err(_) => skipped += 1,
+                            }
+                        }
+                        None => skipped += 1,
+                    },
                     Kind::File => {
                         if !real_parents(root, &parts) {
                             skipped += 1;
@@ -598,4 +680,30 @@ pub fn check_confined(helper: &Path) -> io::Result<Option<i32>> {
     let out = Command::new(helper).arg("--check-confined").stdin(Stdio::null()).output()?;
     use std::os::unix::process::ExitStatusExt;
     Ok(out.status.code().or_else(|| out.status.signal().map(|s| 128 + s)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The walk on the real file system: through a link on the way is out
+    /// (as a name of another case would reach it where case is ignored),
+    /// above the top is out, a target that does not exist yet stays in.
+    #[test]
+    fn the_walk_after_placing() {
+        let root = std::env::temp_dir().join(format!("vergence-walk-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("a/b")).unwrap();
+        std::os::unix::fs::symlink("..", root.join("a/up")).unwrap();
+        let at = |s: &str| -> Parts { s.split('/').map(|p| p.as_bytes().to_vec()).collect() };
+        assert!(walk_inside(&root, &at("p"), Path::new("a/b/c")));
+        assert!(walk_inside(&root, &at("p"), Path::new("a/up")), "ending at a link is checked by itself");
+        assert!(!walk_inside(&root, &at("p"), Path::new("a/up/x")), "through a link");
+        assert!(!walk_inside(&root, &at("p"), Path::new("../x")), "above the top");
+        assert!(walk_inside(&root, &at("a/b/p"), Path::new("../../x")));
+        assert!(!walk_inside(&root, &at("a/b/p"), Path::new("../../../x")));
+        assert!(walk_inside(&root, &at("p"), Path::new("not/there/yet")));
+        assert!(!walk_inside(&root, &at("p"), Path::new("/etc/passwd")));
+        let _ = fs::remove_dir_all(&root);
+    }
 }
