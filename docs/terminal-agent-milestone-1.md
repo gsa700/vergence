@@ -1,5 +1,13 @@
 # Terminal agent milestone 1: Terminal on the agent interface
 
+**Built 2026-11-22; ready to close after Dave's hands-on pass.** Then the
+agent layer is **frozen** (Dave, 2026-11-22: "agree, finish the terminal
+milestone then freeze it. we'll see how it is in real day to day. if it seems
+useful we'll continue, if not, we've the proof of concept."): no new agent
+features unless day-to-day use asks for them; what is there is maintained and
+reviewed; the meaning tree keeps growing for accessibility and testing;
+revisit after about a month of real use.
+
 *Drafted 2026-11-22 with Dave's answers.* The roadmap's "The terminal on the
 agent interface" (docs/apps-roadmap.md): today vergence-term publishes no
 meaning (`vagent windows` lists it as "(no meaning)"), so an agent can neither
@@ -286,3 +294,29 @@ All questions answered: ready to build.
   system not listed. See "This tab only, with a visual" above for the tab
   marks.
 
+**Closing steps (2026-11-22 evening):**
+- agents.log records the window's answer to each act as its own line, by
+  the server's act number: "act N: …, asked", then "act N: acted" or "act N:
+  refused: <why>" (703528f, 2b490aa), so a forwarded key never reads as typed
+  (the review's ctrl+d/ctrl+c question: both were refused).
+- agent-check has a terminal part (8613885; `agent-check.sh terminal` alone):
+  its own terminal typed in and read back; its grant nothing in another
+  terminal with the same tab ids; a root shell; a program named ssh in front;
+  typing again once the person ends it; Escape twice; the log's answers.
+- Display suite 19 (77fa0f3): the person's tab marked for a read grant, the
+  agent's own for typing, one mark a tab, gone after Escape twice; `vctl
+  agents` lists the marks the bars draw ("mark: window C/W tab #N …").
+- kepler, the first FreeBSD run: workspace tests 1,013 pass; agent-check's
+  terminal part 8 of 8; real prompts refused: ssh-keygen's passphrase prompt
+  (readpassphrase: termios on the pty master, canonical without echo), the
+  shell's `read` after `stty -echo`, and a prompt known by its text only;
+  root after `sudo -s` and a program named ssh in front, by procstat.
+  One fix found there (cffd867): between a burst's steps the text test
+  looked at the whole cursor line, so the agent's own command naming
+  "Password:" was cut halfway; it now looks before the agent's own echo,
+  and a prompt that comes up mid-burst still stops it.
+- Hubble: workspace tests 1,024, display suite 19 of 19, agent-check (all
+  parts) 19 of 19. techbench: tests 1,024 (not installed: it runs from the
+  package). Package `vergence-0.1.0_6` built from 2b490aa (GitHub's commit
+  tarball) and put in techbench's ~/vergence-repo, waiting for Dave's
+  install (the bus moved: a session restart).

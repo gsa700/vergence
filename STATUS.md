@@ -12,9 +12,14 @@ sync.
 
 ## In progress
 
-Terminal on the agent interface (docs/terminal-agent-milestone-1.md):
-steps 1-4 and vagent/MCP in git (bus v38), not installed; left: agent-check's
-terminal part, the display-suite scenario, kepler and techbench, the review.
+Terminal on the agent interface (docs/terminal-agent-milestone-1.md): built,
+reviewed and fixed (bus v39), tested on Hubble, kepler (FreeBSD) and techbench;
+ready to close after Dave's hands-on pass. Package vergence-0.1.0_6 waits in
+techbench's local repository for his install; Hubble and kepler are ready to
+install (both need a session restart). **Then the agent layer is frozen**
+(Dave, 2026-11-22): no new agent features unless day-to-day use asks;
+maintained and reviewed; the meaning tree keeps growing for accessibility and
+testing; revisit after about a month of real use.
 Packaging milestone 1 closed 2026-11-22 (docs/packaging-milestone-1.md):
 the `vergence` xbps package and `vergence-setup`; techbench runs from it.
 Defaults milestone 1 closed the same day.
