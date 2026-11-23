@@ -12,6 +12,9 @@
 //                                          press, focus, reveal, set <value>, choose <item>
 //   vagent act <client> <window> <node> <action> [value...]
 //   vagent changes [since]                 what changed since a number
+//   vagent read <client> <window> <node> [offset] [len]
+//                                          a widget's text: one page from offset
+//                                          (characters), or the whole of it in pages
 //
 // --name N says who the agent is (default "vagent"). Finds the bus from
 // $VERGENCE_BUS, else $WAYLAND_DISPLAY in $XDG_RUNTIME_DIR.
@@ -185,6 +188,49 @@ fn run(name: &str, args: &[String]) -> Result<String, String> {
                 role: String::new(),
                 name: String::new(),
             })?)
+        }
+        // A widget's whole text, past the tree's 512-character cut (bus v37).
+        "read" => {
+            let (client, window, node) = (num(1)? as u32, num(2)? as u32, num(3)?);
+            let page = |c: &mut _, offset: u32, len: u32| -> Result<(u32, String), String> {
+                match ask(c, |serial| AgentRequest::Read {
+                    serial,
+                    client,
+                    window,
+                    node,
+                    offset,
+                    len,
+                    role: String::new(),
+                    name: String::new(),
+                })? {
+                    AgentEvent::Text { total, text, .. } => Ok((total, text)),
+                    other => Err(format!("unexpected {other:?}")),
+                }
+            };
+            match args.get(4) {
+                // One page, and where it ends of the whole.
+                Some(o) => {
+                    let offset: u32 = o.parse().map_err(|_| usage())?;
+                    let len = args.get(5).and_then(|l| l.parse().ok()).unwrap_or(u32::MAX);
+                    let (total, text) = page(&mut c, offset, len)?;
+                    let end = offset + text.chars().count() as u32;
+                    Ok(format!("{text}\n[{offset}..{end} of {total}]"))
+                }
+                // The whole text, page after page.
+                None => {
+                    let mut all = String::new();
+                    let mut offset = 0u32;
+                    loop {
+                        let (total, text) = page(&mut c, offset, u32::MAX)?;
+                        let got = text.chars().count() as u32;
+                        all.push_str(&text);
+                        offset += got;
+                        if got == 0 || offset >= total {
+                            break Ok(format!("{all}\n[{offset} characters]"));
+                        }
+                    }
+                }
+            }
         }
         "changes" => {
             let since = args.get(1).and_then(|a| a.parse().ok()).unwrap_or(0);

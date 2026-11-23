@@ -108,8 +108,8 @@ an AI collaborator must know to work here safely.
 - The agent interface (`vagent --name Claude ...`, or `vergence-agent-mcp`)
   needs `XDG_RUNTIME_DIR` and `WAYLAND_DISPLAY=wayland-1` over ssh; each app
   is asked of Dave in a server-drawn dialog. A text area's value in the tree
-  is cut at 512 characters: read long documents from disk. vtile needs the
-  same environment.
+  is cut at 512 characters: read the whole of it with `vagent read <client>
+  <window> <node>` (bus v37, in pages). vtile needs the same environment.
 - Never start the login screen on a machine where Dave is logged in (vdm
   refuses while a session is registered). vdm's log: /var/log/messages on
   FreeBSD, socklog on Void.

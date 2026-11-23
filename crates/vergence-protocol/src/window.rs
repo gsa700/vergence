@@ -418,6 +418,18 @@ pub enum WinRequest {
         ok: bool,
         why: String,
     },
+    /// The answer to [`WinEvent::ReadText`] with this serial (bus v37): the
+    /// node's text from `offset` (in characters), `total` characters in all;
+    /// `found` false when there is no such node now.
+    TextPage {
+        window: u32,
+        serial: u32,
+        node: u64,
+        found: bool,
+        offset: u32,
+        total: u32,
+        text: String,
+    },
     /// The window as a display list (display lists milestone 1, bus v30):
     /// a scene in vergence-scene's keyed wire form (version 2), `len` bytes
     /// at the start of the memfd `fd`, read when the server reads this
@@ -894,7 +906,24 @@ pub enum WinEvent {
     SessionEnding {
         window: u32,
     },
+    /// Send the text of meaning node `node` (its value, else its name) from
+    /// character `offset`, at most `len` characters (bus v37, paged reading:
+    /// the tree cuts every text at [`MEANING_TEXT_MAX`] characters). Answered
+    /// by [`WinRequest::TextPage`] with the same serial.
+    ReadText {
+        window: u32,
+        serial: u32,
+        node: u64,
+        offset: u32,
+        len: u32,
+    },
 }
+
+/// The most characters a page of text carries ([`WinEvent::ReadText`]): with
+/// four bytes a character at worst, well inside a frame.
+pub const TEXT_PAGE_MAX: u32 = 8192;
+/// What the tree cuts every name and value at (the toolkit's meaning request).
+pub const MEANING_TEXT_MAX: usize = 512;
 
 pub(crate) mod op {
     // Client to server.
@@ -926,6 +955,7 @@ pub(crate) mod op {
     pub const GROUND_CLICKED: u16 = 125;
     pub const ACTED: u16 = 126;
     pub const SCENE: u16 = 127;
+    pub const TEXT_PAGE: u16 = 128;
     // Server to client.
     pub const CREATED: u16 = 100;
     pub const CONFIGURE: u16 = 101;
@@ -964,6 +994,7 @@ pub(crate) mod op {
     pub const ACT: u16 = 134;
     pub const SCENES_OFF: u16 = 135;
     pub const SESSION_ENDING: u16 = 136;
+    pub const READ_TEXT: u16 = 137;
 
     /// Whether an opcode is a window message's (either way).
     pub fn is_window(opcode: u16) -> bool {
@@ -1380,6 +1411,11 @@ impl WinRequest {
                 e.u32(*window).u32(*serial).bool(*ok).str(why);
                 e
             }
+            WinRequest::TextPage { window, serial, node, found, offset, total, text } => {
+                let mut e = Encoder::frame(op::TEXT_PAGE);
+                e.u32(*window).u32(*serial).u64(*node).bool(*found).u32(*offset).u32(*total).str(text);
+                e
+            }
             WinRequest::Scene { window, fd, len, forget } => {
                 let mut e = Encoder::frame(op::SCENE);
                 fds.push(fd.raw());
@@ -1575,6 +1611,15 @@ impl WinRequest {
             }
             op::GROUND_CLICKED => WinRequest::GroundClicked { window: d.u32()? },
             op::ACTED => WinRequest::Acted { window: d.u32()?, serial: d.u32()?, ok: d.bool()?, why: d.str()? },
+            op::TEXT_PAGE => {
+                let (window, serial, node, found, offset, total) =
+                    (d.u32()?, d.u32()?, d.u64()?, d.bool()?, d.u32()?, d.u32()?);
+                let text = d.str()?;
+                if text.chars().count() > TEXT_PAGE_MAX as usize {
+                    return Err(WireError::TooLong(text.len()));
+                }
+                WinRequest::TextPage { window, serial, node, found, offset, total, text }
+            }
             op::SCENE => {
                 let mut got = take(fds, &mut d)?;
                 if got.len() != 1 {
@@ -1793,6 +1838,11 @@ impl WinEvent {
                 e.u32(*window);
                 e
             }
+            WinEvent::ReadText { window, serial, node, offset, len } => {
+                let mut e = Encoder::frame(op::READ_TEXT);
+                e.u32(*window).u32(*serial).u64(*node).u32(*offset).u32(*len);
+                e
+            }
             WinEvent::ScenesOff { window, why } => {
                 let mut e = Encoder::frame(op::SCENES_OFF);
                 e.u32(*window).str(why);
@@ -1941,6 +1991,13 @@ impl WinEvent {
             }
             op::SCENES_OFF => WinEvent::ScenesOff { window: d.u32()?, why: d.str()? },
             op::SESSION_ENDING => WinEvent::SessionEnding { window: d.u32()? },
+            op::READ_TEXT => WinEvent::ReadText {
+                window: d.u32()?,
+                serial: d.u32()?,
+                node: d.u64()?,
+                offset: d.u32()?,
+                len: d.u32()?,
+            },
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -2222,6 +2279,24 @@ mod tests {
             WinRequest::GroundClicked { window: 1 },
             WinRequest::Acted { window: 1, serial: 7, ok: false, why: "it is off".into() },
             WinRequest::Acted { window: 2, serial: 8, ok: true, why: String::new() },
+            WinRequest::TextPage {
+                window: 1,
+                serial: 9,
+                node: 1 << 40,
+                found: true,
+                offset: 512,
+                total: 2000,
+                text: "wörld ".repeat(40),
+            },
+            WinRequest::TextPage {
+                window: 1,
+                serial: 10,
+                node: 7,
+                found: false,
+                offset: 0,
+                total: 0,
+                text: String::new(),
+            },
             WinRequest::Scene { window: 1, fd: a.clone(), len: 4096, forget: vec![7, 1 << 63] },
             WinRequest::Menu {
                 window: 1,
@@ -2341,6 +2416,7 @@ mod tests {
             WinEvent::Act { window: 1, serial: 11, node: 5, action: Action::Reveal },
             WinEvent::ScenesOff { window: 1, why: "too costly to draw".into() },
             WinEvent::SessionEnding { window: 2 },
+            WinEvent::ReadText { window: 2, serial: 12, node: 1 << 33, offset: 8192, len: 8192 },
         ];
         for m in all {
             let (bytes, fds) = m.encode().unwrap();

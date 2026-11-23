@@ -70,11 +70,14 @@
 //! showing its name; a dialog that asks for a size keeps its center.
 //! Version 36 (preview milestone 1, step 6b): `window::WinRequest::Style::frosted`,
 //! a window with no ground of its own, frosted by the server behind its whole body.
+//! Version 37 (terminal agent milestone 1, paged reading): `agent::AgentRequest::Read` and
+//! `agent::AgentEvent::Text`, a node's whole text in pages; `window::WinEvent::ReadText`
+//! and `window::WinRequest::TextPage`, the window's side of it.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 36;
+pub const VERSION: u32 = 37;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

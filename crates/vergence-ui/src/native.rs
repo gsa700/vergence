@@ -140,6 +140,9 @@ struct Win<'a> {
     bar_by_server: bool,
     /// The strip under the server's bar it draws (look milestone 1), points.
     inset: f32,
+    /// The meaning last sent, whole (the request cuts every text at 512
+    /// characters): an agent's paged reading (bus v37) is answered from it.
+    meaning: Option<MeaningTree>,
     /// The wallpaper's color behind it, as the server last said (Tint).
     tint: Option<Color>,
 }
@@ -363,6 +366,7 @@ impl<'a> Win<'a> {
             timers: Vec::new(),
             bar_by_server,
             inset: 0.0,
+            meaning: None,
             tint: None,
         }
     }
@@ -842,6 +846,18 @@ impl<'a> Native<'a> {
                 };
                 self.send(WinRequest::Acted { window, serial, ok, why })?;
             }
+            // A page of a widget's whole text, for an agent (bus v37).
+            WinEvent::ReadText { window, serial, node, offset, len } => {
+                let page = self
+                    .index(window)
+                    .and_then(|i| self.windows[i].meaning.as_ref())
+                    .and_then(|tree| text_page(tree, node, offset, len));
+                let (found, total, text) = match page {
+                    Some((total, text)) => (true, total, text),
+                    None => (false, 0, String::new()),
+                };
+                self.send(WinRequest::TextPage { window, serial, node, found, offset, total, text })?;
+            }
             // Drag and drop (files milestone 1, step 8).
             // In the picture's own points, as the pointer's are: the strip
             // under the server's bar (inset) counted in (files milestone 3:
@@ -1172,6 +1188,7 @@ impl<'a> Native<'a> {
         // The window's meaning, when it has changed (Contract 3).
         if let Some(tree) = self.windows[i].app.get().meaning() {
             self.send(meaning_request(id, &tree))?;
+            self.windows[i].meaning = Some(tree);
         }
         // Its app menu and bar style, when they have changed (app settings milestone 1).
         if let Some((terminal, commands)) = self.windows[i].app.get().commands() {
@@ -1190,6 +1207,17 @@ impl<'a> Native<'a> {
 /// pieces comes when a window needs more).
 const MEANING_BUDGET: usize = 60 * 1024;
 const MEANING_TEXT: usize = 512;
+
+/// A page of node `node`'s text (its value, else its name): from character
+/// `offset`, at most `len` characters (and never more than a page). None if
+/// there is no such node. Characters, never bytes, so a page never splits one.
+fn text_page(tree: &MeaningTree, node: u64, offset: u32, len: u32) -> Option<(u32, String)> {
+    let n = tree.nodes.iter().find(|n| n.id == node)?;
+    let text = n.value.as_deref().unwrap_or(&n.name);
+    let total = text.chars().count().min(u32::MAX as usize) as u32;
+    let len = len.min(vergence_protocol::window::TEXT_PAGE_MAX) as usize;
+    Some((total, text.chars().skip(offset as usize).take(len).collect()))
+}
 
 /// The tree as the protocol's Meaning request, within its limits.
 fn meaning_request(window: u32, tree: &MeaningTree) -> WinRequest {
@@ -1270,6 +1298,36 @@ mod tests {
         assert!(nodes.iter().all(|n| n.name.chars().count() <= MEANING_TEXT && n.states.len() <= MAX_STATES));
         let bytes = ClientMsg::Window(req).encode().expect("fits one frame");
         assert!(bytes.len() <= 64 * 1024, "{} bytes", bytes.len());
+    }
+
+    #[test]
+    fn a_long_value_reads_back_whole_in_pages() {
+        // Node 6 (the helper numbers from 1): 2,000 characters, some of them several bytes long: the tree cuts it
+        // at 512, the pages give it back whole.
+        let long: String =
+            (0..2000).map(|i| if i % 7 == 0 { 'é' } else { char::from(b'a' + (i % 26) as u8) }).collect();
+        let mut n = node(5, 3);
+        n.value = Some(long.clone());
+        let tree =
+            MeaningTree { focus: 0, caret: None, nodes: vec![crate::MeaningNode { value: None, ..node(1, 3) }, n] };
+        let WinRequest::Meaning { nodes, .. } = meaning_request(1, &tree) else { panic!() };
+        assert_eq!(nodes[1].value.as_ref().unwrap().chars().count(), MEANING_TEXT, "the tree cuts it");
+        let mut read = String::new();
+        let mut offset = 0;
+        loop {
+            let (total, page) = text_page(&tree, 6, offset, 700).expect("the node");
+            assert_eq!(total, 2000);
+            if page.is_empty() {
+                break;
+            }
+            offset += page.chars().count() as u32;
+            read.push_str(&page);
+        }
+        assert_eq!(read, long);
+        assert!(text_page(&tree, 99, 0, 10).is_none(), "no such node");
+        assert_eq!(text_page(&tree, 2, 0, 10).unwrap().1, node(1, 3).name, "no value: the name");
+        let (_, big) = text_page(&tree, 6, 0, u32::MAX).unwrap();
+        assert!(big.chars().count() <= vergence_protocol::window::TEXT_PAGE_MAX as usize);
     }
 
     #[test]

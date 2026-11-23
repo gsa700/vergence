@@ -95,3 +95,22 @@ you", naming the tab; buttons Don't allow, Just now, For an hour.
    person's tabs (the window titled with the agent's name).
 
 All questions answered: ready to build.
+
+## Progress
+
+- **Paged reading** (plan step 2, built first; bus v37), 2026-11-22.
+  `AgentRequest::Read` / `AgentEvent::Text` for agents,
+  `WinEvent::ReadText` / `WinRequest::TextPage` for windows; pages of at
+  most 8,192 characters (`window::TEXT_PAGE_MAX`), counted in characters,
+  never split. The toolkit keeps each window's last whole tree and answers
+  from it; the server checks the app as for a tree read, refuses a secret
+  field, a gone widget or one that changed (role/name), logs the read, and
+  fails a read the window does not answer in 10 s or whose window goes.
+  `vagent read <client> <window> <node> [offset] [len]` (whole text, or one
+  page) and the MCP `read` tool. Edit's text area now publishes the text
+  alone (it ended in "(line l, column c)", which a reader got back as part
+  of the document; the caret stays the tree's caret) and whole up to 4 MB
+  (64 KB before: past it there was nothing to read). Checked in a headless
+  session on Hubble: a 4,260-character file with é, ü, ï read back exactly
+  in pages, one page from offset 1000, a gone node refused.
+

@@ -484,7 +484,9 @@ impl Server {
         let mut apps: Vec<String> = Vec::new();
         let key_of = |s: &Server, w: &Win| w.native().map(|n| s.agent_app_key(n.client, &n.app_id));
         match &r {
-            AgentRequest::Tree { client, window, .. } | AgentRequest::Act { client, window, .. } => {
+            AgentRequest::Tree { client, window, .. }
+            | AgentRequest::Act { client, window, .. }
+            | AgentRequest::Read { client, window, .. } => {
                 if let Some(w) = self.natives.get(&(*client, *window)).cloned() {
                     apps.extend(key_of(self, &w));
                 }
@@ -650,6 +652,37 @@ impl Server {
                 self.agent_ring(&agent, (loc.0 + m.x, loc.1 + m.y, m.w, m.h), win);
                 if self.send_act(&w, node, action, Some((id, serial))).is_none() {
                     reply(self, AgentEvent::Acted { serial, ok: false, why: "not a native window".into() });
+                }
+            }
+            // A widget's whole text in pages (bus v37): the tree cuts every
+            // text at 512 characters; the window answers from its own.
+            AgentRequest::Read { serial, client, window, node, offset, len, role, name } => {
+                let Some(w) = self.natives.get(&(client, window)).cloned() else {
+                    return refuse(self, serial, ErrorCode::Failed, format!("no native window {client}/{window}"));
+                };
+                let current = w
+                    .native()
+                    .and_then(|n| n.meaning())
+                    .and_then(|(_, _, nodes)| nodes.into_iter().find(|m| m.id == node));
+                let Some(m) = current else {
+                    return refuse(self, serial, ErrorCode::Failed, "no such widget now (the window changed)".into());
+                };
+                // A secret field sends no value, and none is read.
+                if m.states.iter().any(|s| s == "secret") {
+                    return refuse(self, serial, ErrorCode::Denied, "a secret field is not read by agents".into());
+                }
+                if (!role.is_empty() && m.role != role) || (!name.is_empty() && m.name != name) {
+                    return refuse(
+                        self,
+                        serial,
+                        ErrorCode::Failed,
+                        format!("the widget changed: it is now the {} {:?}", m.role, m.name),
+                    );
+                }
+                let app = w.native().map(|n| n.app_id.clone()).unwrap_or_default();
+                self.agent_log(id, &app, &format!("read #{node} ({} {:?}) from {offset}", m.role, m.name));
+                if self.send_read(&w, node, offset, len, id, serial).is_none() {
+                    refuse(self, serial, ErrorCode::Failed, "not a native window".into());
                 }
             }
             AgentRequest::Changes { serial, since } => {

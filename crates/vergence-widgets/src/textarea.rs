@@ -93,8 +93,11 @@ const PAD_Y: f32 = 4.0;
 const GUTTER_PAD: f32 = 8.0;
 const BAR_W: f32 = 6.0;
 const MIN_THUMB: f32 = 24.0;
-/// A text this long or shorter is told whole to a screen reader.
-const TELL_WHOLE: usize = 64 * 1024;
+/// A text this long or shorter is told whole to a screen reader and to an
+/// agent, which reads it in pages (bus v37; 64 KB before: an editor's longer
+/// document gave an agent nothing to read). The tree is built again at each
+/// change: copying this much costs about a millisecond.
+const TELL_WHOLE: usize = 4 << 20;
 
 /// How a text area shows and edits its text.
 #[derive(Clone, Debug, PartialEq)]
@@ -1753,11 +1756,14 @@ impl Doc {
         }
     }
 
-    /// What a screen reader is told: the whole text if not too long, the caret's place.
+    /// What a screen reader or an agent is told: the whole text if not too
+    /// long (the text alone, so reading it gives the document back; the
+    /// caret's place is the tree's caret, `focused` for an agent), else where
+    /// the caret is.
     pub(crate) fn meaning_value(&self) -> String {
         let (l, c) = self.line_column();
         if self.buffer.bytes() <= TELL_WHOLE {
-            format!("{} (line {l}, column {c})", self.buffer.to_text())
+            self.buffer.to_text()
         } else {
             format!("line {l} of {}, column {c}", self.buffer.line_count())
         }

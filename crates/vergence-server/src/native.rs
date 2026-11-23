@@ -92,7 +92,14 @@ pub struct Acts {
     next: u32,
     /// By serial.
     sent: std::collections::BTreeMap<u32, ActSent>,
+    /// Agents' paged reads (bus v37) waiting for their window, by serial
+    /// (the same numbering as actions).
+    reads: std::collections::BTreeMap<u32, ReadSent>,
 }
+
+/// A read sent: the client and window it went to, the agent's bus client and
+/// serial, the node, and when it went.
+type ReadSent = (u32, u32, u32, u32, u64, std::time::Instant);
 
 /// An action sent: the client and window it went to, its answer (done, or
 /// why not) once given, the agent to pass the answer to (its bus client and
@@ -999,6 +1006,33 @@ impl Server {
                     }
                 }
             }
+            WinRequest::TextPage { window, serial, node, found, offset, total, text } => {
+                if let Some(&(c, w, agent, agent_serial, n, _)) = self.acts.reads.get(&serial)
+                    && c == client
+                    && w == window
+                    && n == node
+                {
+                    self.acts.reads.remove(&serial);
+                    let msg = if found {
+                        vergence_protocol::bus::ServerMsg::Agent(vergence_protocol::agent::AgentEvent::Text {
+                            serial: agent_serial,
+                            client,
+                            window,
+                            node,
+                            offset,
+                            total,
+                            text,
+                        })
+                    } else {
+                        vergence_protocol::bus::ServerMsg::Error {
+                            serial: agent_serial,
+                            code: vergence_protocol::bus::ErrorCode::Failed,
+                            message: "no such widget now (the window changed)".into(),
+                        }
+                    };
+                    self.bus_send(agent, msg);
+                }
+            }
             WinRequest::Meaning { window, focus, caret, nodes } => {
                 if let Some(w) = self.natives.get(&(client, window)).cloned()
                     && let Win::Native(n) = &w
@@ -1089,9 +1123,60 @@ impl Server {
         Some(serial)
     }
 
+    /// Asks native window `w` for a page of node `node`'s text for an agent
+    /// (bus v37): the answer goes to bus client `agent` with its `serial`.
+    /// None if `w` is not a native window.
+    pub fn send_read(&mut self, w: &Win, node: u64, offset: u32, len: u32, agent: u32, serial: u32) -> Option<u32> {
+        let n = w.native()?;
+        let (client, window) = (n.client, n.id);
+        self.acts.next = self.acts.next.wrapping_add(1).max(1);
+        let s = self.acts.next;
+        self.acts.reads.insert(s, (client, window, agent, serial, node, std::time::Instant::now()));
+        while self.acts.reads.len() > ACTS_KEPT {
+            if let Some((_, (_, _, agent, serial, _, _))) = self.acts.reads.pop_first() {
+                self.read_failed(agent, serial, "too many reads at once");
+            }
+        }
+        let len = len.min(vergence_protocol::window::TEXT_PAGE_MAX);
+        self.bus_send(
+            client,
+            vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::ReadText {
+                window,
+                serial: s,
+                node,
+                offset,
+                len,
+            }),
+        );
+        Some(s)
+    }
+
+    fn read_failed(&mut self, agent: u32, serial: u32, why: &str) {
+        self.bus_send(
+            agent,
+            vergence_protocol::bus::ServerMsg::Error {
+                serial,
+                code: vergence_protocol::bus::ErrorCode::Failed,
+                message: why.into(),
+            },
+        );
+    }
+
     /// Actions still unanswered by a window that went (or by every window
     /// of a client that left: `window` None) fail, and their agents hear why.
     pub fn acts_fail(&mut self, client: u32, window: Option<u32>) {
+        let gone: Vec<u32> = self
+            .acts
+            .reads
+            .iter()
+            .filter(|(_, r)| r.0 == client && window.is_none_or(|w| w == r.1))
+            .map(|(s, _)| *s)
+            .collect();
+        for s in gone {
+            if let Some((_, _, agent, serial, _, _)) = self.acts.reads.remove(&s) {
+                self.read_failed(agent, serial, "the window went away");
+            }
+        }
         let mut tell = Vec::new();
         for e in self.acts.sent.values_mut() {
             if e.0 == client && window.is_none_or(|w| w == e.1) && e.2.is_none() {
@@ -1114,6 +1199,13 @@ impl Server {
     /// Actions their windows have not answered in time fail (each second,
     /// with the dock's tick), and their agents hear so.
     pub fn acts_timeout(&mut self) {
+        let late: Vec<u32> =
+            self.acts.reads.iter().filter(|(_, r)| r.5.elapsed() > ACT_TIMEOUT).map(|(s, _)| *s).collect();
+        for s in late {
+            if let Some((_, _, agent, serial, _, _)) = self.acts.reads.remove(&s) {
+                self.read_failed(agent, serial, "the window did not answer");
+            }
+        }
         let mut tell = Vec::new();
         for e in self.acts.sent.values_mut() {
             if e.2.is_none() && e.4.elapsed() > ACT_TIMEOUT {

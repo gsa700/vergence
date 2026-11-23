@@ -484,7 +484,9 @@ make sure it works like we want it to." From now on, where a task can be done
 through the agent interface (reading an app's state, acting on it by name), the
 AI collaborator uses it rather than vctl or the disk, and notes what was
 awkward. Known rough edges to fix as they bite: a text area's value is cut at
-512 characters in the tree (long documents can't be read through it); paths
+512 characters in the tree (long documents can't be read through it; *closed
+2026-11-22, bus v37: `vagent read` / the MCP `read` tool read a widget's whole
+text in pages*); paths
 like "Edit > text area" don't find a window named by its document.
 
 **The terminal on the agent interface** (Dave, 2026-11-22: "the whole point

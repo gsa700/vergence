@@ -112,6 +112,11 @@ pub enum AgentRequest {
     Act { serial: u32, client: u32, window: u32, node: u64, action: Action, role: String, name: String },
     /// The changes after number `since`. Reply: [`AgentEvent::Changes`].
     Changes { serial: u32, since: u64 },
+    /// A widget's whole text in pages (bus v37): from character `offset`, at
+    /// most `len` characters (the server keeps a page within
+    /// [`crate::window::TEXT_PAGE_MAX`]). `role` and `name` as for `Act`.
+    /// Reply: [`AgentEvent::Text`].
+    Read { serial: u32, client: u32, window: u32, node: u64, offset: u32, len: u32, role: String, name: String },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -150,6 +155,16 @@ pub enum AgentEvent {
         latest: u64,
         changes: Vec<(u64, AgentChange)>,
     },
+    /// A page of a widget's text: from character `offset`, `total` in all.
+    Text {
+        serial: u32,
+        client: u32,
+        window: u32,
+        node: u64,
+        offset: u32,
+        total: u32,
+        text: String,
+    },
 }
 
 mod op {
@@ -161,6 +176,7 @@ mod op {
     pub const FOCUSED: u16 = 204;
     pub const ACT: u16 = 205;
     pub const CHANGES: u16 = 206;
+    pub const READ: u16 = 207;
     // Server to agent.
     pub const E_WINDOWS: u16 = 200;
     pub const E_TREE: u16 = 201;
@@ -168,6 +184,7 @@ mod op {
     pub const E_FOCUSED: u16 = 203;
     pub const E_ACTED: u16 = 204;
     pub const E_CHANGES: u16 = 205;
+    pub const E_TEXT: u16 = 206;
 }
 
 fn put_rect(e: &mut Encoder, r: &Rect4) {
@@ -253,6 +270,11 @@ impl AgentRequest {
                 e.u32(*serial).u64(*since);
                 e
             }
+            AgentRequest::Read { serial, client, window, node, offset, len, role, name } => {
+                let mut e = Encoder::frame(op::READ);
+                e.u32(*serial).u32(*client).u32(*window).u64(*node).u32(*offset).u32(*len).str(role).str(name);
+                e
+            }
         };
         e.finish()
     }
@@ -286,6 +308,10 @@ impl AgentRequest {
                     AgentRequest::Act { serial, client, window, node, action, role: d.str()?, name: d.str()? }
                 }
                 op::CHANGES => AgentRequest::Changes { serial, since: d.u64()? },
+                op::READ => {
+                    let (client, window, node, offset, len) = (d.u32()?, d.u32()?, d.u64()?, d.u32()?, d.u32()?);
+                    AgentRequest::Read { serial, client, window, node, offset, len, role: d.str()?, name: d.str()? }
+                }
                 other => return Err(WireError::UnknownOpcode(other)),
             })
         })();
@@ -300,7 +326,8 @@ impl AgentRequest {
             | AgentRequest::Find { serial, .. }
             | AgentRequest::Focused { serial }
             | AgentRequest::Act { serial, .. }
-            | AgentRequest::Changes { serial, .. } => *serial,
+            | AgentRequest::Changes { serial, .. }
+            | AgentRequest::Read { serial, .. } => *serial,
         }
     }
 }
@@ -314,7 +341,8 @@ impl AgentEvent {
             | AgentEvent::Found { serial, .. }
             | AgentEvent::Focused { serial, .. }
             | AgentEvent::Acted { serial, .. }
-            | AgentEvent::Changes { serial, .. } => *serial,
+            | AgentEvent::Changes { serial, .. }
+            | AgentEvent::Text { serial, .. } => *serial,
         }
     }
 
@@ -390,6 +418,11 @@ impl AgentEvent {
                 }
                 e
             }
+            AgentEvent::Text { serial, client, window, node, offset, total, text } => {
+                let mut e = Encoder::frame(op::E_TEXT);
+                e.u32(*serial).u32(*client).u32(*window).u64(*node).u32(*offset).u32(*total).str(text);
+                e
+            }
         };
         e.finish()
     }
@@ -458,6 +491,14 @@ impl AgentEvent {
                 }
                 AgentEvent::Changes { serial, latest, changes }
             }
+            op::E_TEXT => {
+                let (client, window, node, offset, total) = (d.u32()?, d.u32()?, d.u64()?, d.u32()?, d.u32()?);
+                let text = d.str()?;
+                if text.chars().count() > crate::window::TEXT_PAGE_MAX as usize {
+                    return Err(WireError::TooLong(text.len()));
+                }
+                AgentEvent::Text { serial, client, window, node, offset, total, text }
+            }
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -501,6 +542,16 @@ mod tests {
                 name: "Font".into(),
             },
             AgentRequest::Changes { serial: 7, since: 123 },
+            AgentRequest::Read {
+                serial: 8,
+                client: 4,
+                window: 1,
+                node: 1 << 40,
+                offset: 512,
+                len: 8192,
+                role: "text area".into(),
+                name: "Untitled".into(),
+            },
         ] {
             let bytes = r.encode().unwrap();
             let (len, opcode) = (
@@ -555,6 +606,15 @@ mod tests {
                     (40, AgentChange::Tree { client: 4, window: 1 }),
                     (41, AgentChange::Time { app: "vergence-calc".into(), minutes_left: 4 }),
                 ],
+            },
+            AgentEvent::Text {
+                serial: 8,
+                client: 4,
+                window: 1,
+                node: 9,
+                offset: 512,
+                total: 2000,
+                text: "wörld ".repeat(30),
             },
         ] {
             let bytes = ev.encode().unwrap();

@@ -389,6 +389,28 @@ fn tools() -> J {
             ),
         ]),
         obj(vec![
+            ("name", s("read")),
+            (
+                "description",
+                s(format!(
+                    "A widget's whole text, past the tree's 512-character cut: an editor's document, a long field, later a terminal's screen and scrollback. Long texts come in pages: `offset` (characters, from 0) and `length` (at most 8192 a page); the answer says which characters it holds of how many, so ask again from where it ended until you have what you need. Name the widget by `path` or by `window` and `node`. Never a secret field. {PATHS}"
+                )),
+            ),
+            (
+                "inputSchema",
+                schema(
+                    vec![
+                        ("path", prop("string", "The widget, by path.")),
+                        ("window", prop("string", "Or the window (client/window) ...")),
+                        ("node", prop("string", "... and the widget's id (a string: ids are 64-bit).")),
+                        ("offset", prop("number", "The first character to read (default 0).")),
+                        ("length", prop("number", "How many characters (default and most: 8192).")),
+                    ],
+                    &[],
+                ),
+            ),
+        ]),
+        obj(vec![
             ("name", s("wait")),
             (
                 "description",
@@ -563,6 +585,60 @@ fn call(bus: &mut Bus, name: &str, args: &J) -> Result<String, String> {
             )),
             other => Err(format!("unexpected {other:?}")),
         },
+        "read" => {
+            let (client, window, node, role, wname) = if let Some(path) = args.get("path").and_then(J::str) {
+                let found = match bus.ask(|serial| AgentRequest::Find { serial, path: path.to_string() })? {
+                    AgentEvent::Found { found, .. } => found,
+                    other => return Err(format!("unexpected {other:?}")),
+                };
+                match found.as_slice() {
+                    [one] => (one.client, one.window, one.node.id, one.node.role.clone(), one.node.name.clone()),
+                    [] => return Err(format!("nothing at {path:?} (in apps you may use)")),
+                    many => {
+                        return Err(format!(
+                            "{} widgets at {path:?}; name one exactly (a fuller path, or window and node):\n{}",
+                            many.len(),
+                            many.iter().map(found_text).collect::<Vec<_>>().join("\n")
+                        ));
+                    }
+                }
+            } else {
+                let (c, w) = window_id(args.get("window"))?;
+                let n = args
+                    .get("node")
+                    .and_then(J::str)
+                    .and_then(|n| n.trim().parse().ok())
+                    .ok_or("node is the widget's id, as a string")?;
+                (c, w, n, String::new(), String::new())
+            };
+            let number = |k: &str, d: u32| {
+                args.get(k)
+                    .and_then(|v| match v {
+                        J::Num(n) if *n >= 0.0 => Some(n.min(u32::MAX as f64) as u32),
+                        J::Str(t) => t.trim().parse().ok(),
+                        _ => None,
+                    })
+                    .unwrap_or(d)
+            };
+            let (offset, len) = (number("offset", 0), number("length", 8192));
+            match bus.ask(|serial| AgentRequest::Read {
+                serial,
+                client,
+                window,
+                node,
+                offset,
+                len,
+                role: role.clone(),
+                name: wname.clone(),
+            })? {
+                AgentEvent::Text { offset, total, text, .. } => {
+                    let end = offset + text.chars().count() as u32;
+                    let more = if end < total { format!("; more from offset {end}") } else { String::new() };
+                    Ok(format!("{text}\n[characters {offset}..{end} of {total}{more}]"))
+                }
+                other => Err(format!("unexpected {other:?}")),
+            }
+        }
         "act" => {
             let value = args.get("value").and_then(J::str).unwrap_or("").to_string();
             let action = match args.get("action").and_then(J::str).unwrap_or("") {
@@ -810,7 +886,7 @@ mod tests {
         let list = parse(&handle(&mut bus, r#"{"jsonrpc":"2.0","id":"a","method":"tools/list"}"#).unwrap()).unwrap();
         let tools = list.get("result").and_then(|r| r.get("tools")).unwrap();
         let J::Arr(t) = tools else { panic!() };
-        assert_eq!(t.len(), 6);
+        assert_eq!(t.len(), 7, "windows, tree, find, focused, act, read, wait");
         let unknown = parse(&handle(&mut bus, r#"{"jsonrpc":"2.0","id":2,"method":"nope"}"#).unwrap()).unwrap();
         assert_eq!(unknown.get("error").and_then(|e| e.get("code")), Some(&J::Num(-32601.0)));
         let garbage = parse(&handle(&mut bus, "{oops").unwrap()).unwrap();
