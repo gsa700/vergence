@@ -72,8 +72,16 @@ fn action(verb: &str, value: String) -> Result<Action, String> {
         // A terminal's pane (bus v38): "\n" in the text is a line's end.
         "type" if !value.is_empty() => Action::Type(value.replace("\\n", "\n")),
         "key" if vergence_protocol::window::key_name_ok(&value) => Action::Key(value),
-        "key" => return Err(format!("no key {value:?} (Return, Tab, Escape, BackSpace, Up, Down, Left, Right, Home, End, ctrl+<letter>, ...)")),
-        _ => return Err(format!("no action {verb:?} (press, focus, reveal, set <value>, choose <item>, type <text>, key <name>)")),
+        "key" => {
+            return Err(format!(
+                "no key {value:?} (Return, Tab, Escape, BackSpace, Up, Down, Left, Right, Home, End, ctrl+<letter>, ...)"
+            ));
+        }
+        _ => {
+            return Err(format!(
+                "no action {verb:?} (press, focus, reveal, set <value>, choose <item>, type <text>, key <name>)"
+            ));
+        }
     })
 }
 
@@ -248,9 +256,9 @@ fn run(name: &str, args: &[String]) -> Result<String, String> {
         "terminal" if args.get(1).map(String::as_str) == Some("open") => {
             let cwd = args.get(2).cloned().unwrap_or_default();
             match ask(&mut c, |serial| AgentRequest::OpenTerminal { serial, cwd })? {
-                AgentEvent::Terminal { client, window, tab, .. } => {
-                    Ok(format!("terminal {client} {window} tab {tab} (its pane is the tab's \"terminal\" child: vagent tree {client} {window})"))
-                }
+                AgentEvent::Terminal { client, window, tab, .. } => Ok(format!(
+                    "terminal {client} {window} tab {tab} (its pane is the tab's \"terminal\" child: vagent tree {client} {window})"
+                )),
                 other => Err(format!("unexpected {other:?}")),
             }
         }

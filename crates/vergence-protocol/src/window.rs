@@ -243,8 +243,21 @@ pub const TYPE_MAX: usize = 16 * 1024;
 /// The keys [`Action::Key`] may name (as the control socket's `vctl key`
 /// names them), besides `ctrl+<a-z>`.
 pub const KEY_NAMES: &[&str] = &[
-    "Return", "Tab", "Escape", "BackSpace", "Delete", "Up", "Down", "Left", "Right", "Home", "End", "Prior", "Next",
-    "Insert", "space",
+    "Return",
+    "Tab",
+    "Escape",
+    "BackSpace",
+    "Delete",
+    "Up",
+    "Down",
+    "Left",
+    "Right",
+    "Home",
+    "End",
+    "Prior",
+    "Next",
+    "Insert",
+    "space",
 ];
 
 /// Whether a key name is one [`Action::Key`] takes.

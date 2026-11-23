@@ -159,4 +159,56 @@ All questions answered: ready to build.
   the tab in front at Read, "always" and "session" not offered, the reply
   that tab's nodes only; the other tab's node refused; typing asked again at
   Act; both dialogs shot and fit. Still not installed: step 4 next.
-
+- **Step 4, typing, and step 5's vagent/MCP part** (bus v38, 2026-11-22).
+  **In git, not installed** (install waits for steps 5-6: agent-check, the
+  display-suite scenario, kepler and techbench, the independent review).
+  Protocol: `Action::Type(text)` (at most 16 KB) and `Action::Key(name)`
+  (`window::KEY_NAMES`: Return, Tab, Escape, BackSpace, Delete, Up, Down,
+  Left, Right, Home, End, Prior, Next, Insert, space, or ctrl+<letter>;
+  anything else refused on decode); `AgentRequest::OpenTerminal { cwd }` and
+  its answer `AgentEvent::Terminal { client, window, tab }`;
+  `WinRequest::RevokeAgent` (the window's stop) and `WinEvent::AgentActing`
+  (who is about to act, for the badge). Widgets refuse Type/Key.
+  **Server**: Type and Key need an Act grant for the node's tab. OpenTerminal
+  asks once, "An agent wants a terminal of its own" (Don't allow, Just now,
+  For an hour), then starts `vergence-term --for-agent NAME` (the one beside
+  the server, else on PATH) in the cwd (a folder, else home); the new
+  window's first tree (its root saying "owner:NAME", same pid and program)
+  gets that grant on its tab and the agent its answer. A window that does
+  not come in 20 s is forgotten (the agent's own timeout applies). A stop
+  (RevokeAgent) ends every agent's grant for the tab and refuses them there
+  for 60 s with "the person stopped you in this tab (ask again later)".
+  agents.log keeps a typed text's length and its first 40 characters,
+  never more; keys by name.
+  **Terminal** (crates/vergence-term/src/agent.rs), at the moment of typing:
+  "Terminal is asking for a password: the person types it"; "this tab runs
+  as root: agents may not type here"; "the person is typing" (a keystroke in
+  that pane within 1 s); a burst the person cut short is told at the next act
+  ("the person typed: the rest of what you typed last was not typed; read
+  the screen"). Text up to a line (120 characters, at most one line end, at
+  the end) is typed over 0.25 s in 16 ms steps, never splitting a
+  character; longer goes in at once, bracketed if the program asked (its
+  own end-of-paste removed); "\n" is Return; keys go through the keyboard's
+  encoder; a key waits behind a burst in progress. The person's keystroke in
+  the pane drops the rest of a burst. **Badge**: the tab's title in the bar
+  reads "⌨ Claude · ..." while the agent types and 3 s after, and a pill
+  "Claude is typing · stop" sits at the pane's top right; **a click on the
+  pill** revokes. **Escape twice** within 0.5 s in a tab an agent holds
+  revokes; the first Escape reaches the program (vim needs it), the second
+  does not. Either stop notes "[Claude's access to this tab ended]" in the
+  pane. `--for-agent NAME` opens its own process and window ("NAME's
+  terminal"), one tab, no handover or restored session. The tree is now
+  made only when a cheap key changes (size, front tab, tab titles, each
+  pane's output count, grid size, cursor, states), not every frame.
+  **vagent**: `terminal open [cwd]`, `type <client> <window> <node>
+  <text>`, `key <client> <window> <node> <name>`; **MCP**: `terminal`,
+  `type`, `key`, their descriptions naming the refusals, the pace and the
+  stops. Checked headless on Hubble: the dialog (Always and Session not
+  offered), the agent's own window "Claude's terminal" with owner:Claude;
+  `echo hi` typed and read back; `read -s` refused with the password words,
+  and after the person answered it, typing again; a person's key cutting a
+  48-character line short, told at the next act; "the person is typing";
+  Escape twice and a click on the pill both revoking; the person's own
+  terminal not found by `find`. Shots of the dialog, the badge and the note
+  looked at. Workspace tests on Hubble: 1,013 passed. Not run: kepler and
+  techbench (not synced in this step), agent-check's terminal part.

@@ -110,6 +110,10 @@ an AI collaborator must know to work here safely.
   is asked of Dave in a server-drawn dialog. A text area's value in the tree
   is cut at 512 characters: read the whole of it with `vagent read <client>
   <window> <node>` (bus v37, in pages). vtile needs the same environment.
+  Terminals (bus v38): `vagent terminal open` asks for a window of the
+  agent's own; then `vagent type|key <client> <window> <pane> ...`. "Just
+  now" is that connection's, so a second vagent process asks again: answer
+  `vctl agent-answer hour` in scripts. Escape twice in that tab revokes.
 - Never start the login screen on a machine where Dave is logged in (vdm
   refuses while a session is registered). vdm's log: /var/log/messages on
   FreeBSD, socklog on Void.

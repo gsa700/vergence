@@ -127,8 +127,12 @@ fn node(id: u64, parent: u64, role: &str, name: String, value: Option<String>, s
 pub(crate) struct MeaningKey {
     size: (u32, u32),
     shown: usize,
-    tabs: Vec<(u32, String, u64, Vec<(u64, u64, (usize, usize, usize, usize, bool), Vec<String>)>)>,
+    tabs: Vec<(u32, String, u64, Vec<PaneSig>)>,
 }
+
+/// A pane's part of the key: id, output count, grid (cols, rows, cursor x,
+/// y, shown) and states.
+type PaneSig = (u64, u64, (usize, usize, usize, usize, bool), Vec<String>);
 
 impl Terminal {
     pub(crate) fn meaning_key(&self) -> MeaningKey {
@@ -145,7 +149,10 @@ impl Terminal {
                         .map(|(p, s)| {
                             let (out, grid) = {
                                 let sc = lock(&s.screen);
-                                (sc.output, (sc.grid.cols, sc.grid.rows, sc.grid.cx, sc.grid.cy, sc.grid.cursor_visible))
+                                (
+                                    sc.output,
+                                    (sc.grid.cols, sc.grid.rows, sc.grid.cx, sc.grid.cy, sc.grid.cursor_visible),
+                                )
                             };
                             (*p, out, grid, s.state().states())
                         })

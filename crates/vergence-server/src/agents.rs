@@ -523,12 +523,8 @@ impl Agents {
     /// is refused there for the cool-down, told the person stopped it, rather
     /// than asked again at once.
     pub fn revoke_scope(&mut self, app: &str, scope: u64) -> usize {
-        let gone: Vec<Who> = self
-            .scoped
-            .keys()
-            .filter(|(_, p, id)| p == app && *id == scope)
-            .map(|(a, _, _)| a.clone())
-            .collect();
+        let gone: Vec<Who> =
+            self.scoped.keys().filter(|(_, p, id)| p == app && *id == scope).map(|(a, _, _)| a.clone()).collect();
         self.scoped.retain(|(_, p, id), _| !(p == app && *id == scope));
         let now = Instant::now();
         for a in &gone {

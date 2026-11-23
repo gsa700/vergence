@@ -1051,7 +1051,9 @@ impl Server {
             // tab mark's click): every agent's grant there ends now.
             WinRequest::RevokeAgent { window, node, agent } => {
                 let n = self.agent_revoke_tab(client, window, node);
-                tracing::info!("agents: the person stopped {agent:?} in tab #{node} of {client}/{window} ({n} grant(s))");
+                tracing::info!(
+                    "agents: the person stopped {agent:?} in tab #{node} of {client}/{window} ({n} grant(s))"
+                );
             }
             WinRequest::Copy { kinds, .. } => self.native_copy(client, kinds),
             WinRequest::Paste { serial, kind } => self.native_paste(client, serial, kind),

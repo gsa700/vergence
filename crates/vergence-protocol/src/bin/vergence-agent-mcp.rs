@@ -418,7 +418,10 @@ fn tools() -> J {
                     "A terminal of your own, in a window of its own (the person's terminals and tabs stay hidden from you). The person is asked first (Just now, or for an hour); the call waits for the answer. Answers with its window and its tab; the pane to type into is the tab's \"terminal\" child (see `tree`). Then `type` and `key` into that pane, and `read` its screen (the pane's value) or its scrollback (the pane's \"log\" child).",
                 ),
             ),
-            ("inputSchema", schema(vec![("cwd", prop("string", "The folder it starts in (default: the home folder)."))], &[])),
+            (
+                "inputSchema",
+                schema(vec![("cwd", prop("string", "The folder it starts in (default: the home folder)."))], &[]),
+            ),
         ]),
         obj(vec![
             ("name", s("type")),
@@ -647,7 +650,9 @@ fn call(bus: &mut Bus, name: &str, args: &J) -> Result<String, String> {
                         _ => None,
                     };
                     Ok(match pane {
-                        Some(p) => format!("your terminal: window {client}/{window}, tab {tab}, pane {p} (type into node {p})"),
+                        Some(p) => {
+                            format!("your terminal: window {client}/{window}, tab {tab}, pane {p} (type into node {p})")
+                        }
                         None => format!("your terminal: window {client}/{window}, tab {tab}"),
                     })
                 }

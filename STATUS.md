@@ -12,7 +12,10 @@ sync.
 
 ## In progress
 
-Nothing: packaging milestone 1 closed 2026-11-22 (docs/packaging-milestone-1.md):
+Terminal on the agent interface (docs/terminal-agent-milestone-1.md):
+steps 1-4 and vagent/MCP in git (bus v38), not installed; left: agent-check's
+terminal part, the display-suite scenario, kepler and techbench, the review.
+Packaging milestone 1 closed 2026-11-22 (docs/packaging-milestone-1.md):
 the `vergence` xbps package and `vergence-setup`; techbench runs from it.
 Defaults milestone 1 closed the same day.
 
