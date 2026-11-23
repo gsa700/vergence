@@ -1,7 +1,11 @@
 # Template file for 'vergence'
 pkgname=vergence
 version=0.1.0
-revision=5
+revision=6
+# Built from a commit past the tag until the next release is tagged (a lab
+# package for techbench: the terminal agent milestone's fixes, bus v39);
+# GitHub serves the commit's tarball as it serves a tag's.
+_commit=2b490aa7a7e916d44298031ee26d8eb390e1d760
 build_style=cargo
 hostmakedepends="pkg-config"
 makedepends="libinput-devel libxkbcommon-devel libseat-devel libgbm-devel
@@ -14,8 +18,8 @@ maintainer="David Erickson <gsa700@gmail.com>"
 # alone (FAAD2's code); the fonts OFL-1.1; the spelling list SCOWL's own.
 license="Apache-2.0 OR GPL-2.0-or-later, GPL-2.0-or-later, OFL-1.1, custom:SCOWL"
 homepage="https://github.com/gsa700/vergence"
-distfiles="https://github.com/gsa700/vergence/archive/refs/tags/v${version}.tar.gz"
-checksum=f0a13b8da54f01845bf8d7ba7ece38ef0d87e44d22de0c7da1b77b9767b0893c
+distfiles="https://github.com/gsa700/vergence/archive/${_commit}.tar.gz"
+checksum=8fa023450970785f9f27fad848f7974587a935187501e2f3ca2c2d4532290ef0
 
 # The login screen's account: owns nothing, logs in nowhere, may use the seat.
 system_accounts="_vdm"
