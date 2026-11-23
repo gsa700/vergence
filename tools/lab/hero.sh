@@ -9,6 +9,9 @@
 # tiles, and four of Vergence's own apps overlapping (FileView, Reader on the
 # 17-days story, Terminal, Settings > Appearance); no third-party programs.
 # PNGs land in OUTDIR (default ~/vergence-hero); look at them before use.
+# The README's picture (docs/screenshots/desktop.jpg) is dusk-default, the
+# desktop as shipped (Dave, 2026-11-22), made 2560 wide at JPEG quality 85.
+# Variations are <wallpaper>-<style>; style default is App default.
 set -u
 cd "$(dirname "$0")/../.." || exit 1
 ROOT=$(pwd)

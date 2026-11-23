@@ -1,6 +1,6 @@
 # Vergence
 
-![Vergence: Settings on the Wallpaper page and FileView on the same folder, over the Dusk wallpaper, with the dock below](docs/screenshots/desktop.jpg)
+![Vergence out of the box: the Dusk wallpaper and each app in its own style (App default): Settings on Appearance, FileView on Pictures, Terminal, and Reader on the story of the first 17 days, with the frosted dock below](docs/screenshots/desktop.jpg)
 
 Vergence is the movement of both eyes converging on one point so that you see
 one clear image. This project does the same for a desktop: every monitor and
