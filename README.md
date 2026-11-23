@@ -45,7 +45,7 @@ STATUS.md says what is built and what comes next.
 <td><a href="docs/screenshots/dark-tint.jpg"><img src="docs/screenshots/dark-tint.jpg" alt="Settings and FileView in dark style over the Tide wallpaper, taking on its teal"></a><br>Dark style: windows take on the wallpaper's color.</td>
 </tr>
 <tr>
-<td><a href="docs/screenshots/reader.jpg"><img src="docs/screenshots/reader.jpg" alt="Reader showing two pages of the Vergence whitepaper side by side"></a><br>Reader: a PDF as a book's spread, on its own engine.</td>
+<td><a href="docs/screenshots/reader.jpg"><img src="docs/screenshots/reader.jpg" alt="Reader showing a whole page of a PDF about how Vergence was made, with a chart of commits per day"></a><br>Reader, on its own PDF engine: the story of Vergence's first 17 days.</td>
 <td><a href="docs/screenshots/edit-terminal.jpg"><img src="docs/screenshots/edit-terminal.jpg" alt="Edit with the workspace's Cargo.toml beside Terminal building Vergence"></a><br>Edit beside Terminal, building Vergence itself.</td>
 </tr>
 </table>
