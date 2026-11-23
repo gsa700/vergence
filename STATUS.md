@@ -65,6 +65,17 @@ each milestone doc lists what is left.
 
 ## Known issues
 
+- **A GPU reset leaves the screen white** (kepler, 2026-11-22): when the
+  monitor was plugged into a session that had run a day without one, drm-kmod
+  reported repeated GPU hangs on the UHD 630 and reset the contexts of the
+  server and the desktop's icons; the server kept running but drew only
+  white until restarted. Two parts: the hang (drm-kmod; report kept,
+  ~/vergence-gpu-reports, kepler-20261122-194358) and ours: the server does
+  not notice a lost GL context and rebuild its renderer.
+- **The UPS tile floods the log on kepler**: "vtile: more than 16 rows, 240
+  chart values or 8 controls", about 8,500 lines in a day from the
+  ups-tile lab script (a lab tile, not in packages).
+
 - **A stale `/run/vdm/power-key`** (vdm killed and not restarted) makes
   acpid ignore the power key until a reboot (packaging review, L3).
 
