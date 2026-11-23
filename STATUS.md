@@ -12,14 +12,14 @@ sync.
 
 ## In progress
 
-Terminal on the agent interface (docs/terminal-agent-milestone-1.md): built,
-reviewed and fixed (bus v39), tested on Hubble, kepler (FreeBSD) and techbench;
-ready to close after Dave's hands-on pass. Released as v0.2.0, then v0.2.1 (PipeWire, the D-Bus fix; package vergence-0.2.1_1) in
-techbench's local repository for his install; Hubble and kepler are ready to
-install (both need a session restart). **Then the agent layer is frozen**
-(Dave, 2026-11-22): no new agent features unless day-to-day use asks;
-maintained and reviewed; the meaning tree keeps growing for accessibility and
-testing; revisit after about a month of real use.
+Terminal on the agent interface (docs/terminal-agent-milestone-1.md):
+**closed 2026-11-23** after Dave's hands-on pass on techbench; three dock and
+grant fixes from it (the Dockworker's text kept in its slot, the agent tile
+gone after a stop, a closed tab's grant ended) wait for a release.
+**The agent layer is frozen** (Dave, 2026-11-22): no new agent features
+unless day-to-day use asks; maintained and reviewed; the meaning tree keeps
+growing for accessibility and testing; revisit after about a month of real
+use.
 Typing stays (Dave, 2026-11-23): its use is a person who cannot type,
 helped by voice; the safeguards that assume hands are the known work for a
 voice milestone (the milestone doc, "Why typing stays").
@@ -77,6 +77,7 @@ Defaults milestone 1 closed the same day.
 | Login | vdm: the login screen and the lock screen | vdm-milestone-1 |
 | Session | Everything back after a restart; documents fresh after a deliberate close | session-milestone-1 |
 | Meaning | Contract 3: widgets acted on by meaning, the agent interface with permission, the magnifier | meaning-milestone-1 |
+| Terminal agent | Terminal on the agent interface: tabs read and typed in by grant per tab, the agent's own window, refusals at password prompts and root tabs, marks in the bar, Escape twice to stop | terminal-agent-milestone-1 |
 | Settings | Grouped pages, displays, input, Wi-Fi, energy, notifications, apps | settings-milestone-1, -2; app-settings-milestone-1 |
 | Sound | OSS, ALSA and the PulseAudio protocol: outputs, volume, playback streams | sound-milestone-1 |
 | Apps | Edit, FileView (tabs, sidebar, drives, disk images, the Space preview), Reader (PDF on our own engine), Close-Up, Terminal, Calculator, Hardware, Force Quit, Screenshot | editor-, files-milestone-1..3, reader-, pdf-, tools-, screenshots-milestone-1 |

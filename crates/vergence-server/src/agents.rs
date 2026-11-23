@@ -234,6 +234,15 @@ impl TabGrant {
 /// when that window says what it means.
 pub const NEW_TERMINAL: u64 = u64::MAX;
 
+/// The tabs (nodes saying "scope") in `old` and not in `new`.
+fn closed_scopes(old: &[vergence_protocol::window::Node], new: &[vergence_protocol::window::Node]) -> Vec<u64> {
+    let scopes = |nodes: &[vergence_protocol::window::Node]| -> Vec<u64> {
+        nodes.iter().filter(|n| n.states.iter().any(|s| s == "scope")).map(|n| n.id).collect()
+    };
+    let now = scopes(new);
+    scopes(old).into_iter().filter(|id| !now.contains(id)).collect()
+}
+
 /// How long a terminal asked for may take to say what it means.
 pub const TERMINAL_WAIT_PUB: std::time::Duration = std::time::Duration::from_secs(20);
 
@@ -818,9 +827,64 @@ impl Server {
             for a in &gone {
                 self.agent_log_named(&a.name, &app, &format!("stopped by the person in tab #{scope}"));
             }
+            // The tile said "using" that tab: stopped, it says nothing (found
+            // in Dave's hands-on pass, 2026-11-23: it stayed for two minutes).
+            self.agent_tile_drop_if_tab_gone();
         }
         self.agent_tabs_sync();
         gone.len()
+    }
+
+    /// Grants for the tabs that left window (`client`, `window`)'s tree (in
+    /// `old`, not in `new`: closed) end. A closed tab's number is never used
+    /// again, so its grant could reach nothing, but it stayed in Privacy >
+    /// Agents and on the dock's tile until its hour ran out (Dave's hands-on
+    /// pass, 2026-11-23). Only tabs seen to go: a grant made before its tab's
+    /// first tree arrives is kept.
+    pub fn agent_tabs_closed(
+        &mut self,
+        client: u32,
+        window: u32,
+        old: &[vergence_protocol::window::Node],
+        new: &[vergence_protocol::window::Node],
+    ) {
+        let gone = closed_scopes(old, new);
+        if gone.is_empty() {
+            return;
+        }
+        let closed: Vec<(Who, u32, u64)> = self
+            .agents
+            .scoped
+            .iter()
+            .filter(|((_, c, id), g)| *c == client && g.window == window && gone.contains(id))
+            .map(|(k, _)| k.clone())
+            .collect();
+        if closed.is_empty() {
+            return;
+        }
+        let app = self
+            .natives
+            .get(&(client, window))
+            .and_then(|w| w.native())
+            .map(|n| self.agent_app_key(n.client, &n.app_id))
+            .unwrap_or_default();
+        for key in &closed {
+            self.agents.scoped.remove(key);
+            self.agent_log_named(&key.0.name, &app, &format!("tab #{} closed: its grant ended", key.2));
+        }
+        self.agent_tile_drop_if_tab_gone();
+        self.agent_tabs_sync();
+    }
+
+    /// The agent tile goes when the tab its last use was in has no grant left.
+    fn agent_tile_drop_if_tab_gone(&mut self) {
+        if self.agents.last_tab.is_some() && self.agents.tabs_of_any(self.agents.last_tab).is_none() {
+            self.agents.last_tab = None;
+            if self.agents.tile_up {
+                self.agents.tile_up = false;
+                self.tile_remove(crate::tiles::Owner::Desktop, "agent");
+            }
+        }
     }
 
     /// Each shell window told which of its tabs agents hold a grant for, when
@@ -1163,8 +1227,9 @@ impl Server {
         let ending = minutes.is_some_and(|m| m <= ENDING_MINUTES);
         let (state, label) = match minutes {
             Some(m) if ending => (vergence_protocol::tile::TileState::Problem, format!("{m} min left")),
-            // The label under the dock's tile is short: the app alone.
-            _ => (vergence_protocol::tile::TileState::Warning, format!("using {}", self.app_shown_name(&app))),
+            // The label under the dock's tile is short: the app alone ("using"
+            // made it wider than its slot; the card's title says it).
+            _ => (vergence_protocol::tile::TileState::Warning, self.app_shown_name(&app)),
         };
         // More time is offered only for an app's grant: a tab's is asked again.
         let controls = if minutes.is_some() && tab.is_none() {
@@ -1571,13 +1636,7 @@ impl Server {
             tracing::info!("agents: tab grants taken back ({agent:?}, {program:?}, {app:?})");
             let shown = tab.map_or(app, |t| t.0).to_string();
             self.agent_log_named(agent, &shown, &format!("tab grant(s) taken back from Privacy > Agents ({program})"));
-            if self.agents.last_tab.is_some() && self.agents.tabs_of_any(self.agents.last_tab).is_none() {
-                self.agents.last_tab = None;
-                if self.agents.tile_up {
-                    self.agents.tile_up = false;
-                    self.tile_remove(crate::tiles::Owner::Desktop, "agent");
-                }
-            }
+            self.agent_tile_drop_if_tab_gone();
             self.agent_tabs_sync();
         }
         let before = self.agents.grants.len();
@@ -1957,6 +2016,29 @@ mod tests {
         assert_eq!(a.tabs_of(30, 1).len(), 1);
         assert!(a.tabs_of(31, 1).is_empty());
         assert!(a.tabs_of(30, 2).is_empty(), "another window of the same program");
+    }
+
+    /// A closed tab is one in the old tree and not the new; a window's
+    /// other nodes and tabs still there are not.
+    #[test]
+    fn closed_scopes_are_tabs_that_went() {
+        let node = |id: u64, scope: bool| vergence_protocol::window::Node {
+            id,
+            parent: 0,
+            role: String::new(),
+            name: String::new(),
+            value: None,
+            states: if scope { vec!["scope".into()] } else { Vec::new() },
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0,
+            items: Vec::new(),
+        };
+        let old = [node(1, false), node(10, true), node(11, true), node(20, false)];
+        let new = [node(1, false), node(11, true), node(12, true)];
+        assert_eq!(closed_scopes(&old, &new), vec![10]);
+        assert!(closed_scopes(&[], &new).is_empty(), "a first tree closes nothing");
     }
 
     /// A terminal of the agent's own (step 4): the grant asked under

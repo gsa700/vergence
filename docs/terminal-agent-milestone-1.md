@@ -1,7 +1,8 @@
 # Terminal agent milestone 1: Terminal on the agent interface
 
-**Built 2026-11-22; ready to close after Dave's hands-on pass.** Then the
-agent layer is **frozen** (Dave, 2026-11-22: "agree, finish the terminal
+**Built 2026-11-22; CLOSED 2026-11-23 after Dave's hands-on pass on
+techbench** (Dave: "close it and fix the dockworker"). The agent layer is now
+**frozen** (Dave, 2026-11-22: "agree, finish the terminal
 milestone then freeze it. we'll see how it is in real day to day. if it seems
 useful we'll continue, if not, we've the proof of concept."): no new agent
 features unless day-to-day use asks for them; what is there is maintained and
@@ -362,3 +363,47 @@ frozen, and the voice milestone sets the pace for its own use.
   package). Package `vergence-0.1.0_6` built from 2b490aa (GitHub's commit
   tarball) and put in techbench's ~/vergence-repo, waiting for Dave's
   install (the bus moved: a session restart).
+
+### Dave's hands-on pass and the close (2026-11-23)
+
+On techbench (Vergence 0.2.1, the package), Claude driving from Control with
+`vagent` over ssh, Dave at the screen:
+
+| Test | Result |
+|---|---|
+| Read grant: the dialog, the outline mark, only that tab marked | passed |
+| The agent's own window, typing, the pace, "still typing" | passed (the pace looks instant: "Why typing stays") |
+| The person's key stopping the agent | not tried by hand; agent-check and display suite 19 cover it |
+| Password prompt (`read -s`) refused | passed |
+| Root tab refused (sudo's own prompt counts: sudo runs as root; Ctrl+C refused too) | passed |
+| Escape twice: grant ends, the pane's note, typing refused after | passed |
+| Closing the whole Terminal ends its grants | passed |
+
+Found and fixed (the agent layer's maintenance, not new features):
+- **The Dockworker's label ran over its neighbors** ("vagent / using
+  Terminal" over the Settings icon and the Sound tile). Every tile's two lines
+  are now kept inside its slot: a too-wide value is set smaller (down to 80%),
+  then any line is cut with an ellipsis (shelf.rs `fit_line`). The agent
+  tile's label is the app alone ("Terminal"; the card's title says "Claude is
+  using ..."), as its comment always said.
+- **The agent tile stayed up after a stop.** Escape twice ended the grant
+  but the tile said "using Terminal" for its two working minutes; a stop now
+  takes it down when the tab it showed has no grant left.
+- **A closed tab's grant lingered** in Privacy > Agents and on the tile until
+  its hour ran out (Dave closed the tab he had granted and opened a new one).
+  Tab numbers are never reused (NEXT_TAB only counts up), so it reached
+  nothing; it now ends when its tab leaves the window's tree
+  (`agent_tabs_closed`: tabs in the old tree and not the new, so a grant made
+  before its tab's first tree is kept).
+
+Not a bug: the agent's name comes from `vagent --name` ("vagent" when left
+out); Claude had left it out at first.
+
+Left for the voice milestone ("Why typing stays"): the pace, and Ctrl+C at a
+password prompt (refused like any key, so an agent cannot back out of a
+prompt it started).
+
+Checks: workspace tests Hubble 1,032, techbench 1,032, kepler 1,021; display
+suite 19 of 19 on Hubble (the dock with "Claude / Terminal" whole in
+scenario 19's shot); clippy adds nothing new.
+

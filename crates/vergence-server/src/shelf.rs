@@ -1991,12 +1991,21 @@ impl Server {
                     }
                 };
                 let ink = crate::tiles::state_ink(tile.state, light, s.tile_ink);
-                let (vs, ls) = (13.0 * k, 9.5 * k);
+                let room = slot.w as f32 - 4.0 * k;
+                // A value a little too wide (an agent's name) is set smaller,
+                // down to 80%, before it is cut.
+                let full = fonts.layout(big, 13.0 * k, &tile.value).1;
+                let vs = if full > room { (13.0 * k * room / full).max(13.0 * k * 0.8) } else { 13.0 * k };
+                let ls = 9.5 * k;
                 let (vm, lm) = (fonts.metrics(big, vs), fonts.metrics(small, ls));
                 let (vh, lh) =
                     (vm.ascent + vm.descent, if tile.label.is_empty() { 0.0 } else { lm.ascent + lm.descent });
                 let top = slot.y as f32 + (slot.h as f32 - vh - lh) / 2.0;
-                let vw = fonts.layout(big, vs, &tile.value).1;
+                // Each line kept inside its slot: a long one is cut with an
+                // ellipsis, not drawn over its neighbors (Dave, 2026-11-23).
+                let value = fit_line(&tile.value, room, |t| fonts.layout(big, vs, t).1);
+                let label = fit_line(&tile.label, room, |t| fonts.layout(small, ls, t).1);
+                let vw = fonts.layout(big, vs, &value).1;
                 vergence_render::text(
                     &mut scene,
                     fonts,
@@ -2004,10 +2013,10 @@ impl Server {
                     vs,
                     ink,
                     ScenePoint::new(slot.x as f32 + (slot.w as f32 - vw) / 2.0, (top + vm.ascent).round()),
-                    &tile.value,
+                    &value,
                 );
-                if !tile.label.is_empty() {
-                    let lw = fonts.layout(small, ls, &tile.label).1;
+                if !label.is_empty() {
+                    let lw = fonts.layout(small, ls, &label).1;
                     let dim = if tile.state == vergence_protocol::tile::TileState::Fine { color(s.mark) } else { ink };
                     vergence_render::text(
                         &mut scene,
@@ -2016,7 +2025,7 @@ impl Server {
                         ls,
                         dim,
                         ScenePoint::new(slot.x as f32 + (slot.w as f32 - lw) / 2.0, (top + vh + lm.ascent).round()),
-                        &tile.label,
+                        &label,
                     );
                 }
             }
@@ -2360,5 +2369,40 @@ impl Server {
             running::item_at(rect(d), self.shelf.names.len(), upright, at.x.floor() as i32, at.y.floor() as i32)
         })?;
         self.shelf_items().into_iter().nth(i).map(|(item, _)| item)
+    }
+}
+
+/// `text` as it fits in `max` points by `width`: whole, or cut at a character
+/// with an ellipsis after it (just the ellipsis when nothing else fits).
+fn fit_line(text: &str, max: f32, mut width: impl FnMut(&str) -> f32) -> String {
+    if width(text) <= max {
+        return text.to_string();
+    }
+    let mut cut = text.to_string();
+    while !cut.is_empty() {
+        cut.pop();
+        let tried = format!("{}\u{2026}", cut.trim_end());
+        if width(&tried) <= max {
+            return tried;
+        }
+    }
+    "\u{2026}".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit_line;
+
+    #[test]
+    fn fit_line_cuts_with_an_ellipsis() {
+        // One point a character, the ellipsis included.
+        let w = |t: &str| t.chars().count() as f32;
+        assert_eq!(fit_line("Sound", 8.0, w), "Sound");
+        assert_eq!(fit_line("Terminal", 8.0, w), "Terminal");
+        assert_eq!(fit_line("using Terminal", 8.0, w), "using T\u{2026}");
+        // No space before the ellipsis where the cut falls after one.
+        assert_eq!(fit_line("using Terminal", 7.0, w), "using\u{2026}");
+        assert_eq!(fit_line("Terminal", 0.5, w), "\u{2026}");
+        assert_eq!(fit_line("", 0.0, w), "");
     }
 }

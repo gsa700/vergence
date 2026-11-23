@@ -240,6 +240,9 @@ impl Server {
             if scopes.as_ref().is_none_or(|s| !s.is_empty()) {
                 self.meaning_log.push(Change::Tree { client, window, scopes });
             }
+            if shell && let Some(old) = old_nodes {
+                self.agent_tabs_closed(client, window, old, &new.2);
+            }
         }
     }
 
