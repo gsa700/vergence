@@ -113,4 +113,31 @@ All questions answered: ready to build.
   (64 KB before: past it there was nothing to read). Checked in a headless
   session on Hubble: a 4,260-character file with é, ü, ï read back exactly
   in pages, one page from offset 1000, a gone node refused.
+- **Terminal's tree** (plan step 3), 2026-11-22. **In git, not installed**:
+  until the tab-scoped grants (step 1) exist, an app-wide grant would read
+  every tab, so no box runs it. crates/vergence-term/src/meaning.rs: window
+  > tab (each one, "selected" for the one in front, its active pane's
+  states) > terminal ("pane N", the visible screen as value, "focused",
+  "program:<name>", "root", "password", "busy", "exited", "cwd:<path>"; the
+  caret at the cursor of the front tab's active pane) > log ("scrollback",
+  the last 10,000 lines / 1 MB, read whole through paged reading). Ids stable
+  while a tab and a pane live: tab = 1<<60 | the tab's id (the bar's, a
+  process-wide counter never reused), pane = 2<<60 | tab id<<20 | its number
+  in the tab's split tree, its scrollback = 3<<60 | the same; `tab_of(node)`
+  finds the tab of any node, for step 1. Every tab publishes its panes (the
+  scoped grants hide the others). **Password** = input read a line at a time
+  (ICANON) without echo, asked of the pty's master with tcgetattr (Linux
+  hands a master's terminal-mode request to its slave; FreeBSD's pts takes
+  it on either side; ICANON is 0o2 on Linux, 0x100 on FreeBSD): echo off
+  alone was wrong, since zsh's zle, readline and libedit turn echo off while
+  a command is typed (the headless check caught it). The working directory
+  is read at most every two seconds per pane (FreeBSD runs procstat); the
+  scrollback text is made again only when lines were added. Checked in a
+  headless session on Hubble: the tree's nodes and states; `echo hello`
+  typed with vctl and seen in the pane's value; "password" on during `read
+  -s` and off after; the scrollback after `seq 1 2000` read whole with
+  `vagent read` (8,831 characters). FreeBSD's ICANON/termios reading is by
+  its headers, not yet run (kepler not synced in this step; its unit test,
+  a_password_prompt_is_seen_from_the_master, runs there with the next sync).
+  Workspace tests on Hubble: 1,005 passed.
 

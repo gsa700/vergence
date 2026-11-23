@@ -43,6 +43,7 @@ mod fuzz;
 #[allow(dead_code)]
 mod grid;
 mod input;
+mod meaning;
 mod menu;
 mod mouse;
 mod palette;
@@ -258,6 +259,10 @@ struct Terminal {
     /// (which, after which frame, when); kept only while measuring.
     frame_now: u64,
     asked: Option<(usize, u64, Instant)>,
+    /// Each pane's scrollback text as last made for the meaning tree.
+    scrollback_cache: meaning::ScrollbackCache,
+    /// The meaning tree last given to the toolkit (sent again only when it differs).
+    meaning_told: Option<vergence_ui::MeaningTree>,
 }
 
 impl Terminal {
@@ -341,6 +346,8 @@ impl Terminal {
             measuring: std::env::var_os("VTERM_FRAMES").is_some(),
             frame_now: 0,
             asked: None,
+            scrollback_cache: Default::default(),
+            meaning_told: None,
         }
     }
 }
@@ -433,6 +440,17 @@ impl App for Terminal {
 
     fn opening_size(&self) -> Option<(u32, u32)> {
         self.ask_size
+    }
+
+    /// The window's tabs and terminals (meaning.rs), when they changed since
+    /// last asked. Nothing is acted on yet (step 4).
+    fn meaning(&mut self) -> Option<vergence_ui::MeaningTree> {
+        let now = self.meaning_now();
+        if self.meaning_told.as_ref() == Some(&now) {
+            return None;
+        }
+        self.meaning_told = Some(now.clone());
+        Some(now)
     }
 
     fn bar(&mut self) -> Option<vergence_ui::Bar> {

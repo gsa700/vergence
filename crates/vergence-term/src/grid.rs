@@ -741,8 +741,10 @@ impl Grid {
         self.dirty = true;
     }
 
-    /// The screen as text (tests; copying, later).
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// The screen as text: each row's characters (a wide one's right half
+    /// left out, combining marks kept), trailing spaces trimmed, the rows
+    /// joined by line ends, the blank rows at the bottom left out (the meaning
+    /// tree's value: terminal agent milestone 1; tests).
     pub fn text(&self) -> String {
         self.lines
             .iter()
@@ -755,6 +757,28 @@ impl Grid {
             .join("\n")
             .trim_end()
             .to_string()
+    }
+}
+
+impl Grid {
+    /// The scrollback as text, oldest first, as [`Grid::text`] makes a row:
+    /// the last `max_lines` lines, and no more than `max_bytes` (the oldest
+    /// left out first), for the meaning tree's scrollback node.
+    pub fn scrollback_text(&self, max_lines: usize, max_bytes: usize) -> String {
+        let mut rows: Vec<String> = Vec::new();
+        let mut bytes = 0;
+        for l in self.scrollback.iter().rev().take(max_lines) {
+            let mut text = String::new();
+            l.iter().filter(|c| c.width != 0).for_each(|c| c.push_to(&mut text));
+            let text = text.trim_end().to_string();
+            if bytes + text.len() + 1 > max_bytes {
+                break;
+            }
+            bytes += text.len() + 1;
+            rows.push(text);
+        }
+        rows.reverse();
+        rows.join("\n")
     }
 }
 
@@ -805,6 +829,26 @@ mod tests {
 
     fn feed(g: &mut Grid, s: &str) {
         Parser::new().advance(g, s.as_bytes());
+    }
+
+    /// The meaning tree's screen: a wide character once, trailing spaces gone.
+    #[test]
+    fn the_screen_as_text_for_its_meaning() {
+        let mut g = Grid::new(12, 3);
+        feed(&mut g, "a\u{4e2d}b   \r\ne\u{301}x");
+        assert_eq!(g.text(), "a\u{4e2d}b\ne\u{301}x", "the wide one's right half left out, the accent kept");
+    }
+
+    /// The scrollback, oldest first, the newest kept when it is capped.
+    #[test]
+    fn the_scrollback_as_text_capped() {
+        let mut g = Grid::new(10, 2);
+        for i in 1..=6 {
+            feed(&mut g, &format!("line {i}\r\n"));
+        }
+        assert_eq!(g.scrollback_text(100, 1 << 20), "line 1\nline 2\nline 3\nline 4\nline 5");
+        assert_eq!(g.scrollback_text(2, 1 << 20), "line 4\nline 5", "the last lines");
+        assert_eq!(g.scrollback_text(100, 14), "line 4\nline 5", "no more bytes than asked, the oldest dropped");
     }
 
     #[test]

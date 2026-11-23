@@ -107,6 +107,48 @@ pub(crate) struct Session {
     /// Started with a command (`-e`), not the shell: the program is the
     /// pty's own process, and running while it lives.
     command: bool,
+    /// The foreground's working directory, the group it was read for and
+    /// when (FreeBSD runs procstat for it: at most every two seconds).
+    cwd_seen: std::cell::RefCell<Option<(u32, String, Instant)>>,
+}
+
+/// What a terminal is doing, for its meaning (terminal agent milestone 1).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct PaneState {
+    /// The foreground program's name ("zsh", "vim", "sudo").
+    pub(crate) program: String,
+    /// It runs as the superuser (the red tab).
+    pub(crate) root: bool,
+    /// Typed input is not echoed: a password is being asked.
+    pub(crate) password: bool,
+    /// A program other than the shell is in front.
+    pub(crate) busy: bool,
+    /// Where the foreground program works, if it can be read.
+    pub(crate) cwd: Option<String>,
+    /// The program has ended (the pane says so and waits to be closed).
+    pub(crate) exited: bool,
+}
+
+impl PaneState {
+    /// As the meaning tree's states: "program:<name>", "root", "password",
+    /// "busy", "exited", "cwd:<path>".
+    pub(crate) fn states(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if !self.program.is_empty() {
+            out.push(format!("program:{}", self.program));
+        }
+        for (on, word) in
+            [(self.root, "root"), (self.password, "password"), (self.busy, "busy"), (self.exited, "exited")]
+        {
+            if on {
+                out.push(word.to_string());
+            }
+        }
+        if let Some(cwd) = &self.cwd {
+            out.push(format!("cwd:{cwd}"));
+        }
+        out
+    }
 }
 
 /// The screen changed: a frame is wanted if this terminal is in front. Up
@@ -207,6 +249,7 @@ impl Session {
             news,
             root_seen: std::cell::Cell::new(None),
             command: is_command,
+            cwd_seen: std::cell::RefCell::new(None),
         })
     }
 
@@ -246,6 +289,37 @@ impl Session {
         let root = program::group_has_root(group);
         self.root_seen.set(Some((group, root, Instant::now())));
         root
+    }
+
+    /// What it is doing now, for its meaning.
+    pub(crate) fn state(&self) -> PaneState {
+        let exited = lock(&self.screen).exited;
+        if exited {
+            return PaneState { exited: true, ..Default::default() };
+        }
+        let group = self.pty.foreground();
+        let busy = self.running().is_some();
+        let program = group.and_then(program::name_of).unwrap_or_default();
+        let cwd = group.and_then(|g| {
+            let mut seen = self.cwd_seen.borrow_mut();
+            if let Some((was, cwd, at)) = seen.as_ref()
+                && *was == g
+                && at.elapsed() < Duration::from_secs(2)
+            {
+                return Some(cwd.clone());
+            }
+            let cwd = program::cwd_of(g).or_else(|| program::cwd_of(self.pty.pid()))?;
+            *seen = Some((g, cwd.clone(), Instant::now()));
+            Some(cwd)
+        });
+        PaneState {
+            program,
+            root: self.as_root(),
+            password: self.pty.asks_password() == Some(true),
+            busy,
+            cwd,
+            exited: false,
+        }
     }
 
     /// Makes the terminal's grid cols x rows, if it is not, and tells its program.

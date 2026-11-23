@@ -395,7 +395,7 @@ of its entry file saying what it is for and where to start.
 
 | Crate | What it is | Start at |
 |---|---|---|
-| vergence-term | Terminal: tabs in the bar, split panes | `src/main.rs` |
+| vergence-term | Terminal: tabs in the bar, split panes; its meaning tree for agents (meaning.rs) | `src/main.rs` |
 | vergence-settings | The settings app | `src/main.rs` |
 | vergence-edit | Edit, the text editor | `src/main.rs` |
 | vergence-files | FileView, the file manager; also the desktop's icons and Space preview | `src/main.rs` |

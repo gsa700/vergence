@@ -20,7 +20,17 @@ unsafe extern "C" {
     fn signal(signum: i32, handler: usize) -> usize;
     fn ioctl(fd: i32, request: std::ffi::c_ulong, ...) -> i32;
     fn tcgetpgrp(fd: i32) -> i32;
+    fn tcgetattr(fd: i32, termios: *mut u8) -> i32;
 }
+
+/// struct termios's c_lflag (after c_iflag, c_oflag and c_cflag, each 32
+/// bits) and its ECHO bit, the same on Linux and FreeBSD; ICANON's differs.
+const LFLAG_AT: usize = 12;
+const ECHO: u32 = 0o10;
+#[cfg(target_os = "linux")]
+const ICANON: u32 = 0o2;
+#[cfg(not(target_os = "linux"))]
+const ICANON: u32 = 0x100;
 
 const O_RDWR: i32 = 2;
 // Close-on-exec: the terminal's end of a pty must not be handed down to the
@@ -139,6 +149,26 @@ impl Pty {
         (group > 0).then_some(group as u32)
     }
 
+    /// Whether a password is being asked (terminal agent milestone 1: an
+    /// agent may not type then): input read a line at a time (canonical) and
+    /// not echoed, as `sudo`, `ssh` and `read -s` read it. Echo off alone is
+    /// not enough: a shell's line editor (zsh's zle, bash's readline,
+    /// FreeBSD sh's libedit) turns it off while a command is typed and echoes
+    /// itself, but reads a key at a time (not canonical). Asked of the
+    /// master: Linux answers a terminal-mode request on a pty's master for its
+    /// slave (tty_mode_ioctl uses the linked tty), and FreeBSD's pts takes it
+    /// on either side. None: not known.
+    pub fn asks_password(&self) -> Option<bool> {
+        // Larger than either system's struct termios (Linux 60 bytes, FreeBSD 44).
+        let mut t = [0u8; 128];
+        // SAFETY: a buffer larger than the struct, and our own descriptor.
+        if unsafe { tcgetattr(self.master.as_raw_fd(), t.as_mut_ptr()) } != 0 {
+            return None;
+        }
+        let lflag = u32::from_ne_bytes([t[LFLAG_AT], t[LFLAG_AT + 1], t[LFLAG_AT + 2], t[LFLAG_AT + 3]]);
+        Some(lflag & ECHO == 0 && lflag & ICANON != 0)
+    }
+
     /// A handle for reading the shell's output on another thread.
     pub fn reader(&self) -> std::io::Result<File> {
         self.master.try_clone()
@@ -200,6 +230,32 @@ mod tests {
         assert!(text.contains("checked-42"), "{text}");
         let held: Vec<&str> = text.lines().filter(|l| l.starts_with("held-")).collect();
         assert!(held.is_empty(), "descriptors handed down to the shell: {held:?}");
+    }
+
+    /// The password state, seen from the master (Linux and FreeBSD alike):
+    /// a line read without echo while `sleep` holds the terminal after
+    /// `stty -echo`, and not once echo is back. (A shell's line editor, while
+    /// it waits for a command, reads keys without echo but not a line: not a
+    /// password either.)
+    #[test]
+    fn a_password_prompt_is_seen_from_the_master() {
+        let mut p = super::Pty::spawn("/bin/sh", &[], 80, 24, None).unwrap();
+        let r = p.reader().unwrap();
+        std::thread::spawn(move || super::read_loop(r, |_| true));
+        let wait_for = |want: bool, p: &super::Pty| {
+            for _ in 0..150 {
+                if p.asks_password() == Some(want) {
+                    return true;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            false
+        };
+        assert!(wait_for(false, &p), "a shell waiting for a command asks no password");
+        p.write(b"stty -echo; sleep 2; stty echo\n");
+        assert!(wait_for(true, &p), "a line without echo is a password's");
+        assert!(wait_for(false, &p), "and not once echo is back");
+        p.write(b"exit\n");
     }
 
     #[test]
