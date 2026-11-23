@@ -1,9 +1,12 @@
 # Archive milestone 1: archives in FileView, extracted and made
 
-Status: **answered 2026-11-23** (Dave: "all leans, go ahead"): libarchive
-through FFI (the borrowing agreed), one top folder kept as it is, the
-archive stays, the caps with "Extract anyway", passwords later, Compress to
-.zip only, .iso stays a disk image, browsing later. Building. Queued
+Status: **CLOSED 2026-11-23** (Dave: "close it and release 0.3.0"), after
+his hands-on pass on techbench ("all works as expected": the AlbumWall zip
+downloaded and extracted; three PDFs and a zip compressed into a zip).
+Released in v0.3.0. Answered earlier the same day (Dave: "all leans, go
+ahead"): libarchive through FFI (the borrowing agreed), one top folder kept
+as it is, the archive stays, the caps with "Extract anyway", passwords
+later, Compress to .zip only, .iso stays a disk image, browsing later. Queued
 2026-11-22 (Dave: "queue it after the terminal fixes"; STATUS Next #1).
 Dave, 2026-11-23: "i installed zip and unzip but it would be nice if we
 didn't have too": so this milestone also *makes* archives, and needs no
