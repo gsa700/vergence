@@ -1,12 +1,11 @@
 # Template file for 'vergence'
 pkgname=vergence
 version=0.2.1
-revision=2
+revision=3
 # Built from a commit past the v0.2.1 tag until the next release is tagged (a
-# lab package for techbench: the terminal agent milestone's close, the
-# Dockworker text fit, tab grants ending with their tab); GitHub serves a
-# commit's tarball as it serves a tag's.
-_commit=5320ee9b6f38e327900ee0ea67611a2022ae9da5
+# lab package for techbench: archive milestone 1, before the v0.3.0
+# tag); GitHub serves a commit's tarball as it serves a tag's.
+_commit=6b817b5a0a2bd0be045794f3901718113d2dd9ff
 build_style=cargo
 hostmakedepends="pkg-config"
 makedepends="libarchive-devel libinput-devel libxkbcommon-devel libseat-devel libgbm-devel
@@ -21,7 +20,7 @@ maintainer="David Erickson <gsa700@gmail.com>"
 license="Apache-2.0 OR GPL-2.0-or-later, GPL-2.0-or-later, OFL-1.1, custom:SCOWL"
 homepage="https://github.com/gsa700/vergence"
 distfiles="https://github.com/gsa700/vergence/archive/${_commit}.tar.gz"
-checksum=973393729535c20c3113bb883d6329a1b6970e8f07eb6547384f13ec5a2e5e97
+checksum=844395e92c33f734d0529de21b2d14e860821d22191da547659870d1c532389e
 
 # The login screen's account: owns nothing, logs in nowhere, may use the seat.
 system_accounts="_vdm"
