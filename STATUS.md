@@ -89,6 +89,15 @@ each milestone doc lists what is left.
 
 ## Known issues
 
+- **Avalonia apps on Wayland show the old X11 pointer** (AlbumWall on
+  techbench, 2026-11-22): Avalonia's Wayland backend loads the pointer theme
+  with no name at size 24 (WaylandCursorManager.cs), ignoring XCURSOR_THEME,
+  so libwayland-cursor falls back to its built-in cursors. Later: a "default"
+  theme inheriting Vergence's at login, and an upstream Avalonia change
+  (theme, size, scale, wp-cursor-shape-v1). Shared memory 01M837J58YTX473JVW9R2N90A7.
+- **The HDMI/DisplayPort sound of a monitor is not offered** as an output on
+  techbench yet (PipeWire picked the analog profile); choosing outputs later.
+
 - **A GPU reset leaves the screen white** (kepler, 2026-11-22): when the
   monitor was plugged into a session that had run a day without one, drm-kmod
   reported repeated GPU hangs on the UHD 630 and reset the contexts of the
