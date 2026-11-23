@@ -24,9 +24,9 @@ Defaults milestone 1 closed the same day.
 1. **Remote access** (Dave, 2026-11-22: the next milestone after Terminal on
    the agent interface): the protocol and its client(s); display lists, not
    video (whitepaper phase 4, principle 8: transport by SSH or WireGuard,
-   logins through vdm). To settle: which clients first (Vergence, the Mac,
-   Windows), standard protocols (VNC/RDP) or native only, the running session
-   shared or a remote login of its own.
+   logins through vdm). Plan drafted: docs/remote-milestone-1.md (a remote
+   screen with three modes: extend, mirror, take over); its questions are
+   still open.
 2. **AlbumWall for Vergence** (generic name Music): AlbumWall's wall of
    covers and player rebuilt in Rust on the toolkit and Hymie
    (crates/vergence-hymie), for Vergence (docs/apps-roadmap.md).
