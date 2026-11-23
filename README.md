@@ -85,6 +85,8 @@ from the checkout or headless, the tests, and removing Vergence.
 - [STATUS.md](STATUS.md): where things stand.
 - [docs/Vergence-Whitepaper.md](docs/Vergence-Whitepaper.md): the design
   (a PDF beside it).
+- [docs/Vergence-17-Days.pdf](docs/Vergence-17-Days.pdf): how Vergence went
+  from an idea to its first release in 17 days.
 - docs/<area>-milestone-N.md: each piece of work, planned and built
   (docs/milestone-1.md to -4.md, with no area, are phase 1's, the retired X11
   daemon; STATUS.md links the current ones).

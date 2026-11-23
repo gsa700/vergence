@@ -26,7 +26,7 @@ CARGO_TARGET_DIR="$ROOT/target-check" cargo build -q --release --workspace --bin
 # Sample files: Vergence's own documents and pictures.
 rm -rf "$DEMO"
 mkdir -p "$DEMO/Documents" "$DEMO/Pictures" "$DEMO/Music"
-cp docs/Vergence-Whitepaper.pdf CONTRIBUTING.md README.md STATUS.md "$DEMO/Documents/"
+cp docs/Vergence-Whitepaper.pdf docs/Vergence-17-Days.pdf CONTRIBUTING.md README.md STATUS.md "$DEMO/Documents/"
 cp data/backgrounds/*.svg "$DEMO/Pictures/"
 [ -f docs/screenshots/desktop.jpg ] && cp docs/screenshots/desktop.jpg "$DEMO/Pictures/vergence-desktop.jpg"
 
@@ -89,13 +89,13 @@ maximized() {
     sleep 1.5
 }
 
-# 1. Reader: the whitepaper as a book's spread (two pages, pages 2 and 3),
-# on its own PDF engine.
+# 1. Reader: a whole page of the 17-days story (its chart in color), on its
+# own PDF engine.
 fresh
-open "vergence-reader $DEMO/Documents/Vergence-Whitepaper.pdf"
+open "vergence-reader $DEMO/Documents/Vergence-17-Days.pdf"
 maximized vergence-reader
-press vergence-reader button "Two pages"
-field vergence-reader "Page number" 3
+press vergence-reader button "One page"
+press vergence-reader button "The whole page"
 shot reader
 
 # 2. Dark style, Tide behind: the windows take its color.
