@@ -93,13 +93,36 @@ on that screen**, so adding one never touches the screen model:
 So milestone 1's work includes keeping that front-end seam clean: the native
 protocol is the first front end, not wired through the screen.
 
-## Questions for Dave (to settle before building)
+## Answers (Dave, 2026-11-22)
 
-1. ~~Which clients first~~ (answered above: several platforms; the order of
-   the shells is the remaining choice: lean, Vergence and the Mac first, since
-   Control is the daily Mac, then Windows).
-2. ~~Standard protocols~~ (answered above: later, planned now as front ends).
-3. **Which modes in milestone 1**: all three, or mirror and take over first
-   (the daily use) and extend after?
-4. **The running session or a login of its own**: attach to the session at the
-   desk, start one of its own, or both (the modes above suggest both).
+"Vergence and Mac first, all three modes, both."
+1. **Clients**: several platforms; the **Vergence and Mac shells first**,
+   Windows after.
+2. **Standard protocols**: later, planned now as front ends (above).
+3. **Modes**: **all three** in milestone 1 (extend, mirror, take over).
+4. **Sessions**: **both**: attach to the session at the desk, or a remote
+   login of its own through vdm.
+
+## What the answers bring with them
+
+- **A Mac build.** Control has no Rust today. The Mac shell needs Rust there
+  (rustup, which installs into the home folder; not Homebrew) and is signed
+  with the Developer ID the lab's Mac apps already use, so Gatekeeper lets it
+  run. Ask Dave before installing rustup on Control.
+- **The Mac shell draws with vergence-render**, so its GL road must run on
+  macOS (OpenGL there is old, 4.1 and deprecated): find out early whether it
+  does, or whether the core needs a Metal road or a CPU fallback for the Mac.
+- **Two sessions at once** for a remote login while someone is at the desk:
+  vdm today runs one session per seat; a remote login is a session with no
+  seat of its own (its only screen is the remote one), which vdm must allow
+  and show (who is logged in remotely, on the login screen and in About).
+- **Take over and the lock**: the local screens lock with vdm's lock screen,
+  and unlocking at the desk ends the take-over (the viewer sees why).
+
+## Next
+
+Write the protocol outline and the build steps (the remote screen in the
+server, the native front end, the portable client core, the Vergence shell,
+the Mac shell, then the modes and the vdm side), each with its tests and a
+security review before anything listens. Building starts after the terminal
+agent fixes are in and installed.
