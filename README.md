@@ -11,8 +11,8 @@ Vergence is a desktop written in Rust from the display server up: its own
 server (no X11 or Wayland compositor underneath), its own native window
 protocol, its own toolkit, and a set of apps built on them. It is inspired by
 NeXTSTEP: few, clear apps that work alike, a desktop drawn by one hand, and
-documents that are the center of things. It runs on **Void Linux first and
-FreeBSD second**.
+documents that are the center of things. It is developed for the **Void Linux
+and FreeBSD** platforms.
 
 ## What it is
 

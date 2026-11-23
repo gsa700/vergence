@@ -1041,7 +1041,17 @@ impl Server {
                     let old = n.state.lock().unwrap().meaning.replace(new.clone());
                     let origin = self.meaning_origin(&w);
                     self.meaning_changed(client, window, old.as_ref(), &new, origin);
+                    // A terminal started for an agent: its grant goes to its tab.
+                    if old.is_none() {
+                        self.agent_terminal_arrived(client, window, &new.2);
+                    }
                 }
+            }
+            // The person stopped an agent in a tab (bus v38: Escape twice, the
+            // tab mark's click): every agent's grant there ends now.
+            WinRequest::RevokeAgent { window, node, agent } => {
+                let n = self.agent_revoke_tab(client, window, node);
+                tracing::info!("agents: the person stopped {agent:?} in tab #{node} of {client}/{window} ({n} grant(s))");
             }
             WinRequest::Copy { kinds, .. } => self.native_copy(client, kinds),
             WinRequest::Paste { serial, kind } => self.native_paste(client, serial, kind),

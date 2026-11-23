@@ -29,6 +29,8 @@ pub(crate) struct Screen {
     pub(crate) copied: Option<String>,
     /// The text selected with the mouse.
     pub(crate) selection: Option<Selection>,
+    /// Output read so far, by pieces: the meaning tree is made again when it moves.
+    pub(crate) output: u64,
 }
 
 impl Screen {
@@ -188,6 +190,7 @@ impl Session {
             exited: false,
             copied: None,
             selection: None,
+            output: 0,
         }));
         let shared = screen.clone();
         let news = Arc::new(AtomicU8::new(0));
@@ -201,6 +204,7 @@ impl Session {
                     let (before, alt) = (s.grid.pushed, s.grid.alt);
                     let title = s.grid.title.clone();
                     s.parser.advance(&mut s.grid, &bytes);
+                    s.output = s.output.wrapping_add(1);
                     let mut bits = if std::mem::take(&mut s.grid.dirty) { NEWS_DRAW } else { 0 };
                     if s.grid.title != title {
                         bits |= NEWS_STATE;

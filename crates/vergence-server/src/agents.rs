@@ -180,6 +180,29 @@ pub struct Scope {
     pub level: Level,
 }
 
+/// The scope a request for a terminal of the agent's own is asked under
+/// (bus v38): no tab exists yet; its grant moves to the new terminal's tab
+/// when that window says what it means.
+pub const NEW_TERMINAL: u64 = u64::MAX;
+
+/// How long a terminal asked for may take to say what it means.
+pub const TERMINAL_WAIT_PUB: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// A terminal started for an agent, waiting for its window's first tree: who
+/// asked (its bus connection, the request's serial, who it is and the name it
+/// was given), the program started (its pid and path) and the grant to give.
+#[derive(Debug, Clone)]
+pub struct WaitingTerminal {
+    pub client: u32,
+    pub serial: u32,
+    pub agent: Who,
+    pub name: String,
+    pub pid: u32,
+    pub app: String,
+    pub span: Span,
+    pub since: Instant,
+}
+
 /// The key a question, a refusal and a waiting request are kept under: the
 /// app's for an ordinary window; with the tab and the level for a scoped one.
 pub fn gate_key(app: &str, scope: Option<&Scope>) -> String {
@@ -267,6 +290,11 @@ pub struct Agents {
     /// Shell access, by (agent, app, tab node id): how long, and the level.
     /// In memory only.
     scoped: HashMap<(Who, String, u64), (Span, Level)>,
+    /// Tabs the person stopped an agent in (Escape twice, the mark's click):
+    /// refused, saying so, for the cool-down.
+    stopped: HashMap<(Who, String, u64), Instant>,
+    /// Terminals started for agents, waiting for their windows (bus v38).
+    pub terminals: Vec<WaitingTerminal>,
     /// When the person last said Don't allow to an agent about an app.
     refused: HashMap<(Who, String), Instant>,
     /// When the question showing appeared (nothing counts for ARMING).
@@ -491,11 +519,44 @@ impl Agents {
             .collect()
     }
 
-    /// Every agent's grant for a tab ends now (the stop keys, step 4).
+    /// Every agent's grant for a tab ends now (the stop keys, step 4): each
+    /// is refused there for the cool-down, told the person stopped it, rather
+    /// than asked again at once.
     pub fn revoke_scope(&mut self, app: &str, scope: u64) -> usize {
-        let before = self.scoped.len();
+        let gone: Vec<Who> = self
+            .scoped
+            .keys()
+            .filter(|(_, p, id)| p == app && *id == scope)
+            .map(|(a, _, _)| a.clone())
+            .collect();
         self.scoped.retain(|(_, p, id), _| !(p == app && *id == scope));
-        before - self.scoped.len()
+        let now = Instant::now();
+        for a in &gone {
+            for level in [Level::Read, Level::Act] {
+                let sc = Scope { id: scope, tab: String::new(), level };
+                self.refused.insert((a.clone(), gate_key(app, Some(&sc))), now);
+            }
+            self.stopped.insert((a.clone(), app.to_string(), scope), now);
+        }
+        gone.len()
+    }
+
+    /// Whether the person stopped this agent in this tab, lately.
+    pub fn stopped_lately(&self, agent: &Who, app: &str, scope: u64) -> bool {
+        self.stopped
+            .get(&(agent.clone(), app.to_string(), scope))
+            .is_some_and(|t| t.elapsed().as_secs() < COOL_DOWN_SECS)
+    }
+
+    /// The grant given for a terminal of the agent's own, taken to move to
+    /// its tab once it exists.
+    pub fn take_new_terminal(&mut self, agent: &Who, app: &str) -> Option<Span> {
+        self.scoped.remove(&(agent.clone(), app.to_string(), NEW_TERMINAL)).map(|(s, _)| s)
+    }
+
+    /// A tab's grant at the typing level (the agent's own terminal).
+    pub fn grant_tab(&mut self, agent: &Who, app: &str, tab: u64, span: Span) {
+        self.scoped.insert((agent.clone(), app.to_string(), tab), (span, Level::Act));
     }
 
     /// The minutes a timed grant has left, if the agent has one for the app.
@@ -1006,6 +1067,7 @@ impl Server {
                 format!("\u{201c}{t}\u{201d}")
             });
             let heading: String = match (&q.scope, &tab, q.expired) {
+                (Some(sc), _, _) if sc.id == NEW_TERMINAL => "An agent wants a terminal of its own".to_string(),
                 (Some(sc), Some(t), _) if sc.level == Level::Act => format!("An agent wants to type in the tab {t}"),
                 (Some(_), Some(t), _) => format!("An agent wants to read the tab {t}"),
                 (_, _, true) => format!("An agent's time with {shown} is up"),
@@ -1061,6 +1123,9 @@ impl Server {
                 );
             }
             let line = match &q.scope {
+                Some(sc) if sc.id == NEW_TERMINAL => {
+                    "In a window of its own: what it types runs as you. Password prompts and root shells refuse it."
+                }
                 Some(sc) if sc.level == Level::Act => {
                     "This tab only: what it types runs as you. Password prompts and root shells refuse it."
                 }
@@ -1495,7 +1560,30 @@ mod tests {
         a.scoped.insert((c.clone(), app.into(), 13), (Span::Until(now_secs().saturating_sub(1)), Level::Act));
         assert_eq!(a.may_scoped(&c, 4, app, &tab(13, Level::Read)), May::Expired);
         assert_eq!(a.revoke_scope(app, 10), 1);
-        assert_eq!(a.may_scoped(&c, 4, app, &tab(10, Level::Read)), May::Ask);
+        // Stopped by the person: refused there for the cool-down, saying so,
+        // at both levels, not asked again at once (step 4).
+        assert_eq!(a.may_scoped(&c, 4, app, &tab(10, Level::Read)), May::No);
+        assert_eq!(a.may_scoped(&c, 4, app, &tab(10, Level::Act)), May::No);
+        assert!(a.stopped_lately(&c, app, 10));
+        assert!(!a.stopped_lately(&c, app, 11));
+    }
+
+    /// A terminal of the agent's own (step 4): the grant asked under
+    /// NEW_TERMINAL moves to its tab, at the typing level, once.
+    #[test]
+    fn a_terminal_of_its_own() {
+        let mut a = Agents { loaded: true, ..Default::default() };
+        let c = who("Claude");
+        let tab = |id: u64, level: Level| Scope { id, tab: "zsh".into(), level };
+        let app = "vergence-term @ /usr/bin/vergence-term";
+        assert_eq!(a.take_new_terminal(&c, app), None, "nothing granted");
+        a.scoped.insert((c.clone(), app.into(), NEW_TERMINAL), (Span::Connection(3), Level::Act));
+        let span = a.take_new_terminal(&c, app).unwrap();
+        assert_eq!(a.take_new_terminal(&c, app), None, "taken once");
+        a.grant_tab(&c, app, 42, span);
+        assert_eq!(a.may_scoped(&c, 3, app, &tab(42, Level::Act)), May::Yes);
+        assert_eq!(a.scopes_held(&c, 3, app, Level::Act), vec![42]);
+        assert_eq!(a.may_scoped(&who("Other"), 3, app, &tab(42, Level::Read)), May::Ask, "its own, no one else's");
     }
 
     #[test]

@@ -15,7 +15,7 @@ use std::collections::VecDeque;
 
 use vergence_protocol::window::Node;
 
-use crate::{Server, win::Win};
+use crate::{Server, agents::clean_agent_name, win::Win};
 
 /// A rectangle: x, y, width, height (a caret, a widget on the screens).
 pub type Rect4 = (f64, f64, f64, f64);
@@ -614,6 +614,17 @@ impl Server {
                     }
                 }
             }
+            // A terminal of its own (bus v38): asked once, at the typing level,
+            // about the terminal program that would be started.
+            AgentRequest::OpenTerminal { .. } => {
+                let Some(program) = terminal_program() else {
+                    return refuse(self, r.serial(), ErrorCode::Failed, "no vergence-term to start".into());
+                };
+                let key = format!("vergence-term @ {}", program.display());
+                let scope =
+                    Scope { id: crate::agents::NEW_TERMINAL, tab: "a terminal of its own".into(), level: Level::Act };
+                apps.push((key, Some(scope)));
+            }
             // A search in named windows asks about their apps; one across
             // every window ("*") only shows the apps already allowed.
             AgentRequest::Find { path, .. } => {
@@ -644,6 +655,17 @@ impl Server {
                 Some(false) => {
                     self.agent_log(id, app, "refused: not allowed");
                     let name = self.bus_agent_name(id).unwrap_or_default();
+                    let stopped = scope.as_ref().is_some_and(|sc| {
+                        self.bus_agent_who(id).is_some_and(|who| self.agents.stopped_lately(&who, app, sc.id))
+                    });
+                    if stopped {
+                        return refuse(
+                            self,
+                            r.serial(),
+                            ErrorCode::Denied,
+                            "the person stopped you in this tab (ask again later)".into(),
+                        );
+                    }
                     return refuse(self, r.serial(), ErrorCode::Denied, format!("{name} may not use {shown}"));
                 }
             }
@@ -796,7 +818,32 @@ impl Server {
                     );
                 }
                 let app = w.native().map(|n| n.app_id.clone()).unwrap_or_default();
-                self.agent_log(id, &app, &format!("{action:?} #{node} ({} {:?})", m.role, m.name));
+                // What it typed: how much and how it starts, never all of it (a
+                // paste can hold a secret the agent was given).
+                let what = match &action {
+                    vergence_protocol::window::Action::Type(t) => {
+                        let start: String = t.chars().take(40).collect();
+                        format!("Type {} chars {:?}{}", t.chars().count(), start, if t.chars().count() > 40 { "…" } else { "" })
+                    }
+                    a => format!("{a:?}"),
+                };
+                self.agent_log(id, &app, &format!("{what} #{node} ({} {:?})", m.role, m.name));
+                // Who types, for the window to show (a terminal's tab mark) and
+                // to stop (bus v38).
+                if matches!(action, vergence_protocol::window::Action::Type(_) | vergence_protocol::window::Action::Key(_))
+                    && let Some(n) = w.native()
+                {
+                    let agent = clean_agent_name(&self.bus_agent_name(id).unwrap_or_default());
+                    let (c, win) = (n.client, n.id);
+                    self.bus_send(
+                        c,
+                        vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::AgentActing {
+                            window: win,
+                            node,
+                            agent,
+                        }),
+                    );
+                }
                 // A ring where it acts, for the person to see (step 5), kept
                 // within the window.
                 let g = self.space.element_geometry(&w).unwrap_or_default();
@@ -806,6 +853,46 @@ impl Server {
                 self.agent_ring(&agent, (loc.0 + m.x, loc.1 + m.y, m.w, m.h), win);
                 if self.send_act(&w, node, action, Some((id, serial))).is_none() {
                     reply(self, AgentEvent::Acted { serial, ok: false, why: "not a native window".into() });
+                }
+            }
+            // A terminal of its own (bus v38): started in a window of its own;
+            // the grant moves to its tab when its tree comes (agent_terminal_arrived).
+            AgentRequest::OpenTerminal { serial, cwd } => {
+                let Some(program) = terminal_program() else {
+                    return refuse(self, serial, ErrorCode::Failed, "no vergence-term to start".into());
+                };
+                let app = format!("vergence-term @ {}", program.display());
+                let Some(who) = self.bus_agent_who(id) else { return };
+                let Some(span) = self.agents.take_new_terminal(&who, &app) else {
+                    return refuse(self, serial, ErrorCode::Denied, "not allowed".into());
+                };
+                let dir = if cwd.is_empty() {
+                    std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_else(|| "/".into())
+                } else {
+                    std::path::PathBuf::from(&cwd)
+                };
+                if !dir.is_dir() {
+                    return refuse(self, serial, ErrorCode::Failed, format!("no folder {cwd}"));
+                }
+                let name = clean_agent_name(&who.name);
+                let mut cmd = std::process::Command::new(&program);
+                cmd.arg("--for-agent").arg(&name).current_dir(&dir);
+                match crate::spawn(&mut cmd) {
+                    Ok(pid) => {
+                        self.agent_log(id, &app, &format!("a terminal of its own started (pid {pid})"));
+                        self.agents.terminals.retain(|t| t.since.elapsed() < crate::agents::TERMINAL_WAIT_PUB);
+                        self.agents.terminals.push(crate::agents::WaitingTerminal {
+                            client: id,
+                            serial,
+                            agent: who,
+                            name,
+                            pid,
+                            app,
+                            span,
+                            since: std::time::Instant::now(),
+                        });
+                    }
+                    Err(e) => refuse(self, serial, ErrorCode::Failed, format!("vergence-term: {e}")),
                 }
             }
             // A widget's whole text in pages (bus v37): the tree cuts every
@@ -1045,5 +1132,61 @@ mod tests {
         let (some, _) = log.since(latest - 3);
         assert_eq!(some.len(), 3);
         assert!(log.since(latest).0.is_empty());
+    }
+}
+
+/// The terminal program to start for an agent: beside the server (a
+/// checkout's or an install's bin), else on PATH; its real path, which the
+/// new window's program must be.
+pub fn terminal_program() -> Option<std::path::PathBuf> {
+    let beside = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("vergence-term")));
+    let found = beside.filter(|p| p.is_file()).or_else(|| {
+        std::env::var_os("PATH")
+            .and_then(|path| std::env::split_paths(&path).map(|d| d.join("vergence-term")).find(|p| p.is_file()))
+    })?;
+    std::fs::canonicalize(found).ok()
+}
+
+impl Server {
+    /// A window's tree came: if it is a terminal started for an agent (its
+    /// root says "owner:<name>", its program is the one started, by pid and
+    /// path), the agent's grant moves to its one tab and the agent is told
+    /// where it is (bus v38).
+    pub fn agent_terminal_arrived(&mut self, client: u32, window: u32, nodes: &[vergence_protocol::window::Node]) {
+        if self.agents.terminals.is_empty() {
+            return;
+        }
+        self.agents.terminals.retain(|t| t.since.elapsed() < crate::agents::TERMINAL_WAIT_PUB);
+        let Some(root) = nodes.first() else { return };
+        let Some(owner) = root.states.iter().find_map(|s| s.strip_prefix("owner:")) else { return };
+        let pid = self.bus_pid(client);
+        let Some(app) = self.natives.get(&(client, window)).and_then(|w| w.native()).map(|n| self.agent_app_key(n.client, &n.app_id))
+        else {
+            return;
+        };
+        let Some(i) = self
+            .agents
+            .terminals
+            .iter()
+            .position(|t| t.name == owner && Some(t.pid) == pid && t.app == app)
+        else {
+            return;
+        };
+        let Some(tab) = nodes.iter().find(|n| n.role == "tab" && n.states.iter().any(|s| s == "scope")).map(|n| n.id)
+        else {
+            return;
+        };
+        let t = self.agents.terminals.remove(i);
+        self.agents.grant_tab(&t.agent, &t.app, tab, t.span);
+        tracing::info!("agents: {:?}'s own terminal is {client}/{window}, tab #{tab}", t.agent.name);
+        self.bus_send(
+            t.client,
+            vergence_protocol::bus::ServerMsg::Agent(vergence_protocol::agent::AgentEvent::Terminal {
+                serial: t.serial,
+                client,
+                window,
+                tab,
+            }),
+        );
     }
 }

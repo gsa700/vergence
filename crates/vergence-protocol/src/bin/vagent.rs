@@ -15,6 +15,13 @@
 //   vagent read <client> <window> <node> [offset] [len]
 //                                          a widget's text: one page from offset
 //                                          (characters), or the whole of it in pages
+//   vagent terminal open [cwd]             a terminal of the agent's own (bus v38):
+//                                          the person is asked; prints its window and tab
+//   vagent type <client> <window> <node> <text...>
+//                                          type into a terminal's pane ("\n" ends a line)
+//   vagent key <client> <window> <node> <name>
+//                                          a key: Return, Tab, Escape, BackSpace, Up,
+//                                          Down, Left, Right, Home, End, ctrl+c, ...
 //
 // --name N says who the agent is (default "vagent"). Finds the bus from
 // $VERGENCE_BUS, else $WAYLAND_DISPLAY in $XDG_RUNTIME_DIR.
@@ -45,7 +52,7 @@ fn main() {
 }
 
 fn usage() -> String {
-    "usage: vagent windows | tree <client> <window> | find <path> | focused | do <action> <path> [value] | act <client> <window> <node> <action> [value] | changes [since]".into()
+    "usage: vagent windows | tree <client> <window> | find <path> | focused | do <action> <path> [value] | act <client> <window> <node> <action> [value] | changes [since] | read <client> <window> <node> [offset] [len] | terminal open [cwd] | type <client> <window> <node> <text> | key <client> <window> <node> <name>".into()
 }
 
 fn ask(c: &mut Client, make: impl FnOnce(u32) -> AgentRequest) -> Result<AgentEvent, String> {
@@ -62,7 +69,11 @@ fn action(verb: &str, value: String) -> Result<Action, String> {
         "reveal" => Action::Reveal,
         "set" => Action::Set(value),
         "choose" if !value.is_empty() => Action::Choose(value),
-        _ => return Err(format!("no action {verb:?} (press, focus, reveal, set <value>, choose <item>)")),
+        // A terminal's pane (bus v38): "\n" in the text is a line's end.
+        "type" if !value.is_empty() => Action::Type(value.replace("\\n", "\n")),
+        "key" if vergence_protocol::window::key_name_ok(&value) => Action::Key(value),
+        "key" => return Err(format!("no key {value:?} (Return, Tab, Escape, BackSpace, Up, Down, Left, Right, Home, End, ctrl+<letter>, ...)")),
+        _ => return Err(format!("no action {verb:?} (press, focus, reveal, set <value>, choose <item>, type <text>, key <name>)")),
     })
 }
 
@@ -231,6 +242,30 @@ fn run(name: &str, args: &[String]) -> Result<String, String> {
                     }
                 }
             }
+        }
+        // A terminal of the agent's own (bus v38): the reply comes once the
+        // person has answered and its window has said what it means.
+        "terminal" if args.get(1).map(String::as_str) == Some("open") => {
+            let cwd = args.get(2).cloned().unwrap_or_default();
+            match ask(&mut c, |serial| AgentRequest::OpenTerminal { serial, cwd })? {
+                AgentEvent::Terminal { client, window, tab, .. } => {
+                    Ok(format!("terminal {client} {window} tab {tab} (its pane is the tab's \"terminal\" child: vagent tree {client} {window})"))
+                }
+                other => Err(format!("unexpected {other:?}")),
+            }
+        }
+        "type" | "key" => {
+            let (client, window, node) = (num(1)? as u32, num(2)? as u32, num(3)?);
+            let action = action(cmd, rest(4))?;
+            acted(ask(&mut c, |serial| AgentRequest::Act {
+                serial,
+                client,
+                window,
+                node,
+                action,
+                role: String::new(),
+                name: String::new(),
+            })?)
         }
         "changes" => {
             let since = args.get(1).and_then(|a| a.parse().ok()).unwrap_or(0);

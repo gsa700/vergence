@@ -514,6 +514,8 @@ enum Command {
     /// The desktop's bare ground was clicked (bus v23).
     GroundClicked,
     Menu(f32, f32, Vec<MenuLine>),
+    /// The person stopped an agent at this scope node (bus v38).
+    RevokeAgent(u64, String),
 }
 
 /// What a program may ask of its window while it handles input.
@@ -523,6 +525,12 @@ pub struct Window {
 }
 
 impl Window {
+    /// The person stopped `agent` in the scope `node` (a terminal's tab; bus
+    /// v38): the server ends its grant there now. The native road only.
+    pub fn revoke_agent(&mut self, node: u64, agent: &str) {
+        self.commands.push(Command::RevokeAgent(node, agent.to_string()));
+    }
+
     /// The picture has changed: draw a frame.
     pub fn redraw(&mut self) {
         self.commands.push(Command::Redraw);
@@ -862,6 +870,11 @@ pub trait App {
     fn act(&mut self, _node: u64, _action: &Action, _window: &mut Window) -> Result<(), String> {
         Err("this window takes no actions".into())
     }
+
+    /// An agent, by the name the person knows it by, is about to type or
+    /// press a key at `node` (bus v38): a window may show who (a terminal's
+    /// tab mark) and let the person stop it ([`Window::revoke_agent`]).
+    fn agent_acting(&mut self, _node: u64, _agent: &str, _window: &mut Window) {}
 
     /// A drag is over the window at (x, y) with these kinds: what a drop
     /// would do ([`DROP_NONE`], [`DROP_COPY`], [`DROP_MOVE`]).
@@ -1524,6 +1537,7 @@ impl<'a> Runner<'a> {
                 | Command::Activate
                 | Command::ContextMenu(..)
                 | Command::Menu(..)
+                | Command::RevokeAgent(..)
                 | Command::GroundClicked => {}
                 Command::Minimize => self.client.set_minimized(toplevel)?,
                 Command::Copy(text) => {

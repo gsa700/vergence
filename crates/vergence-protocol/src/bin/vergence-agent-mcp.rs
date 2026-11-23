@@ -411,6 +411,56 @@ fn tools() -> J {
             ),
         ]),
         obj(vec![
+            ("name", s("terminal")),
+            (
+                "description",
+                s(
+                    "A terminal of your own, in a window of its own (the person's terminals and tabs stay hidden from you). The person is asked first (Just now, or for an hour); the call waits for the answer. Answers with its window and its tab; the pane to type into is the tab's \"terminal\" child (see `tree`). Then `type` and `key` into that pane, and `read` its screen (the pane's value) or its scrollback (the pane's \"log\" child).",
+                ),
+            ),
+            ("inputSchema", schema(vec![("cwd", prop("string", "The folder it starts in (default: the home folder)."))], &[])),
+        ]),
+        obj(vec![
+            ("name", s("type")),
+            (
+                "description",
+                s(
+                    "Type text into a terminal's pane, as the keyboard would: \"\\n\" ends a line (Return). Up to a line goes in at a visible pace (about a quarter of a second); longer text at once, as a paste. Refused when the pane is at a password prompt (the person types passwords), runs as root, or the person is typing there; and in tabs you hold no typing grant for. The person sees your name on the tab and can stop you at any time (Escape twice, or a click on your mark); then you are refused there for a while. Read the screen afterwards to see what happened.",
+                ),
+            ),
+            (
+                "inputSchema",
+                schema(
+                    vec![
+                        ("window", prop("string", "The window (client/window).")),
+                        ("node", prop("string", "The pane's id (role \"terminal\"), as a string.")),
+                        ("text", prop("string", "What to type.")),
+                    ],
+                    &["window", "node", "text"],
+                ),
+            ),
+        ]),
+        obj(vec![
+            ("name", s("key")),
+            (
+                "description",
+                s(
+                    "Press one key in a terminal's pane: Return, Tab, Escape, BackSpace, Delete, Up, Down, Left, Right, Home, End, Prior, Next, Insert, space, or ctrl+<letter> (ctrl+c to interrupt, ctrl+d to end input). Refused as `type` is.",
+                ),
+            ),
+            (
+                "inputSchema",
+                schema(
+                    vec![
+                        ("window", prop("string", "The window (client/window).")),
+                        ("node", prop("string", "The pane's id (role \"terminal\"), as a string.")),
+                        ("name", prop("string", "The key's name.")),
+                    ],
+                    &["window", "node", "name"],
+                ),
+            ),
+        ]),
+        obj(vec![
             ("name", s("wait")),
             (
                 "description",
@@ -585,6 +635,56 @@ fn call(bus: &mut Bus, name: &str, args: &J) -> Result<String, String> {
             )),
             other => Err(format!("unexpected {other:?}")),
         },
+        // A terminal of its own, typing and keys (bus v38).
+        "terminal" => {
+            let cwd = args.get("cwd").and_then(J::str).unwrap_or("").to_string();
+            match bus.ask(|serial| AgentRequest::OpenTerminal { serial, cwd: cwd.clone() })? {
+                AgentEvent::Terminal { client, window, tab, .. } => {
+                    let pane = match bus.ask(|serial| AgentRequest::Tree { serial, client, window }) {
+                        Ok(AgentEvent::Tree { nodes, .. }) => {
+                            nodes.iter().find(|n| n.parent == tab && n.role == "terminal").map(|n| n.id)
+                        }
+                        _ => None,
+                    };
+                    Ok(match pane {
+                        Some(p) => format!("your terminal: window {client}/{window}, tab {tab}, pane {p} (type into node {p})"),
+                        None => format!("your terminal: window {client}/{window}, tab {tab}"),
+                    })
+                }
+                other => Err(format!("unexpected {other:?}")),
+            }
+        }
+        "type" | "key" => {
+            let (client, window) = window_id(args.get("window"))?;
+            let node: u64 = args
+                .get("node")
+                .and_then(J::str)
+                .and_then(|n| n.trim().parse().ok())
+                .ok_or("node is the pane's id, as a string")?;
+            let action = if name == "type" {
+                let t = args.get("text").and_then(J::str).ok_or("text is needed")?;
+                Action::Type(t.to_string())
+            } else {
+                let k = args.get("name").and_then(J::str).ok_or("name is needed")?;
+                if !vergence_protocol::window::key_name_ok(k) {
+                    return Err(format!("no key {k:?}"));
+                }
+                Action::Key(k.to_string())
+            };
+            match bus.ask(|serial| AgentRequest::Act {
+                serial,
+                client,
+                window,
+                node,
+                action: action.clone(),
+                role: "terminal".into(),
+                name: String::new(),
+            })? {
+                AgentEvent::Acted { ok: true, .. } => Ok("done; read the pane to see the screen".into()),
+                AgentEvent::Acted { why, .. } => Err(format!("refused: {why}")),
+                other => Err(format!("unexpected {other:?}")),
+            }
+        }
         "read" => {
             let (client, window, node, role, wname) = if let Some(path) = args.get("path").and_then(J::str) {
                 let found = match bus.ask(|serial| AgentRequest::Find { serial, path: path.to_string() })? {
@@ -886,7 +986,7 @@ mod tests {
         let list = parse(&handle(&mut bus, r#"{"jsonrpc":"2.0","id":"a","method":"tools/list"}"#).unwrap()).unwrap();
         let tools = list.get("result").and_then(|r| r.get("tools")).unwrap();
         let J::Arr(t) = tools else { panic!() };
-        assert_eq!(t.len(), 7, "windows, tree, find, focused, act, read, wait");
+        assert_eq!(t.len(), 10, "windows, tree, find, focused, act, read, terminal, type, key, wait");
         let unknown = parse(&handle(&mut bus, r#"{"jsonrpc":"2.0","id":2,"method":"nope"}"#).unwrap()).unwrap();
         assert_eq!(unknown.get("error").and_then(|e| e.get("code")), Some(&J::Num(-32601.0)));
         let garbage = parse(&handle(&mut bus, "{oops").unwrap()).unwrap();

@@ -203,6 +203,29 @@ impl Terminal {
                 self.menu_hover,
             );
         }
+        // An agent typing in the tab in front: its mark at the top right,
+        // a click on which stops it (agent.rs).
+        self.agents.mark = None;
+        if let Some((tab, agent)) = self.agent_typing_in_front()
+            && let Some((_, area)) = panes.first()
+        {
+            let size = vergence_look::text_size(self.settings.ui_size, self.text);
+            let words = format!("{agent} is typing \u{b7} stop");
+            let w = fonts.layout(mt.ui.unwrap_or(mt.regular), size, &words).1 + 20.0;
+            let h = (size * 1.8).round();
+            let r = vergence_scene::Rect::new(area.x + area.w - w - 12.0, area.y + 8.0, w, h);
+            scene.fill_rounded(r, h / 2.0, Color::rgba(p.accent.r, p.accent.g, p.accent.b, 235));
+            vergence_render::text(
+                &mut scene,
+                fonts,
+                mt.ui.unwrap_or(mt.regular),
+                size,
+                Color::rgb(255, 255, 255),
+                vergence_scene::Point::new(r.x + 10.0, (r.y + h / 2.0 + size * 0.35).round()),
+                &words,
+            );
+            self.agents.mark = Some((r, tab));
+        }
         self.last_commands = scene.commands.len();
         scene
     }

@@ -229,6 +229,28 @@ pub enum Action {
     Choose(String),
     /// Scroll whatever holds it until it can be seen.
     Reveal,
+    /// Type this text into it, as the keyboard would (bus v38, terminal agent
+    /// milestone 1): a terminal's pane. At most [`TYPE_MAX`] bytes.
+    Type(String),
+    /// Press this key, by name (bus v38): one of [`KEY_NAMES`], or `ctrl+`
+    /// and a letter.
+    Key(String),
+}
+
+/// The most text one [`Action::Type`] carries.
+pub const TYPE_MAX: usize = 16 * 1024;
+
+/// The keys [`Action::Key`] may name (as the control socket's `vctl key`
+/// names them), besides `ctrl+<a-z>`.
+pub const KEY_NAMES: &[&str] = &[
+    "Return", "Tab", "Escape", "BackSpace", "Delete", "Up", "Down", "Left", "Right", "Home", "End", "Prior", "Next",
+    "Insert", "space",
+];
+
+/// Whether a key name is one [`Action::Key`] takes.
+pub fn key_name_ok(name: &str) -> bool {
+    KEY_NAMES.contains(&name)
+        || name.strip_prefix("ctrl+").is_some_and(|k| k.len() == 1 && k.as_bytes()[0].is_ascii_lowercase())
 }
 
 /// What a client asks of its windows.
@@ -417,6 +439,15 @@ pub enum WinRequest {
         serial: u32,
         ok: bool,
         why: String,
+    },
+    /// The person stopped an agent in this window (bus v38, terminal agent
+    /// milestone 1: Escape twice, or a click on the agent's mark): its grant
+    /// for the scope node `node` (a terminal's tab) ends now. `agent` is the
+    /// name the window was told ([`WinEvent::AgentActing`]).
+    RevokeAgent {
+        window: u32,
+        node: u64,
+        agent: String,
     },
     /// The answer to [`WinEvent::ReadText`] with this serial (bus v37): the
     /// node's text from `offset` (in characters), `total` characters in all;
@@ -906,6 +937,14 @@ pub enum WinEvent {
     SessionEnding {
         window: u32,
     },
+    /// An agent acts on meaning node `node` now (bus v38): the name the person
+    /// knows it by, sent before each [`Action::Type`] and [`Action::Key`] so
+    /// the window can show who types (a terminal's tab mark) and stop it.
+    AgentActing {
+        window: u32,
+        node: u64,
+        agent: String,
+    },
     /// Send the text of meaning node `node` (its value, else its name) from
     /// character `offset`, at most `len` characters (bus v37, paged reading:
     /// the tree cuts every text at [`MEANING_TEXT_MAX`] characters). Answered
@@ -956,6 +995,7 @@ pub(crate) mod op {
     pub const ACTED: u16 = 126;
     pub const SCENE: u16 = 127;
     pub const TEXT_PAGE: u16 = 128;
+    pub const REVOKE_AGENT: u16 = 129;
     // Server to client.
     pub const CREATED: u16 = 100;
     pub const CONFIGURE: u16 = 101;
@@ -995,6 +1035,7 @@ pub(crate) mod op {
     pub const SCENES_OFF: u16 = 135;
     pub const SESSION_ENDING: u16 = 136;
     pub const READ_TEXT: u16 = 137;
+    pub const AGENT_ACTING: u16 = 138;
 
     /// Whether an opcode is a window message's (either way).
     pub fn is_window(opcode: u16) -> bool {
@@ -1074,6 +1115,8 @@ pub(crate) fn put_action(e: &mut Encoder, action: &Action) {
         Action::Set(v) => e.u8(2).str(v),
         Action::Choose(v) => e.u8(3).str(v),
         Action::Reveal => e.u8(4),
+        Action::Type(t) => e.u8(5).str(t),
+        Action::Key(k) => e.u8(6).str(k),
     };
 }
 
@@ -1084,6 +1127,20 @@ pub(crate) fn get_action(d: &mut Decoder) -> Result<Action, WireError> {
         2 => Action::Set(d.str()?),
         3 => Action::Choose(d.str()?),
         4 => Action::Reveal,
+        5 => {
+            let t = d.str()?;
+            if t.len() > TYPE_MAX {
+                return Err(WireError::TooLong(t.len()));
+            }
+            Action::Type(t)
+        }
+        6 => {
+            let k = d.str()?;
+            if !key_name_ok(&k) {
+                return Err(WireError::BadValue("key name"));
+            }
+            Action::Key(k)
+        }
         _ => return Err(WireError::BadValue("action")),
     })
 }
@@ -1411,6 +1468,11 @@ impl WinRequest {
                 e.u32(*window).u32(*serial).bool(*ok).str(why);
                 e
             }
+            WinRequest::RevokeAgent { window, node, agent } => {
+                let mut e = Encoder::frame(op::REVOKE_AGENT);
+                e.u32(*window).u64(*node).str(agent);
+                e
+            }
             WinRequest::TextPage { window, serial, node, found, offset, total, text } => {
                 let mut e = Encoder::frame(op::TEXT_PAGE);
                 e.u32(*window).u32(*serial).u64(*node).bool(*found).u32(*offset).u32(*total).str(text);
@@ -1611,6 +1673,7 @@ impl WinRequest {
             }
             op::GROUND_CLICKED => WinRequest::GroundClicked { window: d.u32()? },
             op::ACTED => WinRequest::Acted { window: d.u32()?, serial: d.u32()?, ok: d.bool()?, why: d.str()? },
+            op::REVOKE_AGENT => WinRequest::RevokeAgent { window: d.u32()?, node: d.u64()?, agent: d.str()? },
             op::TEXT_PAGE => {
                 let (window, serial, node, found, offset, total) =
                     (d.u32()?, d.u32()?, d.u64()?, d.bool()?, d.u32()?, d.u32()?);
@@ -1838,6 +1901,11 @@ impl WinEvent {
                 e.u32(*window);
                 e
             }
+            WinEvent::AgentActing { window, node, agent } => {
+                let mut e = Encoder::frame(op::AGENT_ACTING);
+                e.u32(*window).u64(*node).str(agent);
+                e
+            }
             WinEvent::ReadText { window, serial, node, offset, len } => {
                 let mut e = Encoder::frame(op::READ_TEXT);
                 e.u32(*window).u32(*serial).u64(*node).u32(*offset).u32(*len);
@@ -1991,6 +2059,7 @@ impl WinEvent {
             }
             op::SCENES_OFF => WinEvent::ScenesOff { window: d.u32()?, why: d.str()? },
             op::SESSION_ENDING => WinEvent::SessionEnding { window: d.u32()? },
+            op::AGENT_ACTING => WinEvent::AgentActing { window: d.u32()?, node: d.u64()?, agent: d.str()? },
             op::READ_TEXT => WinEvent::ReadText {
                 window: d.u32()?,
                 serial: d.u32()?,
@@ -2279,6 +2348,7 @@ mod tests {
             WinRequest::GroundClicked { window: 1 },
             WinRequest::Acted { window: 1, serial: 7, ok: false, why: "it is off".into() },
             WinRequest::Acted { window: 2, serial: 8, ok: true, why: String::new() },
+            WinRequest::RevokeAgent { window: 3, node: 1 << 60 | 9, agent: "Claude".into() },
             WinRequest::TextPage {
                 window: 1,
                 serial: 9,
@@ -2417,6 +2487,9 @@ mod tests {
             WinEvent::ScenesOff { window: 1, why: "too costly to draw".into() },
             WinEvent::SessionEnding { window: 2 },
             WinEvent::ReadText { window: 2, serial: 12, node: 1 << 33, offset: 8192, len: 8192 },
+            WinEvent::Act { window: 1, serial: 13, node: 7, action: Action::Type("echo hi\n".into()) },
+            WinEvent::Act { window: 1, serial: 14, node: 7, action: Action::Key("ctrl+c".into()) },
+            WinEvent::AgentActing { window: 1, node: 1 << 60 | 3, agent: "Claude".into() },
         ];
         for m in all {
             let (bytes, fds) = m.encode().unwrap();

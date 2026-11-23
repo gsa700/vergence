@@ -35,6 +35,7 @@
 //! Rules: the window's thread never parses the program's output. Random escape sequences must
 //! never panic the parser (fuzz.rs runs with `cargo test`).
 
+mod agent;
 mod commands;
 mod confirm;
 mod draw;
@@ -263,6 +264,15 @@ struct Terminal {
     scrollback_cache: meaning::ScrollbackCache,
     /// The meaning tree last given to the toolkit (sent again only when it differs).
     meaning_told: Option<vergence_ui::MeaningTree>,
+    /// What the tree was last made from (meaning.rs `meaning_key`): made
+    /// again only when it changes, not at every frame.
+    meaning_key: Option<meaning::MeaningKey>,
+    /// Agents typing in this window (agent.rs; bus v38).
+    agents: agent::Agents,
+    /// `--for-agent NAME`: a terminal of an agent's own, in a window of its
+    /// own (its tree's root says "owner:NAME"; the server grants that agent
+    /// its tab).
+    for_agent: Option<String>,
 }
 
 impl Terminal {
@@ -348,6 +358,9 @@ impl Terminal {
             asked: None,
             scrollback_cache: Default::default(),
             meaning_told: None,
+            meaning_key: None,
+            agents: agent::Agents::default(),
+            for_agent: None,
         }
     }
 }
@@ -355,6 +368,8 @@ impl Terminal {
 /// The cursor's blink: on and off this long.
 const BLINK: Duration = Duration::from_millis(530);
 const TIMER_BLINK: u64 = 4;
+/// An agent's typing at its pace, and its mark's time (agent.rs).
+pub(crate) const TIMER_AGENT: u64 = 5;
 
 /// Text size for a while: steps of a tenth, from half to three times.
 const ZOOM_STEP: f32 = 0.1;
@@ -363,7 +378,10 @@ const ZOOM_MAX: f32 = 3.0;
 
 impl App for Terminal {
     fn title(&self) -> String {
-        "Terminal".into()
+        match &self.for_agent {
+            Some(name) => format!("{name}'s terminal"),
+            None => "Terminal".into(),
+        }
     }
 
     fn app_id(&self) -> String {
@@ -445,6 +463,13 @@ impl App for Terminal {
     /// The window's tabs and terminals (meaning.rs), when they changed since
     /// last asked. Nothing is acted on yet (step 4).
     fn meaning(&mut self) -> Option<vergence_ui::MeaningTree> {
+        // Made again only when what it is made from changed (no scrollback
+        // copied and compared at every frame).
+        let key = self.meaning_key();
+        if self.meaning_key.as_ref() == Some(&key) {
+            return None;
+        }
+        self.meaning_key = Some(key);
         let now = self.meaning_now();
         if self.meaning_told.as_ref() == Some(&now) {
             return None;
@@ -453,8 +478,17 @@ impl App for Terminal {
         Some(now)
     }
 
+    fn act(&mut self, node: u64, action: &vergence_ui::Action, window: &mut Window) -> Result<(), String> {
+        self.on_act(node, action, window)
+    }
+
+    fn agent_acting(&mut self, node: u64, agent: &str, _window: &mut Window) {
+        self.on_agent_acting(node, agent);
+    }
+
     fn bar(&mut self) -> Option<vergence_ui::Bar> {
-        let tabs: Vec<(u32, String, bool)> = self.tabs.iter().map(|t| (t.id, t.label(), t.as_root())).collect();
+        let tabs: Vec<(u32, String, bool)> =
+            self.tabs.iter().map(|t| (t.id, self.agent_title(t.id, t.label()), t.as_root())).collect();
         let front = self.tabs.get(self.shown).map_or(0, |t| t.id);
         // The tab in front is the page's color (look milestone 1): our ground.
         let bg = self.palette.bg;
@@ -688,11 +722,19 @@ fn main() {
         terminal.open_panes = n.clamp(1, 16);
     }
     terminal.open_maximized = args.iter().any(|a| a == "--maximized");
+    // A terminal of an agent's own (bus v38): the server starts it so; its
+    // window is its own, and its process too (no other start hands over to it).
+    if let Some(name) = args.iter().position(|a| a == "--for-agent").and_then(|i| args.get(i + 1)) {
+        let name: String = name.chars().filter(|c| !c.is_control()).take(24).collect();
+        terminal.for_agent = Some(if name.trim().is_empty() { "Agent".into() } else { name.trim().to_string() });
+    }
     // One process for all the terminal's windows (program.rs), on either road
     // since bar milestone 1, step 4b: a later start asks the running one for a
     // window and is done. A terminal started to be measured keeps a process of
     // its own.
-    let measured = args.iter().any(|a| a == "--tabs" || a == "--panes") || std::env::var_os("VTERM_FRAMES").is_some();
+    let measured = args.iter().any(|a| a == "--tabs" || a == "--panes")
+        || std::env::var_os("VTERM_FRAMES").is_some()
+        || terminal.for_agent.is_some();
     let native =
         std::env::var_os("VERGENCE_BUS").is_some() && std::env::var("VERGENCE_UI_WAYLAND").as_deref() != Ok("1");
     if !measured {

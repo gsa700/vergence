@@ -73,11 +73,16 @@
 //! Version 37 (terminal agent milestone 1, paged reading): `agent::AgentRequest::Read` and
 //! `agent::AgentEvent::Text`, a node's whole text in pages; `window::WinEvent::ReadText`
 //! and `window::WinRequest::TextPage`, the window's side of it.
+//! Version 38 (terminal agent milestone 1, typing): `window::Action::Type` and
+//! `window::Action::Key`; `agent::AgentRequest::OpenTerminal` and
+//! `agent::AgentEvent::Terminal`, an agent's terminal of its own;
+//! `window::WinEvent::AgentActing`, who types; `window::WinRequest::RevokeAgent`,
+//! the person's stop.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 37;
+pub const VERSION: u32 = 38;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

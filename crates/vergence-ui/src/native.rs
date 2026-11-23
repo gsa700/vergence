@@ -492,6 +492,7 @@ impl<'a> Native<'a> {
                 Command::Size(w, h) => self.send(WinRequest::Size { window: id, width: w as f64, height: h as f64 })?,
                 Command::Drag(label, items) => self.send(WinRequest::DragStart { window: id, label, items })?,
                 Command::Activate => self.send(WinRequest::Activate { window: id })?,
+                Command::RevokeAgent(node, agent) => self.send(WinRequest::RevokeAgent { window: id, node, agent })?,
                 Command::ContextMenu(x, y) => {
                     // The menu shows the commands as they are now.
                     if let Some((terminal, commands)) = self.windows[i].app.get().commands() {
@@ -845,6 +846,10 @@ impl<'a> Native<'a> {
                     Err(e) => (false, e),
                 };
                 self.send(WinRequest::Acted { window, serial, ok, why })?;
+            }
+            // Who is about to type (bus v38): the window may show it.
+            WinEvent::AgentActing { window, node, agent } => {
+                self.with_window(window, |app, w| app.agent_acting(node, &agent, w))?;
             }
             // A page of a widget's whole text, for an agent (bus v37).
             WinEvent::ReadText { window, serial, node, offset, len } => {

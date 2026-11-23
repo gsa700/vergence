@@ -965,6 +965,8 @@ impl<M: Clone> Ui<M> {
                 self.reveal(i);
                 r.redraw = true;
             }
+            // Typing and keys are a terminal's (bus v38); a widget's text is Set.
+            Action::Type(_) | Action::Key(_) => return Err("this widget takes Set, not typing".into()),
         }
         r.used = true;
         Ok(r)

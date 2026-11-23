@@ -120,7 +120,42 @@ fn node(id: u64, parent: u64, role: &str, name: String, value: Option<String>, s
     }
 }
 
+/// What a window's tree is made from, cheaply: the window's size and front
+/// tab; each tab's id and title; each pane's output count, size and states.
+/// The tree is made again only when this changes.
+#[derive(PartialEq)]
+pub(crate) struct MeaningKey {
+    size: (u32, u32),
+    shown: usize,
+    tabs: Vec<(u32, String, u64, Vec<(u64, u64, (usize, usize, usize, usize, bool), Vec<String>)>)>,
+}
+
 impl Terminal {
+    pub(crate) fn meaning_key(&self) -> MeaningKey {
+        MeaningKey {
+            size: (self.width as u32, self.height as u32),
+            shown: self.shown,
+            tabs: self
+                .tabs
+                .iter()
+                .map(|t| {
+                    let panes = t
+                        .panes
+                        .iter()
+                        .map(|(p, s)| {
+                            let (out, grid) = {
+                                let sc = lock(&s.screen);
+                                (sc.output, (sc.grid.cols, sc.grid.rows, sc.grid.cx, sc.grid.cy, sc.grid.cursor_visible))
+                            };
+                            (*p, out, grid, s.state().states())
+                        })
+                        .collect();
+                    (t.id, t.label(), t.active, panes)
+                })
+                .collect(),
+        }
+    }
+
     /// The window's meaning now (the toolkit sends it when it differs from
     /// the last one: main.rs's `meaning`).
     pub(crate) fn meaning_now(&mut self) -> MeaningTree {
@@ -134,7 +169,14 @@ impl Terminal {
             h: self.height,
             // "shell-access": the server asks for this window's grants a tab at
             // a time, never Always (terminal agent milestone 1, step 1).
-            ..node(WINDOW_ID, 0, "window", title, None, vec!["shell-access".to_string()])
+            ..node(WINDOW_ID, 0, "window", title, None, {
+                let mut states = vec!["shell-access".to_string()];
+                // A terminal of an agent's own: the server gives that agent its tab.
+                if let Some(name) = &self.for_agent {
+                    states.push(format!("owner:{name}"));
+                }
+                states
+            })
         }];
         let mut focus = 0;
         let mut caret = None;

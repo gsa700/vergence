@@ -117,6 +117,11 @@ pub enum AgentRequest {
     /// [`crate::window::TEXT_PAGE_MAX`]). `role` and `name` as for `Act`.
     /// Reply: [`AgentEvent::Text`].
     Read { serial: u32, client: u32, window: u32, node: u64, offset: u32, len: u32, role: String, name: String },
+    /// A terminal of the agent's own (bus v38, terminal agent milestone 1): a
+    /// window of its own, one tab, started in `cwd` (empty: the home folder).
+    /// The person is asked first, at the typing level. Reply:
+    /// [`AgentEvent::Terminal`] once its window has said what it means.
+    OpenTerminal { serial: u32, cwd: String },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -155,6 +160,14 @@ pub enum AgentEvent {
         latest: u64,
         changes: Vec<(u64, AgentChange)>,
     },
+    /// The agent's own terminal (bus v38): its window, and its one tab's
+    /// node (the grant's scope; its pane is that tab's child).
+    Terminal {
+        serial: u32,
+        client: u32,
+        window: u32,
+        tab: u64,
+    },
     /// A page of a widget's text: from character `offset`, `total` in all.
     Text {
         serial: u32,
@@ -177,6 +190,7 @@ mod op {
     pub const ACT: u16 = 205;
     pub const CHANGES: u16 = 206;
     pub const READ: u16 = 207;
+    pub const OPEN_TERMINAL: u16 = 208;
     // Server to agent.
     pub const E_WINDOWS: u16 = 200;
     pub const E_TREE: u16 = 201;
@@ -185,6 +199,7 @@ mod op {
     pub const E_ACTED: u16 = 204;
     pub const E_CHANGES: u16 = 205;
     pub const E_TEXT: u16 = 206;
+    pub const E_TERMINAL: u16 = 207;
 }
 
 fn put_rect(e: &mut Encoder, r: &Rect4) {
@@ -275,6 +290,11 @@ impl AgentRequest {
                 e.u32(*serial).u32(*client).u32(*window).u64(*node).u32(*offset).u32(*len).str(role).str(name);
                 e
             }
+            AgentRequest::OpenTerminal { serial, cwd } => {
+                let mut e = Encoder::frame(op::OPEN_TERMINAL);
+                e.u32(*serial).str(cwd);
+                e
+            }
         };
         e.finish()
     }
@@ -312,6 +332,13 @@ impl AgentRequest {
                     let (client, window, node, offset, len) = (d.u32()?, d.u32()?, d.u64()?, d.u32()?, d.u32()?);
                     AgentRequest::Read { serial, client, window, node, offset, len, role: d.str()?, name: d.str()? }
                 }
+                op::OPEN_TERMINAL => {
+                    let cwd = d.str()?;
+                    if cwd.len() > MAX_PATH {
+                        return Err(WireError::TooLong(cwd.len()));
+                    }
+                    AgentRequest::OpenTerminal { serial, cwd }
+                }
                 other => return Err(WireError::UnknownOpcode(other)),
             })
         })();
@@ -327,7 +354,8 @@ impl AgentRequest {
             | AgentRequest::Focused { serial }
             | AgentRequest::Act { serial, .. }
             | AgentRequest::Changes { serial, .. }
-            | AgentRequest::Read { serial, .. } => *serial,
+            | AgentRequest::Read { serial, .. }
+            | AgentRequest::OpenTerminal { serial, .. } => *serial,
         }
     }
 }
@@ -342,7 +370,8 @@ impl AgentEvent {
             | AgentEvent::Focused { serial, .. }
             | AgentEvent::Acted { serial, .. }
             | AgentEvent::Changes { serial, .. }
-            | AgentEvent::Text { serial, .. } => *serial,
+            | AgentEvent::Text { serial, .. }
+            | AgentEvent::Terminal { serial, .. } => *serial,
         }
     }
 
@@ -418,6 +447,11 @@ impl AgentEvent {
                 }
                 e
             }
+            AgentEvent::Terminal { serial, client, window, tab } => {
+                let mut e = Encoder::frame(op::E_TERMINAL);
+                e.u32(*serial).u32(*client).u32(*window).u64(*tab);
+                e
+            }
             AgentEvent::Text { serial, client, window, node, offset, total, text } => {
                 let mut e = Encoder::frame(op::E_TEXT);
                 e.u32(*serial).u32(*client).u32(*window).u64(*node).u32(*offset).u32(*total).str(text);
@@ -491,6 +525,7 @@ impl AgentEvent {
                 }
                 AgentEvent::Changes { serial, latest, changes }
             }
+            op::E_TERMINAL => AgentEvent::Terminal { serial, client: d.u32()?, window: d.u32()?, tab: d.u64()? },
             op::E_TEXT => {
                 let (client, window, node, offset, total) = (d.u32()?, d.u32()?, d.u64()?, d.u32()?, d.u32()?);
                 let text = d.str()?;
@@ -525,6 +560,32 @@ mod tests {
     }
 
     #[test]
+    fn key_names_are_checked() {
+        use crate::window::key_name_ok;
+        for k in ["Return", "Escape", "ctrl+c", "ctrl+d", "Up", "space"] {
+            assert!(key_name_ok(k), "{k}");
+        }
+        for k in ["", "return", "ctrl+", "ctrl+C", "ctrl+cc", "alt+F4", "super+l", "F1"] {
+            assert!(!key_name_ok(k), "{k}");
+        }
+        // A key the wire does not take is refused when read.
+        let bytes = AgentRequest::Act {
+            serial: 1,
+            client: 1,
+            window: 1,
+            node: 1,
+            action: Action::Key("alt+F4".into()),
+            role: String::new(),
+            name: String::new(),
+        }
+        .encode()
+        .unwrap();
+        let len = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
+        let opcode = u16::from_le_bytes(bytes[4..6].try_into().unwrap());
+        assert!(AgentRequest::decode(opcode, &bytes[6..4 + len]).is_err());
+    }
+
+    #[test]
     fn requests_round_trip() {
         for r in [
             AgentRequest::Hello { serial: 1, name: "Claude".into() },
@@ -552,6 +613,25 @@ mod tests {
                 role: "text area".into(),
                 name: "Untitled".into(),
             },
+            AgentRequest::Act {
+                serial: 9,
+                client: 4,
+                window: 1,
+                node: 2 << 60 | 3 << 20 | 1,
+                action: Action::Type("echo hi\n".into()),
+                role: "terminal".into(),
+                name: "pane 1".into(),
+            },
+            AgentRequest::Act {
+                serial: 10,
+                client: 4,
+                window: 1,
+                node: 2 << 60 | 3 << 20 | 1,
+                action: Action::Key("Return".into()),
+                role: String::new(),
+                name: String::new(),
+            },
+            AgentRequest::OpenTerminal { serial: 11, cwd: "/home/me/src".into() },
         ] {
             let bytes = r.encode().unwrap();
             let (len, opcode) = (
@@ -607,6 +687,7 @@ mod tests {
                     (41, AgentChange::Time { app: "vergence-calc".into(), minutes_left: 4 }),
                 ],
             },
+            AgentEvent::Terminal { serial: 12, client: 4, window: 2, tab: 1 << 60 | 7 },
             AgentEvent::Text {
                 serial: 8,
                 client: 4,

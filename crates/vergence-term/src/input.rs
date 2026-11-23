@@ -129,6 +129,7 @@ impl Terminal {
     pub(crate) fn on_timer(&mut self, id: u64, window: &mut Window) {
         let now = Instant::now();
         match id {
+            crate::TIMER_AGENT => self.on_agent_timer(window),
             // The cursor blinks while the window has the keyboard.
             TIMER_BLINK => {
                 if self.focused && self.blink {
@@ -186,6 +187,10 @@ impl Terminal {
             Input::Button { modifiers, .. } => self.shift = modifiers.shift,
             Input::Focus(false) => self.shift = false,
             _ => {}
+        }
+        // An agent's stop keys and the person's typing (agent.rs) come first.
+        if self.agent_input(input, window) {
+            return;
         }
         // A finger (vergence_ui::touch): a tap is a click where it tapped; a
         // drag up or down scrolls what is under where the finger came down,

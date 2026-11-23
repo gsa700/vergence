@@ -40,6 +40,7 @@ fn colors_follow_the_desktop() {
 #[test]
 fn the_scrollback_keys_reach_its_ends() {
     let mut s = Screen {
+        output: 0,
         grid: Grid::new(10, 4),
         parser: vt::Parser::new(),
         scroll: 0,
@@ -134,6 +135,7 @@ fn the_settings_file_is_followed() {
 #[test]
 fn the_view_scrolls_within_the_scrollback() {
     let mut s = Screen {
+        output: 0,
         grid: Grid::new(20, 4),
         parser: vt::Parser::new(),
         scroll: 0,
