@@ -428,7 +428,7 @@ fn tools() -> J {
             (
                 "description",
                 s(
-                    "Type text into a terminal's pane, as the keyboard would: \"\\n\" ends a line (Return). Up to a line goes in at a visible pace (about a quarter of a second); longer text at once, as a paste. Refused when the pane is at a password prompt (the person types passwords), runs as root, or the person is typing there; and in tabs you hold no typing grant for. The person sees your name on the tab and can stop you at any time (Escape twice, or a click on your mark); then you are refused there for a while. Read the screen afterwards to see what happened.",
+                    "Type text into a terminal's pane, as the keyboard would: \"\\n\" ends a line (Return). Up to a line goes in at a visible pace (about a quarter of a second); longer text at once, as a paste. Refused when the pane is at a password prompt (the person types passwords), runs as root, or the person is typing there; and in tabs you hold no typing grant for. The person sees your name on the tab and can stop you at any time (Escape twice in the tab, or a click on the \"is typing · stop\" pill); then you are refused there for a while. Read the screen afterwards to see what happened.",
                 ),
             ),
             (
