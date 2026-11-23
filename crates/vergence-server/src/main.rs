@@ -93,6 +93,7 @@ mod settings;
 mod shelf;
 mod snap;
 mod sound;
+mod soundserver;
 mod state;
 mod style;
 mod switch;
@@ -182,6 +183,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         state.drives_start();
         // The D-Bus edge (dbus.rs); sets DBUS_SESSION_BUS_ADDRESS unless one is set.
         crate::dbus::listen(&mut state);
+        // PipeWire for other programs' sound (soundserver.rs, Linux), on the
+        // D-Bus edge just made and before the session's apps come back.
+        crate::soundserver::start();
     }
 
     // X11 apps through Xwayland, if the settings ask for it (off by default: a
@@ -197,9 +201,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         spawn_client();
     }
 
-    event_loop.run(None, &mut state, move |_| {
+    let ran = event_loop.run(None, &mut state, move |_| {
         // Server is running
-    })?;
+    });
+    // The sound server goes with its session bus (soundserver.rs).
+    crate::soundserver::stop();
+    ran?;
     // Restart or Shut Down from the log out dialog: the apps have closed;
     // vdm does it (while this session is still registered with it).
     if let Some(p) = state.session_dialog.after_exit.take() {

@@ -20,6 +20,16 @@ install (both need a session restart). **Then the agent layer is frozen**
 (Dave, 2026-11-22): no new agent features unless day-to-day use asks;
 maintained and reviewed; the meaning tree keeps growing for accessibility and
 testing; revisit after about a month of real use.
+
+Sound for other programs on Void (docs/sound-milestone-1.md, 2026-11-22):
+the session starts PipeWire with WirePlumber and pipewire-pulse
+(soundserver.rs; AlbumWall was silent without a sound server), the package
+depends on them, vergence-setup routes ALSA programs through it. Our D-Bus
+edge's name signals now come in dbus-daemon's order, which WirePlumber's
+device reservation needed (it gave only Dummy Output). Tested on Hubble in
+headless sessions; a real session restart there waits for its screen to be
+unlocked. Package vergence-0.2.0_2 (built from a commit after the v0.2.0
+tag) waits in techbench's local repository.
 Packaging milestone 1 closed 2026-11-22 (docs/packaging-milestone-1.md):
 the `vergence` xbps package and `vergence-setup`; techbench runs from it.
 Defaults milestone 1 closed the same day.

@@ -257,3 +257,33 @@ tone into a temporary null sink (1.6 s, nothing heard). Hubble (Void)
 keeps plain ALSA: no sound server there, and Void's Firefox speaks ALSA
 itself. Not yet: following the server's changes by subscription (the
 reading thread asks again, as for ALSA), PipeWire's own protocol.
+
+### PipeWire in the session (2026-11-22)
+
+AlbumWall was silent on a fresh Void with Vergence (techbench): its engine
+plays through the PulseAudio protocol, and Void without systemd runs no
+sound server. Dave asked for it in the install. Now the server starts
+PipeWire, then WirePlumber and pipewire-pulse (unless PipeWire's own
+configuration starts them), right after its D-Bus edge is up and before
+the session's apps come back, and stops them when it ends
+(crates/vergence-server/src/soundserver.rs; the kernel's parent-death
+signal stops them after a crash too). Only on Linux, only for a session on
+the real monitors (`VERGENCE_SOUND_SERVER=on` for tests in a headless one,
+`=off` never), only when no sound server runs and PipeWire is installed;
+`[sound] pipewire = false` turns it off. The Void package depends on
+pipewire, wireplumber and alsa-pipewire; vergence-setup links
+alsa-pipewire's two files into /etc/alsa/conf.d (listed for `--undo`) so
+ALSA programs play through it. FreeBSD keeps OSS. vergence-sound needed
+nothing: it already takes the PulseAudio protocol when a server runs.
+
+WirePlumber first gave only Dummy Output under Vergence (alsa.lua:501),
+which a WirePlumber setting (`monitor.alsa.reserve-device = disabled`)
+hid. The cause was our D-Bus edge: it sent NameAcquired before
+NameOwnerChanged, where dbus-daemon sends NameLost, NameOwnerChanged, then
+NameAcquired. GDBus takes a name as its own at NameAcquired, so
+WirePlumber's watcher of its own reservation took the later
+NameOwnerChanged for another program's and marked both cards busy. Fixed in
+dbus.rs (request_name and release_name, with tests); WirePlumber 0.5.18
+now works with device reservation on (Hubble, three runs of three; the old
+order, in the same headless setup, failed every time).
+

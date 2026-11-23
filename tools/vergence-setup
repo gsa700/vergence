@@ -17,13 +17,16 @@
 # person and the login screen's account), the vdm service, the login screen at
 # boot, the system bus and polkitd for drives (where udisks2 is installed),
 # wpa_supplicant (where there is a Wi-Fi card), acpid leaving the power key to
-# a running session, a system log for vdm. Then hints for what it cannot do
-# (packages to install). Linux with runit (Void) or systemd, and FreeBSD.
+# a running session, a system log for vdm, ALSA programs routed through
+# PipeWire (Linux, where alsa-pipewire is installed: the session starts
+# PipeWire). Then hints for what it cannot do (packages to install). Linux
+# with runit (Void) or systemd, and FreeBSD.
 #
 # --undo, before `xbps-remove vergence`: vdm disabled (the login screen ends,
 # and with it every Vergence session), automatic login and the login screen
 # at boot turned off (a later install brings neither back silently), acpid's
-# handler as it was. Accounts, groups and the other services are left.
+# handler as it was, the ALSA routing links it made removed. Accounts, groups
+# and the other services are left.
 set -u
 # Root's own PATH, not the one sudo or doas may pass on (packaging review).
 PATH=/usr/bin:/usr/sbin:/bin:/sbin:/usr/local/bin:/usr/local/sbin
@@ -39,7 +42,7 @@ while [ $# -gt 0 ]; do
         --undo) undo=1; shift ;;
         --user) need "$@"; user=$2; shift 2 ;;
         --login-screen) need "$@"; login_screen=$2; shift 2 ;;
-        -h|--help) sed -n '2,31p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
         *) echo "vergence-setup: unknown option $1 (--help)" >&2; exit 2 ;;
     esac
 done
@@ -92,6 +95,13 @@ if [ -n "$undo" ]; then
     handler=/etc/acpi/handler.sh
     if [ -f "$handler.vergence-orig" ] && grep -q 'vdm/power-key' "$handler" 2>/dev/null; then
         mv -f "$handler.vergence-orig" "$handler" && echo "power key: acpid's handler as it was"
+    fi
+    # Only the links this made (listed when made); links the person made stay.
+    if [ -f "$state/alsa-links" ]; then
+        while IFS= read -r link; do
+            [ -L "$link" ] && rm -f "$link" && echo "sound: $link removed"
+        done < "$state/alsa-links"
+        rm -f "$state/alsa-links"
     fi
     echo "undone: now sudo xbps-remove vergence (accounts, groups and other services are left as they are)"
     exit 0
@@ -243,6 +253,27 @@ if [ -n "$runit" ] && ! ls /var/service | grep -q -E '^(socklog|syslog|rsyslog|m
     else
         echo "log: no system log runs, so vdm's log is lost (xbps-install socklog-void, then run this again)" >&2
     fi
+fi
+
+# ---- ALSA programs through PipeWire (Linux) ----
+# The session starts PipeWire (vergence-server, soundserver.rs); programs that
+# open ALSA's default device then play through it too instead of taking the
+# card for themselves. alsa-pipewire ships the two files; Void's way is to link
+# them into /etc/alsa/conf.d. The links made are listed for --undo.
+alsa_share=/usr/share/alsa/alsa.conf.d
+if [ "$os" = Linux ] && [ -f "$alsa_share/50-pipewire.conf" ] && [ -f "$alsa_share/99-pipewire-default.conf" ] \
+    && { [ ! -e /etc/alsa/conf.d/50-pipewire.conf ] || [ ! -e /etc/alsa/conf.d/99-pipewire-default.conf ]; }; then
+    if ask "sound: route ALSA programs through PipeWire (links in /etc/alsa/conf.d)?"; then
+        mkdir -p /etc/alsa/conf.d "$state"
+        for f in 50-pipewire.conf 99-pipewire-default.conf; do
+            if [ ! -e "/etc/alsa/conf.d/$f" ]; then
+                ln -s "$alsa_share/$f" "/etc/alsa/conf.d/$f" && echo "/etc/alsa/conf.d/$f" >> "$state/alsa-links" \
+                    && echo "sound: /etc/alsa/conf.d/$f linked"
+            fi
+        done
+    fi
+elif [ "$os" = Linux ] && command -v pipewire >/dev/null 2>&1 && [ ! -f "$alsa_share/50-pipewire.conf" ]; then
+    echo "sound: ALSA programs will not go through PipeWire (Void: xbps-install alsa-pipewire, then run this again)" >&2
 fi
 
 # ---- what it cannot do: hints ----

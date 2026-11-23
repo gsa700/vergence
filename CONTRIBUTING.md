@@ -30,9 +30,13 @@ own machines have them:
 - **Void:** `xbps-install git rust cargo pkg-config libinput-devel
   libxkbcommon-devel libseat-devel libgbm-devel libdrm-devel
   eudev-libudev-devel wayland-devel wayland-protocols mesa-dri seatd
-  fontconfig openbsd-netcat udisks2 dbus socklog-void`, plus
-  `xorg-server-xwayland` for X11 programs and Mesa's Vulkan driver for a
-  second GPU (`mesa-vulkan-nouveau` for NVIDIA). udisks2 mounts drives and
+  fontconfig openbsd-netcat udisks2 dbus socklog-void pipewire wireplumber
+  alsa-pipewire`, plus `xorg-server-xwayland` for X11 programs and Mesa's
+  Vulkan driver for a second GPU (`mesa-vulkan-nouveau` for NVIDIA). The
+  session starts PipeWire (with WirePlumber and pipewire-pulse) for other
+  programs' sound, since a Void without systemd runs no sound server by
+  itself; `[sound] pipewire = false` in desktop.toml leaves it out, and
+  vergence-setup routes ALSA programs through it. udisks2 mounts drives and
   needs the system bus (install.sh enables `dbus`); a base Void runs no
   syslog, so enable socklog for vdm's log (`ln -s /etc/sv/socklog-unix
   /etc/sv/nanoklogd /var/service/`). Checked on a fresh Void install
