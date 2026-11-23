@@ -17,6 +17,7 @@ vergence-types.workspace = true
 vergence-decode.workspace = true
 vergence-thumbs.workspace = true
 vergence-pdf.workspace = true
+vergence-archive.workspace = true
 vergence-hymie.workspace = true
 vergence-sound.workspace = true
 vergence-protocol.workspace = true

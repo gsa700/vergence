@@ -127,3 +127,39 @@ library itself is already there with xbps); FreeBSD needs nothing.
 6. Packaging (`libarchive-devel`), borrowed-review and notices, docs;
    tests on Hubble, techbench and kepler; a display-suite scenario
    (extract, see the folder); an independent review (untrusted input).
+
+## Progress
+
+**Steps 1-6 built 2026-11-23**, waiting for the independent review and
+Dave's hands-on pass.
+
+- **vergence-archive** (0344c95): ffi.rs (the calls, `mode_t` 16 bits on
+  FreeBSD), stream.rs (the pipe), helper.rs (`vergence-unpack`), unpack.rs
+  (list, extract, the rules, the caps), make.rs (Compress, and `write_raw`
+  for the tests' hostile archives). Found on the way:
+  - glibc opens /etc/localtime at a zip's first time: `tzset()` now runs
+    before confinement (the seccomp filter killed the helper there).
+  - libarchive's writers pass names through the locale's character set,
+    and a Rust program runs in the C locale: FreeBSD wrote "é" as "?" in a
+    .zip. make.rs sets a per-thread UTF-8 locale (uselocale) while it writes.
+  - libarchive 3.8.11's pax writer crashes on a non-ASCII UTF-8 name in the
+    C locale; the app writes only .zip, the tests write tar names raw.
+- **FileView** (archive.rs): a double click on an archive (or several)
+  extracts it; Extract Here and Extract To… (the toolkit's folder chooser)
+  in the item's menu for archives and the packages made of one (.jar,
+  .apk, .deb, .rpm); every listing first, then "… Extract it anyway?" past
+  the caps; the job's progress and Stop in the strip, as a copy's; the new
+  folder chosen; what was left out said; undo puts what was extracted in
+  the Trash (`Done::Extracted`). **Compress** makes a .zip by libarchive
+  (was `tar -czf`), with progress, Stop and undo.
+- Packaging: `libarchive-devel` in makedepends (xbps adds the library's
+  runtime dependency itself); install.sh installs `vergence-unpack`.
+  THIRD-PARTY-NOTICES.md lists built-in crates only: libarchive is linked
+  from the system, as libinput is, so it is in docs/borrowed-review.md and
+  the whitepaper's §8 table instead.
+- Checks: 9 tests with the real helper (ordinary tar.gz and zip, one top
+  folder, hostile names and links, a size lie, not an archive, the caps,
+  Compress read back) on Hubble and kepler; workspace tests Hubble 1,043,
+  techbench 1,043, kepler 1,032; display suite 20 of 20 on Hubble with the
+  new scenario 20 (a zip opened: extracted, `..` not made, the left-out
+  note, no hidden folder left, one top folder kept).

@@ -138,6 +138,13 @@ impl Viewer {
                     b("Empty Trash", Msg::Confirm(true), true),
                 ]));
             }
+            Some(Ask::Extract { why, .. }) => {
+                out.push(strip(vec![
+                    label(format!("{why} Extract it anyway?")).size(12.0).weight(600).wrap().width(Length::FILL),
+                    b("Cancel", Msg::Confirm(false), false),
+                    b("Extract anyway", Msg::Confirm(true), true),
+                ]));
+            }
             None => {}
         }
         if let Some(n) = self.naming.as_ref().filter(|n| n.rename.is_none() || self.renaming_row().is_none()) {

@@ -1302,6 +1302,39 @@ pub fn is_disk_image(e: &Entry) -> bool {
     !e.dir && e.mime == Some("application/x-cd-image")
 }
 
+/// The archive types a double click extracts (archive milestone 1): the
+/// ones whose only use is to hold files. Packages and documents built on
+/// zip (.jar, .deb, .odt) open with their apps; their menu still offers
+/// Extract ([`can_extract`]).
+pub const ARCHIVES: &[&str] = &[
+    "application/zip",
+    "application/x-tar",
+    "application/x-compressed-tar",
+    "application/x-xz-compressed-tar",
+    "application/x-zstd-compressed-tar",
+    "application/x-bzip-compressed-tar",
+    "application/x-7z-compressed",
+    "application/vnd.rar",
+];
+
+/// An archive a double click extracts.
+pub fn is_archive(e: &Entry) -> bool {
+    !e.dir && e.mime.is_some_and(|m| ARCHIVES.contains(&m))
+}
+
+/// An archive its menu offers to extract: the above, and the packages made
+/// of one.
+pub fn can_extract(mime: &str) -> bool {
+    ARCHIVES.contains(&mime)
+        || matches!(
+            mime,
+            "application/java-archive"
+                | "application/vnd.android.package-archive"
+                | "application/vnd.debian.binary-package"
+                | "application/x-rpm"
+        )
+}
+
 /// Mounts a disk image read-only: through the server in a Vergence session
 /// (bus v34), else vergence-media here. Where it is mounted.
 pub fn mount_image(path: &Path) -> Result<PathBuf, String> {

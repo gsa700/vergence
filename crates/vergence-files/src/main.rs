@@ -38,6 +38,7 @@
 //! confined helpers.
 
 mod actions;
+mod archive;
 mod commands;
 mod desktop;
 mod dnd;
@@ -101,6 +102,13 @@ enum Ask {
     /// Delete these for good.
     Forever(Vec<PathBuf>),
     EmptyTrash,
+    /// An extract past the caps (archive milestone 1): why, in words; "Extract
+    /// anyway" starts it again, agreed.
+    Extract {
+        archives: Vec<PathBuf>,
+        into: Option<PathBuf>,
+        why: String,
+    },
 }
 
 /// A name being typed: a new folder's, or a new name for a file.
@@ -112,11 +120,19 @@ struct Naming {
     file: bool,
 }
 
+/// A job's outcome once it ends: what it did (for undo) and what to say.
+type JobResult = Arc<Mutex<Option<(ops::Done, Option<String>)>>>;
+
+/// Extract To…'s answer from the file dialog: the archives and the folder.
+type ExtractTo = Arc<Mutex<Option<(Vec<PathBuf>, PathBuf)>>>;
+
 /// A long copy or move on a worker.
 struct Job {
     words: String,
     progress: Arc<ops::Progress>,
-    result: Arc<Mutex<Option<(ops::Done, Option<String>)>>>,
+    result: JobResult,
+    /// A question the job ended on (an extract past the caps), asked when it ends.
+    ask: Arc<Mutex<Option<Ask>>>,
 }
 
 /// A picture for the preview, decoded apart, for a path.
@@ -244,6 +260,8 @@ struct Viewer {
     /// once it comes (where it is mounted, or why not).
     mounting: Option<(String, Arc<Mutex<Option<Result<PathBuf, String>>>>)>,
     job: Option<Job>,
+    /// Extract To…'s answer from the file dialog: the archives and the folder.
+    extract_to: ExtractTo,
     /// Pictures' thumbnails for the icon view, made in the background
     /// (vergence-thumbs; the freedesktop cache other desktops share).
     thumbs: vergence_thumbs::Thumbnailer,
@@ -461,6 +479,7 @@ impl Viewer {
             naming: None,
             rename_after: None,
             mounting: None,
+            extract_to: Arc::default(),
             job: None,
             thumbs,
             thumb_waker,
@@ -869,6 +888,7 @@ impl Program for Viewer {
                     }
                     self.read_all();
                 }
+                Some(Ask::Extract { archives, into, .. }) if yes => self.start_extract(archives, into, true),
                 Some(Ask::EmptyTrash) if yes => {
                     if let Err(e) = ops::empty_trash() {
                         self.notice = Some(format!("The Trash could not be emptied: {}", files::plain(&e)));

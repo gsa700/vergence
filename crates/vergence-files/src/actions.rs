@@ -4,12 +4,12 @@
 //! is in main.rs.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use vergence_widgets::files;
 use vergence_widgets::{Program, Window};
 
-use crate::{Ask, DOUBLE, Job, Naming, Viewer, cmd, notify, ops};
+use crate::{Ask, DOUBLE, Job, JobResult, Naming, Viewer, cmd, ops};
 
 impl Viewer {
     /// A double click's longest gap: the desktop's (Settings > Mouse), as
@@ -49,45 +49,6 @@ impl Viewer {
             }
             Err(e) => self.notice = Some(format!("The link could not be made: {}", files::plain(&e))),
         }
-    }
-
-    /// The chosen items into one archive beside them: "name.tar.gz" for one,
-    /// "Archive.tar.gz" for several, by the system's tar (principle 8), on a
-    /// worker; the folder's watch shows it when it is there.
-    pub(crate) fn compress(&mut self) {
-        let chosen = self.chosen_paths();
-        let Some(dir) = chosen.first().and_then(|p| p.parent()).map(Path::to_path_buf) else { return };
-        if chosen.iter().any(|p| p.parent() != Some(dir.as_path())) {
-            self.notice = Some("Items from different folders cannot be compressed together.".into());
-            return;
-        }
-        let base = match chosen.as_slice() {
-            [one] => one.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Archive".into()),
-            _ => "Archive".into(),
-        };
-        let name = ops::free_name(&format!("{base}.tar.gz"), |x| dir.join(x).symlink_metadata().is_ok());
-        let to = dir.join(&name);
-        let names: Vec<std::ffi::OsString> =
-            chosen.iter().filter_map(|p| p.file_name().map(|n| n.to_os_string())).collect();
-        std::thread::spawn(move || {
-            // "--" so a name starting with "-" is a name, not an option.
-            let out = std::process::Command::new("tar")
-                .arg("-czf")
-                .arg(&to)
-                .arg("-C")
-                .arg(&dir)
-                .arg("--")
-                .args(&names)
-                .output();
-            match out {
-                Ok(o) if o.status.success() => {}
-                Ok(o) => {
-                    let _ = std::fs::remove_file(&to);
-                    notify(&format!("“{name}” could not be made"), String::from_utf8_lossy(&o.stderr).trim());
-                }
-                Err(e) => notify(&format!("“{name}” could not be made"), &format!("tar: {e}")),
-            }
-        });
     }
 
     /// A Trash row's own button: that row chosen, then put back, or asked
@@ -146,7 +107,7 @@ impl Viewer {
             if plan.len() == 1 { "" } else { "s" }
         );
         let progress = Arc::new(ops::Progress::default());
-        let result: Arc<Mutex<Option<(ops::Done, Option<String>)>>> = Arc::default();
+        let result: JobResult = Arc::default();
         let (p, r, waker) = (progress.clone(), result.clone(), self.waker.clone());
         std::thread::spawn(move || {
             // The window looks again while it runs, and when it ends.
@@ -167,7 +128,7 @@ impl Viewer {
                 w.wake();
             }
         });
-        self.job = Some(Job { words, progress, result });
+        self.job = Some(Job { words, progress, result, ask: Arc::default() });
     }
 
     /// A finished job: what it did goes on the undo stack; its error is said.
@@ -175,15 +136,32 @@ impl Viewer {
         let Some(job) = &self.job else { return false };
         let Some((done, error)) = job.result.lock().unwrap_or_else(|e| e.into_inner()).take() else { return true };
         let made = !matches!(&done, ops::Done::Copied(v) if v.is_empty())
-            && !matches!(&done, ops::Done::Moved(v) if v.is_empty());
+            && !matches!(&done, ops::Done::Moved(v) if v.is_empty())
+            && !matches!(&done, ops::Done::Extracted(v) if v.is_empty());
+        // What an extract or Compress made is chosen, if it is here.
+        let new = match &done {
+            ops::Done::Extracted(v) => v.first().cloned(),
+            ops::Done::Made(p) => Some(p.clone()),
+            _ => None,
+        };
         if made {
             self.shared.borrow_mut().undo.push(done);
         }
         if let Some(e) = error {
             self.notice = Some(e);
         }
+        if let Some(a) = job.ask.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            self.ask = Some(a);
+        }
         self.job = None;
         self.read_all();
+        if let Some(p) = new.filter(|p| p.parent().is_some_and(|d| Some(d.to_path_buf()) == self.here()))
+            && let Some(t) = self.front_mut()
+        {
+            t.chosen = vec![p.clone()];
+            t.cursor = Some(p);
+            t.turn += 1;
+        }
         true
     }
 

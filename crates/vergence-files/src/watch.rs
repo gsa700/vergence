@@ -144,6 +144,10 @@ impl Viewer {
             }
             changed = true;
         }
+        // Extract To…'s folder chosen.
+        if self.extract_to_answered() {
+            changed = true;
+        }
         // A copy or move running (its ticks) or ended.
         if self.job.is_some() {
             self.job_ended();

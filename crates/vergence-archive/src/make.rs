@@ -14,7 +14,8 @@ use std::sync::atomic::Ordering;
 use crate::ffi;
 use crate::unpack::Progress;
 
-struct Writer(*mut ffi::Archive, *mut ffi::Entry, Utf8Thread);
+// The third field is held for its Drop: the thread's locale put back after the archive is freed.
+struct Writer(*mut ffi::Archive, *mut ffi::Entry, #[allow(dead_code)] Utf8Thread);
 
 /// This thread's character set made UTF-8 while it writes an archive, and
 /// put back after. libarchive's writers pass names through the locale's

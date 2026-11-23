@@ -72,6 +72,8 @@ pub(crate) mod cmd {
     pub const SIDE_HIDE_RECENT: u32 = 73;
     pub const SIDE_EJECT: u32 = 74;
     pub const MOUNT_IMAGE: u32 = 75;
+    pub const EXTRACT_HERE: u32 = 76;
+    pub const EXTRACT_TO: u32 = 77;
     /// Open With's applications: this, plus their place in the list.
     pub const OPEN_WITH: u32 = 1000;
     pub const MAX_OPEN_WITH: usize = 16;
@@ -111,6 +113,12 @@ impl Viewer {
         {
             let p = one.path.clone();
             self.mount_image(p);
+            return;
+        }
+        // Archives opened are extracted beside themselves (archive milestone 1).
+        if !chosen.is_empty() && chosen.iter().all(files::is_archive) && !self.trash_window && !self.in_trash() {
+            let archives = chosen.iter().map(|e| e.path.clone()).collect();
+            self.start_extract(archives, None, false);
             return;
         }
         let paths: Vec<PathBuf> = chosen.iter().filter(|e| !e.dir).map(|e| e.path.clone()).collect();
@@ -271,6 +279,11 @@ impl Viewer {
             }
             cmd::MAKE_LINK => self.make_link(),
             cmd::COMPRESS => self.compress(),
+            cmd::EXTRACT_HERE => {
+                let archives = self.chosen_archives();
+                self.start_extract(archives, None, false);
+            }
+            cmd::EXTRACT_TO => self.extract_to_dialog(window),
             cmd::INFO => {
                 // A Properties window for each chosen (a few at most), or the folder's.
                 let paths = match self.chosen_paths() {
@@ -484,6 +497,9 @@ impl Viewer {
             lines.push(MenuLine::item(cmd::TRASH, "Move to the Trash", "Delete").enabled(any));
         }
         lines.push(MenuLine::Separator);
+        let archives = !trash && !self.chosen_archives().is_empty();
+        lines.push(MenuLine::item(cmd::EXTRACT_HERE, "Extract Here", "").enabled(archives));
+        lines.push(MenuLine::item(cmd::EXTRACT_TO, "Extract To…", "").enabled(archives));
         lines.push(MenuLine::item(cmd::COMPRESS, "Compress", "").enabled(any && !trash));
         lines.push(MenuLine::item(cmd::INFO, "Properties", "Ctrl+I").enabled(any));
         // Backup milestone 1, step 4: versions from snapshots and the backup copy.

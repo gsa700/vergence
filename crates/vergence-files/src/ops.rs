@@ -348,6 +348,8 @@ pub enum Done {
     /// Something new made from the menu (a file, a link, an archive): undo
     /// puts it in the Trash.
     Made(PathBuf),
+    /// Folders an extract made (undo puts them in the Trash).
+    Extracted(Vec<PathBuf>),
 }
 
 /// Runs a paste's plan: each copied or moved, a replaced target first put
@@ -413,6 +415,12 @@ pub fn undo(d: &Done) -> Result<String, String> {
             }
             fs::rename(to, from).map_err(|e| e.to_string())?;
             Ok("The name is back.".into())
+        }
+        Done::Extracted(made) => {
+            for m in made {
+                trash(m).map_err(|e| e.to_string())?;
+            }
+            Ok(format!("What was extracted ({}) is in the Trash.", made.len()))
         }
         Done::Made(p) => {
             trash(p).map_err(|e| e.to_string())?;

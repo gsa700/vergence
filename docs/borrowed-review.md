@@ -174,6 +174,23 @@ included); xkbcommon's keymap handling is the most likely to stay for good.
 Since seat milestone 1 the server also uses xkbcommon directly (the same
 crate and version Smithay builds on) for its own keyboard state, keys.rs.
 
+### libarchive (BSD 2-clause), linked from the system
+
+Archive milestone 1 (Dave, 2026-11-23: "all leans", the borrowing agreed):
+reading archives (zip, tar and its compressed kinds, 7z, rar and more) in
+the confined helper `vergence-unpack`, and writing Compress's .zip, through
+our own small FFI (crates/vergence-archive/src/ffi.rs; no bindings crate).
+Linked from the system, not shipped: Void's package manager is built on
+it, FreeBSD has it in its base system. It replaced the plan of running the
+bsdtar program, which writes files by its own checks and cannot be
+confined on FreeBSD (Capsicum ends at exec). Only the helper calls its
+read side, after confinement; our code makes every file. Review: keep; our
+own readers for deflate, xz, zstd, bzip2, LZMA and rar are months of work,
+and the formats' corner cases are where the security bugs live. Watch: its
+writers pass names through the locale's character set (make.rs sets a
+per-thread UTF-8 locale), and its pax writer crashed on a non-ASCII UTF-8
+name in the C locale (3.8.11; the app writes only .zip).
+
 ### Xwayland
 
 X11 applications, off by default since 2026-11-10. Review: keep as the only

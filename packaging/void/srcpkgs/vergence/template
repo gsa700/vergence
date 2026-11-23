@@ -9,7 +9,7 @@ revision=2
 _commit=5320ee9b6f38e327900ee0ea67611a2022ae9da5
 build_style=cargo
 hostmakedepends="pkg-config"
-makedepends="libinput-devel libxkbcommon-devel libseat-devel libgbm-devel
+makedepends="libarchive-devel libinput-devel libxkbcommon-devel libseat-devel libgbm-devel
  libdrm-devel eudev-libudev-devel wayland-devel wayland-protocols
  fontconfig-devel pam-devel"
 depends="seatd mesa-dri fontconfig dbus udisks2 polkit openbsd-netcat

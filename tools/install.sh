@@ -33,6 +33,7 @@
 #   libexec/vergence/vergence-hymie          sound files decoded apart (Hymie), confined the same way
 #   libexec/vergence/vergence-hymie-aac      AAC sound files decoded apart (GPL, FAAD2's), confined the same way
 #   libexec/vergence/vergence-pdf            PDF documents read and drawn apart, confined the same way
+#   libexec/vergence/vergence-unpack         archives read apart for FileView, confined the same way
 #   libexec/vergence/media-eject             FreeBSD only: the root helper that unmounts a drive
 #                                            under /media (setuid root, group vergence, mode 4750)
 #   /etc/autofs/special_vergence_media       FreeBSD only: the automounter's /media map (FAT
@@ -119,7 +120,7 @@ if [ -n "$uninstall" ]; then
     # acpid's handler as it was (the power key's guard taken out).
     [ -z "$destdir" ] && [ -f /etc/acpi/handler.sh.vergence-orig ] && mv -f /etc/acpi/handler.sh.vergence-orig /etc/acpi/handler.sh
     rm -f "$libexec/ups-tile" "$libexec/vtile-demo"
-    rm -f "$libexec/sound-default" "$libexec/vergence-choose" "$libexec/vergence-decode" "$libexec/vergence-hymie" "$libexec/vergence-hymie-aac" "$libexec/vergence-pdf" "$words/en_US.txt" "$words/SCOWL-COPYRIGHT.txt"
+    rm -f "$libexec/sound-default" "$libexec/vergence-choose" "$libexec/vergence-decode" "$libexec/vergence-hymie" "$libexec/vergence-hymie-aac" "$libexec/vergence-pdf" "$libexec/vergence-unpack" "$words/en_US.txt" "$words/SCOWL-COPYRIGHT.txt"
     # The service files and hooks it wrote, never a package's (the service's
     # link in /var/service, the person's choice, is left).
     if [ -z "$destdir" ]; then
@@ -289,6 +290,8 @@ install -m 755 "$release/vergence-hymie-aac" "$libexec/vergence-hymie-aac"
 # PDF documents read and drawn apart, confined (PDF milestone 1, step 6).
 [ -x "$release/vergence-pdf" ] || { echo "install.sh: $release/vergence-pdf is missing; run cargo build --release first" >&2; exit 1; }
 install -m 755 "$release/vergence-pdf" "$libexec/vergence-pdf"
+[ -x "$release/vergence-unpack" ] || { echo "install.sh: $release/vergence-unpack is missing; run cargo build --release first" >&2; exit 1; }
+install -m 755 "$release/vergence-unpack" "$libexec/vergence-unpack"
 install -m 755 "$here/vergence-session" "$bin/vergence-session"
 # The system setup, run once as root after installing (packaging milestone 1):
 # a package enables nothing, this does, asking first; install.sh runs it with

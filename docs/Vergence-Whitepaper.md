@@ -474,6 +474,7 @@ What it does not do, said plainly: switching to another virtual terminal stays p
 |---|---|---|
 | Smithay | The server's Wayland front end, DRM/KMS and input back ends, renderer | Borrowed for phase 2 bring-up; moving to a support role (decided 8 November 2026). Input dispatch, focus and grabs are the project's own since 12 November 2026 (vergence-seat); next the window space and the renderer, then the DRM/KMS and input back ends; the Wayland front end may stay as an edge |
 | libinput, libseat/seatd, xkbcommon | Input devices, seat and device access, keymaps | Borrowed through Smithay; xkbcommon also directly, for the server's own keyboard state |
+| libarchive | Reading archives (in a confined helper only, §6.10) and writing .zip, for File Viewer | Borrowed (BSD 2-clause), linked from the system, not shipped; through the project's own FFI (decided 23 November 2026) |
 | Xwayland | X11 applications (the X11 edge) | Borrowed; an X server of our own is a large project |
 | iced | Nothing, since 10 November 2026 | **Removed.** Borrowed (MIT) for the first tools, chosen over Slint on 8 November 2026, replaced by the project's own toolkit, vergence-ui (§6.10, decided 9 November 2026): the terminal moved on 10 November, the settings app the same evening, and iced went with its patches and workarounds |
 | ab_glyph, resvg | Title-bar text, SVG wallpapers | Borrowed; small, candidates for our own |
