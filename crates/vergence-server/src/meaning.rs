@@ -924,7 +924,10 @@ impl Server {
                     vergence_protocol::window::Action::Set(t) => format!("Set {} chars", t.chars().count()),
                     a => format!("{a:?}"),
                 };
-                self.agent_log(id, &app, &format!("{what} #{node} ({} {:?})", m.role, m.name));
+                // Logged as asked; the window's answer follows as its own line
+                // with the same act number (act_answer_line), so this line never
+                // reads as "typed".
+                self.agent_log(id, &app, &format!("act {serial}: {what} #{node} ({} {:?}), asked", m.role, m.name));
                 // Who types, for the window to show (a terminal's tab mark) and
                 // to stop (bus v38).
                 if matches!(
@@ -1119,6 +1122,12 @@ fn found_line(f: &Found) -> String {
 
 /// What agents.log keeps of typed text: its length and its first word, at
 /// most 24 characters of it.
+/// The agents.log line for a window's answer to an agent's act: tied to the
+/// line that asked by the agent's act number.
+pub fn act_answer_line(serial: u32, ok: bool, why: &str) -> String {
+    if ok { format!("act {serial}: acted") } else { format!("act {serial}: refused: {why}") }
+}
+
 pub fn typed_summary(t: &str) -> String {
     let first: String = t.split_whitespace().next().unwrap_or("").chars().take(24).collect();
     let more = t.trim().chars().count() > first.chars().count();
@@ -1351,5 +1360,16 @@ mod tests {
         let s = typed_summary("curl -H 'Authorization: Bearer sk-SECRET' https://x");
         assert!(!s.contains("SECRET") && s.starts_with("Type ") && s.contains("\"curl\""), "{s}");
         assert!(!typed_summary(&"p".repeat(100)).contains(&"p".repeat(25)), "a first word is cut too");
+    }
+
+    /// The window's answer is logged as its own line with the act's number,
+    /// so a forwarded key is never read as typed.
+    #[test]
+    fn act_answer_lines_name_the_act() {
+        assert_eq!(act_answer_line(7, true, ""), "act 7: acted");
+        assert_eq!(
+            act_answer_line(8, false, "this tab runs as root: agents may not type here"),
+            "act 8: refused: this tab runs as root: agents may not type here"
+        );
     }
 }
