@@ -103,9 +103,34 @@ protocol is the first front end, not wired through the screen.
 4. **Sessions**: **both**: attach to the session at the desk, or a remote
    login of its own through vdm.
 
+## The order: Vergence first, then a portable build (Dave, 2026-11-22)
+
+Asked whether the Mac shell should use Avalonia, and reminded that the apps
+roadmap already plans toolkit roads for macOS and Windows, Dave set the order:
+"right now I think the Vergence model is the priority and then building the
+ability to compile a version like the aot for avalonia/.NET".
+
+1. **This milestone: the Vergence model.** The remote screen and its three
+   modes in the server, the native protocol as the first front end, vdm's
+   remote logins, and the client on Vergence (vergence-ui, its native road).
+   The client's core stays free of platform code so the next step can carry
+   it.
+2. **After it: a portable build of Vergence apps**, as `dotnet publish` with
+   Native AOT gives an Avalonia app: one command per platform that makes a
+   self-contained native app (a signed .app on the Mac, an .exe on Windows)
+   from the same code. That is the toolkit roads of the apps roadmap (AppKit,
+   then Win32), with vergence-render drawing on each. **The remote client is
+   its first app**, so the Mac client arrives through the toolkit, not a
+   second codebase; Edit, Reader and Vergence Music can follow.
+3. **Avalonia is not used for the client.** It stays the toolkit of Dave's
+   existing Mac, Windows and Pi apps (AlbumWall, Deadwax, Marginal).
+
+So "Vergence and Mac first" means: Vergence in this milestone, the Mac as the
+first target of the portable build that follows.
+
 ## What the answers bring with them
 
-- **A Mac build.** Control has no Rust today. The Mac shell needs Rust there
+- **A Mac build** (the portable-build milestone, not this one). Control has no Rust today. The Mac shell needs Rust there
   (rustup, which installs into the home folder; not Homebrew) and is signed
   with the Developer ID the lab's Mac apps already use, so Gatekeeper lets it
   run. Ask Dave before installing rustup on Control.

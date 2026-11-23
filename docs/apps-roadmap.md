@@ -437,6 +437,10 @@ Mac, Windows and the Pi kiosk; Avalonia on FreeBSD is not pursued.
   design; later, toolkit roads for macOS (AppKit) and Windows (Win32) would
   let it and every Vergence app run there (roughly a toolkit milestone each;
   Hymie's AudioQueue and WASAPI outputs to port with them).
+  *2026-11-22 (Dave): this becomes the portable build, "the ability to
+  compile a version like the aot for avalonia/.NET", right after remote
+  milestone 1, with the remote client as its first app
+  (docs/remote-milestone-1.md).*
 
 ## The web component, after Vergence Music (Dave, 2026-11-21 night)
 
