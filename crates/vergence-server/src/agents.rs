@@ -19,6 +19,16 @@
 // answers nothing. The question names the app by its entry's name and id
 // and the agent by its name (cleaned, quoted) and program, in rows its
 // words cannot push out. Requests wait while it asks, and run when it answers.
+//
+// Shell access (terminal agent milestone 1, step 1): a window whose tree's
+// root says "shell-access" (Terminal) is granted a tab at a time, never the
+// whole app: a node's scope is its nearest ancestor saying "scope" (a tab),
+// and a grant covers that scope at a level, Read (its tree, focus, changes,
+// pages) or Act (typing; it includes Read). The dialog names the tab and the
+// level and offers only Don't allow, Just now and the timed length: no
+// "Until I log out", no "Always" (Dave: "never"), and an Always kept for the
+// whole app from before is not honored there. These grants live in memory
+// only (a tab's id is its process's).
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -154,6 +164,31 @@ pub enum May {
     Expired,
 }
 
+/// How much a scoped grant allows: reading a tab, or typing in it too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Level {
+    Read,
+    Act,
+}
+
+/// What a request on a shell-access window is about: the tab (its node id
+/// and title, for the dialog) and the level it needs.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Scope {
+    pub id: u64,
+    pub tab: String,
+    pub level: Level,
+}
+
+/// The key a question, a refusal and a waiting request are kept under: the
+/// app's for an ordinary window; with the tab and the level for a scoped one.
+pub fn gate_key(app: &str, scope: Option<&Scope>) -> String {
+    match scope {
+        None => app.to_string(),
+        Some(s) => format!("{app}\u{0}tab {} {:?}", s.id, s.level),
+    }
+}
+
 /// The buttons, left to right.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Button {
@@ -171,6 +206,10 @@ const BUTTONS: [(Button, &str); 5] = [
     (Button::Always, "Always"),
     (Button::Hour, "For an hour"),
 ];
+
+/// A shell-access tab's buttons: never "Until I log out" or "Always".
+const SHELL_BUTTONS: [(Button, &str); 3] =
+    [(Button::DontAllow, "Don't allow"), (Button::JustNow, "Just now"), (Button::Hour, "For an hour")];
 
 /// The timed button's words for a length: "For an hour", "For 30 minutes",
 /// "For 4 hours", "For a day".
@@ -205,12 +244,29 @@ struct Question {
     shown: String,
     /// Its timed grant ran out (the question says so).
     expired: bool,
+    /// A shell-access window's tab and level (None: the whole app, as ever).
+    scope: Option<Scope>,
+}
+
+impl Question {
+    /// The buttons this question offers.
+    fn buttons(&self) -> &'static [(Button, &'static str)] {
+        if self.scope.is_some() { &SHELL_BUTTONS } else { &BUTTONS }
+    }
+
+    /// What its waiting requests and refusal are kept under.
+    fn key(&self) -> String {
+        gate_key(&self.app, self.scope.as_ref())
+    }
 }
 
 #[derive(Default)]
 pub struct Agents {
     /// By (agent, app id).
     grants: HashMap<(Who, String), Span>,
+    /// Shell access, by (agent, app, tab node id): how long, and the level.
+    /// In memory only.
+    scoped: HashMap<(Who, String, u64), (Span, Level)>,
     /// When the person last said Don't allow to an agent about an app.
     refused: HashMap<(Who, String), Instant>,
     /// When the question showing appeared (nothing counts for ARMING).
@@ -390,6 +446,58 @@ impl Agents {
         }
     }
 
+    /// What agent `agent` may do in tab `scope.id` of shell-access `app` at
+    /// `scope.level` now. A Read grant asks again for Act; an Act grant
+    /// covers Read. An app-wide grant, Always included, counts for nothing.
+    fn may_scoped(&mut self, agent: &Who, client: u32, app: &str, scope: &Scope) -> May {
+        let key = (agent.clone(), app.to_string(), scope.id);
+        let refused = (agent.clone(), gate_key(app, Some(scope)));
+        match self.scoped.get(&key).copied() {
+            None if self.refused.get(&refused).is_some_and(|t| t.elapsed().as_secs() < COOL_DOWN_SECS) => May::No,
+            None => May::Ask,
+            Some((_, level)) if level < scope.level => {
+                if self.refused.get(&refused).is_some_and(|t| t.elapsed().as_secs() < COOL_DOWN_SECS) {
+                    May::No
+                } else {
+                    May::Ask
+                }
+            }
+            Some((Span::Connection(c), _)) if c == client => May::Yes,
+            Some((Span::Until(t), _)) if now_secs() < t => May::Yes,
+            Some((Span::Until(_), _)) => {
+                self.scoped.remove(&key);
+                May::Expired
+            }
+            Some(_) => May::Ask,
+        }
+    }
+
+    /// The tabs of shell-access `app` an agent holds a live grant for, at
+    /// `level` or more.
+    pub fn scopes_held(&self, agent: &Who, client: u32, app: &str, level: Level) -> Vec<u64> {
+        self.scoped
+            .iter()
+            .filter(|((a, p, _), (span, l))| {
+                a == agent
+                    && p == app
+                    && *l >= level
+                    && match span {
+                        Span::Connection(c) => *c == client,
+                        Span::Until(t) => now_secs() < *t,
+                        _ => false,
+                    }
+            })
+            .map(|((_, _, id), _)| *id)
+            .collect()
+    }
+
+    /// Every agent's grant for a tab ends now (the stop keys, step 4).
+    pub fn revoke_scope(&mut self, app: &str, scope: u64) -> usize {
+        let before = self.scoped.len();
+        self.scoped.retain(|(_, p, id), _| !(p == app && *id == scope));
+        before - self.scoped.len()
+    }
+
     /// The minutes a timed grant has left, if the agent has one for the app.
     fn minutes_left(&self, agent: &Who, app: &str) -> Option<u64> {
         match self.grants.get(&(agent.clone(), app.to_string())) {
@@ -406,9 +514,22 @@ impl Server {
 
     /// May the agent on bus client `client` use `app`? Asks the person (and
     /// keeps `request` to run after) when nothing says yet; None then.
-    pub fn agent_gate(&mut self, client: u32, app: &str, shown: &str, request: &AgentRequest) -> Option<bool> {
+    /// `scope`: a shell-access window's tab and level (granted on its own).
+    pub fn agent_gate(
+        &mut self,
+        client: u32,
+        app: &str,
+        shown: &str,
+        request: &AgentRequest,
+        scope: Option<Scope>,
+    ) -> Option<bool> {
         let agent = self.bus_agent_who(client)?;
-        match self.agents.may(&agent, client, app) {
+        let key = gate_key(app, scope.as_ref());
+        let may = match &scope {
+            Some(sc) => self.agents.may_scoped(&agent, client, app, sc),
+            None => self.agents.may(&agent, client, app),
+        };
+        match may {
             May::Yes => {
                 self.agents.last = Some((agent, app.to_string(), Instant::now()));
                 self.agent_tile();
@@ -421,11 +542,11 @@ impl Server {
                 if self.agents.pending.len() >= PENDING_MAX || mine >= PENDING_PER_CLIENT {
                     return Some(false);
                 }
-                let asked = self.agents.asking.iter().any(|a| a.agent == agent && a.app == app);
+                let asked = self.agents.asking.iter().any(|a| a.agent == agent && a.key() == key);
                 if !asked && self.agents.asking.iter().filter(|a| a.client == client).count() >= ASKS_PER_CLIENT {
                     return Some(false);
                 }
-                self.agents.pending.push_back((client, app.to_string(), request.clone()));
+                self.agents.pending.push_back((client, key.clone(), request.clone()));
                 if !asked {
                     let q = Question {
                         agent,
@@ -433,6 +554,7 @@ impl Server {
                         app: app.to_string(),
                         shown: shown.to_string(),
                         expired: may == May::Expired,
+                        scope,
                     };
                     let first = self.agents.asking.is_empty();
                     self.agents.asking.push_back(q);
@@ -450,6 +572,30 @@ impl Server {
     pub fn agent_may_quietly(&mut self, client: u32, app: &str) -> bool {
         let Some(agent) = self.bus_agent_who(client) else { return false };
         self.agents.may(&agent, client, app) == May::Yes
+    }
+
+    /// The tabs of shell-access `app` the agent on `client` may read now.
+    pub fn agent_scopes(&mut self, client: u32, app: &str, level: Level) -> Vec<u64> {
+        let Some(agent) = self.bus_agent_who(client) else { return Vec::new() };
+        self.agents.scopes_held(&agent, client, app, level)
+    }
+
+    /// Every agent's grant for tab `scope` of the shell-access window
+    /// (`app_client`, `window`) ends now: the stop keys (step 4). How many.
+    pub fn agent_revoke_tab(&mut self, app_client: u32, window: u32, scope: u64) -> usize {
+        let Some(app) = self
+            .natives
+            .get(&(app_client, window))
+            .and_then(|w| w.native())
+            .map(|n| self.agent_app_key(n.client, &n.app_id))
+        else {
+            return 0;
+        };
+        let n = self.agents.revoke_scope(&app, scope);
+        if n > 0 {
+            tracing::info!("agents: {n} grant(s) for tab {scope} of {app:?} revoked");
+        }
+        n
     }
 
     /// One line in agents.log: who, what app, what, how it went.
@@ -472,6 +618,7 @@ impl Server {
     /// An agent's connection ended: its "Just now" grants go, and its waiting requests.
     pub fn agents_forget(&mut self, client: u32) {
         self.agents.grants.retain(|_, s| *s != Span::Connection(client));
+        self.agents.scoped.retain(|_, (s, _)| *s != Span::Connection(client));
         self.agents.pending.retain(|(c, _, _)| *c != client);
         let before = self.agents.asking.len();
         let was_first = self.agents.asking.front().is_some_and(|q| q.client == client);
@@ -511,7 +658,8 @@ impl Server {
     /// requests waiting on it run (or are refused), the next question shows.
     fn agent_answer(&mut self, i: usize) {
         let Some(q) = self.agents.asking.pop_front() else { return };
-        let button = BUTTONS.get(i).map_or(Button::DontAllow, |b| b.0);
+        let buttons = q.buttons();
+        let button = buttons.get(i).map_or(Button::DontAllow, |b| b.0);
         let span = match button {
             Button::DontAllow => None,
             Button::JustNow => Some(Span::Connection(q.client)),
@@ -521,24 +669,39 @@ impl Server {
         };
         tracing::info!("agents: {:?} and {:?}: {:?}", q.agent, q.app, span);
         if span.is_none() {
-            self.agents.refused.insert((q.agent.clone(), q.app.clone()), Instant::now());
+            self.agents.refused.insert((q.agent.clone(), q.key()), Instant::now());
         }
-        if let Some(s) = span {
-            self.agents.grants.insert((q.agent.clone(), q.app.clone()), s);
-            if matches!(s, Span::Always | Span::Until(_)) {
-                self.agents.save();
+        match (span, &q.scope) {
+            // A tab's grant: in memory, at its level (never Always or the session).
+            (Some(s @ (Span::Connection(_) | Span::Until(_))), Some(sc)) => {
+                self.agents.scoped.insert((q.agent.clone(), q.app.clone(), sc.id), (s, sc.level));
             }
+            (Some(_), Some(_)) => {}
+            (Some(s), None) => {
+                self.agents.grants.insert((q.agent.clone(), q.app.clone()), s);
+                if matches!(s, Span::Always | Span::Until(_)) {
+                    self.agents.save();
+                }
+            }
+            (None, _) => {}
         }
+        let scope_words = q.scope.as_ref().map_or(String::new(), |sc| {
+            format!(" for the tab {:?} ({:?}, #{})", sc.tab.chars().take(48).collect::<String>(), sc.level, sc.id)
+        });
         self.agent_log_named(
             &q.agent.name,
             &q.app,
-            &format!("asked ({}): {}", q.agent.program, BUTTONS.get(i).map_or("Don't allow", |b| b.1)),
+            &format!("asked ({}){scope_words}: {}", q.agent.program, buttons.get(i).map_or("Don't allow", |b| b.1)),
         );
-        // The requests about this app from this agent, in order.
+        // The requests about this app (this tab, at this level or below) from
+        // this agent, in order: a typing grant lets its reads run too.
+        let key = q.key();
+        let read_key = q.scope.as_ref().map(|sc| gate_key(&q.app, Some(&Scope { level: Level::Read, ..sc.clone() })));
         let mut mine = Vec::new();
         let mut rest = VecDeque::new();
         for (c, app, r) in std::mem::take(&mut self.agents.pending) {
-            if app == q.app && self.bus_agent_who(c).as_ref() == Some(&q.agent) {
+            let covered = app == key || (span.is_some() && read_key.as_deref() == Some(app.as_str()));
+            if covered && self.bus_agent_who(c).as_ref() == Some(&q.agent) {
                 mine.push((c, r));
             } else {
                 rest.push_back((c, app, r));
@@ -578,7 +741,7 @@ impl Server {
         if !pressed || !self.agent_dialog_armed() {
             return;
         }
-        let n = BUTTONS.len();
+        let n = self.agents.asking.front().map_or(BUTTONS.len(), |q| q.buttons().len());
         let a = &mut self.agents;
         match sym {
             k::KEY_Escape => return self.agent_answer(0),
@@ -799,7 +962,8 @@ impl Server {
         let timed = timed_label(agents_settings().1);
         let label_of =
             |b: Button, l: &'static str| -> String { if b == Button::Hour { timed.clone() } else { l.to_string() } };
-        let widths: Vec<i32> = BUTTONS
+        let buttons = q.buttons();
+        let widths: Vec<i32> = buttons
             .iter()
             .map(|(b, label)| {
                 let (f, side) = if *b == Button::Hour { (bold, DEFAULT_SIDE) } else { (face, BUTTON_SIDE) };
@@ -810,7 +974,7 @@ impl Server {
         // Don't allow on the left, the four lengths to the right.
         let mut local: Vec<(usize, i32, i32)> = vec![(0, PAD, widths[0])];
         let mut x = W - PAD;
-        for i in (1..BUTTONS.len()).rev() {
+        for i in (1..buttons.len()).rev() {
             x -= widths[i];
             local.push((i, x, widths[i]));
             x -= BUTTON_GAP;
@@ -822,7 +986,7 @@ impl Server {
             .map(|(i, x, w)| (*i, Rectangle::new((at.0 + x, at.1 + row_y).into(), (*w, BUTTON_H).into())))
             .collect();
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (focus, light, scale.to_bits(), accent.r, accent.g, accent.b, &q.agent, &q.shown, &timed, q.expired)
+        (focus, light, scale.to_bits(), accent.r, accent.g, accent.b, &q.agent, &q.shown, &timed, q.expired, &q.scope)
             .hash(&mut h);
         let key = h.finish();
         if self.agents.picture.as_ref().map(|(k, _)| *k) != Some(key) {
@@ -836,10 +1000,16 @@ impl Server {
             let m = fonts.metrics(bold, 18.0);
             // The heading in the desktop's words; the agent's name only quoted.
             let shown: String = q.shown.chars().take(32).collect();
-            let heading: String = if q.expired {
-                format!("An agent's time with {shown} is up")
-            } else {
-                format!("An agent wants to use {shown}")
+            // A shell-access tab: its name, quoted, and what the agent would do.
+            let tab: Option<String> = q.scope.as_ref().map(|sc| {
+                let t: String = clean_agent_name(&sc.tab).chars().take(28).collect();
+                format!("\u{201c}{t}\u{201d}")
+            });
+            let heading: String = match (&q.scope, &tab, q.expired) {
+                (Some(sc), Some(t), _) if sc.level == Level::Act => format!("An agent wants to type in the tab {t}"),
+                (Some(_), Some(t), _) => format!("An agent wants to read the tab {t}"),
+                (_, _, true) => format!("An agent's time with {shown} is up"),
+                _ => format!("An agent wants to use {shown}"),
             };
             vergence_render::text(
                 &mut scene,
@@ -890,10 +1060,17 @@ impl Server {
                     value,
                 );
             }
-            let line = if q.expired {
-                "Keep allowing it to read the app's windows and act in them? What it was doing waits."
-            } else {
-                "It could read the app's windows and press, type and choose in them. A secret field stays secret."
+            let line = match &q.scope {
+                Some(sc) if sc.level == Level::Act => {
+                    "This tab only: what it types runs as you. Password prompts and root shells refuse it."
+                }
+                Some(_) => "This tab only: its screen and what scrolled by. Other tabs stay hidden from it.",
+                None if q.expired => {
+                    "Keep allowing it to read the app's windows and act in them? What it was doing waits."
+                }
+                None => {
+                    "It could read the app's windows and press, type and choose in them. A secret field stays secret."
+                }
             };
             vergence_render::text(
                 &mut scene,
@@ -907,7 +1084,7 @@ impl Server {
             let plain = Color::rgba(s.menu_ink.0, s.menu_ink.1, s.menu_ink.2, 20);
             for (i, x, bw) in &local {
                 let r = SceneRect::new(*x as f32, row_y as f32, *bw as f32, BUTTON_H as f32);
-                let default = BUTTONS[*i].0 == Button::Hour;
+                let default = buttons[*i].0 == Button::Hour;
                 let (ground, text, f) =
                     if default { (accent, Color::rgb(0xff, 0xff, 0xff), bold) } else { (plain, ink(s.menu_ink), face) };
                 scene.fill_rounded(r, 8.0, ground);
@@ -919,7 +1096,7 @@ impl Server {
                         ink(s.menu_ink),
                     );
                 }
-                let label = label_of(BUTTONS[*i].0, BUTTONS[*i].1);
+                let label = label_of(buttons[*i].0, buttons[*i].1);
                 let lw = fonts.layout(f, TEXT, &label).1;
                 let lm = fonts.metrics(f, TEXT);
                 vergence_render::text(
@@ -1177,13 +1354,24 @@ impl Server {
                 s => format!("{:?} ({}) {p:?}: {s:?}", a.name, a.program),
             })
             .collect();
+        // Tabs of shell-access apps (memory only).
+        out.extend(self.agents.scoped.iter().map(|((a, p, id), (s, l))| match s {
+            Span::Until(t) => format!(
+                "{:?} ({}) {p:?} tab #{id} {l:?}: for {} more min",
+                a.name,
+                a.program,
+                t.saturating_sub(now_secs()).div_ceil(60)
+            ),
+            s => format!("{:?} ({}) {p:?} tab #{id} {l:?}: {s:?}", a.name, a.program),
+        }));
         out.sort();
         if let Some(q) = self.agents.asking.front() {
             out.push(format!(
-                "asking: {:?} ({}) wants to use {:?} ({} questions, {} requests waiting{})",
+                "asking: {:?} ({}) wants to use {:?}{} ({} questions, {} requests waiting{})",
                 q.agent.name,
                 q.agent.program,
                 q.shown,
+                q.scope.as_ref().map_or(String::new(), |sc| format!(", tab {:?} #{} {:?}", sc.tab, sc.id, sc.level)),
                 self.agents.asking.len(),
                 self.agents.pending.len(),
                 if self.agent_dialog_armed() { "" } else { "; not yet answerable" }
@@ -1198,16 +1386,21 @@ impl Server {
         if self.agents.asking.is_empty() {
             return "nothing is being asked".into();
         }
-        let i = match word {
-            "deny" | "dont" | "no" => 0,
-            "now" | "just-now" => 1,
-            "session" => 2,
-            "always" => 3,
-            "hour" | "timed" => 4,
+        let want = match word {
+            "deny" | "dont" | "no" => Button::DontAllow,
+            "now" | "just-now" => Button::JustNow,
+            "session" => Button::Session,
+            "always" => Button::Always,
+            "hour" | "timed" => Button::Hour,
             _ => return "agent-answer deny|now|session|always|hour".into(),
         };
+        let buttons = self.agents.asking.front().map_or(&BUTTONS[..], |q| q.buttons());
+        let Some(i) = buttons.iter().position(|(b, _)| *b == want) else {
+            return format!("this question does not offer {word:?}");
+        };
+        let label = buttons[i].1;
         self.agent_answer(i);
-        format!("answered {:?}", BUTTONS[i].1)
+        format!("answered {label:?}")
     }
 }
 
@@ -1270,6 +1463,57 @@ mod tests {
         a.refused
             .insert((c.clone(), "term".into()), Instant::now() - std::time::Duration::from_secs(COOL_DOWN_SECS + 1));
         assert_eq!(a.may(&c, 4, "term"), May::Ask);
+    }
+
+    #[test]
+    fn a_tab_s_grant() {
+        let mut a = Agents { loaded: true, ..Default::default() };
+        let c = who("Claude");
+        let tab = |id: u64, level: Level| Scope { id, tab: "zsh".into(), level };
+        let app = "vergence-term @ /usr/bin/vergence-term";
+        assert_eq!(a.may_scoped(&c, 3, app, &tab(10, Level::Read)), May::Ask);
+        // An Always for the whole app, kept from before, counts for nothing here.
+        a.grants.insert((c.clone(), app.into()), Span::Always);
+        assert_eq!(a.may_scoped(&c, 3, app, &tab(10, Level::Read)), May::Ask);
+        // Read granted: reading yes, typing asks again, another tab asks.
+        a.scoped.insert((c.clone(), app.into(), 10), (Span::Connection(3), Level::Read));
+        assert_eq!(a.may_scoped(&c, 3, app, &tab(10, Level::Read)), May::Yes);
+        assert_eq!(a.may_scoped(&c, 3, app, &tab(10, Level::Act)), May::Ask, "reading is not typing");
+        assert_eq!(a.may_scoped(&c, 3, app, &tab(11, Level::Read)), May::Ask, "one tab, not the app");
+        assert_eq!(a.may_scoped(&c, 4, app, &tab(10, Level::Read)), May::Ask, "Just now is this connection's");
+        // Typing granted: it covers reading.
+        a.scoped.insert((c.clone(), app.into(), 10), (Span::Until(now_secs() + 600), Level::Act));
+        assert_eq!(a.may_scoped(&c, 4, app, &tab(10, Level::Read)), May::Yes);
+        assert_eq!(a.may_scoped(&c, 4, app, &tab(10, Level::Act)), May::Yes);
+        assert_eq!(a.scopes_held(&c, 4, app, Level::Read), vec![10]);
+        assert!(a.scopes_held(&who("Other"), 4, app, Level::Read).is_empty(), "per agent");
+        // A refusal is the tab's and the level's.
+        a.refused.insert((c.clone(), gate_key(app, Some(&tab(11, Level::Read)))), Instant::now());
+        assert_eq!(a.may_scoped(&c, 4, app, &tab(11, Level::Read)), May::No);
+        assert_eq!(a.may_scoped(&c, 4, app, &tab(12, Level::Read)), May::Ask);
+        // Timed out: asked again, saying so; the stop keys revoke at once.
+        a.scoped.insert((c.clone(), app.into(), 13), (Span::Until(now_secs().saturating_sub(1)), Level::Act));
+        assert_eq!(a.may_scoped(&c, 4, app, &tab(13, Level::Read)), May::Expired);
+        assert_eq!(a.revoke_scope(app, 10), 1);
+        assert_eq!(a.may_scoped(&c, 4, app, &tab(10, Level::Read)), May::Ask);
+    }
+
+    #[test]
+    fn a_tab_s_question_offers_no_always() {
+        let q = |scope: Option<Scope>| Question {
+            agent: who("Claude"),
+            client: 3,
+            app: "vergence-term @ x".into(),
+            shown: "Terminal".into(),
+            expired: false,
+            scope,
+        };
+        let shell = q(Some(Scope { id: 10, tab: "zsh".into(), level: Level::Act }));
+        let words: Vec<&str> = shell.buttons().iter().map(|b| b.1).collect();
+        assert_eq!(words, vec!["Don't allow", "Just now", "For an hour"]);
+        assert!(!shell.buttons().iter().any(|b| matches!(b.0, Button::Always | Button::Session)));
+        assert_eq!(q(None).buttons().len(), 5, "an ordinary app as ever");
+        assert_ne!(shell.key(), q(None).key(), "a tab's question is kept apart from the app's");
     }
 
     #[test]

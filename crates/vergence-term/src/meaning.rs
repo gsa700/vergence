@@ -16,9 +16,9 @@
 //!                  whole through paged reading (bus v37): the tree's send
 //!                  cuts every value at 512 characters.
 //!
-//! Every tab publishes its terminals, the ones behind too: the grants of
-//! step 1 are scoped to a tab and hide the others from an agent (until then
-//! this is not installed: an app-wide grant would see every tab).
+//! Every tab publishes its terminals, the ones behind too: the window says
+//! "shell-access" and each tab "scope", so the server's grants (step 1) cover
+//! one tab at a time and hide the others from an agent.
 //!
 //! Ids are stable for as long as a tab and a pane live, whatever moves:
 //!   window          1
@@ -132,7 +132,9 @@ impl Terminal {
             y: 0.0,
             w: self.width,
             h: self.height,
-            ..node(WINDOW_ID, 0, "window", title, None, Vec::new())
+            // "shell-access": the server asks for this window's grants a tab at
+            // a time, never Always (terminal agent milestone 1, step 1).
+            ..node(WINDOW_ID, 0, "window", title, None, vec!["shell-access".to_string()])
         }];
         let mut focus = 0;
         let mut caret = None;
@@ -140,7 +142,8 @@ impl Terminal {
         for (index, tab) in self.tabs.iter().enumerate() {
             let selected = index == self.shown;
             let tab_id = tab_node(tab.id);
-            let mut tab_states = Vec::new();
+            // "scope": a grant covers this tab and what is under it, nothing else.
+            let mut tab_states = vec!["scope".to_string()];
             if selected {
                 tab_states.push("selected".to_string());
             }

@@ -140,4 +140,23 @@ All questions answered: ready to build.
   its headers, not yet run (kepler not synced in this step; its unit test,
   a_password_prompt_is_seen_from_the_master, runs there with the next sync).
   Workspace tests on Hubble: 1,005 passed.
+- **Step 1, grants scoped to a tab** (2026-11-22). Terminal's root says
+  "shell-access", each tab "scope"; the server (agents.rs, meaning.rs) asks
+  for such a window a tab at a time at a level, Read (tree, focus, changes,
+  pages) or Act (it includes Read), offering only Don't allow, Just now and
+  the timed length; an app-wide Always is not honored there; these grants
+  live in memory. A tree or the focus reads the tab in front; a read or an
+  act names its node's tab; a node in a tab the agent holds nothing for, and
+  not in front, is refused ("not in a tab you may use") without asking.
+  Replies hold the root (named "Terminal": the window's title is the tab in
+  front's) and the granted tabs' nodes only; Find skips other tabs and never
+  asks about a shell window; changes tell focus only in held tabs and the
+  caret only while a held tab is in front. The dialog's heading names the
+  tab ("An agent wants to type in the tab ..."), the agent's name staying in
+  its quoted row as before. `vctl agents` lists tab grants.
+  `agent_revoke_tab(client, window, tab)` ends every agent's grant for a tab
+  (for step 4's stop keys). Checked headless on Hubble: a tree asked about
+  the tab in front at Read, "always" and "session" not offered, the reply
+  that tab's nodes only; the other tab's node refused; typing asked again at
+  Act; both dialogs shot and fit. Still not installed: step 4 next.
 

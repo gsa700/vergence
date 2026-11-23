@@ -421,3 +421,8 @@ unnecessary for now); voice control.
   `role:*` matched only a widget named "*"; both fixed in meaning.rs, with
   tests. Secret fields are refused by unit tests and step 1's checks, not
   here (no app of ours has one on screen headless).
+
+*2026-11-22: a window whose root says "shell-access" (Terminal) is granted a
+tab at a time and at a level instead, never Always: see
+docs/terminal-agent-milestone-1.md, step 1.*
+
