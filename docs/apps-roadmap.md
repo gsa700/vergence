@@ -512,3 +512,12 @@ the system's references) now has its parts: the toolkit and its widgets, the
 components (Hymie, the PDF engine, decoders, drives, the preview), the
 documents (ARCHITECTURE.md, the crate docs, CONTRIBUTING.md), the display suite
 to check what was built, and the agent interface to try it.
+
+## From the screenshots (2026-11-22)
+
+- **FileView's preview pane grows with the window**, as Finder's preview
+  column does: today it has a fixed width, so a PDF's first page shows as a
+  thumbnail too small to read even with the window maximized; and a Space
+  preview opens centered over its FileView, hiding the list it came from.
+  Both seen making README screenshots; the preview shot waits for this.
+

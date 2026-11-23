@@ -45,8 +45,8 @@ STATUS.md says what is built and what comes next.
 <td><a href="docs/screenshots/dark-tint.jpg"><img src="docs/screenshots/dark-tint.jpg" alt="Settings and FileView in dark style over the Tide wallpaper, taking on its teal"></a><br>Dark style: windows take on the wallpaper's color.</td>
 </tr>
 <tr>
-<td><a href="docs/screenshots/reader.jpg"><img src="docs/screenshots/reader.jpg" alt="Reader showing the Vergence whitepaper"></a><br>Reader: PDF on its own engine, sharp at any scale.</td>
-<td><a href="docs/screenshots/preview.jpg"><img src="docs/screenshots/preview.jpg" alt="FileView's preview window showing a wallpaper"></a><br>FileView's preview: Space on any file.</td>
+<td><a href="docs/screenshots/reader.jpg"><img src="docs/screenshots/reader.jpg" alt="Reader showing two pages of the Vergence whitepaper side by side"></a><br>Reader: a PDF as a book's spread, on its own engine.</td>
+<td><a href="docs/screenshots/edit-terminal.jpg"><img src="docs/screenshots/edit-terminal.jpg" alt="Edit with the workspace's Cargo.toml beside Terminal building Vergence"></a><br>Edit beside Terminal, building Vergence itself.</td>
 </tr>
 </table>
 

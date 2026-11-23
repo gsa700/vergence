@@ -113,16 +113,8 @@ at vergence-files 1240 520
 front vergence-files
 shot dark-tint
 
-# 3. FileView's preview pane: the list and the chosen file side by side,
-# the whitepaper's first page drawn beside its folder.
-fresh "[files]
-view = \"list\"
-preview-pane = true"
-open "vergence-files $DEMO/Documents"
-at vergence-files 380 220
-press vergence-files button "Vergence-Whitepaper"
-sleep 2
-shot preview
+# (FileView's preview: left out until its pane grows with the window; the
+# pane's page is too small to read, and a Space preview covers the list.)
 
 # 4. Edit and Terminal: the workspace's Cargo.toml beside a terminal
 # building the tree (a fresh target folder, so it is compiling when shot).
