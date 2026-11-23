@@ -751,68 +751,41 @@ impl Server {
         {
             return Err(format!("{name} can't be requested"));
         }
-        let me = self.dbus_unique(id);
-        let q = self.dbus.names.entry(name.to_string()).or_default();
-        let Some(&(owner, owner_flags)) = q.front() else {
-            q.push_back((id, flags));
-            self.dbus_name_acquired(id, name);
-            self.dbus_owner_changed(name, "", &me);
-            tracing::info!("dbus: {me} owns {name}");
-            return Ok(1);
-        };
-        if owner == id {
-            q[0].1 = flags;
-            return Ok(4);
-        }
-        if flags & REPLACE_EXISTING != 0 && owner_flags & ALLOW_REPLACEMENT != 0 {
-            q.retain(|(o, _)| *o != id);
-            q.pop_front();
-            q.push_front((id, flags));
-            if owner_flags & DO_NOT_QUEUE == 0 {
-                q.insert(1, (owner, owner_flags));
-            }
-            let old = self.dbus_unique(owner);
-            self.dbus_bus_signal("NameLost", &[Value::Str(name.into())], Some(owner));
-            self.dbus_name_acquired(id, name);
-            self.dbus_owner_changed(name, &old, &me);
-            tracing::info!("dbus: {me} took {name} from {old}");
-            return Ok(1);
-        }
-        if flags & DO_NOT_QUEUE != 0 {
-            return Ok(3);
-        }
-        if !q.iter().any(|(o, _)| *o == id) {
-            q.push_back((id, flags));
-        }
-        Ok(2)
+        let (reply, events) = request_name(&mut self.dbus.names, id, name, flags);
+        self.dbus_name_events(name, &events);
+        Ok(reply)
     }
 
     /// ReleaseName: 1 released, 2 no such name, 3 not owner. `tell` sends
     /// NameLost (not when the connection is gone).
     fn dbus_release_name(&mut self, id: u32, name: &str, tell: bool) -> u32 {
-        let Some(q) = self.dbus.names.get_mut(name) else { return 2 };
-        let Some(pos) = q.iter().position(|(o, _)| *o == id) else { return 3 };
-        q.remove(pos);
-        if pos != 0 {
-            return 1;
+        let (reply, mut events) = release_name(&mut self.dbus.names, id, name);
+        if !tell {
+            events.retain(|e| !matches!(e, NameEvent::Lost(_)));
         }
-        let next = q.front().map(|(o, _)| *o);
-        if next.is_none() {
-            self.dbus.names.remove(name);
-        }
-        let old = self.dbus_unique(id);
-        if tell {
-            self.dbus_bus_signal("NameLost", &[Value::Str(name.into())], Some(id));
-        }
-        match next {
-            Some(n) => {
-                let new = self.dbus_unique(n);
-                self.dbus_name_acquired(n, name);
-                self.dbus_owner_changed(name, &old, &new);
+        self.dbus_name_events(name, &events);
+        reply
+    }
+
+    /// The signals for a change of a name's owner, in the order given (which
+    /// is dbus-daemon's: see [`request_name`]).
+    fn dbus_name_events(&mut self, name: &str, events: &[NameEvent]) {
+        for e in events {
+            match *e {
+                NameEvent::Lost(id) => self.dbus_bus_signal("NameLost", &[Value::Str(name.into())], Some(id)),
+                NameEvent::Changed { old, new } => {
+                    let old = old.map(|o| self.dbus_unique(o)).unwrap_or_default();
+                    let new = new.map(|n| self.dbus_unique(n)).unwrap_or_default();
+                    tracing::info!(
+                        "dbus: {name}: {} -> {}",
+                        if old.is_empty() { "none" } else { &old },
+                        if new.is_empty() { "none" } else { &new }
+                    );
+                    self.dbus_owner_changed(name, &old, &new);
+                }
+                NameEvent::Acquired(id) => self.dbus_name_acquired(id, name),
             }
-            None => self.dbus_owner_changed(name, &old, ""),
         }
-        1
     }
 
     fn dbus_send_raw(&mut self, id: u32, bytes: &[u8]) {
@@ -1308,6 +1281,133 @@ fn recv_with_fds(stream: &UnixStream, buf: &mut [u8]) -> std::io::Result<(usize,
         }
     }
     Ok((got.bytes, fds))
+}
+
+/// A signal owed when a well-known name changes hands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NameEvent {
+    /// NameLost, to the connection that had it.
+    Lost(u32),
+    /// NameOwnerChanged, to everyone (None: no owner).
+    Changed { old: Option<u32>, new: Option<u32> },
+    /// NameAcquired, to the new owner.
+    Acquired(u32),
+}
+
+type NameQueues = HashMap<String, VecDeque<(u32, u32)>>;
+
+/// RequestName on the name table: the reply (1 primary owner, 2 queued,
+/// 3 exists, 4 already owner) and the signals owed, in dbus-daemon's order:
+/// NameLost to the old owner, NameOwnerChanged, NameAcquired to the new one,
+/// all before the method reply (bus/services.c). The order matters: GDBus
+/// takes a name as its own at NameAcquired, and a watcher of the same name on
+/// the same connection that sees NameOwnerChanged after that takes it for
+/// someone else's. WirePlumber's device reservation did just that on our
+/// bus, and left no sound output but Dummy Output (2026-11-22).
+fn request_name(names: &mut NameQueues, id: u32, name: &str, flags: u32) -> (u32, Vec<NameEvent>) {
+    let q = names.entry(name.to_string()).or_default();
+    let Some(&(owner, owner_flags)) = q.front() else {
+        q.push_back((id, flags));
+        return (1, vec![NameEvent::Changed { old: None, new: Some(id) }, NameEvent::Acquired(id)]);
+    };
+    if owner == id {
+        q[0].1 = flags;
+        return (4, Vec::new());
+    }
+    if flags & REPLACE_EXISTING != 0 && owner_flags & ALLOW_REPLACEMENT != 0 {
+        q.retain(|(o, _)| *o != id);
+        q.pop_front();
+        q.push_front((id, flags));
+        if owner_flags & DO_NOT_QUEUE == 0 {
+            q.insert(1, (owner, owner_flags));
+        }
+        let events = vec![
+            NameEvent::Lost(owner),
+            NameEvent::Changed { old: Some(owner), new: Some(id) },
+            NameEvent::Acquired(id),
+        ];
+        return (1, events);
+    }
+    if flags & DO_NOT_QUEUE != 0 {
+        return (3, Vec::new());
+    }
+    if !q.iter().any(|(o, _)| *o == id) {
+        q.push_back((id, flags));
+    }
+    (2, Vec::new())
+}
+
+/// ReleaseName on the name table: the reply (1 released, 2 no such name,
+/// 3 not owner) and the signals owed, in dbus-daemon's order (see
+/// [`request_name`]).
+fn release_name(names: &mut NameQueues, id: u32, name: &str) -> (u32, Vec<NameEvent>) {
+    let Some(q) = names.get_mut(name) else { return (2, Vec::new()) };
+    let Some(pos) = q.iter().position(|(o, _)| *o == id) else { return (3, Vec::new()) };
+    q.remove(pos);
+    if pos != 0 {
+        return (1, Vec::new());
+    }
+    let next = q.front().map(|(o, _)| *o);
+    if next.is_none() {
+        names.remove(name);
+    }
+    let mut events = vec![NameEvent::Lost(id), NameEvent::Changed { old: Some(id), new: next }];
+    if let Some(n) = next {
+        events.push(NameEvent::Acquired(n));
+    }
+    (1, events)
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+    use NameEvent::*;
+
+    const NAME: &str = "org.freedesktop.ReserveDevice1.Audio0";
+
+    #[test]
+    fn a_new_owner_hears_owner_changed_before_acquired() {
+        let mut t = NameQueues::new();
+        let (r, ev) = request_name(&mut t, 5, NAME, DO_NOT_QUEUE);
+        assert_eq!(r, 1);
+        assert_eq!(ev, vec![Changed { old: None, new: Some(5) }, Acquired(5)]);
+        assert_eq!(request_name(&mut t, 5, NAME, 0), (4, vec![]));
+    }
+
+    #[test]
+    fn a_taken_name_says_lost_changed_acquired() {
+        let mut t = NameQueues::new();
+        request_name(&mut t, 1, NAME, ALLOW_REPLACEMENT);
+        assert_eq!(request_name(&mut t, 2, NAME, DO_NOT_QUEUE), (3, vec![]));
+        let (r, ev) = request_name(&mut t, 2, NAME, REPLACE_EXISTING);
+        assert_eq!(r, 1);
+        assert_eq!(ev, vec![Lost(1), Changed { old: Some(1), new: Some(2) }, Acquired(2)]);
+        // The old owner, which allowed queueing, waits second.
+        assert_eq!(t[NAME].iter().map(|(o, _)| *o).collect::<Vec<_>>(), vec![2, 1]);
+    }
+
+    #[test]
+    fn a_release_hands_on_in_the_same_order() {
+        let mut t = NameQueues::new();
+        request_name(&mut t, 1, NAME, 0);
+        assert_eq!(request_name(&mut t, 2, NAME, 0), (2, vec![]));
+        let (r, ev) = release_name(&mut t, 1, NAME);
+        assert_eq!(r, 1);
+        assert_eq!(ev, vec![Lost(1), Changed { old: Some(1), new: Some(2) }, Acquired(2)]);
+        let (r, ev) = release_name(&mut t, 2, NAME);
+        assert_eq!((r, ev), (1, vec![Lost(2), Changed { old: Some(2), new: None }]));
+        assert!(!t.contains_key(NAME));
+        assert_eq!(release_name(&mut t, 2, NAME), (2, vec![]));
+    }
+
+    #[test]
+    fn leaving_the_queue_says_nothing() {
+        let mut t = NameQueues::new();
+        request_name(&mut t, 1, NAME, 0);
+        request_name(&mut t, 2, NAME, 0);
+        assert_eq!(release_name(&mut t, 2, NAME), (1, vec![]));
+        assert_eq!(release_name(&mut t, 3, NAME), (3, vec![]));
+    }
 }
 
 #[cfg(test)]
