@@ -20,6 +20,9 @@ install (both need a session restart). **Then the agent layer is frozen**
 (Dave, 2026-11-22): no new agent features unless day-to-day use asks;
 maintained and reviewed; the meaning tree keeps growing for accessibility and
 testing; revisit after about a month of real use.
+Typing stays (Dave, 2026-11-23): its use is a person who cannot type,
+helped by voice; the safeguards that assume hands are the known work for a
+voice milestone (the milestone doc, "Why typing stays").
 
 Sound for other programs on Void (docs/sound-milestone-1.md, 2026-11-22):
 the session starts PipeWire with WirePlumber and pipewire-pulse

@@ -123,6 +123,48 @@ you", naming the tab; buttons Don't allow, Just now, For an hour.
 
 All questions answered: ready to build.
 
+## Why typing stays: the use case (Dave, 2026-11-23)
+
+During his hands-on pass on techbench Dave asked whether typing earns its
+place. Claude's first answer was no: an agent always has a shell already
+(a remote one reaches the bus over ssh, a local one runs in a shell), so
+typing into a tab gives it nothing it lacks, while the typing grant is the
+most dangerous thing in the agent layer. Claude proposed removing typing
+and keeping reading.
+
+Dave's answer: "image [imagine] I was disabled in some way and I wanted you to help me
+do things, probably via voice". That settles it, and typing stays:
+
+- **The person is the one being served.** A person who cannot type has no
+  practical shell of their own. The agent's ssh shell is invisible to them;
+  their own Terminal tab is where they can watch what is done on their
+  behalf.
+- **Their tab holds what the agent's shell cannot reach**: an ssh session
+  into another machine, an editor with unsaved work, a program halfway
+  through.
+- **The desktop is the whole of it, not only Terminal.** Edit, Files and
+  Settings already take actions by name (meaning milestone 1); Terminal was
+  the missing piece. With voice: "C, open my wish list and add a line",
+  "C, what did that build say?", "C, update the system".
+
+**The gap: this milestone's safeguards assume hands.** For the person this
+is for, each needs a hands-free form. This is the known work, for a voice
+milestone when Dave wants one (the agent layer is otherwise frozen):
+
+| Safeguard | Today | For a person who cannot type |
+|---|---|---|
+| Allowing | a click in the server's dialog | "allow for an hour" by voice, or a switch |
+| Stopping | any key; Escape twice; a click on the pill | "stop" by voice, heard at once, every time |
+| Password prompts | refused, the person types it | they cannot: another way to prove it is them (a security key, a fingerprint, or speaking to a prompt only the server sees) |
+| Watching | text at a line per 250 ms | the agent's typing read aloud, or a pace the person sets |
+
+Found in the same pass: a line typed at the PACE (120 characters in 250 ms)
+looks instant to a person ("I was watching thinking you were typing really
+fast"); nobody can press a key inside one line's burst on purpose. The
+person's key still refuses the agent's next line (the last second), which is
+the stop a person can really use. Recorded, not changed: the layer is
+frozen, and the voice milestone sets the pace for its own use.
+
 ## Progress
 
 - **Paged reading** (plan step 2, built first; bus v37), 2026-11-22.
