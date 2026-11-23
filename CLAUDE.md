@@ -28,7 +28,7 @@ an AI collaborator must know to work here safely.
   runs in the ASUS TUF F15 (Intel UHD panel at 1080p 144 Hz, GTX 1650 on the
   external outputs through Mesa NVK; dual boot with Windows). No display
   manager: log in on the text console, then `vergence`. Passwordless sudo.
-  Ask before restarting its session.
+  Its session may be restarted freely (Dave, 2026-11-22).
 - **techbench** (Void Linux, glibc, since 2026-11-22: i9-13900K, UHD 770,
   the LG 27" 4K at 133⅓%; Btrfs root, not encrypted for now: encryption
   waits for the Vergence installer, docs/release-pathway.md §4):
@@ -82,7 +82,7 @@ an AI collaborator must know to work here safely.
 - **Installing (Hubble, kepler):** `cargo build --release` on the box, `sudo tools/install.sh`
   (it restarts the desktop's icons and installs the helpers in
   libexec/vergence), then `vctl restart` only when the server changed or the
-  bus version moved (and only with Dave's go on techbench; ask on Hubble).
+  bus version moved (and only with Dave's go on techbench; Hubble freely).
   An installed session has no control socket unless
   `~/.config/vergence/control-socket` exists (it does on the lab's boxes).
 - **Commit and push** after each piece (GitHub `gsa700/vergence`, private;
