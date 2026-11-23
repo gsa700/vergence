@@ -1,0 +1,11 @@
+[package]
+name = "vergence-archive"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Archives read in a confined helper and written as .zip, through libarchive (archive milestone 1); every archive is untrusted input"
+
+[dependencies]
+vergence-decode.workspace = true
+vergence-types.workspace = true
