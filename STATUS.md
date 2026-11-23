@@ -46,7 +46,10 @@ Defaults milestone 1 closed the same day.
    added to the package's depends), in a confined helper, nothing written
    outside the target (no `..`, absolute paths or symlinks out), caps
    against archive bombs, progress as for copies. Later: an archive browsed
-   as a folder, and Space previewing its list.
+   as a folder, and Space previewing its list. **Plan drafted 2026-11-23**
+   (docs/archive-milestone-1.md): libarchive through FFI in a confined
+   helper instead of the bsdtar program, and Compress to .zip too (Dave: no
+   zip/unzip needed); waits for his answers.
 2. **Remote access** (Dave, 2026-11-22: the next milestone after Terminal on
    the agent interface): the protocol and its client(s); display lists, not
    video (whitepaper phase 4, principle 8: transport by SSH or WireGuard,
