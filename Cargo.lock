@@ -2240,6 +2240,7 @@ dependencies = [
 name = "vergence-files"
 version = "0.2.1"
 dependencies = [
+ "vergence-archive",
  "vergence-config",
  "vergence-decode",
  "vergence-hymie",
