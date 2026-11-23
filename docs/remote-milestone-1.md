@@ -60,12 +60,45 @@ The three modes:
 - **Transport**: SSH (a channel or a forwarded socket) or WireGuard; never a
   listening TCP port of our own.
 
+## Clients and protocols (Dave, 2026-11-22)
+
+Dave: "client wise, we need to be able run on multiple platforms. and plan the
+extra protocols for later VNC, virt, RDP, etc."
+
+**Clients run on several platforms from the start.** One client, written in
+Rust, in two layers:
+- **A portable core** (a crate of its own): the connection, the protocol, and
+  drawing what arrives (display lists through vergence-render, pixels by
+  decoding), with no platform code. The same core in every client.
+- **Thin shells per platform**: a window, input, the clipboard and the
+  screen's size and density from each system. First Vergence itself and the
+  other Linux and FreeBSD desktops (Wayland, X11 later if wanted), the Mac,
+  and Windows; phones later.
+- **The protocol is documented and versioned** (as the bus protocol is), so
+  others can write clients of their own.
+
+**Extra protocols come later, planned for now.** The remote screen produces
+frames, damage and display lists and takes input; a protocol is a **front end
+on that screen**, so adding one never touches the screen model:
+- **Native** (milestone 1): display lists and pixels, ours.
+- **VNC (RFB)**: pixels only; any VNC viewer works. Likely the first extra.
+- **RDP**: pixels with better compression; Windows' own client works.
+- **Virtual machines** ("virt": SPICE, as virt-manager and virt-viewer use):
+  for VMs, and for showing a session to those tools.
+- Each one arrives with its own security review, and with the same rules as
+  native: logins through vdm, transport through SSH or WireGuard (or the
+  protocol's own TLS when bound only to a tunnel), the watcher indicator.
+- Whether any borrows a library is asked of Dave when its turn comes.
+
+So milestone 1's work includes keeping that front-end seam clean: the native
+protocol is the first front end, not wired through the screen.
+
 ## Questions for Dave (to settle before building)
 
-1. **Which clients first**: Vergence to Vergence (the natural start); a viewer
-   for the Mac (Control); Windows (the hamshack PC); later perhaps the iPhone.
-2. **Standard protocols**: also speak VNC or RDP (pixels, a borrowed library
-   or our own encoder) so any existing viewer works, or native only at first?
+1. ~~Which clients first~~ (answered above: several platforms; the order of
+   the shells is the remaining choice: lean, Vergence and the Mac first, since
+   Control is the daily Mac, then Windows).
+2. ~~Standard protocols~~ (answered above: later, planned now as front ends).
 3. **Which modes in milestone 1**: all three, or mirror and take over first
    (the daily use) and extend after?
 4. **The running session or a login of its own**: attach to the session at the
