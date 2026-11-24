@@ -13,3 +13,53 @@
 
 pub mod lz;
 pub mod proto;
+
+/// The host's socket for Vergence Remote, beside the session's bus: the
+/// server listens on it, `vergence-remote` connects to it.
+pub fn socket_for(runtime: &std::path::Path, display: &str) -> std::path::PathBuf {
+    runtime.join(format!("vergence-remote-{display}"))
+}
+
+/// The running session's remote socket, for `vergence-remote` run over SSH
+/// (where neither WAYLAND_DISPLAY nor, often, XDG_RUNTIME_DIR is set): in
+/// `$XDG_RUNTIME_DIR`, or the usual runtime folders for this user, the
+/// `vergence-remote-*` sockets something answers on. More than one (two
+/// sessions) is an error the person sees.
+pub fn find_socket() -> Result<std::path::PathBuf, String> {
+    let uid = unsafe {
+        unsafe extern "C" {
+            fn getuid() -> u32;
+        }
+        getuid()
+    };
+    // XDG_RUNTIME_DIR when it is set (a login that has it, a test session);
+    // else the usual places for this user.
+    let dirs: Vec<std::path::PathBuf> = match std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()) {
+        Some(d) => vec![d.into()],
+        None => {
+            let mut v: Vec<std::path::PathBuf> = vec![format!("/run/user/{uid}").into(), format!("/tmp/xdg-{uid}").into()];
+            if let Ok(user) = std::env::var("USER") {
+                v.push(format!("/var/run/xdg/{user}").into());
+            }
+            v
+        }
+    };
+    let mut live = Vec::new();
+    for d in dirs {
+        let Ok(entries) = std::fs::read_dir(&d) else { continue };
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with("vergence-remote-")
+                && std::os::unix::net::UnixStream::connect(e.path()).is_ok()
+                && !live.contains(&e.path())
+            {
+                live.push(e.path());
+            }
+        }
+    }
+    match live.len() {
+        0 => Err("no Vergence session is running for this user here".into()),
+        1 => Ok(live.remove(0)),
+        _ => Err("more than one Vergence session is running for this user here".into()),
+    }
+}

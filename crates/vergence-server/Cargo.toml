@@ -34,6 +34,7 @@ vergence-render.workspace = true
 vergence-edid.workspace = true
 vergence-xsettings.workspace = true
 vergence-protocol.workspace = true
+vergence-remote.workspace = true
 vergence-net.workspace = true
 vergence-power.workspace = true
 vergence-sound.workspace = true

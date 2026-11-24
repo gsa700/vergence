@@ -2412,6 +2412,7 @@ dependencies = [
  "vergence-power",
  "vergence-profile",
  "vergence-protocol",
+ "vergence-remote",
  "vergence-render",
  "vergence-scene",
  "vergence-seat",

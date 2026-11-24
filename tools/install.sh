@@ -13,7 +13,7 @@
 #   cargo build --release
 #
 # What goes where (PREFIX=/usr/local):
-#   bin/vergence-server, vergence-term, vergence-settings, vergence-calc, vergence-quit, vergence-hw, vergence-edit, vergence-closeup, vergence-reader, vergence-files, vergence-screenshot, vergence-open, vbus, vtile, vagent, vergence-agent-mcp, vnative, vsound, vshell, vctl   the programs
+#   bin/vergence-server, vergence-term, vergence-settings, vergence-calc, vergence-quit, vergence-hw, vergence-edit, vergence-closeup, vergence-reader, vergence-files, vergence-screenshot, vergence-open, vbus, vtile, vagent, vergence-agent-mcp, vnative, vsound, vshell, vergence-remote (SSH runs it for Vergence Remote), vergence-remote-probe, vctl   the programs
 #   bin/vergence-session                     the session launcher (tools/vergence-session)
 #   bin/vergence -> vergence-session         start the session from a text console
 #   sbin/vergence-setup                      the system setup, run once as root (install.sh runs it with --yes)
@@ -82,7 +82,7 @@ applications=$destdir$prefix/share/applications
 icons=$destdir$prefix/share/icons/hicolor/scalable/apps
 docs=$destdir$prefix/share/doc/vergence       # license and notices (the settings app's About page names it)
 docfiles="LICENSE-APACHE LICENSE-GPL THIRD-PARTY-NOTICES.md"
-programs="vergence-server vergence-term vergence-settings vergence-calc vergence-quit vergence-hw vergence-edit vergence-closeup vergence-reader vergence-files vergence-screenshot vergence-open vbus vtile vagent vergence-agent-mcp vnative vsound vshell vdm-try"
+programs="vergence-server vergence-term vergence-settings vergence-calc vergence-quit vergence-hw vergence-edit vergence-closeup vergence-reader vergence-files vergence-screenshot vergence-open vbus vtile vagent vergence-agent-mcp vnative vsound vshell vdm-try vergence-remote vergence-remote-probe"
 tools="vergence-term vergence-settings vergence-calc vergence-quit vergence-hw vergence-edit vergence-closeup vergence-reader vergence-files vergence-trash vergence-screenshot"
 libexec=$destdir$prefix/libexec/vergence
 sbin=$destdir$prefix/sbin

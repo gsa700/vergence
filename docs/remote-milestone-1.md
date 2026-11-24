@@ -259,3 +259,18 @@ is listed above only as Dave's own alternative.
   Documented for other viewers in docs/remote-protocol.md. Tests: 7
   (round trips, a screen compressing better than 20 to 1, hostile blocks
   and messages), on Hubble, techbench and kepler.
+- **Step 3, `vergence-remote`** (2026-11-23): the server listens on a socket
+  of its own beside the bus, `$XDG_RUNTIME_DIR/vergence-remote-<display>`
+  (owner only, the same user only; remote.rs), so the screen's stream is a
+  channel of its own and the bus is unchanged (no version bump). On it the
+  same protocol as over SSH, frames uncompressed; `vergence-remote` (run by
+  SSH) finds the session's socket, relays both ways checking every message,
+  and compresses frames on their way out, so the compositor's loop never
+  compresses. One frame in flight, the next after the viewer's Ack. Hello
+  starts a view (the main screen: the one at the layout's origin), named on
+  the Dockworker's tile; End there tells the viewer ("Ended from the desk")
+  and closes it. A viewer is held to 25 megapixels (a whole picture must fit
+  one message uncompressed on the local leg). The machine does not sleep
+  from idleness while viewed. `vergence-remote-probe`, a viewer without a
+  window, for tests and diagnosis. Display suite 22: the first frame of a
+  1280x720 desktop was 22.6 KB on the wire (0.6% of raw), 83 ms from start.

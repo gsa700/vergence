@@ -2284,9 +2284,18 @@ pub type RemoteRect = (u32, u32, u32, u32, Vec<u8>);
 /// A remote view of the screen `source` for a viewer of `want` pixels, for
 /// `who` (named on the Dockworker's tile); its id.
 pub fn remote_start(state: &mut Server, source: &str, want: (u32, u32), who: &str) -> Result<u32, String> {
+    // A whole picture must fit one message uncompressed on the local leg
+    // (vergence-remote's protocol caps messages at 128 MiB): 25 megapixels,
+    // a 6K screen; larger viewers get a view that fits.
     if !(16..=16384).contains(&want.0) || !(16..=16384).contains(&want.1) {
         return Err("a viewer from 16x16 to 16384x16384 pixels".into());
     }
+    let want = if want.0 as u64 * want.1 as u64 > 25_000_000 {
+        let k = (25_000_000.0 / (want.0 as f64 * want.1 as f64)).sqrt();
+        ((want.0 as f64 * k) as u32, (want.1 as f64 * k) as u32)
+    } else {
+        want
+    };
     let Some(b) = state.backend.as_mut() else { return Err("no backend".into()) };
     let Some((key, _)) = b.surfaces.iter().find(|(_, s)| s.connector == source) else {
         return Err(format!("no screen named {source}"));
@@ -2343,6 +2352,8 @@ fn remote_clock(state: &mut Server) {
             for key in idle {
                 remote_alone(st, key);
             }
+            // Frames to the viewers that may take one (remote.rs).
+            st.remote_service();
         }
         TimeoutAction::ToDuration(Duration::from_millis(16))
     });
@@ -2383,6 +2394,8 @@ pub fn remote_stop(state: &mut Server, id: u32) -> bool {
     if stopped {
         tracing::info!("remote view {id}: stopped");
         remote_tile(state);
+        // A viewer whose view this was is told (remote.rs).
+        state.remote_service();
     }
     stopped
 }
@@ -2398,6 +2411,8 @@ pub fn remote_end_all(state: &mut Server) {
     b.remotes.clear();
     tracing::info!("remote views: {n} ended from the desk");
     remote_tile(state);
+    // Their viewers told now: the views' clock stops with the last view.
+    state.remote_service();
 }
 
 /// The Dockworker's tile while anyone views this computer (principle 8: who
@@ -2440,6 +2455,11 @@ pub fn remote_tile(state: &mut Server) {
             page: String::new(),
         },
     );
+}
+
+/// The remote views' ids.
+pub fn remote_ids(state: &Server) -> Vec<u32> {
+    state.backend.as_ref().map(|b| b.remotes.iter().map(|r| r.id).collect()).unwrap_or_default()
 }
 
 /// How many remote views there are.

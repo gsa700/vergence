@@ -160,6 +160,7 @@ pub struct Server {
     pub control_owned: bool,
     /// The session bus (bus.rs).
     pub bus: crate::bus::Bus,
+    pub remote: crate::remote::Remotes,
     /// The D-Bus edge (dbus.rs).
     pub dbus: crate::dbus::DBus,
     /// The desktop settings (settings.rs).
@@ -375,6 +376,7 @@ impl Server {
             exit_code: 0,
             control_owned: false,
             bus: Default::default(),
+            remote: Default::default(),
             dbus: Default::default(),
             settings: Default::default(),
             notes: Default::default(),

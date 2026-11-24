@@ -269,7 +269,14 @@ impl Server {
             self.input_screens_off();
         }
         // The login screen does not put the machine to sleep itself (vdm, step 6).
-        if !sleep.is_zero() && !self.energy.slept && idle >= sleep && !crate::greeter() {
+        // Not while someone views it remotely (remote milestone 1): sleep would
+        // cut them off mid-session; the screens may still go off.
+        if !sleep.is_zero()
+            && !self.energy.slept
+            && idle >= sleep
+            && !crate::greeter()
+            && crate::drm::remote_count(self) == 0
+        {
             if c.lock_before_sleep {
                 self.lock_for_idle("sleep");
             }
