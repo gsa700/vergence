@@ -2488,6 +2488,10 @@ name = "vergence-spell"
 version = "0.4.0-pre.3"
 
 [[package]]
+name = "vergence-syntax"
+version = "0.4.0-pre.3"
+
+[[package]]
 name = "vergence-sysinfo"
 version = "0.4.0-pre.3"
 

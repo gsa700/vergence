@@ -1,0 +1,11 @@
+[package]
+name = "vergence-syntax"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Vergence's syntax highlighting: our own line-by-line highlighters, built in or from definition files"
+
+# Our own code; no dependencies yet (definition files, step 7, will read TOML
+# with the toml crate the workspace already uses).
+[dependencies]
