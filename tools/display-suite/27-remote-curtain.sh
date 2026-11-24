@@ -13,7 +13,7 @@ scenario() {
     set -- $(edit_line | sed -E 's/.*\{ x: (-?[0-9]+), y: (-?[0-9]+), width: ([0-9]+), height: ([0-9]+) \}.*/\1 \2 \3 \4/')
     cx=$(($1 + $3 / 2)); cy=$(($2 + $4 / 2))
     env XDG_RUNTIME_DIR="$run" "$TARGET/vergence-remote-probe" --size 1920x1080 --frames 1000 --seconds 12 --name Control \
-        --script "pointer $cx $cy; press left; release left; wait 300; privacy on; wait 1200; type behind the curtain; wait 4000" \
+        --script "pointer $cx $cy; press left; release left; wait 300; privacy on; wait 1200; type behind the curtain; wait 500; down 125; down 42; key 4; up 42; up 125; wait 3000" \
         -- "$TARGET/vergence-remote" > "$OUT/probe.txt" 2>&1 &
     p=$!
     sleep 3.5
@@ -32,6 +32,10 @@ scenario() {
     vctl tree > "$OUT/tree.txt"
     check "$(yes_if "grep -q 'behind the curtain' '$OUT/tree.txt'")" "the viewer's keys reached Edit through the curtain"
     check "$(yes_if "vctl lock | grep -q '^unlocked'")" "unlocked at the desk"
+    # Super+Shift+3 from the viewer behind the curtain: the session, not the lock.
+    taken=$(ls -t "$HOME"/.cache/vergence-headless/home/Pictures/Screenshots/*/*.png 2>/dev/null | head -1)
+    if [ -n "$taken" ]; then cp "$taken" "$OUT/screenshot.png"; fi
+    check "$(yes_if "[ -s '$OUT/screenshot.png' ] && ! cmp -s '$OUT/screenshot.png' '$OUT/desk.png'")" "a screenshot behind the curtain is the session's (not the desk's lock)"
     tail -3 "$OUT/probe.txt" | sed 's/^/  .. /'
     # The probe reads the host's messages after its script: checked once it ended.
     check "$(yes_if "grep -q 'privacy: on' '$OUT/probe.txt'")" "the viewer was told the desk is blanked"

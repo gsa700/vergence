@@ -1777,8 +1777,13 @@ fn screen_pixels(
     let geo = state.space.output_geometry(output).ok_or("a screen without a place")?;
     let scale = output.current_scale().fractional_scale();
     let size = output.current_mode().map(|m| m.size).ok_or("a screen without a mode")?;
+    // Behind Vergence Remote's curtain a screenshot is the remote person's
+    // (theirs are the only hands on the session): the session, as their view
+    // draws it, not the desk's lock (Dave, 2026-11-23).
+    state.remote.drawing = state.lock.curtain;
     let elements: Vec<OutputElements> =
         screen_elements(state, renderer, output, geo, scale, pointer_at).into_iter().map(to_output).collect();
+    state.remote.drawing = false;
     let clear = state.background_color(&output.name());
     let rgba = capture(renderer, &elements, size, scale, clear)?;
     Ok((size.w as usize, size.h as usize, scale, rgba))

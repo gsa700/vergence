@@ -12,7 +12,7 @@
 //! (the view's pixels), `press|release left|right|middle`, `key CODE` (an evdev
 //! code, down and up), `type TEXT` (small letters, digits and spaces), `scroll
 //! DX DY`, `privacy on|off` (blank the desk), `locks CAPS NUM` (0 or 1 each),
-//! `wait MS`.
+//! `down CODE` and `up CODE` (a key held, for chords), `wait MS`.
 
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::process::{Command, ExitCode, Stdio};
@@ -81,6 +81,8 @@ fn script_step(cmd: &str) -> Result<(Vec<ToHost>, u64), String> {
             (m, 30)
         }
         Some("scroll") => (vec![ToHost::Scroll { dx: num(1)?, dy: num(2)? }], 30),
+        Some("down") => (vec![ToHost::Key { code: num(1)? as u32, pressed: true }], 30),
+        Some("up") => (vec![ToHost::Key { code: num(1)? as u32, pressed: false }], 30),
         Some("wait") => (Vec::new(), num(1)? as u64),
         Some("privacy") => (vec![ToHost::Privacy { on: words.get(1) == Some(&"on") }], 30),
         Some("locks") => (vec![ToHost::Locks { caps: num(1)? != 0.0, num: num(2)? != 0.0 }], 60),

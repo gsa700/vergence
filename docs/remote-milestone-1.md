@@ -321,7 +321,8 @@ is listed above only as Dave's own alternative.
     back to the window and go out again, round and round. Display suite 26
     (with a stand-in host: `--command`); vctl key learns `Alt`.
   - **Blanking, the curtain** (protocol version 2: `Privacy`): the viewer's
-    bar button, Blank the desk / Show the desk. The desk locks as by
+    bar button, Lock Hubble's Screen / Unlock Hubble's Screen (the host
+    named; first "Blank the desk", renamed at Dave's word). The desk locks as by
     Super+L, but the window with the keyboard keeps it; remote views draw
     the session (decor.rs, `remote.drawing`), and the viewer's input passes
     one event at a time (the seat's lock set aside quietly around it,
@@ -354,4 +355,12 @@ is listed above only as Dave's own alternative.
   came out reversed, and stayed so on Hubble after); behind the curtain the
   desk's monitors draw no pointer (the remote person's pointer moved on the
   lock screen); the picture on whole device pixels (a faint grid along the
-  tiles at 133%). Open: "some funny business with the mouse" (asked what).
+  tiles at 133%). Second pass (~21:38): the pointer hiding and the keyboard
+  following the pointer confirmed. Fixed then: a screenshot taken behind
+  the curtain was the desk's lock screen (now the session, as the remote
+  person sees it); the button renamed with the host named ("Lock Hubble's
+  Screen" / "Unlock Hubble's Screen"); and a viewer's keys left down when
+  it went stayed down on the host (a stuck Ctrl turned Shift+F into Edit's
+  Find and made Hubble's own keyboard seem dead): the host now remembers
+  what each viewer holds and lets go when it goes. Open: "some funny
+  business with the mouse" (asked what).

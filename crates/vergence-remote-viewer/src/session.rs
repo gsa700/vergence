@@ -57,7 +57,7 @@ pub struct Viewer {
     view_only: bool,
     /// The bar's privacy button as last described (the host's answer, and
     /// whether the session is live): asked again only when it changed.
-    bar_said: Option<(bool, bool)>,
+    bar_said: Option<(bool, bool, String)>,
     /// The pointer is over the window, and the window has the keyboard: the
     /// keyboard is taken whole only while both hold.
     inside: bool,
@@ -402,21 +402,24 @@ impl App for Viewer {
     /// The bar's own button: blank the host's desk (its monitors locked
     /// behind a curtain while this window goes on using it), or show it.
     fn bar(&mut self) -> Option<Bar> {
-        let (live, privacy) = self
+        let (live, privacy, host) = self
             .session
             .as_ref()
-            .and_then(|s| s.shared.lock().ok().map(|sh| (sh.state == State::Live, sh.privacy)))
-            .unwrap_or((false, false));
-        let now = (live && !self.view_only, privacy);
-        if self.bar_said == Some(now) {
+            .and_then(|s| s.shared.lock().ok().map(|sh| (sh.state == State::Live, sh.privacy, sh.host.clone())))
+            .unwrap_or((false, false, String::new()));
+        // The machine named, not "remote" (from the far side, this one is the
+        // remote): "Lock Hubble's Screen" says what happens there (Dave,
+        // 2026-11-23: "Lock Remote Screen and Show Remote Screen would be
+        // more accurate").
+        let host = if host.is_empty() { self.host.clone() } else { host };
+        let now = (live && !self.view_only, privacy, host);
+        if self.bar_said.as_ref() == Some(&now) {
             return None;
         }
+        let name = if now.1 { format!("Unlock {}'s Screen", now.2) } else { format!("Lock {}'s Screen", now.2) };
+        let enabled = now.0;
         self.bar_said = Some(now);
-        let name = if privacy { "Show the desk" } else { "Blank the desk" };
-        Some(Bar::Tools {
-            buttons: vec![BarButton { id: 1, icon: BarIcon::Label, name: name.into(), enabled: now.0 }],
-            from: 0.0,
-        })
+        Some(Bar::Tools { buttons: vec![BarButton { id: 1, icon: BarIcon::Label, name, enabled }], from: 0.0 })
     }
 
     fn bar_button(&mut self, id: u32, _window: &mut Window) {

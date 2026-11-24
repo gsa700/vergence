@@ -59,6 +59,11 @@ struct Conn {
     ready: bool,
     seq: u32,
     program: String,
+    /// Keys and mouse buttons this viewer holds down here: let go when it
+    /// goes, so no key stays down on this machine (a Ctrl held across a
+    /// disconnect turned Shift+F into Find, 2026-11-23).
+    keys_down: Vec<u32>,
+    buttons_down: Vec<u32>,
 }
 
 /// desktop.toml's `[remote] enabled`: whether Vergence Remote may reach this
@@ -230,7 +235,16 @@ impl Server {
         match e {
             Event::Opened { conn, writer, program } => {
                 tracing::info!("remote: connection {conn} ({program})");
-                self.remote.conns.push(Conn { id: conn, view: None, writer, ready: false, seq: 0, program });
+                self.remote.conns.push(Conn {
+                    id: conn,
+                    view: None,
+                    writer,
+                    ready: false,
+                    seq: 0,
+                    program,
+                    keys_down: Vec::new(),
+                    buttons_down: Vec::new(),
+                });
             }
             Event::Closed { conn, why } => {
                 tracing::info!("remote: connection {conn} closed ({why})");
@@ -294,6 +308,17 @@ impl Server {
             | ToHost::Button { .. }
             | ToHost::Scroll { .. }
             | ToHost::Locks { .. } => {
+                // What it holds down, kept (to let go of when it goes).
+                let cn = &mut self.remote.conns[c];
+                match msg {
+                    ToHost::Key { code, pressed: true } if !cn.keys_down.contains(&code) => cn.keys_down.push(code),
+                    ToHost::Key { code, pressed: false } => cn.keys_down.retain(|k| *k != code),
+                    ToHost::Button { code, pressed: true } if !cn.buttons_down.contains(&code) => {
+                        cn.buttons_down.push(code)
+                    }
+                    ToHost::Button { code, pressed: false } => cn.buttons_down.retain(|b| *b != code),
+                    _ => {}
+                }
                 if let Some(v) = self.remote.conns[c].view {
                     self.remote_input(v, msg);
                 }
@@ -396,7 +421,23 @@ impl Server {
     fn remote_close(&mut self, conn: u32) {
         let Some(i) = self.remote.conns.iter().position(|c| c.id == conn) else { return };
         let c = self.remote.conns.remove(i);
+        // Every key and button it left down, let go (before its view goes:
+        // the release is still a remote viewer's, passing the curtain).
         if let Some(v) = c.view {
+            for code in c.keys_down.iter().rev() {
+                self.remote_input(v, ToHost::Key { code: *code, pressed: false });
+            }
+            for code in &c.buttons_down {
+                self.remote_input(v, ToHost::Button { code: *code, pressed: false });
+            }
+            if !c.keys_down.is_empty() || !c.buttons_down.is_empty() {
+                tracing::info!(
+                    "remote: connection {} left {} key(s), {} button(s) down: let go",
+                    c.id,
+                    c.keys_down.len(),
+                    c.buttons_down.len()
+                );
+            }
             crate::drm::remote_stop(self, v);
         }
         // The last viewer gone behind the curtain: the desk stays locked, as
