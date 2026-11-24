@@ -136,6 +136,16 @@ in definition files anyone can add without building Vergence.
 - Settings: **Syntax colors** on/off (on by default), and the existing
   Spellcheck and Autocomplete keep their own switches.
 
+## Progress
+
+- **2026-11-24, steps 1 to 3 built** (d0f074d, a5d62e8): vergence-syntax with
+  the registry, detection and Python; the syntax palettes in vergence-look
+  (contrast tested); the text area's per-line pieces and colored drawing;
+  Edit's detection, status-line list, View > Language and the Syntax colors
+  switch. Seen in a headless session on Hubble, light and dark (a Python
+  sample). Tests: Hubble and techbench 1,070, kepler 1,059. Next: Dave's
+  first look, then step 4 (Markdown).
+
 ## Steps
 
 1. `vergence-syntax`: the span and state types, the `Highlighter`
