@@ -86,6 +86,15 @@ each milestone doc lists what is left.
 
 ## Known issues
 
+- **kepler's live session hangs the GPU when the workspace tests run there**
+  (2026-11-23: drm-kmod "GPU HANG ... context reset" in vergence-server and
+  vergence-files right after two test runs, and when a new FileView met an
+  old server after an install without a restart): stretched textures, blank
+  windows. Run kepler's tests under tools/test-guard.sh; install a server
+  change only with a restart. To do: skip the GPU tests while a session
+  runs on the box; tools/lab/fetch-gpu-reports.sh looks in ~/gpu-reports
+  while tools/gpu-report.sh writes /root/gpu-reports (it found nothing).
+
 - **The dock's tiles are marked changed every frame** though their pixels
   stay the same (found 2026-11-23 by the remote view's damage: a 240x48
   strip of tiles damaged ~60 times a second on a still desktop). Monitors
