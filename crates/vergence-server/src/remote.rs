@@ -48,6 +48,9 @@ pub struct Remotes {
     /// A remote viewer's input is being handled now: it passes the curtain
     /// (lock.rs `locked_for_input`).
     pub passing: bool,
+    /// A session with no monitors: the size its viewer's window asked for
+    /// and when, to give the screen once it has held for a moment.
+    screen_want: Option<((u32, u32), std::time::Instant)>,
 }
 
 struct Conn {
@@ -295,6 +298,9 @@ impl Server {
             ToHost::Resize { width, height } => {
                 if let Some(v) = self.remote.conns[c].view {
                     crate::drm::remote_resize(self, v, (width, height));
+                    if crate::monitorless() {
+                        self.remote.screen_want = Some(((width, height), std::time::Instant::now()));
+                    }
                 }
             }
             ToHost::Ack { seq } => {
@@ -453,6 +459,25 @@ impl Server {
     /// Each connection that may take a frame gets what changed (a pull of
     /// its view), and one whose view was ended from the desk is told and
     /// closed. Called by the remote views' clock and after End.
+    /// A session with no monitors follows its viewer's window: the screen
+    /// takes the size asked for once it has held 400 ms, when one viewer
+    /// alone is looking (two viewers of different sizes would fight).
+    pub fn remote_follow_window(&mut self) {
+        let Some((px, at)) = self.remote.screen_want else { return };
+        if at.elapsed() < std::time::Duration::from_millis(400) {
+            return;
+        }
+        self.remote.screen_want = None;
+        if crate::drm::remote_count(self) != 1 {
+            return;
+        }
+        let px = (px.0.clamp(640, 8192), px.1.clamp(400, 8192));
+        let Some(screen) = crate::drm::memory_screens(self).into_iter().next() else { return };
+        if let Err(e) = crate::drm::resize_memory_screen(self, &screen, px) {
+            tracing::warn!("remote: the screen could not follow the window: {e}");
+        }
+    }
+
     pub fn remote_service(&mut self) {
         let live = crate::drm::remote_ids(self);
         let ended: Vec<u32> =

@@ -413,6 +413,12 @@ is listed above only as Dave's own alternative.
   unharmed, its log rotated away and recovered from the open file). Since:
   vergence-remote uses only the vergence-session beside it and only one
   that knows `--monitorless`; vergence-session refuses options it does not
-  know; the scenarios use throwaway homes. Still to do in step 6: a desk
-  login taking that session onto the monitors (answered: yes), and the
-  screen following the viewer's window size.
+  know; the scenarios use throwaway homes. Dave's test from techbench
+  (~22:30): "it worked, got a fresh hubble desktop"; "reconnected, apps
+  were still there". **The screen follows the window** (~22:35): a
+  monitorless session's screen takes the viewer's window size once it has
+  held 400 ms, with one viewer looking; the view returns to one pixel to
+  one. (A second slip: scenario 29's cleanup killed every monitorless
+  session by name, Dave's live one with it; it now stops only its own, by
+  process group, checked beside a decoy.) Still to do in step 6: a desk
+  login taking that session onto the monitors (answered: yes).

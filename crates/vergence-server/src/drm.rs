@@ -1705,6 +1705,49 @@ pub fn add_memory_screen(
     Ok(name)
 }
 
+/// A screen in memory given a new size, as a monitor's mode changed (a
+/// session with no monitors following its viewer's window, remote milestone
+/// 1, step 6): its scale kept, windows laid out again.
+pub fn resize_memory_screen(state: &mut Server, name: &str, px: (u32, u32)) -> Result<(), String> {
+    use smithay::backend::renderer::Offscreen;
+    if !(1..=8192).contains(&px.0) || !(1..=8192).contains(&px.1) {
+        return Err("a screen from 1x1 to 8192x8192 pixels".into());
+    }
+    let anchors = state.window_anchors();
+    let Some(b) = state.backend.as_mut() else { return Err("no backend".into()) };
+    let Some((key, s)) = b.surfaces.iter_mut().find(|(k, s)| k.0 == MEMORY && s.connector == name) else {
+        return Err(format!("no screen {name} in memory"));
+    };
+    let key = *key;
+    if s.px == px {
+        return Ok(());
+    }
+    let Present::Memory(m) = &mut s.present else { return Err(format!("{name} is not in memory")) };
+    let refresh = (1_000_000_000 / m.interval.as_micros().max(1)) as i32;
+    let tex = b
+        .renderer
+        .create_buffer(Fourcc::Abgr8888, (px.0 as i32, px.1 as i32).into())
+        .map_err(|e| format!("{name}: no texture to draw it in: {e}"))?;
+    let wl_mode = WlMode { size: (px.0 as i32, px.1 as i32).into(), refresh };
+    s.output.set_preferred(wl_mode);
+    s.output.change_current_state(Some(wl_mode), None, None, None);
+    m.tex = tex;
+    m.damage = smithay::backend::renderer::damage::OutputDamageTracker::from_output(&s.output);
+    tracing::info!("{name}: now {}x{} (was {}x{})", px.0, px.1, s.px.0, s.px.1);
+    s.px = px;
+    s.modes = vec![vergence_protocol::bus::ModeInfo {
+        width: px.0,
+        height: px.1,
+        refresh_mhz: refresh as u32,
+        preferred: true,
+    }];
+    s.mode = 0;
+    setup_changed(state, anchors);
+    state.bus_outputs_changed();
+    render(state, key);
+    Ok(())
+}
+
 /// Take a screen in memory away, as a monitor unplugged.
 pub fn remove_memory_screen(state: &mut Server, name: &str) -> Result<(), String> {
     let key = state
@@ -2372,6 +2415,10 @@ fn remote_clock(state: &mut Server) {
             for key in idle {
                 remote_alone(st, key);
             }
+            // A session with no monitors: its screen to the viewer's window,
+            // once the window has kept a size for a moment (not at every step
+            // of a drag).
+            st.remote_follow_window();
             // Frames to the viewers that may take one (remote.rs).
             st.remote_service();
         }
