@@ -65,10 +65,10 @@ video (§6.6, phase 4).
    travels on that one channel. The person's keys, `~/.ssh/config`, jump
    hosts and host-key checks all work; WireGuard is the network path under
    SSH, not a mode of its own. Nothing listens on the network.
-2. **See it**: the session's screens, one at a time or all, drawn at the
-   viewer's own scale. Vergence's windows as display lists; other programs'
-   windows (Wayland, X11) as compressed pixels, only what changed (no video
-   codec yet).
+2. **See it**: the session's screens, one at a time or all, drawn by the
+   host's server at the viewer's own size and scale (text rendered at the
+   viewer's resolution, never scaled up), sent as the rectangles that
+   changed, compressed (no video codec yet). See "Frames, not display lists".
 3. **Use it**: keyboard and pointer as at the desk, every key passed through
    in full screen (Super, Alt+Tab, Ctrl+Alt+…; the Mac's Cmd mapped
    sensibly), touch where the viewer has it.
@@ -116,8 +116,26 @@ relays the stream between the server and the SSH channel. Pictures and
 keymaps, which local apps pass as file descriptors, cross as bytes, with a
 cache so a picture crosses once.
 
-**The protocol**, documented and versioned as the bus protocol is: display
-lists and pixel tiles from the host; input, clipboard and screen sizes from
+**Frames, not display lists, in milestone 1** (Dave, 2026-11-23: "yes, go
+with A"). Two designs were weighed:
+- **A: the host's server draws each frame at the viewer's exact size and
+  scale** and sends the rectangles that changed, compressed. Everything
+  works at once (the bars' frost and tint, the dock, the pointer, the lock
+  screen, Wayland programs), the picture is as sharp as a local one (the
+  server draws at the viewer's resolution; native windows' scenes drawn
+  again at that scale, as for a window across two monitors), and the viewer
+  stays a thin window that shows rectangles. The cost is bytes: screens of
+  text and flat color compress well, fine on a LAN and over WireGuard.
+- **B: per-window display lists, composed by the viewer.** Lightest on the
+  network, but the viewer becomes a compositor: the server's bars, frost,
+  dock, menus, lock screen and effects drawn again on every platform and
+  kept in step. Dave: "B sound a lot like we'd be shipping the entire
+  toolkit and server?" Later, for slow links, B's idea can come in for the
+  big parts (a window's contents as its display list) while the server still
+  composes the rest.
+
+**The protocol**, documented and versioned as the bus protocol is: frames
+as compressed rectangles from the host; input, clipboard and screen sizes from
 the viewer. Every frame from the host is untrusted input on the viewer's
 side, as an app's display list is on the server's: validated, with limits.
 
