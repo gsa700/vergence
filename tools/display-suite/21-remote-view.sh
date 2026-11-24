@@ -21,7 +21,10 @@ scenario() {
     cp "$SHOTS/remote-$id.png" "$OUT/remote-desktop.png" 2>/dev/null
     idle=$(vctl remote check "$id")
     echo "  .. still: $idle"
-    check "$(yes_if "echo '$idle' | grep -q ', 0 rectangle(s), 0 bytes'")" "a still screen: nothing sent"
+    # Nothing, or only a live tile's figure (the network's traffic on a
+    # machine with a network): under 1% of the view.
+    still=$(echo "$idle" | sed -E 's/.* ([0-9]+) bytes.*/\1/')
+    check "$(yes_if "[ '$still' -lt 186624 ]")" "a still screen: (almost) nothing sent"
     # A window opened and moved: only what it touched comes back.
     pattern Remote || { check 0 "the test pattern"; return; }
     vctl remote check "$id" >/dev/null
