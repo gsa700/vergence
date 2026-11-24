@@ -305,5 +305,10 @@ is listed above only as Dave's own alternative.
     Display suite 24: the viewer viewing its own session (a mirror).
   - Checks: workspace Hubble 1,054, techbench 1,054, kepler 1,043; display
     suite 24 of 24 on Hubble and on techbench.
-  - Next in step 4: the machine list, full screen with every key passed
-    through, blanking.
+  - The machine list: `vergence-remote-viewer` with no host lists the saved
+    computers (`~/.config/vergence/remote-machines`, one SSH destination a
+    line), adds one typed or offered from `~/.ssh/config`'s hosts (question
+    3), removes one; choosing one opens its window (each computer a window
+    of its own). Destinations are checked (no spaces, no leading dash, no
+    shell's characters) and go to ssh after `--`. Display suite 25.
+  - Next in step 4: full screen with every key passed through, blanking.

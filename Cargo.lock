@@ -2377,6 +2377,7 @@ dependencies = [
  "vergence-scene",
  "vergence-text",
  "vergence-ui",
+ "vergence-widgets",
 ]
 
 [[package]]

@@ -12,3 +12,4 @@ vergence-ui.workspace = true
 vergence-scene.workspace = true
 vergence-render.workspace = true
 vergence-text.workspace = true
+vergence-widgets.workspace = true
