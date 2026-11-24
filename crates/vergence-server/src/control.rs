@@ -597,6 +597,23 @@ impl Server {
                     _ => usage.into(),
                 }
             }
+            // The monitors off now, as after the idle time (energy.rs), or woken
+            // as by input: `energy screens-off`, `energy wake` (the tests).
+            "energy" => match args.first().copied() {
+                Some("screens-off") => {
+                    if !self.energy.screens_off {
+                        self.energy.screens_off = true;
+                        crate::drm::screens_off(self);
+                        self.input_screens_off();
+                    }
+                    "screens off".into()
+                }
+                Some("wake") => {
+                    self.energy_activity();
+                    "awake".into()
+                }
+                _ => format!("energy: screens {}", if self.energy.screens_off { "off" } else { "on" }),
+            },
             // Remote views (remote milestone 1, step 1), for the tests: `remote
             // start MEM-1 2880x1620`, `remote list`, `remote resize ID WxH`,
             // `remote stop ID`, and `remote check ID`: a pull, each rectangle

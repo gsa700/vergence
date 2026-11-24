@@ -2311,9 +2311,56 @@ pub fn remote_start(state: &mut Server, source: &str, want: (u32, u32), who: &st
         sent: Vec::new(),
     });
     tracing::info!("remote view {id}: {source} for a viewer of {}x{}", want.0, want.1);
+    let first = b.remotes.len() == 1;
     remote_tile(state);
     render(state, key);
+    if first {
+        remote_clock(state);
+    }
     Ok(id)
+}
+
+/// While there are remote views, every 16 ms: a view whose screen is not
+/// being drawn (its monitor off, energy.rs, or blanked; or nothing changed
+/// on it for a while) is drawn by itself, so the viewer never freezes with
+/// the desk. Drawing a view alone presents nothing on the monitor. Stops
+/// with the last view; not while the seat is another console's.
+fn remote_clock(state: &mut Server) {
+    let _ = state.loop_handle.insert_source(Timer::from_duration(Duration::from_millis(16)), |_, _, st| {
+        let Some(b) = st.backend.as_ref() else { return TimeoutAction::Drop };
+        if b.remotes.is_empty() {
+            return TimeoutAction::Drop;
+        }
+        if !b.paused {
+            let off = st.energy.screens_off;
+            let idle: Vec<Key> = b
+                .surfaces
+                .iter()
+                .filter(|(_, s)| b.remotes.iter().any(|r| r.source == s.connector))
+                .filter(|(_, s)| off || s.last.elapsed() > Duration::from_millis(48))
+                .map(|(k, _)| *k)
+                .collect();
+            for key in idle {
+                remote_alone(st, key);
+            }
+        }
+        TimeoutAction::ToDuration(Duration::from_millis(16))
+    });
+}
+
+/// The remote views of screen `key` drawn without the screen itself.
+fn remote_alone(state: &mut Server, key: Key) {
+    let Some(mut b) = state.backend.take() else { return };
+    if let Some(s) = b.surfaces.get(&key) {
+        let output = s.output.clone();
+        let connector = s.connector.clone();
+        if let Some(geo) = state.space.output_geometry(&output) {
+            let pointer_at = state.seat.get_pointer().map(|p| p.current_location()).unwrap_or_default();
+            let clear = state.background_color(&connector);
+            remote_frames(state, &mut b.renderer, &mut b.remotes, &output, &connector, geo, pointer_at, clear);
+        }
+    }
+    state.backend = Some(b);
 }
 
 /// The view `id` resized for a viewer of `want` pixels.

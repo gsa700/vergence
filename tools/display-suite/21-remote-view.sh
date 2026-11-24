@@ -32,6 +32,14 @@ scenario() {
     check "$(yes_if "echo '$moved' | grep -q 'match yes' && [ '$bytes' -gt 0 ] && [ '$bytes' -lt 9331200 ]")" "a change: only its rectangles (under half the view), matching the picture"
     sleep 1
     cp "$SHOTS/remote-$id.png" "$OUT/remote-moved.png" 2>/dev/null
+    # The desk's monitors off (energy): the view goes on being drawn.
+    vctl energy screens-off >/dev/null
+    vctl remote check "$id" >/dev/null
+    move Remote 600 300
+    dark=$(vctl remote check "$id")
+    echo "  .. monitors off: $dark"
+    check "$(yes_if "echo '$dark' | grep -q 'match yes' && ! echo '$dark' | grep -q ', 0 rectangle'")" "the monitors off: the view still follows a change"
+    vctl energy wake >/dev/null
     vctl remote resize "$id" 1280x720 >/dev/null; sleep 0.8
     check "$(yes_if "vctl remote list | grep -q '^$id MEM-1 1280x720 scale 0.667'")" "resized for a smaller viewer"
     check "$(yes_if "vctl remote stop '$id' | grep -q stopped && [ -z \"\$(vctl remote list)\" ]")" "stopped"

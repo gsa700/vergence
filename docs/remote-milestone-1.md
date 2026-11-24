@@ -184,6 +184,9 @@ The screen stream is its own channel, never the agent interface itself
    lists and tiles, input, sizes; the validation and limits on the viewer's
    side; unit tests with hostile frames.
 3. **`vergence-remote`**: run by SSH, reaching the session over the bus,
+   (found in step 1: while a view is open, remote input counts as activity
+   and the machine does not go to sleep from idleness, energy.rs, or the
+   person would be cut off mid-session),
    relaying, the picture cache; the Dockworker tile, End, the log; "Ask the
    person at the desk" off for the same user.
 4. **The portable core and the Vergence viewer**: connect, draw, input, full
@@ -214,3 +217,23 @@ VNC, virt, RDP, etc."; "Vergence and Mac first, all three modes, both"; and
 ability to compile a version like the aot for avalonia/.NET". Avalonia was
 not to be used for the client (2026-11-22); a .NET shell over the same core
 is listed above only as Dave's own alternative.
+
+## Progress
+
+- **Step 1, the remote view in the server** (2026-11-23, building):
+  - 2217955: a remote view is a screen drawn again at a viewer's size and
+    scale, each time the screen is drawn (its elements built afresh at the
+    viewer's scale, so text and native windows are sharp), into a texture
+    and damage tracker of its own; never an output. Changed rectangles merge
+    as they come and wait for the front end's pull (the pull is the flow
+    control); a pull sends only pixels that differ from what the viewer has,
+    trimmed to what changed. The dock's tiles turned out to be damaged every
+    frame with the same pixels (a known issue in STATUS): it costs nothing.
+  - 0bd43a4: the Dockworker's tile, "Control is viewing this computer" (or
+    "and 1 more"), the screens, since when, and End (ends every view).
+  - The view's own clock: drawn alone every 16 ms when its screen is not
+    being drawn (monitors off, blanked, or still), so it never freezes with
+    the desk.
+  - Display suite 21 (13 checks), with `vctl remote`, `vctl energy`.
+  - Next in step 1: blanking (the desk's lock screen while remote input and
+    the view go on).
