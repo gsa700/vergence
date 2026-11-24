@@ -282,3 +282,28 @@ is listed above only as Dave's own alternative.
   throwaway forwarded agent, killed after, so techbench's access is
   unchanged. Hubble's host key was added to techbench's known_hosts from
   Control's.)
+- **Step 4, input and the Vergence viewer** (2026-11-23, building):
+  - 4d89333: a viewer's pointer (mapped from the view's pixels), buttons,
+    keys (evdev codes) and scrolling take vctl's paths into the seat; they
+    count as activity; none while the elevation prompt is up. A viewer's
+    keys reach the lock's password field (the lock screen is reached
+    remotely). Display suite 23: a window dragged by its bar, text typed
+    into Edit, from the viewer.
+  - The portable core (vergence-remote's client.rs, no platform code): a
+    session runs the command (`ssh -o BatchMode=yes HOST vergence-remote`),
+    keeps the picture from the frames (checked, acknowledged), notes what
+    changed, wakes the shell, and says plainly why it ended (ssh's own last
+    words when it fails).
+  - The toolkit's key events carry the physical key (`code`, evdev), so a
+    viewer sends keys the host maps with its own layout.
+  - `vergence-remote-viewer HOST`: the Vergence shell, a window showing the
+    host's desktop, one pixel to one (the view is the window's pixels below
+    its bar, resized with it), drawn as 256-pixel tiles so a frame costs
+    only the tiles it touched; pointer, buttons, keys (no repeats: the
+    host's) and scrolling sent; held keys and buttons let go when the
+    window loses the keyboard; the host's name in the title once known.
+    Display suite 24: the viewer viewing its own session (a mirror).
+  - Checks: workspace Hubble 1,054, techbench 1,054, kepler 1,043; display
+    suite 24 of 24 on Hubble and on techbench.
+  - Next in step 4: the machine list, full screen with every key passed
+    through, blanking.

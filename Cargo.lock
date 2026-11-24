@@ -2369,6 +2369,17 @@ name = "vergence-remote"
 version = "0.3.0"
 
 [[package]]
+name = "vergence-remote-viewer"
+version = "0.3.0"
+dependencies = [
+ "vergence-remote",
+ "vergence-render",
+ "vergence-scene",
+ "vergence-text",
+ "vergence-ui",
+]
+
+[[package]]
 name = "vergence-render"
 version = "0.3.0"
 dependencies = [

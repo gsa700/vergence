@@ -229,8 +229,11 @@ pub enum Input {
     /// types if it types any, and whether this is a held key repeating.
     /// `composing`: the key went into a dead-key or compose sequence that is
     /// not finished; it types nothing and should not be taken as a command.
+    /// `code`: the physical key, as Linux's input code (evdev), whatever the
+    /// layout (Vergence Remote sends it so the host applies its own layout).
     Key {
         sym: u32,
+        code: u32,
         text: Option<String>,
         pressed: bool,
         repeat: bool,
@@ -2076,7 +2079,7 @@ impl<'a> Runner<'a> {
         } else {
             (keyboard.key(key).0, None, false)
         };
-        self.tell(id, Input::Key { sym, text, pressed, repeat, composing, modifiers })
+        self.tell(id, Input::Key { sym, code: key, text, pressed, repeat, composing, modifiers })
     }
 
     /// Tells each window's program of every timer of its that is due, the

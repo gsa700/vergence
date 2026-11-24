@@ -53,8 +53,8 @@ fn press(ui: &mut Ui<Msg>, x: f32, y: f32, pressed: bool) -> Vec<Msg> {
 fn key(ui: &mut Ui<Msg>, sym: u32, shift: bool) -> Vec<Msg> {
     let modifiers = Modifiers { shift, ..Modifiers::default() };
     let r =
-        ui.input(&Input::Key { sym, text: None, pressed: true, repeat: false, composing: false, modifiers }).messages;
-    ui.input(&Input::Key { sym, text: None, pressed: false, repeat: false, composing: false, modifiers });
+        ui.input(&Input::Key { code: 0, sym, text: None, pressed: true, repeat: false, composing: false, modifiers }).messages;
+    ui.input(&Input::Key { code: 0, sym, text: None, pressed: false, repeat: false, composing: false, modifiers });
     r
 }
 
@@ -397,7 +397,7 @@ fn type_text(ui: &mut Ui<Msg>, text: &str) -> Vec<Msg> {
     let mut out = Vec::new();
     for c in text.chars() {
         out.extend(
-            ui.input(&Input::Key {
+            ui.input(&Input::Key { code: 0,
                 sym: c as u32,
                 text: Some(c.to_string()),
                 pressed: true,
@@ -413,7 +413,7 @@ fn type_text(ui: &mut Ui<Msg>, text: &str) -> Vec<Msg> {
 
 fn chord(ui: &mut Ui<Msg>, c: char, ctrl: bool) -> Response<Msg> {
     let modifiers = Modifiers { ctrl, ..Modifiers::default() };
-    ui.input(&Input::Key { sym: c as u32, text: None, pressed: true, repeat: false, composing: false, modifiers })
+    ui.input(&Input::Key { code: 0, sym: c as u32, text: None, pressed: true, repeat: false, composing: false, modifiers })
 }
 
 fn center(r: Rect) -> (f32, f32) {
@@ -493,7 +493,7 @@ fn typing_into_a_field() {
     assert_eq!(type_text(&mut ui, "x"), vec![Msg::Text("#xa".into())]);
     assert_eq!(key(&mut ui, sym::RETURN, false), vec![Msg::Submit]);
     // Shift+Home chooses back to the start; typing replaces it.
-    ui.input(&Input::Key {
+    ui.input(&Input::Key { code: 0,
         sym: sym::HOME,
         text: None,
         pressed: true,
@@ -536,7 +536,7 @@ fn a_field_undoes_and_redoes() {
     assert!(chord(&mut ui, 'z', true).messages.is_empty(), "nothing more to undo");
     assert_eq!(chord(&mut ui, 'y', true).messages, vec![Msg::Text("hello".into())]);
     let shift_z = Modifiers { ctrl: true, shift: true, ..Modifiers::default() };
-    let r = ui.input(&Input::Key {
+    let r = ui.input(&Input::Key { code: 0,
         sym: 'Z' as u32,
         text: None,
         pressed: true,
@@ -852,7 +852,7 @@ fn fuzz_input_on_every_widget() {
             },
             5 | 6 => {
                 let k = keys[(next() % keys.len() as u64) as usize];
-                Input::Key {
+                Input::Key { code: 0,
                     sym: k,
                     text: char::from_u32(k).filter(|c| !c.is_control() && k < 0x100).map(|c| c.to_string()),
                     pressed: next() % 3 != 0,

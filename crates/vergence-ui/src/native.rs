@@ -942,7 +942,7 @@ impl<'a> Native<'a> {
         } else {
             (keyboard.key(key).0, None, false)
         };
-        self.tell(window, Input::Key { sym, text, pressed, repeat, composing, modifiers })
+        self.tell(window, Input::Key { sym, code: key, text, pressed, repeat, composing, modifiers })
     }
 
     fn timers_due(&mut self) -> io::Result<()> {

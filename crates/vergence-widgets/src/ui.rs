@@ -1651,7 +1651,7 @@ impl<M: Clone> Ui<M> {
                 }
             }
             Input::Touch { id: finger, phase, x, y } => self.touch(finger, phase, x, y, &mut r),
-            Input::Key { sym: key, ref text, pressed: true, repeat, composing: false, modifiers } => {
+            Input::Key { sym: key, ref text, pressed: true, repeat, composing: false, modifiers, .. } => {
                 self.key(key, text.as_deref(), repeat, modifiers, &mut r)
             }
             Input::Key { sym: key, pressed: false, .. } if key == sym::RETURN || key == ' ' as u32 => {

@@ -11,6 +11,7 @@
 //! Start reading: proto.rs's module comment (the stream), then
 //! [`proto::Frame::apply`] (where the viewer meets untrusted input).
 
+pub mod client;
 pub mod lz;
 pub mod proto;
 
