@@ -2201,7 +2201,10 @@ fn remote_frames(
 /// A changed rectangle added to those kept: nothing if one already covers
 /// it; joined with any it overlaps (again, until none overlap), so a region
 /// that changes every frame stays one rectangle, not one a frame.
-fn remote_add(pending: &mut Vec<Rectangle<i32, smithay::utils::Physical>>, rect: Rectangle<i32, smithay::utils::Physical>) {
+fn remote_add(
+    pending: &mut Vec<Rectangle<i32, smithay::utils::Physical>>,
+    rect: Rectangle<i32, smithay::utils::Physical>,
+) {
     if rect.size.w <= 0 || rect.size.h <= 0 || pending.iter().any(|p| p.contains_rect(rect)) {
         return;
     }
@@ -2334,7 +2337,9 @@ pub fn remote_list(state: &Server) -> Vec<String> {
         .map(|b| {
             b.remotes
                 .iter()
-                .map(|r| format!("{} {} {}x{} scale {:.3} frames {}", r.id, r.source, r.px.w, r.px.h, r.scale, r.frames))
+                .map(|r| {
+                    format!("{} {} {}x{} scale {:.3} frames {}", r.id, r.source, r.px.w, r.px.h, r.scale, r.frames)
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -2348,11 +2353,8 @@ pub fn remote_pull(state: &mut Server, id: u32) -> Option<Result<RemoteFrame, St
     let Some(tex) = r.tex.as_mut() else {
         return Some(Ok(RemoteFrame { width: 0, height: 0, scale: r.scale, rects: Vec::new() }));
     };
-    let rects: Vec<Rectangle<i32, smithay::utils::Physical>> = if r.whole {
-        vec![Rectangle::from_size(r.px)]
-    } else {
-        std::mem::take(&mut r.pending)
-    };
+    let rects: Vec<Rectangle<i32, smithay::utils::Physical>> =
+        if r.whole { vec![Rectangle::from_size(r.px)] } else { std::mem::take(&mut r.pending) };
     r.whole = false;
     r.pending.clear();
     let bounds = Rectangle::<i32, smithay::utils::Physical>::from_size(r.px);
@@ -2380,13 +2382,16 @@ pub fn remote_pull(state: &mut Server, id: u32) -> Option<Result<RemoteFrame, St
 
 /// The view `id`'s whole picture (for the tests: a pull's rectangles must
 /// match it).
-pub fn remote_picture(state: &mut Server, id: u32) -> Option<Result<(u32, u32, Vec<u8>), String>> {
+pub fn remote_picture(state: &mut Server, id: u32) -> Option<Result<Pixels32, String>> {
     let b = state.backend.as_mut()?;
     let r = b.remotes.iter_mut().find(|r| r.id == id)?;
     let px = r.px;
     let tex = r.tex.as_mut()?;
     Some(read_texture(&mut b.renderer, tex, px).map(|v| (px.w as u32, px.h as u32, v)))
 }
+
+/// A picture's width and height and its RGBA pixels.
+pub type Pixels32 = (u32, u32, Vec<u8>);
 
 /// A rectangle of a texture's pixels, RGBA, rows from the top.
 fn read_region(
