@@ -147,6 +147,8 @@ impl Server {
             }
             // An agent's timed grant, one more span (agents.rs).
             ("agent", "extend") => self.agent_extend(),
+            // Vergence Remote: whoever is at the desk ends it (remote milestone 1).
+            ("remote", "end") => crate::drm::remote_end_all(self),
             _ => tracing::debug!("applets: {tile} has no control {control}"),
         }
     }

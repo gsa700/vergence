@@ -194,6 +194,10 @@ impl Server {
     pub fn tiles_tick(&mut self) {
         // The agent tile goes when its agent rests (agents.rs).
         self.agents_tick();
+        // The remote tile's "since", once a minute is plenty; each second is cheap.
+        if crate::drm::remote_count(self) > 0 {
+            crate::drm::remote_tile(self);
+        }
         self.acts_timeout();
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
         if self.tiles.minute == Some(secs / 60) {
@@ -305,7 +309,7 @@ impl Server {
             .iter()
             .map(|p| {
                 format!(
-                    "{} {:?} {:?} {:?} {:?} group {:?} page {:?} rows {} chart {} controls {}",
+                    "{} {:?} {:?} {:?} {:?} group {:?} page {:?} rows {} chart {} controls {} title {:?}",
                     p.key(),
                     p.owner,
                     p.tile.value,
@@ -315,7 +319,8 @@ impl Server {
                     p.tile.page,
                     p.tile.card.rows.len(),
                     p.tile.card.chart.len(),
-                    p.tile.card.controls.len()
+                    p.tile.card.controls.len(),
+                    p.tile.card.title
                 )
             })
             .collect();

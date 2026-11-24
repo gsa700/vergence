@@ -2101,6 +2101,9 @@ const REMOTE_RECTS: usize = 64;
 
 struct RemoteView {
     id: u32,
+    /// Who is viewing, as the Dockworker's tile names them ("Control"), and since when.
+    who: String,
+    since: std::time::Instant,
     /// The screen it shows (its connector name).
     source: String,
     /// The viewer's size in pixels: the view fits the screen into it.
@@ -2278,8 +2281,9 @@ pub struct RemoteFrame {
 /// A changed rectangle: x, y, width, height in the view's pixels, and its RGBA pixels.
 pub type RemoteRect = (u32, u32, u32, u32, Vec<u8>);
 
-/// A remote view of the screen `source` for a viewer of `want` pixels; its id.
-pub fn remote_start(state: &mut Server, source: &str, want: (u32, u32)) -> Result<u32, String> {
+/// A remote view of the screen `source` for a viewer of `want` pixels, for
+/// `who` (named on the Dockworker's tile); its id.
+pub fn remote_start(state: &mut Server, source: &str, want: (u32, u32), who: &str) -> Result<u32, String> {
     if !(16..=16384).contains(&want.0) || !(16..=16384).contains(&want.1) {
         return Err("a viewer from 16x16 to 16384x16384 pixels".into());
     }
@@ -2289,8 +2293,12 @@ pub fn remote_start(state: &mut Server, source: &str, want: (u32, u32)) -> Resul
     };
     let key = *key;
     let id = REMOTE_IDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let who: String = who.chars().filter(|c| !c.is_control()).take(40).collect();
+    let who = if who.trim().is_empty() { "A remote viewer".to_string() } else { who.trim().to_string() };
     b.remotes.push(RemoteView {
         id,
+        who,
+        since: std::time::Instant::now(),
         source: source.to_string(),
         want,
         scale: 0.0,
@@ -2303,6 +2311,7 @@ pub fn remote_start(state: &mut Server, source: &str, want: (u32, u32)) -> Resul
         sent: Vec::new(),
     });
     tracing::info!("remote view {id}: {source} for a viewer of {}x{}", want.0, want.1);
+    remote_tile(state);
     render(state, key);
     Ok(id)
 }
@@ -2323,10 +2332,72 @@ pub fn remote_stop(state: &mut Server, id: u32) -> bool {
     let Some(b) = state.backend.as_mut() else { return false };
     let before = b.remotes.len();
     b.remotes.retain(|r| r.id != id);
-    if b.remotes.len() != before {
+    let stopped = b.remotes.len() != before;
+    if stopped {
         tracing::info!("remote view {id}: stopped");
+        remote_tile(state);
     }
-    b.remotes.len() != before
+    stopped
+}
+
+/// Every remote view ended (the Dockworker tile's End, from whoever is at
+/// the desk).
+pub fn remote_end_all(state: &mut Server) {
+    let Some(b) = state.backend.as_mut() else { return };
+    if b.remotes.is_empty() {
+        return;
+    }
+    let n = b.remotes.len();
+    b.remotes.clear();
+    tracing::info!("remote views: {n} ended from the desk");
+    remote_tile(state);
+}
+
+/// The Dockworker's tile while anyone views this computer (principle 8: who
+/// is watching, and the desk can end it): who, which screens, since when,
+/// and End. Taken down when the last view stops. Kept up to date by the
+/// dock's tick.
+pub fn remote_tile(state: &mut Server) {
+    use vergence_protocol::tile::{Card, Control, ControlKind, Tile, TileState};
+    let views: Vec<(String, String, u64)> = state
+        .backend
+        .as_ref()
+        .map(|b| b.remotes.iter().map(|r| (r.who.clone(), r.source.clone(), r.since.elapsed().as_secs())).collect())
+        .unwrap_or_default();
+    let Some((who, _, secs)) = views.first().cloned() else {
+        state.tile_remove(crate::tiles::Owner::Desktop, "remote");
+        return;
+    };
+    let mut screens: Vec<String> = views.iter().map(|v| v.1.clone()).collect();
+    screens.dedup();
+    let mins = secs / 60;
+    let long = if mins == 0 { "just now".to_string() } else if mins < 60 { format!("{mins} min") } else { format!("{} h {} min", mins / 60, mins % 60) };
+    let others = views.iter().filter(|v| v.0 != who).count();
+    let title = if others > 0 { format!("{who} and {others} more are viewing this computer") } else { format!("{who} is viewing this computer") };
+    state.tile_set(
+        crate::tiles::Owner::Desktop,
+        Tile {
+            id: "remote".into(),
+            value: who.chars().take(12).collect(),
+            label: "viewing".into(),
+            state: TileState::Warning,
+            group: "System".into(),
+            card: Card {
+                title,
+                big: String::new(),
+                rows: vec![("Screens".into(), screens.join(", ")), ("Since".into(), long)],
+                chart: Vec::new(),
+                controls: vec![Control { id: "end".into(), label: "End".into(), kind: ControlKind::Button }],
+                note: "Vergence Remote, over SSH. End stops it at once.".into(),
+            },
+            page: String::new(),
+        },
+    );
+}
+
+/// How many remote views there are.
+pub fn remote_count(state: &Server) -> usize {
+    state.backend.as_ref().map_or(0, |b| b.remotes.len())
 }
 
 /// Each view: its id, screen, size, scale and frames drawn.

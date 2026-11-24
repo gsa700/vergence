@@ -606,7 +606,7 @@ impl Server {
                 if self.backend.is_none() {
                     return "remote: only with --drm".into();
                 }
-                let usage = "remote [start SCREEN WxH | list | resize ID WxH | stop ID | check ID]";
+                let usage = "remote [start SCREEN WxH [WHO] | list | resize ID WxH | stop ID | end | check ID]";
                 let pair = |v: &str| -> Option<(u32, u32)> {
                     let (a, b) = v.split_once('x')?;
                     Some((a.parse().ok()?, b.parse().ok()?))
@@ -615,7 +615,7 @@ impl Server {
                 match args.first().copied() {
                     None | Some("list") => crate::drm::remote_list(self).join("\n"),
                     Some("start") => match (args.get(1), args.get(2).and_then(|v| pair(v))) {
-                        (Some(screen), Some(want)) => match crate::drm::remote_start(self, screen, want) {
+                        (Some(screen), Some(want)) => match crate::drm::remote_start(self, screen, want, args.get(3).copied().unwrap_or("vctl")) {
                             Ok(id) => format!("remote view {id}"),
                             Err(e) => format!("remote: {e}"),
                         },
@@ -626,6 +626,10 @@ impl Server {
                         (Some(i), Some(_)) => format!("remote: no view {i}"),
                         _ => usage.into(),
                     },
+                    Some("end") => {
+                        crate::drm::remote_end_all(self);
+                        "ended".into()
+                    }
                     Some("stop") => match id(1) {
                         Some(i) if crate::drm::remote_stop(self, i) => format!("stopped {i}"),
                         Some(i) => format!("remote: no view {i}"),
