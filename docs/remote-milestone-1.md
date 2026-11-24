@@ -274,3 +274,11 @@ is listed above only as Dave's own alternative.
   from idleness while viewed. `vergence-remote-probe`, a viewer without a
   window, for tests and diagnosis. Display suite 22: the first frame of a
   1280x720 desktop was 22.6 KB on the wire (0.6% of raw), 83 ms from start.
+  **Over real SSH** (2026-11-23, Dave's go): techbench viewed a headless
+  session on Hubble with `vergence-remote-probe -- ssh hubble vergence-remote`:
+  2560x1440 at 1.333, the first frame 76 KB, on screen 262 ms from the start
+  (SSH's login included); 1280x720, 22 KB in 258 ms. (techbench has had no
+  SSH key since its reinstall; the test used Control's key through a
+  throwaway forwarded agent, killed after, so techbench's access is
+  unchanged. Hubble's host key was added to techbench's known_hosts from
+  Control's.)
