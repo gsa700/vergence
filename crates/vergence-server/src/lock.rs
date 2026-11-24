@@ -582,7 +582,11 @@ impl Server {
     }
 
     /// A key while locked: typed into the field, Backspace, Escape (clears),
-    /// Enter (answers). Only keys pressed at the machine reach here.
+    /// Enter (answers). Keys pressed at the machine reach here, and a Vergence
+    /// Remote viewer's (remote milestone 1: the lock and login screens are
+    /// reached remotely, Dave 2026-11-23; the viewer is the session's own user
+    /// over SSH, and vdm still checks the password); never vctl's or an
+    /// agent's (refused while locked).
     pub fn lock_key(&mut self, sym: u32, typed: Option<char>, pressed: bool) {
         use xkbcommon::xkb::keysyms as k;
         if !pressed || !self.lock.on {

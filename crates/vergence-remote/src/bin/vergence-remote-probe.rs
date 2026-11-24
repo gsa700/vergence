@@ -6,7 +6,12 @@
 //! `--out FILE` the last picture is written as a PPM.
 //!
 //! vergence-remote-probe [--size WxH] [--frames N] [--seconds S] [--name N]
-//!     [--screen NAME] [--out FILE] -- COMMAND [ARGS...]
+//!     [--screen NAME] [--out FILE] [--script "CMD; CMD; ..."] -- COMMAND [ARGS...]
+//!
+//! The script runs after the first frame, as a viewer's input: `pointer X Y`
+//! (the view's pixels), `press|release left|right|middle`, `key CODE` (an evdev
+//! code, down and up), `type TEXT` (small letters, digits and spaces), `scroll
+//! DX DY`, `wait MS`.
 
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::process::{Command, ExitCode, Stdio};
@@ -31,6 +36,55 @@ impl<R: Read> Read for Counted<R> {
 /// What came: frames, the picture's size, its pixels, the scale.
 type Got = (u32, (u32, u32), Vec<u8>, f32);
 
+/// evdev codes for typing small letters, digits and spaces.
+fn code_of(c: char) -> Option<u32> {
+    const LETTERS: &[u32; 26] =
+        &[30, 48, 46, 32, 18, 33, 34, 35, 23, 36, 37, 38, 50, 49, 24, 25, 16, 19, 31, 20, 22, 47, 17, 45, 21, 44];
+    match c {
+        'a'..='z' => Some(LETTERS[c as usize - 'a' as usize]),
+        '1'..='9' => Some(2 + c as u32 - '1' as u32),
+        '0' => Some(11),
+        ' ' => Some(57),
+        _ => None,
+    }
+}
+
+/// One script command as the messages it sends (and a pause).
+fn script_step(cmd: &str) -> Result<(Vec<ToHost>, u64), String> {
+    let words: Vec<&str> = cmd.split_whitespace().collect();
+    let num = |i: usize| -> Result<f32, String> {
+        words.get(i).and_then(|w| w.parse().ok()).ok_or_else(|| format!("script: {cmd:?}"))
+    };
+    let button = |w: Option<&&str>| match w.copied() {
+        Some("left") | None => Ok(0x110),
+        Some("right") => Ok(0x111),
+        Some("middle") => Ok(0x112),
+        Some(other) => Err(format!("script: no button {other}")),
+    };
+    Ok(match words.first().copied() {
+        Some("pointer") => (vec![ToHost::Pointer { x: num(1)?, y: num(2)? }], 30),
+        Some("press") => (vec![ToHost::Button { code: button(words.get(1))?, pressed: true }], 30),
+        Some("release") => (vec![ToHost::Button { code: button(words.get(1))?, pressed: false }], 30),
+        Some("key") => {
+            let code = num(1)? as u32;
+            (vec![ToHost::Key { code, pressed: true }, ToHost::Key { code, pressed: false }], 30)
+        }
+        Some("type") => {
+            let text = cmd.trim_start().strip_prefix("type").unwrap_or("").trim_start();
+            let mut m = Vec::new();
+            for c in text.chars() {
+                let code = code_of(c).ok_or_else(|| format!("script: cannot type {c:?}"))?;
+                m.push(ToHost::Key { code, pressed: true });
+                m.push(ToHost::Key { code, pressed: false });
+            }
+            (m, 30)
+        }
+        Some("scroll") => (vec![ToHost::Scroll { dx: num(1)?, dy: num(2)? }], 30),
+        Some("wait") => (Vec::new(), num(1)? as u64),
+        _ => return Err(format!("script: {cmd:?}")),
+    })
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let flag = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
@@ -41,6 +95,7 @@ fn main() -> ExitCode {
     let seconds: u64 = flag("--seconds").and_then(|v| v.parse().ok()).unwrap_or(10);
     let name = flag("--name").unwrap_or_else(|| "Probe".into());
     let screen = flag("--screen").unwrap_or_default();
+    let script = flag("--script");
     let Some(cmd_at) = args.iter().position(|a| a == "--") else {
         eprintln!("usage: vergence-remote-probe [--size WxH] [--frames N] [--seconds S] [--out FILE] -- COMMAND ...");
         return ExitCode::from(2);
@@ -86,6 +141,20 @@ fn main() -> ExitCode {
                         f.rects.len()
                     );
                     ToHost::Ack { seq: f.seq }.write(&mut w).and_then(|_| w.flush()).map_err(|e| e.to_string())?;
+                    if got == 1
+                        && let Some(script) = &script
+                    {
+                        for cmd in script.split(';').map(str::trim).filter(|c| !c.is_empty()) {
+                            let (msgs, pause) = script_step(cmd)?;
+                            for m in msgs {
+                                m.write(&mut w).map_err(|e| e.to_string())?;
+                                w.flush().map_err(|e| e.to_string())?;
+                                std::thread::sleep(Duration::from_millis(8));
+                            }
+                            std::thread::sleep(Duration::from_millis(pause));
+                        }
+                        println!("script: done");
+                    }
                 }
                 ToViewer::Notice { text } => println!("notice: {text}"),
                 ToViewer::Bye { reason } => return Err(format!("bye: {reason}")),

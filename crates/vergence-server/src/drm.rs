@@ -2457,6 +2457,21 @@ pub fn remote_tile(state: &mut Server) {
     );
 }
 
+/// A place in view `id` (its pixels) as a place on its screen (logical),
+/// kept on the screen.
+pub fn remote_to_logical(state: &Server, id: u32, x: f32, y: f32) -> Option<Point<f64, Logical>> {
+    let b = state.backend.as_ref()?;
+    let r = b.remotes.iter().find(|r| r.id == id)?;
+    if r.scale <= 0.0 {
+        return None;
+    }
+    let output = state.space.outputs().find(|o| o.name() == r.source)?;
+    let geo = state.space.output_geometry(output)?;
+    let lx = (x as f64 / r.scale).clamp(0.0, (geo.size.w - 1).max(0) as f64);
+    let ly = (y as f64 / r.scale).clamp(0.0, (geo.size.h - 1).max(0) as f64);
+    Some(Point::from((geo.loc.x as f64 + lx, geo.loc.y as f64 + ly)))
+}
+
 /// The remote views' ids.
 pub fn remote_ids(state: &Server) -> Vec<u32> {
     state.backend.as_ref().map(|b| b.remotes.iter().map(|r| r.id).collect()).unwrap_or_default()

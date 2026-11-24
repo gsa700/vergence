@@ -220,9 +220,55 @@ impl Server {
                     c.ready = true;
                 }
             }
-            // Input arrives with step 4.
-            ToHost::Key { .. } | ToHost::Pointer { .. } | ToHost::Button { .. } | ToHost::Scroll { .. } => {}
+            ToHost::Key { .. } | ToHost::Pointer { .. } | ToHost::Button { .. } | ToHost::Scroll { .. } => {
+                if let Some(v) = self.remote.conns[c].view {
+                    self.remote_input(v, msg);
+                }
+            }
             ToHost::Bye => self.remote_close(conn),
+        }
+    }
+
+    /// The viewer's keyboard, pointer, buttons and scrolling, as the
+    /// machine's own (step 4): the same paths vctl's input takes, so the seat
+    /// decides where each goes. Counts as activity (energy.rs). Not while the
+    /// server's elevation prompt is up: that is answered at the machine.
+    fn remote_input(&mut self, view: u32, msg: ToHost) {
+        use smithay::backend::input::{Axis, AxisSource, ButtonState, InputTime, KeyState};
+        if self.elevating() {
+            return;
+        }
+        self.energy_activity();
+        let now = InputTime::now();
+        match msg {
+            ToHost::Pointer { x, y } => {
+                if let Some(p) = crate::drm::remote_to_logical(self, view, x, y) {
+                    self.touch_mouse_back();
+                    self.pointer_to(p, now);
+                }
+            }
+            // Mouse buttons only (evdev BTN_LEFT .. BTN_TASK).
+            ToHost::Button { code, pressed } if (0x110..=0x117).contains(&code) => {
+                let state = if pressed { ButtonState::Pressed } else { ButtonState::Released };
+                self.handle_button(code, state, now);
+            }
+            // Keyboard keys only (evdev codes below BTN_MISC), as the server's keycodes (+8).
+            ToHost::Key { code, pressed } if code > 0 && code < 0x100 => {
+                let state = if pressed { KeyState::Pressed } else { KeyState::Released };
+                self.handle_key((code + 8).into(), state, now);
+            }
+            ToHost::Scroll { dx, dy } => {
+                let (dx, dy) = (dx.clamp(-10_000.0, 10_000.0) as f64, dy.clamp(-10_000.0, 10_000.0) as f64);
+                let mut frame = smithay::input::pointer::AxisFrame::new(now).source(AxisSource::Continuous);
+                if dx != 0.0 {
+                    frame = frame.value(Axis::Horizontal, dx);
+                }
+                if dy != 0.0 {
+                    frame = frame.value(Axis::Vertical, dy);
+                }
+                self.pointer_axis(frame, 2, dx, dy, 0, 0, now);
+            }
+            _ => {}
         }
     }
 
