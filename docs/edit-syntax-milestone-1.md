@@ -7,7 +7,11 @@ each language's words. Start with .md .html .php .py". After the editor
 (techbench, 2026-11-23: "Edit is coming along nicely", next: syntax
 highlighting and code autocomplete).
 
-Questions with leans at the end; nothing is built until Dave answers.
+**Accepted 2026-11-24** (Dave): "Yes to all 8 on your leans", and on the
+languages: "The languages were to start, we would maybe want others. Maybe
+build so they can be added?" So languages are pluggable (design §1, "Adding
+languages"): built-in ones behind one interface, and simple ones described
+in definition files anyone can add without building Vergence.
 
 ## Where things stand
 
@@ -62,6 +66,25 @@ Questions with leans at the end; nothing is built until Dave answers.
     and CSS come with it, as languages of their own too).
   - **PHP**: `<?php ... ?>` inside HTML, variables, keywords, the common
     functions as builtins, strings with `$var` inside, heredocs, comments.
+- **Adding languages** (Dave, 2026-11-24): two ways, both through one
+  registry (`vergence_syntax::languages()`), so the text area and Edit never
+  name a language themselves:
+  - **Built in**: a module implementing the `Highlighter` interface (its
+    state type, `line()`, its words, its extensions and first-line
+    patterns), registered in one list. For languages with structure:
+    Markdown, HTML, PHP, and any that need more than rules.
+  - **Definition files**: a small TOML file per language in
+    `$prefix/share/vergence/syntax/` (shipped) or
+    `~/.config/vergence/syntax/` (the person's, overriding a shipped one by
+    name): its name, extensions and first-line patterns, keyword and
+    builtin lists, line and block comment markers, string quotes (with
+    escapes, raw and multi-line forms), number style, and which delimiters
+    nest. One general rule-driven highlighter reads it. Most languages
+    (shell, Rust, C, Go, Lua, TOML, INI, YAML, SQL, Makefile...) fit this,
+    so adding one is writing a file, not code. A file is untrusted input:
+    read with limits, a bad one skipped with a note in the log.
+  - Python could be either; it is built in (f-strings, prefixes) and also
+    serves as the test of the interface.
 - **Then, cheaply, since the pieces exist**: JavaScript and CSS on their
   own, JSON, shell, Rust, TOML/INI, C (question 6).
 - **Which language**: by the file's extension; else its first line (`#!`
@@ -115,8 +138,8 @@ Questions with leans at the end; nothing is built until Dave answers.
 
 ## Steps
 
-1. `vergence-syntax`: the span and state types, Python, its tests and
-   fuzz test.
+1. `vergence-syntax`: the span and state types, the `Highlighter`
+   interface and the registry, Python built in, its tests and fuzz test.
 2. The text area draws spans (colors only), the per-line cache and its
    invalidation; the palette in vergence-look with the contrast tests.
 3. Edit: detection, the status, View > Language, the Syntax colors switch.
@@ -126,7 +149,11 @@ Questions with leans at the end; nothing is built until Dave answers.
 5. HTML with JavaScript and CSS; PHP in HTML.
 6. Spelling in code limited to comments, strings and prose; completion with
    the language's words.
-7. The languages after the first four (question 6), as Dave orders them.
+7. Definition files: the rule-driven highlighter, the TOML format
+   (documented in docs/syntax-files.md), loading from the shipped and the
+   person's directories; then the next languages as files (question 6:
+   JavaScript and CSS stay built in with HTML; shell, JSON, Rust, TOML, C
+   as files).
 8. Display-suite scenario (a Python, a Markdown and a PHP file, light and
    dark, shots compared), tests on Hubble, techbench and kepler; a package
    for techbench.
@@ -142,7 +169,7 @@ Questions with leans at the end; nothing is built until Dave answers.
 - In a Python file, `isi` offers `isinstance`; in HTML, `<bl` offers
   `blockquote`.
 
-## Questions for Dave
+## Questions for Dave (answered 2026-11-24: all eight as leaned)
 
 1. **Our own tokenizers, or tree-sitter?** Lean: **our own**. Tree-sitter
    would be borrowing (a C library and a grammar per language, each its own
