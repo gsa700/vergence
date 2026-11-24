@@ -65,6 +65,10 @@ enabled = false
 # Agents are off by default (defaults milestone 1); the agent checks need them.
 [agents]
 enabled = true
+
+# Vergence Remote is off by default (Privacy > Remote); the remote checks need it.
+[remote]
+enabled = true
 EOF
     fi
     [ $# -gt 0 ] || set -- --screen "1920x1080 531x299@60"

@@ -134,6 +134,9 @@ enum Page {
     Session,
     /// Privacy > Agents: what agents may use (privacy.rs; meaning milestone 1).
     Agents,
+    /// Privacy > Remote: whether Vergence Remote may reach this computer
+    /// (privacy.rs; remote milestone 1).
+    Remote,
     /// The battery and the GPUs (battery.rs); only where there is a battery.
     Battery,
     Sound,
@@ -1035,6 +1038,7 @@ impl Program for App {
             Page::LockScreen => "Lock Screen".into(),
             Page::Session => "Session".into(),
             Page::Agents => "Agents".into(),
+            Page::Remote => "Remote".into(),
             Page::Login => "Login".into(),
             Page::Apps => "Apps".into(),
             Page::DefaultApps => "Default apps".into(),
@@ -1116,6 +1120,7 @@ impl Program for App {
             Page::LockScreen => self.lock_page(),
             Page::Session => self.session_page(),
             Page::Agents => self.agents_page(),
+            Page::Remote => self.remote_page(),
             Page::Login => self.login_page(),
             Page::Apps => self.apps_page(),
             Page::DefaultApps => self.defaults_page(),

@@ -26,6 +26,12 @@ pub fn agents_settings(d: &toml::Table) -> (bool, i64) {
     (on, minutes)
 }
 
+/// desktop.toml's `[remote] enabled`: whether Vergence Remote may reach this
+/// computer (remote milestone 1; off by default, Dave 2026-11-23).
+pub fn remote_enabled(d: &toml::Table) -> bool {
+    d.get("remote").and_then(|a| a.as_table()).and_then(|t| t.get("enabled")).and_then(|v| v.as_bool()).unwrap_or(false)
+}
+
 /// The grants, from the server, mailed back.
 pub fn fetch(mail: Mail) {
     std::thread::spawn(move || {
@@ -59,6 +65,8 @@ pub enum PrivacyMsg {
     Revoke(String, String, String),
     Enabled(bool),
     Timed(i64),
+    /// Vergence Remote may reach this computer.
+    Remote(bool),
 }
 
 /// How a grant reads: "For 42 more minutes", "Until you log out".
@@ -85,7 +93,32 @@ impl App {
             PrivacyMsg::Timed(m) => self.save_table("agents", |t| {
                 t.insert("timed-minutes".into(), m.into());
             }),
+            PrivacyMsg::Remote(on) => self.save_table("remote", |t| {
+                t.insert("enabled".into(), on.into());
+            }),
         }
+    }
+
+    /// Privacy > Remote (remote milestone 1): whether Vergence Remote may
+    /// reach this computer. Off, the desktop opens no socket for it at all.
+    pub fn remote_page(&self) -> Element<Message> {
+        let on = remote_enabled(&self.desktop);
+        self.page_layout(
+            "Remote",
+            "Vergence Remote lets you use this computer from another one as if you were sitting at it: its screens, keyboard and mouse, over SSH with your own keys. Only you can connect (the same account, through SSH); while someone is connected a tile on the dock says who, and End there stops it at once. A connection may blank this computer's screens behind the lock while it works.",
+            vec![self.group(
+                Some("Vergence Remote"),
+                vec![setting(
+                    "Allow Vergence Remote",
+                    if on {
+                        "On: you can reach this computer from another with Vergence Remote, over SSH."
+                    } else {
+                        "Off: nothing listens for it; no one can view or use this computer remotely."
+                    },
+                    switch(on, |on| Message::Privacy(PrivacyMsg::Remote(on))).name("Allow Vergence Remote"),
+                )],
+            )],
+        )
     }
 
     pub fn agents_page(&self) -> Element<Message> {

@@ -40,6 +40,8 @@ pub enum Event {
 pub struct Remotes {
     conns: Vec<Conn>,
     pub path: Option<PathBuf>,
+    /// The accepting thread's go-on flag, while the socket is open.
+    open: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// A remote view is being drawn now (drm.rs): behind the curtain it
     /// draws the session, not the lock (decor.rs).
     pub drawing: bool,
@@ -59,7 +61,63 @@ struct Conn {
     program: String,
 }
 
+/// desktop.toml's `[remote] enabled`: whether Vergence Remote may reach this
+/// computer (Privacy > Remote; off by default, Dave 2026-11-23). Read at most
+/// once a second.
+pub fn enabled() -> bool {
+    static CACHE: std::sync::Mutex<Option<(std::time::Instant, bool)>> = std::sync::Mutex::new(None);
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((t, v)) = *cache
+        && t.elapsed() < std::time::Duration::from_secs(1)
+    {
+        return v;
+    }
+    let text = vergence_config::effective_text_with(crate::wallpaper::desktop_path().as_deref());
+    let v = text
+        .parse::<toml::Table>()
+        .ok()
+        .and_then(|t| t.get("remote").and_then(|r| r.get("enabled")).and_then(|v| v.as_bool()))
+        .unwrap_or(false);
+    *cache = Some((std::time::Instant::now(), v));
+    v
+}
+
+/// The socket opened or closed to follow the setting (the dock's tick, once
+/// a second): off, there is no socket at all, and any connection ends.
+pub fn follow_setting(state: &mut Server) {
+    let on = enabled();
+    if on && state.remote.open.is_none() {
+        listen(state);
+    } else if !on && state.remote.open.is_some() {
+        unlisten(state);
+    }
+}
+
+fn unlisten(state: &mut Server) {
+    if let Some(flag) = state.remote.open.take() {
+        flag.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+    if let Some(path) = state.remote.path.take() {
+        // The accepting thread wakes on a connection, sees the flag, and ends.
+        let _ = UnixStream::connect(&path);
+        let _ = std::fs::remove_file(&path);
+    }
+    for c in std::mem::take(&mut state.remote.conns) {
+        send(&c.writer, &ToViewer::Bye { reason: "Vergence Remote was turned off on this computer".into() });
+        if let Some(v) = c.view {
+            crate::drm::remote_stop(state, v);
+        }
+    }
+    if state.lock.curtain {
+        state.lock.curtain = false;
+    }
+    tracing::info!("remote: off (Privacy > Remote)");
+}
+
 pub fn listen(state: &mut Server) {
+    if !enabled() {
+        return;
+    }
     let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from) else {
         return tracing::warn!("remote: no XDG_RUNTIME_DIR");
     };
@@ -83,9 +141,14 @@ pub fn listen(state: &mut Server) {
         return tracing::warn!("remote: {e}");
     }
     let ours = crate::control::our_uid();
+    let open = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    state.remote.open = Some(open.clone());
     std::thread::spawn(move || {
         let mut next = 1u32;
         for stream in listener.incoming().flatten() {
+            if !open.load(std::sync::atomic::Ordering::Relaxed) {
+                return;
+            }
             if crate::control::peer_uid(&stream) != Some(ours) {
                 tracing::warn!("remote: a connection from another user, refused");
                 continue;

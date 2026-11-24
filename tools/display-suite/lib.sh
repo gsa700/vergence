@@ -11,6 +11,11 @@ headless() {
     n=$#
     for s in "$@"; do set -- "$@" --screen "$s"; done
     shift "$n"
+    # Vergence Remote is off by default (Privacy > Remote): on for the suite,
+    # whatever an earlier scenario left in the throwaway profile.
+    cfg=$HOME/.cache/vergence-headless/home/.config/vergence/desktop.toml
+    mkdir -p "$(dirname "$cfg")"
+    grep -q '^\[remote\]' "$cfg" 2>/dev/null || printf '\n[remote]\nenabled = true\n' >> "$cfg"
     VERGENCE_SERVER="$TARGET/vergence-server" "$ROOT/tools/vergence-headless" start "$@" >/dev/null || return 1
     eval "$("$ROOT/tools/vergence-headless" env)"
     SHOTS=$HOME/.cache/vergence-headless/home/vergence-shots

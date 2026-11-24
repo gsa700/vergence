@@ -96,7 +96,10 @@ impl App {
             .collect()),
             ("Sound", vec![("Sound".into(), Page::Sound, Icon::Sound, "sound volume output speaker headphones mute audio")]),
             ("Accessibility", vec![("Accessibility".into(), Page::Accessibility, Icon::Accessibility, "accessibility contrast motion transparency size zoom magnifier lens focus ring")]),
-            ("Privacy", vec![("Agents".into(), Page::Agents, Icon::Lock, "agents agent assistant ai claude automation permission allow take back grants privacy mcp")]),
+            ("Privacy", vec![
+                ("Agents".into(), Page::Agents, Icon::Lock, "agents agent assistant ai claude automation permission allow take back grants privacy mcp"),
+                ("Remote".into(), Page::Remote, Icon::Network, "remote vergence remote ssh viewer kvm desktop sharing access another computer"),
+            ]),
             ("System", vec![
                 ("Energy".into(), Page::Energy, Icon::Energy, "energy power sleep screens off idle"),
                 ("Date & Time".into(), Page::DateTime, Icon::Clock, "date time clock zone timezone 24 hour am pm calendar"),

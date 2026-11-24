@@ -194,6 +194,8 @@ impl Server {
     pub fn tiles_tick(&mut self) {
         // The agent tile goes when its agent rests (agents.rs).
         self.agents_tick();
+        // Vergence Remote's socket follows Privacy > Remote (remote.rs).
+        crate::remote::follow_setting(self);
         // The remote tile's "since", once a minute is plenty; each second is cheap.
         if crate::drm::remote_count(self) > 0 {
             crate::drm::remote_tile(self);

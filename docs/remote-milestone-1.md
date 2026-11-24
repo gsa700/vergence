@@ -337,7 +337,12 @@ is listed above only as Dave's own alternative.
     headless session only (`--headless`: no vdm needed there, `vctl lock
     test-unlock`); real sessions still need vdm and a password. Display
     suite 27.
-  - Step 4 built. Settings and packaging (Dave asked 2026-11-23 whether
-    Agents and Remote should be compile or install options; proposed: a
-    Settings switch, off by default, with no socket while off, and a
-    separate package for the remote programs): waiting for his word.
+  - **Privacy > Remote** (Dave, 2026-11-23: "yes to the settings switch"):
+    desktop.toml `[remote] enabled`, off by default. The server follows it
+    within a second (the dock's tick): on, the remote socket opens; off,
+    there is no socket at all, every connection ends ("Vergence Remote was
+    turned off on this computer") and any curtain stays as a plain lock.
+    Settings' page explains it and holds the switch. Compile-time options:
+    not now (Dave asked; two builds to test for little). A separate package
+    for the remote programs: proposed, not yet answered. Display suite 28.
+  - Step 4 built.
