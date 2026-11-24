@@ -1059,6 +1059,23 @@ impl Server {
                     "agents: the person stopped {agent:?} in tab #{node} of {client}/{window} ({n} grant(s))"
                 );
             }
+            // Every key to this window while it has the keyboard (bus v40,
+            // Vergence Remote's viewer): the seat decides (vergence-seat's
+            // capture_keys); the window hears the answer.
+            WinRequest::CaptureKeys { window, on } => {
+                if let Some(w) = self.natives.get(&(client, window)).cloned() {
+                    let id = self.win_id(&w);
+                    self.input.seat.capture_keys(id, on);
+                    tracing::info!("keys: {client}/{window} {} every key", if on { "takes" } else { "gives back" });
+                    self.bus_send(
+                        client,
+                        vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::KeysCaptured {
+                            window,
+                            on,
+                        }),
+                    );
+                }
+            }
             WinRequest::Copy { kinds, .. } => self.native_copy(client, kinds),
             WinRequest::Paste { serial, kind } => self.native_paste(client, serial, kind),
         }

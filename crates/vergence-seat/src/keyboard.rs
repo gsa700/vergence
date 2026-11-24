@@ -7,6 +7,10 @@
 //!
 //! The filter, in order, for a key going down:
 //!
+//! 0. Locked, every key is the lock's (volume and consoles aside). Then, a
+//!    window that captures the keyboard (bus v40, Vergence Remote's viewer)
+//!    and has it gets every key, all below included, but the consoles'
+//!    keys; Ctrl+Alt pressed and let go alone ends the capture.
 //! 1. Ctrl+Alt+Backspace ends the session.
 //! 2. Escape closes the desktop menu or an icon's menu.
 //! 3. The volume keys are the default output's, never a program's.
@@ -189,6 +193,16 @@ pub(crate) struct Keyboard {
     /// The settings: Super with the arrows, and Alt+`, are the server's.
     pub(crate) window_keys: bool,
     pub(crate) app_switch: bool,
+    /// The window that has every key while it has the keyboard (Vergence
+    /// Remote's viewer, remote milestone 1: Super, Alt+Tab and the rest go to
+    /// the far machine), and the one whose capture Ctrl+Alt just ended.
+    pub(crate) captured: Option<WinId>,
+    pub(crate) released: Option<WinId>,
+    /// The modifiers at the last key, and Ctrl+Alt's release watch: armed
+    /// while both are held with nothing else pressed since.
+    pub(crate) last_mods: Mods,
+    pub(crate) chord_armed: bool,
+    pub(crate) chord_other: bool,
 }
 
 impl Default for Keyboard {
@@ -200,6 +214,11 @@ impl Default for Keyboard {
             switching: None,
             window_keys: true,
             app_switch: true,
+            captured: None,
+            released: None,
+            last_mods: Mods::default(),
+            chord_armed: false,
+            chord_other: false,
         }
     }
 }
@@ -218,12 +237,52 @@ impl Keyboard {
 }
 
 impl Seat {
+    /// Window `w` takes every key while it has the keyboard, or no longer
+    /// does (remote milestone 1: Vergence Remote's viewer asks).
+    pub fn capture_keys(&mut self, w: WinId, on: bool) {
+        if on {
+            self.keyboard.captured = Some(w);
+        } else if self.keyboard.captured == Some(w) {
+            self.keyboard.captured = None;
+        }
+    }
+
+    /// The window whose capture Ctrl+Alt ended at the last key, once.
+    pub fn take_capture_released(&mut self) -> Option<WinId> {
+        self.keyboard.released.take()
+    }
+
+    /// Ctrl+Alt's watch, at every key: true when Ctrl+Alt (with neither
+    /// Shift nor Super) were held with nothing else pressed and one of them
+    /// was just let go.
+    fn capture_chord(&mut self, pressed: bool, mods: Mods) -> bool {
+        let before = self.keyboard.last_mods;
+        self.keyboard.last_mods = mods;
+        let modifier = before != mods;
+        if pressed && !modifier {
+            self.keyboard.chord_other = true;
+        }
+        let both = mods.ctrl && mods.alt && !mods.shift && !mods.logo;
+        if both && !self.keyboard.chord_other {
+            self.keyboard.chord_armed = true;
+        }
+        let ended = !pressed && modifier && self.keyboard.chord_armed && !self.keyboard.chord_other && !both;
+        if ended || (!mods.ctrl && !mods.alt && !mods.shift && !mods.logo) {
+            self.keyboard.chord_armed = false;
+            self.keyboard.chord_other = false;
+        }
+        ended
+    }
+}
+
+impl Seat {
     /// A key went down or up.
     pub fn key(&mut self, key: Key, pressed: bool, mods: Mods) -> KeyOut {
         let is_super = key == Key::Super;
         // Locked (review I6): before any other key of the server's, the
         // session's end and Force Quit among them. Only the volume and
         // console switching pass; everything else is the lock dialog's.
+        let chord_ended = self.capture_chord(pressed, mods);
         if self.locked {
             return match key {
                 Key::VolumeUp if pressed => KeyOut::Volume(5),
@@ -232,6 +291,24 @@ impl Seat {
                 Key::Vt(n) if pressed && (1..=12).contains(&n) => KeyOut::Vt(n),
                 _ => KeyOut::Locked,
             };
+        }
+        // A window that captures the keyboard (remote milestone 1) has every
+        // key while it has the keyboard, the server's own shortcuts included;
+        // only switching consoles stays this machine's. Ctrl+Alt pressed and
+        // let go with nothing else gives the keyboard back (the release
+        // itself still goes to the window, so no key stays down there).
+        if let Some(w) = self.keyboard.captured.filter(|w| self.keyboard.focus == Some(*w)) {
+            if let Key::Vt(n) = key
+                && pressed
+                && (1..=12).contains(&n)
+            {
+                return KeyOut::Vt(n);
+            }
+            if chord_ended {
+                self.keyboard.captured = None;
+                self.keyboard.released = Some(w);
+            }
+            return KeyOut::Forward(Some(w));
         }
         if mods.logo
             && mods.alt
@@ -454,6 +531,52 @@ mod tests {
         assert_eq!(seat.key(Key::Equal, true, sa), KeyOut::Zoom(ZoomKey::In), "with the apps popup open too");
         seat.lock();
         assert_eq!(seat.key(Key::Eight, true, sa), KeyOut::Locked);
+    }
+
+    /// Remote milestone 1: a window that captures the keyboard has every key
+    /// while it has the keyboard; consoles still switch here; Ctrl+Alt
+    /// pressed and let go alone gives the keyboard back, Ctrl+Alt with
+    /// another key does not.
+    #[test]
+    fn a_capturing_window_has_every_key_until_ctrl_alt_alone() {
+        let mut seat = Seat::new();
+        seat.focus(Some(W1));
+        seat.capture_keys(W1, true);
+        let logo = Mods { logo: true, ..none() };
+        let alt = Mods { alt: true, ..none() };
+        let ctrl = Mods { ctrl: true, ..none() };
+        let ctrl_alt = Mods { ctrl: true, alt: true, ..none() };
+        assert_eq!(seat.key(Key::Super, true, logo), KeyOut::Forward(Some(W1)));
+        assert_eq!(seat.key(Key::Super, false, none()), KeyOut::Forward(Some(W1)), "no launcher on Super's tap");
+        assert_eq!(seat.key(Key::L, true, logo), KeyOut::Forward(Some(W1)), "Super+L goes over");
+        assert_eq!(seat.key(Key::Tab, true, alt), KeyOut::Forward(Some(W1)), "Alt+Tab goes over");
+        assert_eq!(seat.key(Key::Tab, false, alt), KeyOut::Forward(Some(W1)));
+        assert_eq!(seat.key(Key::Alt, false, none()), KeyOut::Forward(Some(W1)));
+        assert_eq!(seat.key(Key::Vt(3), true, ctrl_alt), KeyOut::Vt(3), "consoles still switch here");
+        // Ctrl+Alt+T: a third key, so the keyboard stays the window's.
+        seat.key(Key::Other, true, ctrl);
+        seat.key(Key::Alt, true, ctrl_alt);
+        seat.key(Key::Other, true, ctrl_alt);
+        seat.key(Key::Other, false, ctrl_alt);
+        seat.key(Key::Alt, false, ctrl);
+        seat.key(Key::Other, false, none());
+        assert_eq!(seat.take_capture_released(), None);
+        assert_eq!(seat.key(Key::Super, true, logo), KeyOut::Forward(Some(W1)), "still captured");
+        seat.key(Key::Super, false, none());
+        // Ctrl+Alt alone: the release goes over, then the keyboard is this machine's.
+        seat.key(Key::Other, true, ctrl);
+        seat.key(Key::Alt, true, ctrl_alt);
+        assert_eq!(seat.key(Key::Alt, false, ctrl), KeyOut::Forward(Some(W1)), "the release itself still goes over");
+        assert_eq!(seat.take_capture_released(), Some(W1));
+        seat.key(Key::Other, false, none());
+        assert_eq!(seat.key(Key::L, true, logo), KeyOut::Lock, "Super+L is this machine's again");
+        // Captured only while it has the keyboard; gone with the window.
+        seat.capture_keys(W1, true);
+        seat.focus(Some(W2));
+        assert_eq!(seat.key(Key::L, true, logo), KeyOut::Lock, "another window has the keyboard");
+        seat.window_gone(W1);
+        seat.focus(Some(W1));
+        assert_eq!(seat.key(Key::L, true, logo), KeyOut::Lock, "a closed window's capture is gone");
     }
 
     #[test]

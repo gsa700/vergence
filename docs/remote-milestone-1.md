@@ -311,4 +311,13 @@ is listed above only as Dave's own alternative.
     3), removes one; choosing one opens its window (each computer a window
     of its own). Destinations are checked (no spaces, no leading dash, no
     shell's characters) and go to ssh after `--`. Display suite 25.
-  - Next in step 4: full screen with every key passed through, blanking.
+  - **The whole keyboard** (bus v40): the viewer asks the server for every
+    key while it has the keyboard (`WinRequest::CaptureKeys`); the seat
+    then forwards every key to it, the server's own shortcuts included
+    (Super, Alt+Tab, Ctrl+Alt+…), but switching consoles; Ctrl+Alt pressed
+    and let go alone gives the keyboard back (`WinEvent::KeysCaptured`
+    false), and a click takes it again. The title says how. A view of this
+    very computer (`localhost`) is looking only: input there would come
+    back to the window and go out again, round and round. Display suite 26
+    (with a stand-in host: `--command`); vctl key learns `Alt`.
+  - Next in step 4: blanking.

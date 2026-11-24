@@ -391,6 +391,9 @@ impl Seat {
             self.keyboard.focus = None;
         }
         self.keyboard.used.retain(|&w| w != window);
+        if self.keyboard.captured == Some(window) {
+            self.keyboard.captured = None;
+        }
         self.touch.window_gone(window, &mut out);
         out
     }

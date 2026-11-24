@@ -80,11 +80,13 @@
 //! the person's stop.
 //! Version 39 (terminal agent milestone 1, the security review): `window::WinEvent::AgentTabs`,
 //! the tabs agents hold a grant for, for the window's stop keys.
+//! Version 40 (remote milestone 1, Vergence Remote's viewer): `window::WinRequest::CaptureKeys`
+//! and `window::WinEvent::KeysCaptured`, a window that takes every key while it has the keyboard.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 39;
+pub const VERSION: u32 = 40;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

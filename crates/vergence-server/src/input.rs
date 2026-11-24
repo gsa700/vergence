@@ -100,6 +100,19 @@ impl Server {
             return;
         }
         let out = self.input.seat.key(crate::keys::seat_key(key.sym, code.raw()), pressed, mods);
+        // Ctrl+Alt alone gave a capturing window's keyboard back (bus v40): it is told.
+        if let Some(id) = self.input.seat.take_capture_released()
+            && let Some((client, window)) = self.input.window(id).and_then(|w| w.native().map(|n| (n.client, n.id)))
+        {
+            tracing::info!("keys: Ctrl+Alt gave {client}/{window}'s keyboard back");
+            self.bus_send(
+                client,
+                vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::KeysCaptured {
+                    window,
+                    on: false,
+                }),
+            );
+        }
         let native = match out {
             KeyOut::Forward(Some(id)) => self.input.window(id).filter(|w| w.native().is_some()),
             _ => None,

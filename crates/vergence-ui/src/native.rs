@@ -493,6 +493,7 @@ impl<'a> Native<'a> {
                 Command::Drag(label, items) => self.send(WinRequest::DragStart { window: id, label, items })?,
                 Command::Activate => self.send(WinRequest::Activate { window: id })?,
                 Command::RevokeAgent(node, agent) => self.send(WinRequest::RevokeAgent { window: id, node, agent })?,
+                Command::CaptureKeys(on) => self.send(WinRequest::CaptureKeys { window: id, on })?,
                 Command::ContextMenu(x, y) => {
                     // The menu shows the commands as they are now.
                     if let Some((terminal, commands)) = self.windows[i].app.get().commands() {
@@ -850,6 +851,10 @@ impl<'a> Native<'a> {
             // Who is about to type (bus v38): the window may show it.
             WinEvent::AgentActing { window, node, agent } => {
                 self.with_window(window, |app, w| app.agent_acting(node, &agent, w))?;
+            }
+            // Every key to the window, or no longer (bus v40).
+            WinEvent::KeysCaptured { window, on } => {
+                self.with_window(window, |app, w| app.keys_captured(on, w))?;
             }
             // The tabs agents hold a grant for (bus v39).
             WinEvent::AgentTabs { window, tabs } => {

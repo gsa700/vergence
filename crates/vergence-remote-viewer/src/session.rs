@@ -47,6 +47,14 @@ pub struct Viewer {
     buttons: Vec<u32>,
     /// The title last set.
     titled: String,
+    /// The window has every key (the server's own shortcuts too), until
+    /// Ctrl+Alt gives the keyboard back; a click takes it again.
+    captured: bool,
+    /// The command that reaches the host (`ssh HOST vergence-remote`).
+    command: Vec<String>,
+    /// Only looking, no input sent: a view of this very session, where input
+    /// would come back to this window and go out again, round and round.
+    view_only: bool,
 }
 
 fn this_host() -> String {
@@ -65,7 +73,15 @@ fn this_host() -> String {
 impl Viewer {
     /// A window for a session with `host` (an SSH destination, or "localhost").
     pub fn new(host: &str) -> Viewer {
+        Viewer::with_command(host, vergence_remote::client::command_for(host))
+    }
+
+    /// A window for a session through `command` (tests: a stand-in host).
+    pub fn with_command(host: &str, command: Vec<String>) -> Viewer {
+        let view_only = host == "localhost";
         Viewer {
+            command,
+            view_only,
             host: host.to_string(),
             session: None,
             waker: None,
@@ -78,6 +94,7 @@ impl Viewer {
             held: Vec::new(),
             buttons: Vec::new(),
             titled: String::new(),
+            captured: false,
         }
     }
 
@@ -132,7 +149,12 @@ impl Viewer {
         (px >= 0.0 && py >= 0.0 && px < self.size.0 as f32 && py < self.size.1 as f32).then_some((px, py))
     }
 
+    /// Input to the host; a resize always (the view follows the window).
     fn send(&self, m: ToHost) {
+        let input = !matches!(m, ToHost::Resize { .. } | ToHost::Bye | ToHost::Ack { .. } | ToHost::Hello { .. });
+        if input && self.view_only {
+            return;
+        }
         if let Some(s) = &self.session {
             s.send(m);
         }
@@ -158,7 +180,22 @@ impl App for Viewer {
             .and_then(|s| s.shared.lock().ok().map(|sh| sh.host.clone()))
             .filter(|h| !h.is_empty())
             .unwrap_or_else(|| self.host.clone());
-        format!("{host} — Vergence Remote")
+        if self.view_only {
+            format!("{host} — Vergence Remote (this computer: looking only)")
+        } else if self.captured {
+            format!("{host} — Vergence Remote (Ctrl+Alt gives the keyboard back)")
+        } else {
+            format!("{host} — Vergence Remote")
+        }
+    }
+
+    fn keys_captured(&mut self, on: bool, window: &mut Window) {
+        self.captured = on;
+        let title = self.title();
+        if title != self.titled {
+            window.set_title(&title);
+            self.titled = title;
+        }
     }
 
     fn app_id(&self) -> String {
@@ -198,8 +235,7 @@ impl App for Viewer {
                     w.wake();
                 }
             };
-            let command = vergence_remote::client::command_for(&self.host);
-            self.session = Some(Session::connect(&command, &this_host(), px, wake));
+            self.session = Some(Session::connect(&self.command, &this_host(), px, wake));
             self.want = px;
         } else if px != self.want {
             self.want = px;
@@ -242,7 +278,16 @@ impl App for Viewer {
         scene
     }
 
-    fn input(&mut self, input: &Input, _window: &mut Window) {
+    fn input(&mut self, input: &Input, window: &mut Window) {
+        // The keyboard taken whole when the window gets it, and again at a
+        // click after Ctrl+Alt gave it back (the server's shortcuts then go
+        // to the far machine too; switching consoles stays here).
+        match input {
+            _ if self.view_only => {}
+            Input::Focus(true) => window.capture_keys(true),
+            Input::Button { pressed: true, .. } if !self.captured => window.capture_keys(true),
+            _ => {}
+        }
         match input {
             Input::PointerMoved { x, y } => {
                 if let Some((px, py)) = self.to_view(*x, *y) {

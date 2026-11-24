@@ -462,6 +462,14 @@ pub enum WinRequest {
         node: u64,
         agent: String,
     },
+    /// Every key to this window while it has the keyboard, the server's own
+    /// shortcuts included (bus v40, remote milestone 1: Vergence Remote's
+    /// viewer), or no longer. The server answers [`WinEvent::KeysCaptured`];
+    /// Ctrl+Alt pressed and let go alone gives the keyboard back.
+    CaptureKeys {
+        window: u32,
+        on: bool,
+    },
     /// The answer to [`WinEvent::ReadText`] with this serial (bus v37): the
     /// node's text from `offset` (in characters), `total` characters in all;
     /// `found` false when there is no such node now.
@@ -966,6 +974,13 @@ pub enum WinEvent {
         window: u32,
         tabs: Vec<AgentTab>,
     },
+    /// Whether the window now has every key (bus v40): the answer to
+    /// [`WinRequest::CaptureKeys`], and `false` when Ctrl+Alt gave the
+    /// keyboard back.
+    KeysCaptured {
+        window: u32,
+        on: bool,
+    },
     /// Send the text of meaning node `node` (its value, else its name) from
     /// character `offset`, at most `len` characters (bus v37, paged reading:
     /// the tree cuts every text at [`MEANING_TEXT_MAX`] characters). Answered
@@ -1029,6 +1044,7 @@ pub(crate) mod op {
     pub const SCENE: u16 = 127;
     pub const TEXT_PAGE: u16 = 128;
     pub const REVOKE_AGENT: u16 = 129;
+    pub const CAPTURE_KEYS: u16 = 130;
     // Server to client.
     pub const CREATED: u16 = 100;
     pub const CONFIGURE: u16 = 101;
@@ -1070,6 +1086,7 @@ pub(crate) mod op {
     pub const READ_TEXT: u16 = 137;
     pub const AGENT_ACTING: u16 = 138;
     pub const AGENT_TABS: u16 = 139;
+    pub const KEYS_CAPTURED: u16 = 140;
 
     /// Whether an opcode is a window message's (either way).
     pub fn is_window(opcode: u16) -> bool {
@@ -1507,6 +1524,11 @@ impl WinRequest {
                 e.u32(*window).u64(*node).str(agent);
                 e
             }
+            WinRequest::CaptureKeys { window, on } => {
+                let mut e = Encoder::frame(op::CAPTURE_KEYS);
+                e.u32(*window).bool(*on);
+                e
+            }
             WinRequest::TextPage { window, serial, node, found, offset, total, text } => {
                 let mut e = Encoder::frame(op::TEXT_PAGE);
                 e.u32(*window).u32(*serial).u64(*node).bool(*found).u32(*offset).u32(*total).str(text);
@@ -1708,6 +1730,7 @@ impl WinRequest {
             op::GROUND_CLICKED => WinRequest::GroundClicked { window: d.u32()? },
             op::ACTED => WinRequest::Acted { window: d.u32()?, serial: d.u32()?, ok: d.bool()?, why: d.str()? },
             op::REVOKE_AGENT => WinRequest::RevokeAgent { window: d.u32()?, node: d.u64()?, agent: d.str()? },
+            op::CAPTURE_KEYS => WinRequest::CaptureKeys { window: d.u32()?, on: d.bool()? },
             op::TEXT_PAGE => {
                 let (window, serial, node, found, offset, total) =
                     (d.u32()?, d.u32()?, d.u64()?, d.bool()?, d.u32()?, d.u32()?);
@@ -1940,6 +1963,11 @@ impl WinEvent {
                 e.u32(*window).u64(*node).str(agent);
                 e
             }
+            WinEvent::KeysCaptured { window, on } => {
+                let mut e = Encoder::frame(op::KEYS_CAPTURED);
+                e.u32(*window).bool(*on);
+                e
+            }
             WinEvent::AgentTabs { window, tabs } => {
                 let mut e = Encoder::frame(op::AGENT_TABS);
                 e.u32(*window).count(tabs.len());
@@ -2102,6 +2130,7 @@ impl WinEvent {
             op::SCENES_OFF => WinEvent::ScenesOff { window: d.u32()?, why: d.str()? },
             op::SESSION_ENDING => WinEvent::SessionEnding { window: d.u32()? },
             op::AGENT_ACTING => WinEvent::AgentActing { window: d.u32()?, node: d.u64()?, agent: d.str()? },
+            op::KEYS_CAPTURED => WinEvent::KeysCaptured { window: d.u32()?, on: d.bool()? },
             op::AGENT_TABS => {
                 let window = d.u32()?;
                 let n = d.count(13)?;
@@ -2400,6 +2429,7 @@ mod tests {
             WinRequest::Acted { window: 1, serial: 7, ok: false, why: "it is off".into() },
             WinRequest::Acted { window: 2, serial: 8, ok: true, why: String::new() },
             WinRequest::RevokeAgent { window: 3, node: 1 << 60 | 9, agent: "Claude".into() },
+            WinRequest::CaptureKeys { window: 3, on: true },
             WinRequest::TextPage {
                 window: 1,
                 serial: 9,
@@ -2542,6 +2572,7 @@ mod tests {
             WinEvent::Act { window: 1, serial: 14, node: 7, action: Action::Key("ctrl+c".into()) },
             WinEvent::AgentActing { window: 1, node: 1 << 60 | 3, agent: "Claude".into() },
             WinEvent::AgentTabs { window: 1, tabs: vec![] },
+            WinEvent::KeysCaptured { window: 1, on: false },
             WinEvent::AgentTabs {
                 window: 1,
                 tabs: vec![

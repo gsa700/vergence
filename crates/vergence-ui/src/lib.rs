@@ -519,6 +519,7 @@ enum Command {
     Menu(f32, f32, Vec<MenuLine>),
     /// The person stopped an agent at this scope node (bus v38).
     RevokeAgent(u64, String),
+    CaptureKeys(bool),
 }
 
 /// What a program may ask of its window while it handles input.
@@ -532,6 +533,14 @@ impl Window {
     /// v38): the server ends its grant there now. The native road only.
     pub fn revoke_agent(&mut self, node: u64, agent: &str) {
         self.commands.push(Command::RevokeAgent(node, agent.to_string()));
+    }
+
+    /// Every key to this window while it has the keyboard, the server's own
+    /// shortcuts included, or no longer (bus v40: Vergence Remote's viewer).
+    /// [`App::keys_captured`] hears the answer, and hears `false` when the
+    /// person gives the keyboard back (Ctrl+Alt). The native road only.
+    pub fn capture_keys(&mut self, on: bool) {
+        self.commands.push(Command::CaptureKeys(on));
     }
 
     /// The picture has changed: draw a frame.
@@ -883,6 +892,10 @@ pub trait App {
     /// tab's meaning node, the agent's name, and whether it may type there.
     /// Sent whenever that changes; the stop keys are for these tabs.
     fn agent_tabs(&mut self, _tabs: &[(u64, String, bool)], _window: &mut Window) {}
+
+    /// Whether the window now has every key (bus v40): the answer to
+    /// [`Window::capture_keys`], or `false` when Ctrl+Alt gave it back.
+    fn keys_captured(&mut self, _on: bool, _window: &mut Window) {}
 
     /// A drag is over the window at (x, y) with these kinds: what a drop
     /// would do ([`DROP_NONE`], [`DROP_COPY`], [`DROP_MOVE`]).
@@ -1546,6 +1559,7 @@ impl<'a> Runner<'a> {
                 | Command::ContextMenu(..)
                 | Command::Menu(..)
                 | Command::RevokeAgent(..)
+                | Command::CaptureKeys(..)
                 | Command::GroundClicked => {}
                 Command::Minimize => self.client.set_minimized(toplevel)?,
                 Command::Copy(text) => {

@@ -19,6 +19,11 @@ fn main() -> std::process::ExitCode {
             println!("usage: vergence-remote-viewer [HOST]   (ssh HOST vergence-remote; localhost for this machine)");
             return std::process::ExitCode::SUCCESS;
         }
+        // For the tests: a stand-in for a host, as any command.
+        Some("--command") => {
+            let command: Vec<String> = std::env::args().skip(2).collect();
+            vergence_ui::run(&mut session::Viewer::with_command("stand-in", command), (1280, 760))
+        }
         Some(host) => vergence_ui::run(&mut session::Viewer::new(host), (1280, 760)),
         None => vergence_widgets::run(machines::Machines::new(), (420, 480)),
     };

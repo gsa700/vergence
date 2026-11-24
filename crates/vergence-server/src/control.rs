@@ -405,6 +405,9 @@ impl Server {
                         // A modifier alone (Ctrl tapped during a drag snaps it, snap.rs).
                         "Control" => vec![29],
                         "Shift" => vec![42],
+                        // Alt alone after a held Ctrl ("ctrl+Alt"): Vergence Remote's
+                        // way to give a captured keyboard back.
+                        "Alt" => vec![56],
                         // The volume keys (KEY_MUTE, KEY_VOLUMEDOWN, KEY_VOLUMEUP).
                         "Mute" => vec![113],
                         "VolumeDown" => vec![114],
@@ -412,7 +415,7 @@ impl Server {
                         other => match other.chars().collect::<Vec<_>>().as_slice() {
                             // One letter or digit, for chords ("ctrl+v").
                             [c] if letter(*c).is_some() => vec![letter(*c).unwrap()],
-                            _ => return format!("key: no key {other} (Escape, Return, BackSpace, Tab, grave, space, Up, Down, Left, Right, Super, Mute, VolumeDown, VolumeUp, a letter; chords like ctrl+v, alt+Tab+Tab)"),
+                            _ => return format!("key: no key {other} (Escape, Return, BackSpace, Tab, grave, space, Up, Down, Left, Right, Super, Control, Shift, Alt, Mute, VolumeDown, VolumeUp, a letter; chords like ctrl+v, alt+Tab+Tab)"),
                         },
                     });
                     }
