@@ -178,8 +178,8 @@ The screen stream is its own channel, never the agent interface itself
 ## Steps
 
 1. **The remote screen in the server**: a screen kind whose frames and
-   damage go to a front end; attaching to the running session; blanking
-   (locking) the local monitors. Tests in the headless suite.
+   damage go to a front end; attaching to the running session. Tests in the
+   headless suite. (Blanking moved to step 4.)
 2. **The protocol** (a document and a crate): versioned messages, display
    lists and tiles, input, sizes; the validation and limits on the viewer's
    side; unit tests with hostile frames.
@@ -190,7 +190,13 @@ The screen stream is its own channel, never the agent interface itself
    relaying, the picture cache; the Dockworker tile, End, the log; "Ask the
    person at the desk" off for the same user.
 4. **The portable core and the Vergence viewer**: connect, draw, input, full
-   screen with keys passed through, the machine list and switching.
+   screen with keys passed through, the machine list and switching; and
+   **blanking** (moved from step 1): a curtain, a lock started by Vergence
+   Remote that the remote side passes through (its input routed as usual,
+   its view drawing the session) while the desk's monitors show the lock
+   screen and the desk's keys reach only its password field; keyboard focus
+   kept; unlocking at the desk ends the connection; a real lock (Super+L,
+   idle) locks the remote too.
 5. **Clipboard and files**: text and pictures both ways; drag and drop and
    transfers through SFTP.
 6. **The login screen**: vdm takes the viewer before anyone is logged in.
@@ -235,5 +241,10 @@ is listed above only as Dave's own alternative.
     being drawn (monitors off, blanked, or still), so it never freezes with
     the desk.
   - Display suite 21 (13 checks), with `vctl remote`, `vctl energy`.
-  - Next in step 1: blanking (the desk's lock screen while remote input and
-    the view go on).
+  - **Blanking moved to step 4** (with remote input): the curtain is "remote
+    input passes, the desk's does not", so it is built and tested with
+    remote input. It also needs a test path into the lock for headless
+    sessions only (the lock needs vdm answering and a session started from
+    the login screen, so the display suite has never tested it).
+  - Checks: workspace Hubble 1,047, techbench 1,047, kepler 1,036; display
+    suite 21 of 21 on Hubble, scenario 21 on techbench.
