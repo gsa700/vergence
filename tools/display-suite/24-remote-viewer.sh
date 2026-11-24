@@ -11,7 +11,7 @@ scenario() {
     sleep 3
     line=$(vctl windows | grep '"vergence-remote-viewer"' | head -1)
     echo "  .. $(echo "$line" | cut -c1-110)"
-    check "$(yes_if "echo '$line' | grep -q '\"[A-Za-z0-9.-]* — Vergence Remote\"' && ! echo '$line' | grep -q 'localhost —'")" "the viewer's window, titled with the host's own name"
+    check "$(yes_if "echo '$line' | grep -q '\"[A-Za-z0-9.-]* — Vergence Remote (this computer: looking only)\"' && ! echo '$line' | grep -q 'localhost —'")" "the viewer's window, titled with the host's own name, looking only (this computer)"
     vctl tiles > "$OUT/tiles.txt"
     check "$(yes_if "grep -q 'is viewing this computer' '$OUT/tiles.txt'")" "the host's tile names the viewer"
     view=$(vctl remote list | head -1)
