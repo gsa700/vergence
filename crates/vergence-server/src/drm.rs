@@ -1492,10 +1492,19 @@ pub fn run_headless(
     state.session = None;
     watchdog(event_loop)?;
     for spec in screens {
-        let parsed = parse_screen_spec(spec)
-            .ok_or_else(|| format!("--screen {spec}: WxH MMxMM[@HZ], as 2560x1440 597x336@60"))?;
+        // `scale=S` sets the screen's scale outright (a session with no
+        // monitors, at its viewer's scale).
+        let scale = spec.split(' ').find_map(|w| w.strip_prefix("scale=")).and_then(|v| v.parse::<f64>().ok());
+        let rest: String = spec.split(' ').filter(|w| !w.starts_with("scale=")).collect::<Vec<_>>().join(" ");
+        let parsed = parse_screen_spec(&rest)
+            .ok_or_else(|| format!("--screen {spec}: WxH MMxMM[@HZ] [scale=S], as 2560x1440 597x336@60"))?;
         let (px, mm, hz) = parsed;
         let edid = fake_screen_edid(px, mm, &format!("HL{}x{}", px.0, px.1));
+        if let Some(s) = scale.filter(|s| (0.5..=4.0).contains(s)) {
+            // As a test scale is: for this run, not saved in the settings.
+            let next = MEMORY_SCREENS.load(std::sync::atomic::Ordering::Relaxed);
+            state.scale_test.insert(format!("MEM-{next}"), s);
+        }
         add_memory_screen(state, edid, px, hz)?;
     }
     Ok(())

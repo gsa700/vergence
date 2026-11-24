@@ -257,7 +257,7 @@ impl App for Viewer {
                     w.wake();
                 }
             };
-            self.session = Some(Session::connect(&self.command, &this_host(), px, wake));
+            self.session = Some(Session::connect(&self.command, &this_host(), px, frame.scale, wake));
             self.want = px;
         } else if px != self.want {
             self.want = px;

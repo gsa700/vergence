@@ -7,3 +7,7 @@ publish.workspace = true
 description = "Vergence Remote's protocol (remote milestone 1): messages between a viewer and a Vergence host over SSH, frames of compressed rectangles, input; everything from the other side is untrusted"
 
 [dependencies]
+# The host's side only (vergence-remote's bin: is Vergence Remote on here?);
+# the portable core (proto, lz, client) uses neither.
+vergence-config.workspace = true
+toml = "0.8"

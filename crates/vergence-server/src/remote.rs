@@ -257,7 +257,7 @@ impl Server {
     fn remote_message(&mut self, conn: u32, msg: ToHost) {
         let Some(c) = self.remote.conns.iter().position(|c| c.id == conn) else { return };
         match msg {
-            ToHost::Hello { name, width, height, screen } if self.remote.conns[c].view.is_none() => {
+            ToHost::Hello { name, width, height, screen, .. } if self.remote.conns[c].view.is_none() => {
                 let screens: Vec<(String, u32, u32)> = self
                     .space
                     .outputs()

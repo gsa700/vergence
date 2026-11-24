@@ -159,6 +159,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         crate::drm::run(&mut event_loop, &mut state)?;
     } else if args.iter().any(|a| a == "--headless") {
         HEADLESS.store(true, std::sync::atomic::Ordering::Relaxed);
+        if args.iter().any(|a| a == "--monitorless") {
+            MONITORLESS.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         let screens: Vec<String> = args.windows(2).filter(|w| w[0] == "--screen").map(|w| w[1].clone()).collect();
         crate::drm::run_headless(&mut event_loop, &mut state, &screens)?;
     } else {
@@ -261,6 +264,17 @@ static HEADLESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 
 pub fn headless() -> bool {
     HEADLESS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// A person's session with no monitors (`--headless --monitorless`, remote
+/// milestone 1, step 6): started by `vergence-remote` for a viewer when
+/// none was running, and used only through Vergence Remote. Headless in how
+/// it draws, but a real session, not a test's: no test unlock, nothing to
+/// lock or blank (no desk), and it keeps running when the viewer goes.
+static MONITORLESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn monitorless() -> bool {
+    MONITORLESS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// The program `cmd` starts runs in a session of its own, with no

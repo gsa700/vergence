@@ -27,15 +27,40 @@ pub fn socket_for(runtime: &std::path::Path, display: &str) -> std::path::PathBu
 /// `vergence-remote-*` sockets something answers on. More than one (two
 /// sessions) is an error the person sees.
 pub fn find_socket() -> Result<std::path::PathBuf, String> {
-    let uid = unsafe {
-        unsafe extern "C" {
-            fn getuid() -> u32;
-        }
-        getuid()
-    };
-    // XDG_RUNTIME_DIR when it is set (a login that has it, a test session);
-    // else the usual places for this user.
-    let dirs: Vec<std::path::PathBuf> = match std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()) {
+    let mut live = live_sockets();
+    match live.len() {
+        0 => Err("no Vergence session is running for this user here".into()),
+        1 => Ok(live.remove(0)),
+        _ => Err("more than one Vergence session is running for this user here".into()),
+    }
+}
+
+/// This account's user id.
+pub fn uid() -> u32 {
+    unsafe extern "C" {
+        fn getuid() -> u32;
+    }
+    // SAFETY: getuid cannot fail.
+    unsafe { getuid() }
+}
+
+/// The runtime directory of a session with no monitors that `vergence-remote`
+/// started (remote milestone 1, step 6): its own, not the SSH login's (which
+/// goes when that login does, and the session stays), and apart from a desk
+/// session's. VERGENCE_MONITORLESS_DIR for the tests.
+pub fn monitorless_dir() -> std::path::PathBuf {
+    match std::env::var_os("VERGENCE_MONITORLESS_DIR").filter(|d| !d.is_empty()) {
+        Some(d) => d.into(),
+        None => format!("/tmp/vergence-monitorless-{}", uid()).into(),
+    }
+}
+
+/// Every live remote socket of this user's sessions: in XDG_RUNTIME_DIR when
+/// it is set, else the usual places; and a session with no monitors' own
+/// directory always.
+pub fn live_sockets() -> Vec<std::path::PathBuf> {
+    let uid = uid();
+    let mut dirs: Vec<std::path::PathBuf> = match std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()) {
         Some(d) => vec![d.into()],
         None => {
             let mut v: Vec<std::path::PathBuf> =
@@ -46,6 +71,7 @@ pub fn find_socket() -> Result<std::path::PathBuf, String> {
             v
         }
     };
+    dirs.push(monitorless_dir());
     let mut live = Vec::new();
     for d in dirs {
         let Ok(entries) = std::fs::read_dir(&d) else { continue };
@@ -59,9 +85,5 @@ pub fn find_socket() -> Result<std::path::PathBuf, String> {
             }
         }
     }
-    match live.len() {
-        0 => Err("no Vergence session is running for this user here".into()),
-        1 => Ok(live.remove(0)),
-        _ => Err("more than one Vergence session is running for this user here".into()),
-    }
+    live
 }

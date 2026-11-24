@@ -13,8 +13,25 @@
 # is in the environment or the user has created ~/.config/vergence/control-socket.
 # `vergence --clean` starts without bringing back the applications the last
 # session had running (session restore; a restart within the session restores).
+#
+# `vergence-session --monitorless "WxH MMxMM@HZ scale=S"` (remote milestone 1,
+# step 6) is a session with no monitors, started by vergence-remote for a
+# viewer when none of the person's was running: the server's screens in
+# memory, used only through Vergence Remote; it stays when the viewer goes,
+# until Log Out in it.
 clean=
-[ "$1" = "--clean" ] && clean=1
+monitorless=
+case $1 in
+    '') ;;
+    --clean) clean=1 ;;
+    --monitorless)
+        monitorless=$2
+        [ -n "$monitorless" ] || { echo "vergence: --monitorless needs a screen, as \"1920x1080 508x286@60\"" >&2; exit 2; }
+        ;;
+    # An option this script does not know is refused, never taken for a start
+    # on the real monitors.
+    *) echo "vergence: unknown option $1 (--clean, --monitorless SCREEN)" >&2; exit 2 ;;
+esac
 # The standard folders (defaults milestone 1, 2026-11-22; Dave: "create a set
 # of folders if they don't exist as is standard for most desktops"): the
 # freedesktop user directories, named in user-dirs.dirs so other programs
@@ -142,7 +159,14 @@ tries=0
 while :; do
     started=$(date +%s)
     [ -s "$LOG" ] && mv "$LOG" "$LOG.1"
-    VERGENCE_CLEAN=$clean "$BIN" --drm > "$LOG" 2>&1
+    if [ -n "$monitorless" ]; then
+        # No sound at a desk no one is at, until Vergence Remote carries it
+        # (the sound step): our player plays nowhere, at the real rate.
+        VERGENCE_SOUND_OFF=${VERGENCE_SOUND_OFF:-pace} VERGENCE_CLEAN=$clean \
+            "$BIN" --headless --monitorless --screen "$monitorless" > "$LOG" 2>&1
+    else
+        VERGENCE_CLEAN=$clean "$BIN" --drm > "$LOG" 2>&1
+    fi
     status=$?
     clean=
     if [ -e "$XDG_RUNTIME_DIR/vergence-locked" ]; then

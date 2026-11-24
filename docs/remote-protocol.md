@@ -1,4 +1,4 @@
-# Vergence Remote protocol, version 3
+# Vergence Remote protocol, version 4
 
 The stream between a viewer and a Vergence host (remote milestone 1,
 docs/remote-milestone-1.md). The reference implementation is
@@ -31,7 +31,7 @@ fields: shorter or longer is an error, as is an unknown type.
 
 | Type | Message | Fields |
 |---|---|---|
-| 1 | Hello | name str (shown on the host's Dockworker tile), width u32, height u32 (the viewer's pixels), screen str (empty: the host's main screen) |
+| 1 | Hello | name str (shown on the host's Dockworker tile), width u32, height u32 (the viewer's pixels), screen str (empty: the host's main screen), scale f32 (the viewer's own, 0.5 to 4: a session the host starts for it, with no monitors, is made at that size and scale) |
 | 2 | Resize | width u32, height u32 |
 | 3 | Ack | seq u32: frame `seq` is shown; the host may send the next |
 | 4 | Key | code u32 (Linux evdev key code), pressed u8 |
@@ -92,3 +92,9 @@ Version 1 (2026-11-23): the first.
 Version 2 (2026-11-23): Privacy both ways (blanking the desk).
 
 Version 3 (2026-11-23): Locks (the lock keys kept in step).
+
+Version 4 (2026-11-23): Hello carries the viewer's scale.
+
+With no session of the person's running and Vergence Remote on in their
+settings, the host starts one with no monitors before answering (remote
+milestone 1, step 6); the viewer sees nothing different but the wait.

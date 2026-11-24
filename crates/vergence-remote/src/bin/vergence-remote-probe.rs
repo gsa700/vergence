@@ -122,7 +122,7 @@ fn main() -> ExitCode {
     let result = (|| -> Result<Got, String> {
         proto::write_opening(&mut w).map_err(|e| e.to_string())?;
         proto::read_opening(&mut r).map_err(|e| e.to_string())?;
-        ToHost::Hello { name, width, height, screen }
+        ToHost::Hello { name, width, height, screen, scale: 1.0 }
             .write(&mut w)
             .and_then(|_| w.flush())
             .map_err(|e| e.to_string())?;

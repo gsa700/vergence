@@ -53,9 +53,16 @@ pub struct Session {
 
 impl Session {
     /// A session through `command` (the program and its arguments), named
-    /// `name` on the host's tile, for a view of `size` pixels; `wake` is
-    /// called from the session's thread when there is something to draw.
-    pub fn connect(command: &[String], name: &str, size: (u32, u32), wake: impl Fn() + Send + 'static) -> Session {
+    /// `name` on the host's tile, for a view of `size` pixels at this
+    /// machine's `scale`; `wake` is called from the session's thread when
+    /// there is something to draw.
+    pub fn connect(
+        command: &[String],
+        name: &str,
+        size: (u32, u32),
+        scale: f32,
+        wake: impl Fn() + Send + 'static,
+    ) -> Session {
         let shared = Arc::new(Mutex::new(Shared {
             state: State::Connecting,
             host: String::new(),
@@ -72,7 +79,7 @@ impl Session {
         let child: Arc<Mutex<Option<Child>>> = Arc::default();
         let (s, c, name, command) = (shared.clone(), child.clone(), name.to_string(), command.to_vec());
         std::thread::spawn(move || {
-            let why = run(&command, &name, size, &s, &c, rx, &wake);
+            let why = run(&command, &name, size, scale, &s, &c, rx, &wake);
             if let Ok(mut sh) = s.lock()
                 && !matches!(sh.state, State::Ended(_))
             {
@@ -108,10 +115,12 @@ impl Drop for Session {
 }
 
 /// The session's whole life; what ended it, in words.
+#[allow(clippy::too_many_arguments)]
 fn run(
     command: &[String],
     name: &str,
     size: (u32, u32),
+    scale: f32,
     shared: &Arc<Mutex<Shared>>,
     child_slot: &Arc<Mutex<Option<Child>>>,
     rx: mpsc::Receiver<ToHost>,
@@ -153,7 +162,13 @@ fn run(
     if let Err(e) = proto::write_opening(&mut w).map_err(proto::Error::Io).and_then(|_| proto::read_opening(&mut r)) {
         return ended(e);
     }
-    let hello = ToHost::Hello { name: name.to_string(), width: size.0, height: size.1, screen: String::new() };
+    let hello = ToHost::Hello {
+        name: name.to_string(),
+        width: size.0,
+        height: size.1,
+        screen: String::new(),
+        scale: scale.clamp(0.5, 4.0),
+    };
     if hello.write(&mut w).and_then(|_| w.flush()).is_err() {
         return "the connection closed".into();
     }

@@ -33,6 +33,10 @@ scenario() {
     check "$(yes_if "grep -q 'notice: Ended from the desk' '$OUT/probe2.txt' && grep -q 'bye: ended from the desk' '$OUT/probe2.txt'")" "End on the tile: the viewer told and closed"
     check "$(yes_if "[ -z \"\$(vctl remote list)\" ] && ! vctl tiles | grep -q 'viewing this computer'")" "no view and no tile left"
     # No session where it looks: said plainly.
-    env XDG_RUNTIME_DIR=/nonexistent "$TARGET/vergence-remote-probe" -- "$TARGET/vergence-remote" > "$OUT/probe3.txt" 2>&1
-    check "$(yes_if "grep -q 'bye: no Vergence session is running' '$OUT/probe3.txt'")" "no session: said plainly"
+    # (A throwaway HOME, Remote off: never the person's own settings, where
+    # Remote on would start a session with no monitors for them.)
+    mkdir -p "$OUT/nohome"
+    env HOME="$OUT/nohome" XDG_RUNTIME_DIR=/nonexistent VERGENCE_MONITORLESS_DIR=/nonexistent \
+        "$TARGET/vergence-remote-probe" -- "$TARGET/vergence-remote" > "$OUT/probe3.txt" 2>&1
+    check "$(yes_if "grep -q 'bye: Vergence Remote is off on this computer' '$OUT/probe3.txt'")" "no session and Remote off: said plainly"
 }

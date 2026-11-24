@@ -97,7 +97,10 @@ video (§6.6, phase 4).
 - **Accessibility**: the remote apps' meaning trees, so a screen reader on
   the viewer's side reads them.
 - **Other hosts**: RDP and VNC as front ends on the remote screen, and
-  perhaps viewing Mac or Windows hosts.
+  perhaps viewing Mac or Windows hosts; and **libvirt** virtual machines'
+  consoles (Dave, 2026-11-23: "And libvirt, lest we forget that one"):
+  the same viewer for his homelab's headless machines, VNC hosts, Windows
+  and VMs.
 - Phones and tablets.
 
 ## How it is built
@@ -214,6 +217,16 @@ The screen stream is its own channel, never the agent interface itself
    while it runs: the desk login takes that same session onto the monitors,
    as a desk session would be viewed remotely (lean), rather than refusing
    or starting a second; (c) sound plays nowhere until the sound step.
+   **Answered** (Dave, 2026-11-23 ~22:00, "yes to all three"): the
+   session stays when the viewer goes; a desk login takes the same session
+   onto the monitors; sound later. His reasons: "your ham club sets up a
+   remote ham radio and a pc to manage it: the apps need to stay running
+   when you log out. And being able to login in locally and see what
+   happening is good as well", and his homelab's headless systems: "install
+   vergence and log right into them like I'm sitting there. That is what
+   were after, and later the same for VNC and Windows." So machines with
+   no monitor, and perhaps no GPU, are first-class hosts: software drawing
+   where there is no GPU.
    **vdm's login screen through the viewer** (the first plan for this step)
    becomes optional: needed only to log in as someone else, later if wanted.
 7. **Checks**: a display-suite scenario (a headless session viewed by a
@@ -384,3 +397,22 @@ is listed above only as Dave's own alternative.
   unlocks; the desk's volume keys do nothing meanwhile. Sound to the viewer
   stays for the sound step. Open: "some funny business with the mouse"
   (asked what).
+- **Step 6, first part, built** (2026-11-23 ~22:15): `vergence-remote`
+  reads the viewer's Hello first; with no session of the person's running
+  and Remote on in their settings, it starts `vergence-session
+  --monitorless "WxH MMxMM@60 scale=S"` (protocol 4: Hello carries the
+  viewer's scale) in a session of its own (setsid), with its own runtime
+  folder /tmp/vergence-monitorless-<uid> (owner-checked), and waits for its
+  socket. The server's `--headless --monitorless` is a person's session,
+  not a test's: nothing to lock or blank, no test unlock, sound plays
+  nowhere until the sound step. It stays when the viewer goes; the next
+  viewer finds it. Display suite 29. **A slip on the way:** scenario 22's
+  "no session" probe ran with Dave's real HOME (Remote on there) and
+  Hubble's older installed vergence-session ignored `--monitorless` and
+  tried `--drm` beside the running session six times (failed, the session
+  unharmed, its log rotated away and recovered from the open file). Since:
+  vergence-remote uses only the vergence-session beside it and only one
+  that knows `--monitorless`; vergence-session refuses options it does not
+  know; the scenarios use throwaway homes. Still to do in step 6: a desk
+  login taking that session onto the monitors (answered: yes), and the
+  screen following the viewer's window size.

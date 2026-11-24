@@ -407,6 +407,10 @@ impl Server {
     /// Why the screen could not be locked now, if it could not.
     fn lock_blocker(&self) -> Option<String> {
         use std::os::unix::fs::FileTypeExt;
+        // No desk to lock: the only way in is a viewer SSH let in.
+        if crate::monitorless() {
+            return Some("this session has no monitors, so there is no desk to lock; close the viewer and the session keeps running".into());
+        }
         // A headless session (tests only: no seat, no keyboard of its own)
         // locks with no vdm; only `vctl lock test-unlock` unlocks it there.
         if crate::headless() {
@@ -456,7 +460,7 @@ impl Server {
     /// Idle long enough for the screens to go off, or going to sleep: locked
     /// if it can be; if not, said once (not at every idle stretch).
     pub fn lock_for_idle(&mut self, why: &str) {
-        if self.lock.on || crate::greeter() {
+        if self.lock.on || crate::greeter() || crate::monitorless() {
             return;
         }
         if self.lock_blocker().is_some() {
@@ -589,7 +593,7 @@ impl Server {
 
     /// The tests' way out of a headless session's lock (no vdm there).
     pub fn lock_test_unlock(&mut self) -> bool {
-        if !crate::headless() || !self.lock.on {
+        if !crate::headless() || crate::monitorless() || !self.lock.on {
             return false;
         }
         self.unlock_now();

@@ -22,7 +22,7 @@ use crate::lz;
 
 pub const MAGIC: &[u8; 4] = b"VRMT";
 /// Raised with every change to a message's layout.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 /// The longest message either side accepts.
 pub const MAX_MESSAGE: usize = 128 << 20;
 /// The largest view, each way.
@@ -150,12 +150,15 @@ impl Frame {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ToHost {
     /// First: the viewer's name (shown on the host's Dockworker tile), its
-    /// size in pixels, and the screen it wants (empty: the main one).
+    /// size in pixels, the screen it wants (empty: the main one), and its own
+    /// scale (version 4: a session started for it, with no monitors, is made
+    /// at that scale, so it looks as this machine's own apps do).
     Hello {
         name: String,
         width: u32,
         height: u32,
         screen: String,
+        scale: f32,
     },
     Resize {
         width: u32,
@@ -311,11 +314,12 @@ impl ToHost {
     pub fn write(&self, w: &mut impl Write) -> io::Result<()> {
         let mut b = Vec::new();
         let kind = match self {
-            ToHost::Hello { name, width, height, screen } => {
+            ToHost::Hello { name, width, height, screen, scale } => {
                 put_str(&mut b, name);
                 b.extend(width.to_be_bytes());
                 b.extend(height.to_be_bytes());
                 put_str(&mut b, screen);
+                b.extend(scale.to_bits().to_be_bytes());
                 1
             }
             ToHost::Resize { width, height } => {
@@ -375,7 +379,12 @@ impl ToHost {
             1 => {
                 let name = f.str()?;
                 let (width, height) = size(&mut f)?;
-                ToHost::Hello { name, width, height, screen: f.str()? }
+                let screen = f.str()?;
+                let scale = f.f32()?;
+                if !(0.5..=4.0).contains(&scale) {
+                    return Err(Error::Bad("a scale outside 0.5 to 4"));
+                }
+                ToHost::Hello { name, width, height, screen, scale }
             }
             2 => {
                 let (width, height) = size(&mut f)?;
@@ -491,7 +500,7 @@ mod tests {
     #[test]
     fn messages_go_and_come_back() {
         let to_host = [
-            ToHost::Hello { name: "Control".into(), width: 2880, height: 1800, screen: String::new() },
+            ToHost::Hello { name: "Control".into(), width: 2880, height: 1800, screen: String::new(), scale: 2.0 },
             ToHost::Resize { width: 1280, height: 720 },
             ToHost::Ack { seq: 7 },
             ToHost::Key { code: 30, pressed: true },
