@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/vergence-edid", "crates/vergence-profile", "crates/vergence-xsettings", "crates/vergence-harness", "crates/vergence-server", "crates/vergence-settings", "crates/vergence-protocol", "crates/vergence-dbus", "crates/vergence-term", "crates/vergence-scene", "crates/vergence-text", "crates/vergence-render", "crates/vergence-wl", "crates/vergence-ui", "crates/vergence-look", "crates/vergence-shell", "crates/vergence-widgets", "crates/vergence-sound", "crates/vergence-seat", "crates/vergence-bar", "crates/vergence-net", "crates/vergence-power", "crates/vergence-calc", "crates/vergence-quit", "crates/vergence-sysinfo", "crates/vergence-hw", "crates/vergence-edit", "crates/vergence-spell", "crates/vergence-types", "crates/vergence-decode", "crates/vergence-closeup", "crates/vergence-reader", "crates/vergence-files", "crates/vergence-thumbs", "crates/vergence-media", "crates/vergence-dm", "crates/vergence-pdf", "crates/vergence-raster", "crates/vergence-hymie", "crates/vergence-hymie-aac", "crates/vergence-config", "crates/vergence-archive"]
+members = ["crates/vergence-edid", "crates/vergence-profile", "crates/vergence-xsettings", "crates/vergence-harness", "crates/vergence-server", "crates/vergence-settings", "crates/vergence-protocol", "crates/vergence-dbus", "crates/vergence-term", "crates/vergence-scene", "crates/vergence-text", "crates/vergence-render", "crates/vergence-wl", "crates/vergence-ui", "crates/vergence-look", "crates/vergence-shell", "crates/vergence-widgets", "crates/vergence-sound", "crates/vergence-seat", "crates/vergence-bar", "crates/vergence-net", "crates/vergence-power", "crates/vergence-calc", "crates/vergence-quit", "crates/vergence-sysinfo", "crates/vergence-hw", "crates/vergence-edit", "crates/vergence-spell", "crates/vergence-types", "crates/vergence-decode", "crates/vergence-closeup", "crates/vergence-reader", "crates/vergence-files", "crates/vergence-thumbs", "crates/vergence-media", "crates/vergence-dm", "crates/vergence-pdf", "crates/vergence-raster", "crates/vergence-hymie", "crates/vergence-hymie-aac", "crates/vergence-config", "crates/vergence-archive", "crates/vergence-remote"]
 
 [workspace.package]
 version = "0.3.0"
@@ -12,6 +12,7 @@ publish = false
 vergence-edid = { path = "crates/vergence-edid" }
 vergence-pdf = { path = "crates/vergence-pdf" }
 vergence-archive = { path = "crates/vergence-archive" }
+vergence-remote = { path = "crates/vergence-remote" }
 vergence-hymie = { path = "crates/vergence-hymie" }
 vergence-raster = { path = "crates/vergence-raster" }
 vergence-profile = { path = "crates/vergence-profile" }

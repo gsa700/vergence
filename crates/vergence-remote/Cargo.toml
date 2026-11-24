@@ -1,0 +1,9 @@
+[package]
+name = "vergence-remote"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Vergence Remote's protocol (remote milestone 1): messages between a viewer and a Vergence host over SSH, frames of compressed rectangles, input; everything from the other side is untrusted"
+
+[dependencies]

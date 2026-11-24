@@ -248,3 +248,14 @@ is listed above only as Dave's own alternative.
     the login screen, so the display suite has never tested it).
   - Checks: workspace Hubble 1,047, techbench 1,047, kepler 1,036; display
     suite 21 of 21 on Hubble, scenario 21 on techbench.
+- **Step 2, the protocol** (2026-11-23): the crate `vergence-remote` (no
+  platform code): proto.rs, the stream (the opening `VRMT` and version,
+  typed and length-framed messages, viewer to host: Hello, Resize, Ack,
+  Key, Pointer, Button, Scroll, Bye; host to viewer: Welcome, Frame,
+  Notice, Bye), and lz.rs, our own compression in LZ4's published block
+  format (question 4: our own first). The viewer's side refuses what breaks
+  the protocol: lengths capped, unknown types, rectangles outside the view
+  or not decoding to exactly their size (a bad frame changes nothing).
+  Documented for other viewers in docs/remote-protocol.md. Tests: 7
+  (round trips, a screen compressing better than 20 to 1, hostile blocks
+  and messages), on Hubble, techbench and kepler.

@@ -2365,6 +2365,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "vergence-remote"
+version = "0.3.0"
+
+[[package]]
 name = "vergence-render"
 version = "0.3.0"
 dependencies = [
