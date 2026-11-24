@@ -597,6 +597,78 @@ impl Server {
                     _ => usage.into(),
                 }
             }
+            // Remote views (remote milestone 1, step 1), for the tests: `remote
+            // start MEM-1 2880x1620`, `remote list`, `remote resize ID WxH`,
+            // `remote stop ID`, and `remote check ID`: a pull, each rectangle
+            // compared with the view's whole picture, which is saved as
+            // remote-ID.png.
+            "remote" => {
+                if self.backend.is_none() {
+                    return "remote: only with --drm".into();
+                }
+                let usage = "remote [start SCREEN WxH | list | resize ID WxH | stop ID | check ID]";
+                let pair = |v: &str| -> Option<(u32, u32)> {
+                    let (a, b) = v.split_once('x')?;
+                    Some((a.parse().ok()?, b.parse().ok()?))
+                };
+                let id = |i: usize| args.get(i).and_then(|v| v.parse::<u32>().ok());
+                match args.first().copied() {
+                    None | Some("list") => crate::drm::remote_list(self).join("\n"),
+                    Some("start") => match (args.get(1), args.get(2).and_then(|v| pair(v))) {
+                        (Some(screen), Some(want)) => match crate::drm::remote_start(self, screen, want) {
+                            Ok(id) => format!("remote view {id}"),
+                            Err(e) => format!("remote: {e}"),
+                        },
+                        _ => usage.into(),
+                    },
+                    Some("resize") => match (id(1), args.get(2).and_then(|v| pair(v))) {
+                        (Some(i), Some(want)) if crate::drm::remote_resize(self, i, want) => format!("resized {i}"),
+                        (Some(i), Some(_)) => format!("remote: no view {i}"),
+                        _ => usage.into(),
+                    },
+                    Some("stop") => match id(1) {
+                        Some(i) if crate::drm::remote_stop(self, i) => format!("stopped {i}"),
+                        Some(i) => format!("remote: no view {i}"),
+                        None => usage.into(),
+                    },
+                    Some("check") => {
+                        let Some(i) = id(1) else { return usage.into() };
+                        let frame = match crate::drm::remote_pull(self, i) {
+                            Some(Ok(f)) => f,
+                            Some(Err(e)) => return format!("remote: {e}"),
+                            None => return format!("remote: no view {i}"),
+                        };
+                        let (w, h, whole) = match crate::drm::remote_picture(self, i) {
+                            Some(Ok(p)) => p,
+                            Some(Err(e)) => return format!("remote: {e}"),
+                            None => return "remote: nothing drawn yet".into(),
+                        };
+                        let mut matched = true;
+                        let mut bytes = 0usize;
+                        for (x, y, rw, rh, px) in &frame.rects {
+                            bytes += px.len();
+                            for row in 0..*rh as usize {
+                                let at = ((*y as usize + row) * w as usize + *x as usize) * 4;
+                                let got = &px[row * *rw as usize * 4..(row + 1) * *rw as usize * 4];
+                                if whole.get(at..at + *rw as usize * 4) != Some(got) {
+                                    matched = false;
+                                }
+                            }
+                        }
+                        let n = frame.rects.len();
+                        save_png(format!("remote-{i}"), w, h, whole);
+                        let first: Vec<String> =
+                            frame.rects.iter().take(4).map(|(x, y, rw, rh, _)| format!("{rw}x{rh}+{x}+{y}")).collect();
+                        format!(
+                            "view {i}: {w}x{h} scale {:.3}, {n} rectangle(s), {bytes} bytes, match {} [{}]",
+                            frame.scale,
+                            if matched { "yes" } else { "NO" },
+                            first.join(" ")
+                        )
+                    }
+                    _ => usage.into(),
+                }
+            }
             // A screen's scale for a test, as if chosen but not saved
             // (tools/display-check.sh): `scale DP-1 1.3333`, `scale DP-1 reset`,
             // `scale reset` (all), `scale` (each screen's).

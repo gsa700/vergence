@@ -272,6 +272,9 @@ pub struct Backend {
     /// Tells the main loop that a thread has woken another GPU and probed its
     /// connectors (screens_on), so its scan is quick.
     probed: smithay::reexports::calloop::channel::Sender<usize>,
+    /// Remote views (remote milestone 1, step 1): screens drawn again at a
+    /// viewer's size and scale, for Vergence Remote.
+    remotes: Vec<RemoteView>,
 }
 
 pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(), Box<dyn std::error::Error>> {
@@ -400,6 +403,7 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
         paused: false,
         waiting: Vec::new(),
         probed,
+        remotes: Vec::new(),
     });
     state.session = Some(session.clone());
 
@@ -1186,6 +1190,10 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
     state.thumbs_prune();
 
     let clear = state.background_color(&s.connector);
+    // Remote views of this screen: drawn again at each viewer's scale.
+    if b.remotes.iter().any(|r| r.source == s.connector) {
+        remote_frames(state, &mut b.renderer, &mut b.remotes, &output, &s.connector, geo, pointer_at, clear);
+    }
     let outcome = if crtc.0 == MEMORY {
         memory_frame(&mut b.renderer, s, &elements, clear)
     } else if crtc.0 == 0 {
@@ -1476,6 +1484,7 @@ pub fn run_headless(
         paused: false,
         waiting: Vec::new(),
         probed,
+        remotes: Vec::new(),
     });
     state.session = None;
     watchdog(event_loop)?;
@@ -2075,3 +2084,321 @@ impl Server {
 
 #[allow(dead_code)]
 fn _unused(_: &Path) {}
+
+// ---------------------------------------------------------------------------
+// Remote views (remote milestone 1, step 1; docs/remote-milestone-1.md, "Frames,
+// not display lists"). A remote view is a screen drawn again at a viewer's size
+// and scale, each time the screen itself is drawn: its elements built afresh at
+// the viewer's scale (so text is rendered at the viewer's resolution, and native
+// windows are drawn again from their scenes at it, as for a window across two
+// screens), into a texture of the view's own, with a damage tracker of its own.
+// What changed is kept until the front end pulls it (the pull is the flow
+// control: a slow viewer gets fewer, larger updates, never a queue). A view is
+// no output: no wl_output, no place in the layout, never in window memory.
+
+/// The most changed rectangles kept before they become one (the whole view).
+const REMOTE_RECTS: usize = 64;
+
+struct RemoteView {
+    id: u32,
+    /// The screen it shows (its connector name).
+    source: String,
+    /// The viewer's size in pixels: the view fits the screen into it.
+    want: (u32, u32),
+    /// The scale it is drawn at, and its size in pixels (the screen's
+    /// logical size times the scale); the texture is made at the first frame
+    /// and again when either changes.
+    scale: f64,
+    px: smithay::utils::Size<i32, smithay::utils::Physical>,
+    tex: Option<smithay::backend::renderer::gles::GlesTexture>,
+    damage: Option<smithay::backend::renderer::damage::OutputDamageTracker>,
+    /// Changed since the last pull; `whole` when everything is to be sent.
+    pending: Vec<Rectangle<i32, smithay::utils::Physical>>,
+    whole: bool,
+    frames: u64,
+    /// What the viewer has (RGBA, the view's size): a pull sends only what
+    /// differs from it, so damage that changed no pixel (the dock's tiles
+    /// redrawn every frame, 2026-11-23) costs nothing on the network.
+    sent: Vec<u8>,
+}
+
+static REMOTE_IDS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+
+/// The scale that fits a screen of logical size `geo` into `want` pixels.
+fn remote_fit(geo: smithay::utils::Size<i32, Logical>, want: (u32, u32)) -> f64 {
+    let (gw, gh) = (geo.w.max(1) as f64, geo.h.max(1) as f64);
+    (want.0 as f64 / gw).min(want.1 as f64 / gh).clamp(0.25, 8.0)
+}
+
+/// The views of the screen `connector` drawn again, each at its scale.
+#[allow(clippy::too_many_arguments)]
+fn remote_frames(
+    state: &mut Server,
+    renderer: &mut GlesRenderer,
+    remotes: &mut [RemoteView],
+    output: &Output,
+    connector: &str,
+    geo: Rectangle<i32, Logical>,
+    pointer_at: Point<f64, Logical>,
+    clear: [f32; 4],
+) {
+    use smithay::backend::renderer::{Bind, Offscreen};
+    for r in remotes.iter_mut().filter(|r| r.source == connector) {
+        let scale = remote_fit(geo.size, r.want);
+        let px = smithay::utils::Size::<i32, smithay::utils::Physical>::from((
+            (geo.size.w as f64 * scale).round() as i32,
+            (geo.size.h as f64 * scale).round() as i32,
+        ));
+        if r.tex.is_none() || px != r.px || (scale - r.scale).abs() > 1e-9 {
+            let buf = smithay::utils::Size::<i32, smithay::utils::Buffer>::from((px.w, px.h));
+            match renderer.create_buffer(Fourcc::Abgr8888, buf) {
+                Ok(t) => r.tex = Some(t),
+                Err(e) => {
+                    tracing::warn!("remote view {}: no texture: {e}", r.id);
+                    continue;
+                }
+            }
+            r.damage = Some(smithay::backend::renderer::damage::OutputDamageTracker::new(px, scale, Transform::Normal));
+            r.scale = scale;
+            r.px = px;
+            r.whole = true;
+            r.pending.clear();
+            r.sent = Vec::new();
+        }
+        let elements: Vec<OutputElements> =
+            screen_elements(state, renderer, output, geo, scale, pointer_at).into_iter().map(to_output).collect();
+        let (Some(tex), Some(damage)) = (r.tex.as_mut(), r.damage.as_mut()) else { continue };
+        let mut fb = match renderer.bind(tex) {
+            Ok(fb) => fb,
+            Err(e) => {
+                tracing::warn!("remote view {}: {e}", r.id);
+                continue;
+            }
+        };
+        match damage.render_output(renderer, &mut fb, 1, &elements, clear) {
+            Ok(res) => {
+                if let Some(d) = res.damage
+                    && !d.is_empty()
+                {
+                    r.frames += 1;
+                    if !r.whole {
+                        for rect in d.iter() {
+                            remote_add(&mut r.pending, *rect);
+                        }
+                        let area: i64 = r.pending.iter().map(|p| p.size.w as i64 * p.size.h as i64).sum();
+                        if r.pending.len() > REMOTE_RECTS || area * 2 > r.px.w as i64 * r.px.h as i64 {
+                            r.whole = true;
+                            r.pending.clear();
+                        }
+                    }
+                }
+            }
+            Err(e) => tracing::warn!("remote view {}: {e:?}", r.id),
+        }
+    }
+}
+
+/// A changed rectangle added to those kept: nothing if one already covers
+/// it; joined with any it overlaps (again, until none overlap), so a region
+/// that changes every frame stays one rectangle, not one a frame.
+fn remote_add(pending: &mut Vec<Rectangle<i32, smithay::utils::Physical>>, rect: Rectangle<i32, smithay::utils::Physical>) {
+    if rect.size.w <= 0 || rect.size.h <= 0 || pending.iter().any(|p| p.contains_rect(rect)) {
+        return;
+    }
+    let mut rect = rect;
+    loop {
+        let before = pending.len();
+        pending.retain(|p| {
+            if p.overlaps(rect) || rect.contains_rect(*p) {
+                rect = rect.merge(*p);
+                false
+            } else {
+                true
+            }
+        });
+        if pending.len() == before {
+            break;
+        }
+    }
+    pending.push(rect);
+}
+
+/// The part of `rect` (its pixels `px`) that differs from what was sent,
+/// trimmed to the rows and columns that changed, and `sent` brought up to
+/// date; None when nothing in it changed.
+fn remote_changed(
+    sent: &mut [u8],
+    stride: usize,
+    rect: Rectangle<i32, smithay::utils::Physical>,
+    px: &[u8],
+) -> Option<(u32, u32, u32, u32, Vec<u8>)> {
+    let (x0, y0, w, h) = (rect.loc.x as usize, rect.loc.y as usize, rect.size.w as usize, rect.size.h as usize);
+    let row_of = |sent: &[u8], y: usize| -> std::ops::Range<usize> {
+        let at = (y0 + y) * stride + x0 * 4;
+        let _ = sent;
+        at..at + w * 4
+    };
+    // The rows that changed, then the columns within them.
+    let changed_row = |y: usize| sent[row_of(sent, y)] != px[y * w * 4..(y + 1) * w * 4];
+    let top = (0..h).find(|&y| changed_row(y))?;
+    let bottom = (0..h).rev().find(|&y| changed_row(y)).unwrap_or(top);
+    let mut left = w;
+    let mut right = 0;
+    for y in top..=bottom {
+        let old = &sent[row_of(sent, y)];
+        let new = &px[y * w * 4..(y + 1) * w * 4];
+        if let Some(l) = (0..w).find(|&x| old[x * 4..x * 4 + 4] != new[x * 4..x * 4 + 4]) {
+            left = left.min(l);
+            let r = (0..w).rev().find(|&x| old[x * 4..x * 4 + 4] != new[x * 4..x * 4 + 4]).unwrap_or(l);
+            right = right.max(r);
+        }
+    }
+    let (cw, ch) = (right + 1 - left, bottom + 1 - top);
+    let mut part = Vec::with_capacity(cw * ch * 4);
+    for y in top..=bottom {
+        let src = &px[y * w * 4 + left * 4..y * w * 4 + (right + 1) * 4];
+        part.extend_from_slice(src);
+        let at = (y0 + y) * stride + (x0 + left) * 4;
+        sent[at..at + cw * 4].copy_from_slice(src);
+    }
+    Some(((x0 + left) as u32, (y0 + top) as u32, cw as u32, ch as u32, part))
+}
+
+/// What a pull hands the front end: the view's size, and each changed
+/// rectangle (x, y, width, height in the view's pixels) with its RGBA pixels.
+pub struct RemoteFrame {
+    pub width: u32,
+    pub height: u32,
+    pub scale: f64,
+    pub rects: Vec<(u32, u32, u32, u32, Vec<u8>)>,
+}
+
+/// A remote view of the screen `source` for a viewer of `want` pixels; its id.
+pub fn remote_start(state: &mut Server, source: &str, want: (u32, u32)) -> Result<u32, String> {
+    if !(16..=16384).contains(&want.0) || !(16..=16384).contains(&want.1) {
+        return Err("a viewer from 16x16 to 16384x16384 pixels".into());
+    }
+    let Some(b) = state.backend.as_mut() else { return Err("no backend".into()) };
+    let Some((key, _)) = b.surfaces.iter().find(|(_, s)| s.connector == source) else {
+        return Err(format!("no screen named {source}"));
+    };
+    let key = *key;
+    let id = REMOTE_IDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    b.remotes.push(RemoteView {
+        id,
+        source: source.to_string(),
+        want,
+        scale: 0.0,
+        px: (0, 0).into(),
+        tex: None,
+        damage: None,
+        pending: Vec::new(),
+        whole: true,
+        frames: 0,
+        sent: Vec::new(),
+    });
+    tracing::info!("remote view {id}: {source} for a viewer of {}x{}", want.0, want.1);
+    render(state, key);
+    Ok(id)
+}
+
+/// The view `id` resized for a viewer of `want` pixels.
+pub fn remote_resize(state: &mut Server, id: u32, want: (u32, u32)) -> bool {
+    let Some(b) = state.backend.as_mut() else { return false };
+    match b.remotes.iter_mut().find(|r| r.id == id) {
+        Some(r) => {
+            r.want = want;
+            true
+        }
+        None => false,
+    }
+}
+
+pub fn remote_stop(state: &mut Server, id: u32) -> bool {
+    let Some(b) = state.backend.as_mut() else { return false };
+    let before = b.remotes.len();
+    b.remotes.retain(|r| r.id != id);
+    if b.remotes.len() != before {
+        tracing::info!("remote view {id}: stopped");
+    }
+    b.remotes.len() != before
+}
+
+/// Each view: its id, screen, size, scale and frames drawn.
+pub fn remote_list(state: &Server) -> Vec<String> {
+    state
+        .backend
+        .as_ref()
+        .map(|b| {
+            b.remotes
+                .iter()
+                .map(|r| format!("{} {} {}x{} scale {:.3} frames {}", r.id, r.source, r.px.w, r.px.h, r.scale, r.frames))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// What changed in view `id` since the last pull, read back from its
+/// texture; None for no such view, an empty list when nothing changed.
+pub fn remote_pull(state: &mut Server, id: u32) -> Option<Result<RemoteFrame, String>> {
+    let b = state.backend.as_mut()?;
+    let r = b.remotes.iter_mut().find(|r| r.id == id)?;
+    let Some(tex) = r.tex.as_mut() else {
+        return Some(Ok(RemoteFrame { width: 0, height: 0, scale: r.scale, rects: Vec::new() }));
+    };
+    let rects: Vec<Rectangle<i32, smithay::utils::Physical>> = if r.whole {
+        vec![Rectangle::from_size(r.px)]
+    } else {
+        std::mem::take(&mut r.pending)
+    };
+    r.whole = false;
+    r.pending.clear();
+    let bounds = Rectangle::<i32, smithay::utils::Physical>::from_size(r.px);
+    let stride = r.px.w as usize * 4;
+    if r.sent.len() != stride * r.px.h as usize {
+        // Nothing sent yet at this size: everything differs.
+        r.sent = vec![0; stride * r.px.h as usize];
+    }
+    let mut out = Vec::new();
+    for rect in rects {
+        let Some(rect) = rect.intersection(bounds) else { continue };
+        if rect.size.w <= 0 || rect.size.h <= 0 {
+            continue;
+        }
+        let px = match read_region(&mut b.renderer, tex, rect) {
+            Ok(px) => px,
+            Err(e) => return Some(Err(e)),
+        };
+        if let Some(changed) = remote_changed(&mut r.sent, stride, rect, &px) {
+            out.push(changed);
+        }
+    }
+    Some(Ok(RemoteFrame { width: r.px.w as u32, height: r.px.h as u32, scale: r.scale, rects: out }))
+}
+
+/// The view `id`'s whole picture (for the tests: a pull's rectangles must
+/// match it).
+pub fn remote_picture(state: &mut Server, id: u32) -> Option<Result<(u32, u32, Vec<u8>), String>> {
+    let b = state.backend.as_mut()?;
+    let r = b.remotes.iter_mut().find(|r| r.id == id)?;
+    let px = r.px;
+    let tex = r.tex.as_mut()?;
+    Some(read_texture(&mut b.renderer, tex, px).map(|v| (px.w as u32, px.h as u32, v)))
+}
+
+/// A rectangle of a texture's pixels, RGBA, rows from the top.
+fn read_region(
+    renderer: &mut GlesRenderer,
+    tex: &mut smithay::backend::renderer::gles::GlesTexture,
+    rect: Rectangle<i32, smithay::utils::Physical>,
+) -> Result<Vec<u8>, String> {
+    use smithay::backend::renderer::{Bind, ExportMem};
+    let region = Rectangle::<i32, smithay::utils::Buffer>::new(
+        (rect.loc.x, rect.loc.y).into(),
+        (rect.size.w, rect.size.h).into(),
+    );
+    let fb = renderer.bind(tex).map_err(|e| e.to_string())?;
+    let mapping = renderer.copy_framebuffer(&fb, region, Fourcc::Abgr8888).map_err(|e| e.to_string())?;
+    let bytes = renderer.map_texture(&mapping).map_err(|e| e.to_string())?;
+    Ok(bytes.to_vec())
+}

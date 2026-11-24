@@ -86,6 +86,12 @@ each milestone doc lists what is left.
 
 ## Known issues
 
+- **The dock's tiles are marked changed every frame** though their pixels
+  stay the same (found 2026-11-23 by the remote view's damage: a 240x48
+  strip of tiles damaged ~60 times a second on a still desktop). Monitors
+  redraw that strip for nothing (power); remote views send nothing for it
+  (a pull sends only pixels that differ).
+
 - **Avalonia apps on Wayland show the old X11 pointer** (AlbumWall on
   techbench, 2026-11-22): Avalonia's Wayland backend loads the pointer theme
   with no name at size 24 (WaylandCursorManager.cs), ignoring XCURSOR_THEME,
