@@ -199,7 +199,23 @@ The screen stream is its own channel, never the agent interface itself
    idle) locks the remote too.
 5. **Clipboard and files**: text and pictures both ways; drag and drop and
    transfers through SFTP.
-6. **The login screen**: vdm takes the viewer before anyone is logged in.
+6. **A session started for the remote person** (Dave, 2026-11-23: "ideally,
+   we should be able to log in remotely and have no active session on the
+   server side. Like ssh can do, but with the vergence desktop"). When no
+   session of the user's is running, `vergence-remote` starts one: a
+   Vergence session with no monitors (the headless session the display
+   suite already runs, made a product), sized to the viewer, with the
+   person's own desktop, Dock and apps. SSH has already logged them in, so
+   no login screen and no root path are needed; the desk's monitors stay
+   on vdm's login screen (or off) and show nothing of it. Questions with
+   leans: (a) when the viewer goes, the session keeps running, to come
+   back to as with a terminal multiplexer, until Log Out in it (lean: yes,
+   with a setting to end it instead); (b) someone logging in at the desk
+   while it runs: the desk login takes that same session onto the monitors,
+   as a desk session would be viewed remotely (lean), rather than refusing
+   or starting a second; (c) sound plays nowhere until the sound step.
+   **vdm's login screen through the viewer** (the first plan for this step)
+   becomes optional: needed only to log in as someone else, later if wanted.
 7. **Checks**: a display-suite scenario (a headless session viewed by a
    headless viewer over a local SSH), tests on Hubble, techbench and kepler,
    latency measured on the LAN and over WireGuard, an independent security
