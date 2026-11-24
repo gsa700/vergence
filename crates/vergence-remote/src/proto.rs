@@ -22,7 +22,7 @@ use crate::lz;
 
 pub const MAGIC: &[u8; 4] = b"VRMT";
 /// Raised with every change to a message's layout.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 /// The longest message either side accepts.
 pub const MAX_MESSAGE: usize = 128 << 20;
 /// The largest view, each way.
@@ -190,6 +190,12 @@ pub enum ToHost {
     Privacy {
         on: bool,
     },
+    /// The viewer's Caps Lock and Num Lock (version 3): the host sets its own
+    /// to match, so letters come out as the viewer's keyboard shows.
+    Locks {
+        caps: bool,
+        num: bool,
+    },
 }
 
 /// What the host sends.
@@ -346,6 +352,11 @@ impl ToHost {
                 b.push(*on as u8);
                 9
             }
+            ToHost::Locks { caps, num } => {
+                b.push(*caps as u8);
+                b.push(*num as u8);
+                10
+            }
         };
         frame_out(w, kind, &b)
     }
@@ -377,6 +388,7 @@ impl ToHost {
             7 => ToHost::Scroll { dx: f.f32()?, dy: f.f32()? },
             8 => ToHost::Bye,
             9 => ToHost::Privacy { on: f.u8()? != 0 },
+            10 => ToHost::Locks { caps: f.u8()? != 0, num: f.u8()? != 0 },
             _ => return Err(Error::Bad("an unknown message")),
         };
         f.done()?;
@@ -488,6 +500,7 @@ mod tests {
             ToHost::Scroll { dx: 0.0, dy: -3.0 },
             ToHost::Bye,
             ToHost::Privacy { on: true },
+            ToHost::Locks { caps: true, num: false },
         ];
         let mut b = Vec::new();
         for m in &to_host {

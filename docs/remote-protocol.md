@@ -1,4 +1,4 @@
-# Vergence Remote protocol, version 2
+# Vergence Remote protocol, version 3
 
 The stream between a viewer and a Vergence host (remote milestone 1,
 docs/remote-milestone-1.md). The reference implementation is
@@ -40,6 +40,7 @@ fields: shorter or longer is an error, as is an unknown type.
 | 7 | Scroll | dx f32, dy f32 |
 | 8 | Bye | (none) |
 | 9 | Privacy | on u8: blank the host's desk (its monitors locked behind a curtain while this viewer goes on), or lift it |
+| 10 | Locks | caps u8, num u8: the viewer's Caps Lock and Num Lock; the host sets its own to match |
 
 Widths and heights are 1 to 16,384.
 
@@ -89,3 +90,5 @@ every length and offset and must produce exactly `w * h * 4` bytes.
 Version 1 (2026-11-23): the first.
 
 Version 2 (2026-11-23): Privacy both ways (blanking the desk).
+
+Version 3 (2026-11-23): Locks (the lock keys kept in step).

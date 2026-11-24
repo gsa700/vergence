@@ -851,7 +851,7 @@ fn fuzz_input_on_every_widget() {
     for round in 0..rounds {
         let x = (next() % 500) as f32 - 50.0;
         let y = (next() % 400) as f32 - 50.0;
-        let m = Modifiers { shift: next() % 4 == 0, ctrl: next() % 6 == 0, alt: next() % 10 == 0, logo: false };
+        let m = Modifiers { shift: next() % 4 == 0, ctrl: next() % 6 == 0, alt: next() % 10 == 0, ..Modifiers::default() };
         let input = match next() % 10 {
             0 => Input::PointerMoved { x, y },
             1 | 2 => Input::Button { button: MouseButton::Left, pressed: next() % 2 == 0, x, y, modifiers: m },

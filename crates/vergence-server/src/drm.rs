@@ -81,7 +81,10 @@ fn screen_elements(
     pointer_at: Point<f64, Logical>,
 ) -> Vec<crate::zoom::Inner> {
     let mut elements = Vec::new();
-    if geo.to_f64().contains(pointer_at) && !state.touch.fingers_last {
+    // Behind Vergence Remote's curtain the desk's monitors draw no pointer: it
+    // is the remote person's, moving, and the desk would see where they work.
+    let curtained = state.lock.curtain && !state.remote.drawing;
+    if geo.to_f64().contains(pointer_at) && !state.touch.fingers_last && !curtained {
         let at = (pointer_at - geo.loc.to_f64()).to_physical(smithay::utils::Scale::from(scale));
         let time = state.start_time.elapsed();
         for d in state.pointer_image.elements(renderer, at, scale, time) {

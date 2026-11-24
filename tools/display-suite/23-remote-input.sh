@@ -28,10 +28,11 @@ scenario() {
     set -- $(edit_line | sed -E 's/.*\{ x: (-?[0-9]+), y: (-?[0-9]+), width: ([0-9]+), height: ([0-9]+) \}.*/\1 \2 \3 \4/')
     cx=$(($1 + $3 / 2)); cy=$(($2 + $4 / 2))
     probe --size 1920x1080 --frames 2 --seconds 8 --name Control \
-        --script "pointer $cx $cy; press left; release left; wait 300; type hello remote; wait 500" \
+        --script "pointer $cx $cy; press left; release left; wait 300; type hello remote; locks 1 0; type abc; locks 0 0; type def; wait 500" \
         > "$OUT/type.txt" 2>&1
     tail -2 "$OUT/type.txt" | sed 's/^/  .. /'
     vctl tree > "$OUT/tree.txt"
     check "$(yes_if "grep -q 'hello remote' '$OUT/tree.txt'")" "typed into Edit from the viewer"
+    check "$(yes_if "grep -q 'hello remoteABCdef' '$OUT/tree.txt'")" "the viewer's Caps Lock followed: ABC with it on, def with it off"
     shot MEM-1 typed >/dev/null
 }

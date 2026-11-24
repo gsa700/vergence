@@ -81,6 +81,10 @@ pub struct Modifiers {
     pub alt: bool,
     /// The Super (logo) key.
     pub logo: bool,
+    /// Caps Lock and Num Lock are on (Vergence Remote keeps the far
+    /// machine's in step with them).
+    pub caps_lock: bool,
+    pub num_lock: bool,
 }
 
 pub struct Keyboard {
@@ -236,7 +240,14 @@ impl Keyboard {
     pub fn modifiers(&self) -> Modifiers {
         // SAFETY: a live state and valid C strings.
         let held = |name: &std::ffi::CStr| unsafe { xkb_state_mod_name_is_active(self.state, name.as_ptr(), STATE_MODS_EFFECTIVE) } > 0;
-        Modifiers { shift: held(c"Shift"), ctrl: held(c"Control"), alt: held(c"Mod1"), logo: held(c"Mod4") }
+        Modifiers {
+            shift: held(c"Shift"),
+            ctrl: held(c"Control"),
+            alt: held(c"Mod1"),
+            logo: held(c"Mod4"),
+            caps_lock: held(c"Lock"),
+            num_lock: held(c"Mod2"),
+        }
     }
 
     /// What a key (the kernel's code, as the server sends it) is under the

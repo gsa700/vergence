@@ -58,6 +58,14 @@ pub struct Viewer {
     /// The bar's privacy button as last described (the host's answer, and
     /// whether the session is live): asked again only when it changed.
     bar_said: Option<(bool, bool)>,
+    /// The pointer is over the window, and the window has the keyboard: the
+    /// keyboard is taken whole only while both hold.
+    inside: bool,
+    focused: bool,
+    /// This keyboard's Caps Lock and Num Lock as last seen, and as last told
+    /// the host (version 3): the host sets its own to match.
+    locks_seen: Option<(bool, bool)>,
+    locks_told: Option<(bool, bool)>,
 }
 
 fn this_host() -> String {
@@ -86,6 +94,10 @@ impl Viewer {
             command,
             view_only,
             bar_said: None,
+            inside: false,
+            focused: false,
+            locks_seen: None,
+            locks_told: None,
             host: host.to_string(),
             session: None,
             waker: None,
@@ -196,6 +208,11 @@ impl App for Viewer {
 
     fn keys_captured(&mut self, on: bool, window: &mut Window) {
         self.captured = on;
+        // The far machine's lock keys put in step as it takes the keyboard.
+        if on && let Some(l) = self.locks_seen {
+            self.send(ToHost::Locks { caps: l.0, num: l.1 });
+            self.locks_told = Some(l);
+        }
         let title = self.title();
         if title != self.titled {
             window.set_title(&title);
@@ -268,7 +285,10 @@ impl App for Viewer {
         // pixel to one when the host drew it at the window's size.
         let (aw, ah) = (frame.width, frame.height - frame.top);
         let k = (aw / self.size.0 as f32).min(ah / self.size.1 as f32);
-        let (ox, oy) = ((aw - self.size.0 as f32 * k) / 2.0, frame.top + (ah - self.size.1 as f32 * k) / 2.0);
+        // On whole device pixels: a tile at a fraction of a pixel is blended
+        // at its edges, and the seams show as a faint grid (Dave, 2026-11-23).
+        let snap = |v: f32| (v * frame.scale).round() / frame.scale;
+        let (ox, oy) = (snap((aw - self.size.0 as f32 * k) / 2.0), snap(frame.top + (ah - self.size.1 as f32 * k) / 2.0));
         self.at = (ox, oy, k);
         for (i, t) in self.tiles.iter().enumerate() {
             let (tx, ty) = (i as u32 % self.cols, i as u32 / self.cols);
@@ -288,9 +308,30 @@ impl App for Viewer {
         // The keyboard taken whole when the window gets it, and again at a
         // click after Ctrl+Alt gave it back (the server's shortcuts then go
         // to the far machine too; switching consoles stays here).
+        // As a KVM's software does, the keyboard follows the pointer (Dave,
+        // 2026-11-23): leaving the window gives it back to this computer at
+        // once (its shortcuts work again), coming back in takes it again if
+        // the window has the keyboard; a click takes it too.
         match input {
             _ if self.view_only => {}
-            Input::Focus(true) => window.capture_keys(true),
+            Input::Focus(on) => {
+                self.focused = *on;
+                if *on && self.inside {
+                    window.capture_keys(true);
+                }
+            }
+            Input::PointerLeft => {
+                self.inside = false;
+                if self.captured {
+                    window.capture_keys(false);
+                }
+            }
+            Input::PointerMoved { .. } if !self.inside => {
+                self.inside = true;
+                if self.focused && !self.captured {
+                    window.capture_keys(true);
+                }
+            }
             Input::Button { pressed: true, .. } if !self.captured => window.capture_keys(true),
             _ => {}
         }
@@ -300,7 +341,8 @@ impl App for Viewer {
                     self.send(ToHost::Pointer { x: px, y: py });
                 }
             }
-            Input::Button { button, pressed, x, y, .. } => {
+            Input::Button { button, pressed, x, y, modifiers } => {
+                self.locks_seen = Some((modifiers.caps_lock, modifiers.num_lock));
                 let code = match button {
                     Button::Left => 0x110,
                     Button::Right => 0x111,
@@ -319,8 +361,19 @@ impl App for Viewer {
             }
             Input::Scroll { dx, dy, .. } => self.send(ToHost::Scroll { dx: *dx, dy: *dy }),
             // The physical key, so the host applies its own layout; repeats
-            // are the host's to make.
-            Input::Key { code, pressed, repeat: false, .. } if *code > 0 => {
+            // are the host's to make. Its lock keys are put in step first if
+            // they drifted (Caps Lock pressed while the keyboard was this
+            // machine's), but never on Caps Lock or Num Lock themselves: those
+            // go over and toggle both.
+            Input::Key { code, pressed, repeat: false, modifiers, .. } if *code > 0 => {
+                let locks = (modifiers.caps_lock, modifiers.num_lock);
+                self.locks_seen = Some(locks);
+                if *pressed && *code != 58 && *code != 69 && self.locks_told != Some(locks) {
+                    self.send(ToHost::Locks { caps: locks.0, num: locks.1 });
+                    self.locks_told = Some(locks);
+                } else if *code == 58 || *code == 69 {
+                    self.locks_told = None;
+                }
                 if *pressed {
                     self.held.push(*code);
                 } else {

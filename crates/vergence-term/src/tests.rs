@@ -10,7 +10,7 @@ use crate::settings::font_name;
 use vergence_ui::bar::WinButton;
 use vergence_ui::{Modifiers, sym};
 
-const NONE: Modifiers = Modifiers { shift: false, ctrl: false, alt: false, logo: false };
+const NONE: Modifiers = Modifiers { shift: false, ctrl: false, alt: false, logo: false, caps_lock: false, num_lock: false };
 
 #[test]
 fn colors_follow_the_desktop() {

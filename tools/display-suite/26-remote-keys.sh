@@ -11,6 +11,10 @@ scenario() {
     i=0; while ! vctl windows | grep -q '"vergence-remote-viewer"'; do sleep 0.2; i=$((i + 1)); [ $i -gt 50 ] && break; done
     sleep 1.5
     w=$(vctl windows | grep '"vergence-remote-viewer"' | head -1 | cut -d' ' -f1)
+    set -- $(vctl windows | grep '"vergence-remote-viewer"' | head -1 | sed -E 's/.*\{ x: (-?[0-9]+), y: (-?[0-9]+), width: ([0-9]+), height: ([0-9]+) \}.*/\1 \2 \3 \4/')
+    vx=$(($1 + $3 / 2)); vy=$(($2 + $4 / 2))
+    # The keyboard follows the pointer: over the window, and the window focused.
+    vctl pointer "$vx" "$vy" >/dev/null
     vctl focus "$w" >/dev/null; sleep 1
     # The window with the keyboard, by its title ("focused: Some(...)").
     focused() { vctl used | head -1; }
@@ -18,6 +22,11 @@ scenario() {
     check "$(yes_if "vctl windows | grep 'vergence-remote-viewer' | grep -q 'Ctrl+Alt gives the keyboard back'")" "it took the whole keyboard (its title says how to give it back)"
     vctl key alt+Tab >/dev/null; sleep 0.8
     check "$(yes_if "focused | grep -q 'Vergence Remote'")" "Alt+Tab went to the viewer, not this machine"
+    # The pointer out of the window: the keyboard back at once.
+    vctl pointer 5 5 >/dev/null; sleep 0.8
+    check "$(yes_if "! vctl windows | grep 'vergence-remote-viewer' | grep -q 'Ctrl+Alt gives'")" "the pointer left the window: the keyboard is this machine's"
+    vctl pointer "$vx" "$vy" >/dev/null; sleep 0.8
+    check "$(yes_if "vctl windows | grep 'vergence-remote-viewer' | grep -q 'Ctrl+Alt gives'")" "back over the window: taken again"
     vctl key ctrl+Alt >/dev/null; sleep 0.8
     check "$(yes_if "! vctl windows | grep 'vergence-remote-viewer' | grep -q 'Ctrl+Alt gives'")" "Ctrl+Alt alone gave the keyboard back"
     vctl key alt+Tab >/dev/null; sleep 0.8

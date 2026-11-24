@@ -346,3 +346,12 @@ is listed above only as Dave's own alternative.
     not now (Dave asked; two builds to test for little). A separate package
     for the remote programs: proposed, not yet answered. Display suite 28.
   - Step 4 built.
+- **Dave's first hands-on, techbench to Hubble** (2026-11-23 ~21:05):
+  "initial impression is good, over the lan it's really fast". Fixed from
+  it: the keyboard follows the pointer (leaving the window gives it back to
+  this computer, coming back in takes it again, as a KVM's software does);
+  the lock keys kept in step (protocol 3, `Locks`: Caps Lock had drifted and
+  came out reversed, and stayed so on Hubble after); behind the curtain the
+  desk's monitors draw no pointer (the remote person's pointer moved on the
+  lock screen); the picture on whole device pixels (a faint grid along the
+  tiles at 133%). Open: "some funny business with the mouse" (asked what).

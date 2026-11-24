@@ -289,7 +289,11 @@ impl Server {
                     c.ready = true;
                 }
             }
-            ToHost::Key { .. } | ToHost::Pointer { .. } | ToHost::Button { .. } | ToHost::Scroll { .. } => {
+            ToHost::Key { .. }
+            | ToHost::Pointer { .. }
+            | ToHost::Button { .. }
+            | ToHost::Scroll { .. }
+            | ToHost::Locks { .. } => {
                 if let Some(v) = self.remote.conns[c].view {
                     self.remote_input(v, msg);
                 }
@@ -361,6 +365,18 @@ impl Server {
             ToHost::Key { code, pressed } if code > 0 && code < 0x100 => {
                 let state = if pressed { KeyState::Pressed } else { KeyState::Released };
                 self.handle_key((code + 8).into(), state, now);
+            }
+            // The viewer's Caps Lock and Num Lock: this machine's own lock key
+            // pressed where they differ (the lights say which are on), so every
+            // keyboard state here (the seat's, Smithay's, the apps') follows.
+            ToHost::Locks { caps, num } => {
+                let Some((num_on, caps_on, _)) = self.input.keys.as_ref().map(|k| k.leds()) else { return };
+                for (want, on, code) in [(caps, caps_on, 58u32), (num, num_on, 69u32)] {
+                    if want != on {
+                        self.handle_key((code + 8).into(), KeyState::Pressed, now);
+                        self.handle_key((code + 8).into(), KeyState::Released, now);
+                    }
+                }
             }
             ToHost::Scroll { dx, dy } => {
                 let (dx, dy) = (dx.clamp(-10_000.0, 10_000.0) as f64, dy.clamp(-10_000.0, 10_000.0) as f64);
