@@ -2153,7 +2153,7 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "vergence-archive"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "vergence-decode",
  "vergence-types",
@@ -2161,7 +2161,7 @@ dependencies = [
 
 [[package]]
 name = "vergence-bar"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "vergence-config",
  "vergence-look",
@@ -2172,7 +2172,7 @@ dependencies = [
 
 [[package]]
 name = "vergence-calc"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "vergence-config",
  "vergence-look",
@@ -2184,7 +2184,7 @@ dependencies = [
 
 [[package]]
 name = "vergence-closeup"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "png 0.18.1",
  "vergence-config",
@@ -2197,18 +2197,18 @@ dependencies = [
 
 [[package]]
 name = "vergence-config"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "toml",
 ]
 
 [[package]]
 name = "vergence-dbus"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 
 [[package]]
 name = "vergence-decode"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "image",
  "resvg",
@@ -2219,15 +2219,15 @@ dependencies = [
 
 [[package]]
 name = "vergence-dm"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 
 [[package]]
 name = "vergence-edid"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 
 [[package]]
 name = "vergence-edit"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "vergence-config",
  "vergence-scene",
@@ -2238,7 +2238,7 @@ dependencies = [
 
 [[package]]
 name = "vergence-files"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "vergence-archive",
  "vergence-config",
@@ -2258,7 +2258,7 @@ dependencies = [
 
 [[package]]
 name = "vergence-harness"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "vergence-decode",
  "vergence-edid",
@@ -2269,7 +2269,7 @@ dependencies = [
 
 [[package]]
 name = "vergence-hw"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "vergence-config",
  "vergence-net",
@@ -2282,25 +2282,25 @@ dependencies = [
 
 [[package]]
 name = "vergence-hymie"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "vergence-decode",
 ]
 
 [[package]]
 name = "vergence-hymie-aac"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "vergence-hymie",
 ]
 
 [[package]]
 name = "vergence-look"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 
 [[package]]
 name = "vergence-media"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "vergence-dbus",
  "vergence-protocol",
@@ -2308,11 +2308,11 @@ dependencies = [
 
 [[package]]
 name = "vergence-net"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 
 [[package]]
 name = "vergence-pdf"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "vergence-decode",
  "vergence-raster",
@@ -2322,11 +2322,11 @@ dependencies = [
 
 [[package]]
 name = "vergence-power"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 
 [[package]]
 name = "vergence-profile"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "serde",
  "sha2",
@@ -2335,11 +2335,11 @@ dependencies = [
 
 [[package]]
 name = "vergence-protocol"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 
 [[package]]
 name = "vergence-quit"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "vergence-config",
  "vergence-protocol",
@@ -2350,11 +2350,11 @@ dependencies = [
 
 [[package]]
 name = "vergence-raster"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 
 [[package]]
 name = "vergence-reader"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "vergence-config",
  "vergence-pdf",
@@ -2366,7 +2366,7 @@ dependencies = [
 
 [[package]]
 name = "vergence-remote"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "toml",
  "vergence-config",
@@ -2374,7 +2374,7 @@ dependencies = [
 
 [[package]]
 name = "vergence-remote-viewer"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "vergence-remote",
  "vergence-render",
@@ -2386,7 +2386,7 @@ dependencies = [
 
 [[package]]
 name = "vergence-render"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "png 0.18.1",
  "vergence-scene",
@@ -2395,15 +2395,15 @@ dependencies = [
 
 [[package]]
 name = "vergence-scene"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 
 [[package]]
 name = "vergence-seat"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 
 [[package]]
 name = "vergence-server"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "ab_glyph",
  "bitflags 2.13.2",
@@ -2470,7 +2470,7 @@ dependencies = [
 
 [[package]]
 name = "vergence-shell"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "vergence-look",
  "vergence-net",
@@ -2481,19 +2481,19 @@ dependencies = [
 
 [[package]]
 name = "vergence-sound"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 
 [[package]]
 name = "vergence-spell"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 
 [[package]]
 name = "vergence-sysinfo"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 
 [[package]]
 name = "vergence-term"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "base64",
  "vergence-look",
@@ -2507,14 +2507,14 @@ dependencies = [
 
 [[package]]
 name = "vergence-text"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "ab_glyph",
 ]
 
 [[package]]
 name = "vergence-thumbs"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "png 0.18.1",
  "vergence-decode",
@@ -2525,11 +2525,11 @@ dependencies = [
 
 [[package]]
 name = "vergence-types"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 
 [[package]]
 name = "vergence-ui"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "vergence-bar",
  "vergence-look",
@@ -2542,7 +2542,7 @@ dependencies = [
 
 [[package]]
 name = "vergence-widgets"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "vergence-config",
  "vergence-decode",
@@ -2560,14 +2560,14 @@ dependencies = [
 
 [[package]]
 name = "vergence-wl"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "vergence-protocol",
 ]
 
 [[package]]
 name = "vergence-xsettings"
-version = "0.4.0-pre.2"
+version = "0.4.0-pre.3"
 dependencies = [
  "toml",
 ]
