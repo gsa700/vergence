@@ -11,8 +11,11 @@ hostmakedepends="pkg-config"
 makedepends="libarchive-devel libinput-devel libxkbcommon-devel libseat-devel libgbm-devel
  libdrm-devel eudev-libudev-devel wayland-devel wayland-protocols
  fontconfig-devel pam-devel"
+# The two font packages are for characters our own fonts lack: symbols
+# programs print in a terminal (Claude Code's ✻ ⏵ ⎿) and other scripts.
+# A base Void has no fonts at all (techbench, 2026-11-23).
 depends="seatd mesa-dri fontconfig dbus udisks2 polkit openbsd-netcat
- pipewire wireplumber alsa-pipewire"
+ pipewire wireplumber alsa-pipewire dejavu-fonts-ttf noto-fonts-ttf"
 short_desc="Desktop with its own display server, toolkit and applications"
 maintainer="David Erickson <gsa700@gmail.com>"
 # The code is Apache-2.0 OR GPL-2.0-or-later; the AAC helper GPL-2.0-or-later

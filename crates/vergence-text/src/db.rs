@@ -6,6 +6,11 @@
 //! which reads a few kilobytes a file. A face's character coverage is read
 //! the first time a fallback search asks about it, and kept.
 //!
+//! Fonts installed after the scan are found by [`FontDb::refresh`]: it notes
+//! each font directory's modification time and, when one has changed, adds
+//! the faces of the files it has not seen. Entries are only ever added, so a
+//! face's index never changes under the loaded faces that point at it.
+//!
 //! There is no fontconfig here and no configuration language. A family is
 //! found by its name; the three generic names (monospace, sans-serif, serif,
 //! and the spellings desktop settings use: "Monospace", "Sans") try a short
@@ -13,6 +18,8 @@
 
 use std::{
     cell::OnceCell,
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
     path::{Path, PathBuf},
 };
 
@@ -70,6 +77,10 @@ impl Entry {
 #[derive(Default)]
 pub struct FontDb {
     pub faces: Vec<Entry>,
+    /// The directories scanned, and their modification times when they
+    /// were (see [`FontDb::refresh`]).
+    dirs: Vec<PathBuf>,
+    signature: u64,
 }
 
 impl FontDb {
@@ -116,14 +127,42 @@ impl FontDb {
         for d in dirs {
             walk(d, 0, &mut files);
         }
-        let mut faces = Vec::new();
+        let mut db = FontDb { faces: Vec::new(), dirs: dirs.to_vec(), signature: signature(dirs) };
+        db.add_files(files);
+        db
+    }
+
+    fn add_files(&mut self, files: Vec<PathBuf>) -> usize {
+        let before = self.faces.len();
         for path in files {
             let Ok(mut file) = std::fs::File::open(&path) else { continue };
             for info in sfnt::faces(&mut file) {
-                faces.push(Entry::new(path.clone(), info));
+                self.faces.push(Entry::new(path.clone(), info));
             }
         }
-        FontDb { faces }
+        self.faces.len() - before
+    }
+
+    /// Add the fonts installed since the scan: if any scanned directory
+    /// changed (a file or folder added, removed or renamed in it), the faces
+    /// of the files not yet indexed. Removed files stay listed; they no
+    /// longer load, and fallback skips them. True if faces were added.
+    pub fn refresh(&mut self) -> bool {
+        if self.dirs.is_empty() {
+            return false;
+        }
+        let now = signature(&self.dirs);
+        if now == self.signature {
+            return false;
+        }
+        self.signature = now;
+        let mut files = Vec::new();
+        for d in &self.dirs {
+            walk(d, 0, &mut files);
+        }
+        let known: std::collections::HashSet<&Path> = self.faces.iter().map(|e| e.path.as_path()).collect();
+        let fresh: Vec<PathBuf> = files.into_iter().filter(|p| !known.contains(p.as_path())).collect();
+        self.add_files(fresh) > 0
     }
 
     /// The face for a family (or a generic name), as close as the family
@@ -207,6 +246,38 @@ fn distance(info: &FaceInfo, weight: u16, italic: bool) -> u32 {
         + weight_distance(info, weight)
 }
 
+/// The modification times of the directories (and those under them, as
+/// deep as [`walk`] goes), hashed: a font added anywhere changes its folder's
+/// time. A directory that is missing counts too, so one made later is seen.
+fn signature(dirs: &[PathBuf]) -> u64 {
+    fn visit(dir: &Path, depth: usize, h: &mut DefaultHasher, count: &mut usize) {
+        if depth > MAX_DEPTH || *count >= MAX_FILES {
+            return;
+        }
+        *count += 1;
+        dir.hash(h);
+        match std::fs::metadata(dir).and_then(|m| m.modified()) {
+            Ok(t) => t.hash(h),
+            Err(_) => {
+                0u8.hash(h);
+                return;
+            }
+        }
+        let Ok(read) = std::fs::read_dir(dir) else { return };
+        let mut subdirs: Vec<PathBuf> = read.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.is_dir()).collect();
+        subdirs.sort();
+        for d in subdirs {
+            visit(&d, depth + 1, h, count);
+        }
+    }
+    let mut h = DefaultHasher::new();
+    let mut count = 0;
+    for d in dirs {
+        visit(d, 0, &mut h, &mut count);
+    }
+    h.finish()
+}
+
 fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
     if depth > MAX_DEPTH || out.len() >= MAX_FILES {
         return;
@@ -253,6 +324,7 @@ mod tests {
                 entry(Spec { family: "Other Symbols", ranges: &[(0x2500, 0x257f), (0x5d0, 0x5ea)], ..Spec::default() }),
                 entry(Spec { family: "Example VF", weight_axis: Some((100, 900)), ..Spec::default() }),
             ],
+            ..FontDb::default()
         }
     }
 
@@ -282,6 +354,7 @@ mod tests {
                 entry(Spec { family: "Noto Sans", ..Spec::default() }),
                 entry(Spec { family: "Noto Sans", weight: 700, ..Spec::default() }),
             ],
+            ..FontDb::default()
         };
         let regular = db.find("sans-serif", 400, false).unwrap();
         assert_eq!(db.faces[regular].info.width, 5);
@@ -305,6 +378,7 @@ mod tests {
                 entry(Spec { family: "Plain", ..Spec::default() }),
                 entry(Spec { family: "Odd Mono", monospace: true, ..Spec::default() }),
             ],
+            ..FontDb::default()
         };
         assert_eq!(name(&only, only.find("monospace", 400, false)), Some(("Odd Mono", 400, false)));
         assert_eq!(FontDb::default().find("monospace", 400, false), None);
@@ -329,5 +403,27 @@ mod tests {
         assert_eq!(db.fallback('漢', mono), None);
         // The base itself is never the answer; its own bold is the nearest other face.
         assert_eq!(name(&db, db.fallback('A', mono)), Some(("Noto Sans Mono", 700, false)));
+    }
+
+    /// A font copied in after the scan is found by refresh, once; nothing
+    /// changes when nothing was added.
+    #[test]
+    fn refresh_finds_fonts_installed_after_the_scan() {
+        let dir = std::env::temp_dir().join(format!("vergence-fontdb-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("old")).unwrap();
+        std::fs::write(dir.join("old/a.ttf"), font(&Spec { family: "Old Face", ..Spec::default() })).unwrap();
+        let mut db = FontDb::scan(std::slice::from_ref(&dir));
+        assert_eq!(db.faces.len(), 1);
+        assert!(!db.refresh(), "nothing changed");
+        // A new folder, as a package would add (its parent's time changes).
+        std::fs::create_dir_all(dir.join("new")).unwrap();
+        std::fs::write(dir.join("new/b.ttf"), font(&Spec { family: "New Symbols", ..Spec::default() })).unwrap();
+        assert!(db.refresh());
+        assert_eq!(db.faces.len(), 2);
+        assert!(db.find("New Symbols", 400, false).is_some());
+        assert_eq!(db.faces[0].info.family, "Old Face", "earlier entries keep their places");
+        assert!(!db.refresh(), "already seen");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

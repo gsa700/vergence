@@ -12,6 +12,9 @@
 //!   for.
 //! - [`Fonts::glyph`] turns a character into a glyph of that face, or of the nearest face that
 //!   has the character (fallback), remembered per character.
+//! - A family or character not found sends a look at the font directories (at most every
+//!   [`REFRESH_EVERY`]): fonts installed while a program runs are used without restarting it,
+//!   the server above all, which draws every program's text by the family names in its scene.
 //! - [`Fonts::layout`] places a line of text: runs of glyphs, one run per face, with kerning
 //!   (the font's `GPOS` kerning, read by kern.rs, else its legacy `kern` table). Sizes and
 //!   positions are in whatever unit the size was given in (reference units for a scene).
@@ -42,7 +45,11 @@ pub mod sfnt;
 #[cfg(test)]
 mod fuzz;
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use ab_glyph::{Font, FontVec, GlyphId, PxScale, VariableFont, point};
 
@@ -54,6 +61,11 @@ const MAX_FONT_FILE: u64 = 64 << 20;
 const MAX_EM_PX: f32 = 8192.0;
 const MAX_BITMAP: usize = 16 << 20;
 const MAX_CACHE_BYTES: usize = 64 << 20;
+
+/// How often, at most, a miss looks for newly installed fonts. A scene that
+/// names a family this machine lacks asks again every frame; the look itself
+/// reads only the font directories' times (db.rs, `FontDb::refresh`).
+pub const REFRESH_EVERY: Duration = Duration::from_secs(3);
 
 /// A face in use: an index into this [`Fonts`]' loaded faces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -161,6 +173,9 @@ pub struct Fonts {
     /// chosen keys). A miss here costs nothing but that lookup.
     front: Vec<Option<(GlyphKey, Option<Arc<Bitmap>>)>>,
     cache_bytes: usize,
+    /// When a miss last looked for new fonts, and how often it may.
+    looked: Option<Instant>,
+    refresh_every: Duration,
 }
 
 impl Fonts {
@@ -178,6 +193,8 @@ impl Fonts {
             cache: HashMap::new(),
             front: vec![None; FRONT],
             cache_bytes: 0,
+            looked: None,
+            refresh_every: REFRESH_EVERY,
         }
     }
 
@@ -189,8 +206,27 @@ impl Fonts {
     /// nearest the machine has. None if there is no such family, or no font
     /// at all.
     pub fn face(&mut self, family: &str, weight: u16, italic: bool) -> Option<FaceId> {
-        let entry = self.db.find(family, weight, italic)?;
+        let entry = match self.db.find(family, weight, italic) {
+            Some(entry) => entry,
+            None if self.look_for_new_fonts() => self.db.find(family, weight, italic)?,
+            None => return None,
+        };
         self.load(entry, weight)
+    }
+
+    /// After a miss: add any fonts installed since the last look (not more
+    /// often than `refresh_every`), forgetting the characters no face had
+    /// so they are searched for again. True if faces were added.
+    fn look_for_new_fonts(&mut self) -> bool {
+        if self.looked.is_some_and(|t| t.elapsed() < self.refresh_every) {
+            return false;
+        }
+        self.looked = Some(Instant::now());
+        if !self.db.refresh() {
+            return false;
+        }
+        self.fallbacks.retain(|_, (_, glyph)| *glyph != 0);
+        true
     }
 
     fn load(&mut self, entry: usize, weight: u16) -> Option<FaceId> {
@@ -300,20 +336,27 @@ impl Fonts {
         if own != 0 {
             return (face, own as u32);
         }
-        if let Some(known) = self.fallbacks.get(&(face, c)) {
-            return *known;
+        if let Some(known) = self.fallbacks.get(&(face, c)).copied() {
+            // A character no face had: worth asking again once fonts are added.
+            if known.1 != 0 || !self.look_for_new_fonts() {
+                return known;
+            }
         }
+        let found = self.search_fallback(face, c);
+        let found = if found.1 == 0 && self.look_for_new_fonts() { self.search_fallback(face, c) } else { found };
+        self.fallbacks.insert((face, c), found);
+        found
+    }
+
+    fn search_fallback(&mut self, face: FaceId, c: char) -> (FaceId, u32) {
         let (entry, weight) = (self.loaded[face.0 as usize].entry, self.loaded[face.0 as usize].weight);
-        let found = self
-            .db
+        self.db
             .fallback(c, entry)
             .and_then(|other| self.load(other, weight))
             .map(|f| (f, self.loaded[f.0 as usize].font.glyph_id(c).0 as u32))
             // A face may list a character and still have no glyph for it.
             .filter(|(_, g)| *g != 0)
-            .unwrap_or((face, 0));
-        self.fallbacks.insert((face, c), found);
-        found
+            .unwrap_or((face, 0))
     }
 
     /// How far the line moves on after this glyph, at `size`.
@@ -540,6 +583,35 @@ mod tests {
         let (runs, _) = fonts.layout(face, 16.0, &format!("A{c}A"));
         assert_eq!(runs.iter().map(|r| r.face).collect::<Vec<_>>(), [face, other, face]);
         assert!(fonts.raster(other, g, 32.0, 0).is_some() || fonts.advance(other, g, 32.0) > 0.0);
+    }
+
+    /// The server's case: a scene names a family installed after the
+    /// server started (or a character only a new font has), and the next
+    /// look finds it, with no restart.
+    #[test]
+    fn fonts_installed_while_running_are_found() {
+        let ours = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/fonts");
+        let dir = std::env::temp_dir().join(format!("vergence-fonts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("inter")).unwrap();
+        std::fs::copy(ours.join("InterVariable.ttf"), dir.join("inter/InterVariable.ttf")).unwrap();
+        let mut fonts = Fonts::new(FontDb::scan(std::slice::from_ref(&dir)));
+        fonts.refresh_every = Duration::ZERO;
+        let inter = fonts.face("Inter Variable", 400, false).expect("Inter");
+        assert_eq!(fonts.face("JetBrains Mono", 400, false), None);
+        // A character Inter lacks and JetBrains Mono has (box drawing, blocks, arrows).
+        let lacking = ['─', '│', '█', '▒', '⎿', '⏵'].into_iter().find(|c| fonts.glyph(inter, *c).1 == 0);
+
+        std::fs::create_dir_all(dir.join("jetbrains")).unwrap();
+        std::fs::copy(ours.join("JetBrainsMono-Variable.ttf"), dir.join("jetbrains/JetBrainsMono-Variable.ttf"))
+            .unwrap();
+        assert!(fonts.face("JetBrains Mono", 400, false).is_some(), "the new family, by name");
+        if let Some(c) = lacking {
+            let (f, g) = fonts.glyph(inter, c);
+            assert_ne!(f, inter, "{c} now comes from the new font");
+            assert_ne!(g, 0);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
