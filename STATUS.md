@@ -38,13 +38,14 @@ releases were added late).
 
 ## Next
 
-1. **Remote access** (Dave, 2026-11-22: the next milestone after Terminal on
-   the agent interface): the protocol and its client(s); display lists, not
-   video (whitepaper phase 4, principle 8: transport by SSH or WireGuard,
-   logins through vdm). Plan: docs/remote-milestone-1.md (a remote screen
-   with three modes: extend, mirror, take over; the Vergence side and client
-   first, all three modes, attach and own login), then a portable build of
-   Vergence apps with the client as its first (the Mac first).
+1. **Vergence Remote** (docs/remote-milestone-1.md, redrafted 2026-11-23
+   with Dave): an app to use a Vergence machine from another as if at it
+   (a KVM for use, not hardware), over SSH (WireGuard as the path), our own
+   protocol only: display lists and compressed pixels, input, clipboard,
+   files by SFTP, the login screen, the Dockworker's "viewing" tile, no
+   prompt for the same user. The Vergence viewer first, then the Mac through
+   the toolkit's portable build. Sound and video later, with the recording
+   milestone's encoder. Waiting for Dave's word on the steps.
 2. **AlbumWall for Vergence** (generic name Music): AlbumWall's wall of
    covers and player rebuilt in Rust on the toolkit and Hymie
    (crates/vergence-hymie), for Vergence (docs/apps-roadmap.md).

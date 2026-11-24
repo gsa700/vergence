@@ -1,153 +1,196 @@
-# Remote milestone 1: remote access, a screen across the network
+# Remote milestone 1: Vergence Remote, using a computer from another one
 
-*Drafted 2026-11-22.* Dave chose remote access as the milestone after Terminal
-on the agent interface: "when we next get to a milestone we should work on the
-remote access protocol and client(s)". The whitepaper already fixes the
-direction: remote graphical access is the display server's job, since only it
-has the frames and the input and can show who is watching (principle 8);
-transport through SSH or WireGuard, logins through vdm, never unauthenticated
-TCP (§7); and drawing commands, not video (phase 4, §6).
+*Redrafted 2026-11-23* with Dave, starting over from what we want (the
+2026-11-22 draft, a screen with three modes, is kept below under "The first
+draft"). Dave: "a remote desktop application that uses SSH or WireGuard to
+access a system remotely. it should be able to really use the computer as
+though you were sitting there". And: "This could replace the need for a KVM
+if done correctly (not the hardware part obviously) but for actual USE."
 
-## The backbone: a remote screen (Dave, 2026-11-22)
+**Status: drafted, waiting for Dave's word on the steps** (the scope
+questions are answered below).
 
-Dave, reading the whitepaper: "should it be a new screen? it seems like there
-would be some benefits, it would inherit all the good work we have done on
-screen memory, session management and so on. but if you have software running
-you would want to interact with directly a new screen wouldn't fit unless we
-created a specific screen type that copies the Main screen?" Agreed the same
-evening: **a remote viewer is a screen of the session**, one screen type with
-three modes.
+## What it is
 
-Vergence already has screens with no monitor behind them: the headless
-sessions' in-memory screens (`MEM-1`, headless milestone 1). A remote screen
-is one of those whose frames go to a client instead of memory.
+**Vergence Remote**, an application: open it, pick a machine, and its
+desktop is in a window (or the whole screen), to use as if you were at it.
+It is what `ssh -X` was for a single program, for a whole desktop, with
+today's security, drawing Vergence's own windows from their display lists
+(sharp at any size, light on the network) rather than sending video.
 
-What a screen inherits:
-- **The viewer's own scale.** The client reports its size and density as a
-  monitor's EDID does; the server draws display lists sharp at that scale (a
-  Retina laptop and a 1080p one each get crisp text, never scaled video).
-- **Window memory per monitor setup.** "At home, two monitors" and "remote,
-  the laptop" are two setups: windows go where they were the last time remote,
-  and back when home.
-- **Session restore, the dock and its tiles, the lock screen, input routing,
-  agents and accessibility**, unchanged: to them it is another screen.
+The whitepaper fixes the direction: remote graphical access is the display
+server's job, since only it has the frames and the input and can show who
+is watching (principle 8); transport by SSH or WireGuard, logins through
+vdm and PAM, never an unauthenticated TCP port (§7); drawing commands, not
+video (§6.6, phase 4).
 
-The three modes:
-1. **Extend**: the remote screen is one more screen, like a monitor plugged in
-   across the network. For a remote login of its own, or a machine whose
-   monitors are off.
-2. **Mirror**: a view of a chosen screen (the main one by default), to see and
-   drive what runs there, as Screen Sharing does. Even mirrored, display lists
-   are drawn at the viewer's scale: a 4K screen seen from a laptop is drawn
-   again sharp, not shrunk.
-3. **Take over**: the local monitors lock and blank (privacy for whoever is at
-   the desk), and the remote screen becomes the session's only screen; window
-   memory moves everything to the remote layout, and unlocking at the desk
-   brings it all back.
+## Dave's answers (2026-11-23)
 
-## Things the design must answer
+- **Hosts: Vergence only, our own protocol.** "eventually we would maybe add
+  RDP and VNC support but let's just get our own working first."
+- **Sound and video later.** Running Firefox remotely is rare ("surely it
+  would be faster on the local machine"); with an SSH connection the local
+  browser can reach the remote network anyway (below, "Browse through this
+  machine").
+- **One video encoder for two uses.** "we need a video codec for screen
+  recording locally so maybe we can get them both with one": the recording
+  milestone's encoder (our own, decided 2026-11-21 in
+  docs/screenshots-milestone-1.md) is the one remote video uses later.
+  Claude's lean for it: VP8 in WebM (open, RFC 6386, plays everywhere, the
+  simplest open codec to write); Opus for sound.
+- **Sessions: attach to the running session, the remote monitors blanked
+  if wished.** Extend (a remote screen as one more monitor) and a separate
+  login beside the desk's session come later.
+- **The login screen: yes.** With nobody logged in, the viewer shows vdm's
+  login screen and logs in through it; the session then starts on the
+  machine as at the desk, and the viewer is attached to it.
+- **The Dockworker shows it**, as the agent tile does: "Control viewing",
+  how long, and End. Whoever is at the desk can always end it; locking the
+  screen ends it too.
+- **No prompt for the same user.** Connecting as the session's own user
+  with an SSH key proves it is you: no question at the desk, the tile always
+  shows. A setting, "Ask the person at the desk", for machines others use.
+- **Clients on every major platform** (Windows, Mac, Linux, BSD). The Vergence
+  viewer first, then the Mac (2026-11-22: "Vergence and Mac first"), through
+  a portable build of the Vergence toolkit, as Native AOT builds an
+  Avalonia app (2026-11-22). Alternatives Dave named: a .NET client, or
+  native apps per platform.
 
-- **A hybrid stream.** Vergence's own windows send display lists; Wayland and
-  X11 programs (Firefox, GTK, Qt) send pixels. The protocol carries both:
-  drawing commands where there are any, compressed pixels for the rest, and
-  only what changed.
-- **Who is watching** (principle 8): a mirrored or taken-over session shows a
-  clear indicator on its local screens, and the person at the desk can end it.
-- **Input**: the viewer's keyboard and pointer join as seat devices of their
-  own, so local and remote input do not fight.
-- **Logins and locks**: a remote login goes through vdm and PAM like a local
-  one; locking from either end locks the session.
-- **Transport**: SSH (a channel or a forwarded socket) or WireGuard; never a
-  listening TCP port of our own.
+## Milestone 1: what it does
 
-## Clients and protocols (Dave, 2026-11-22)
+1. **Connect over SSH.** The viewer runs `ssh <host> vergence-remote`
+   (the host's own program, installed with Vergence); the whole session
+   travels on that one channel. The person's keys, `~/.ssh/config`, jump
+   hosts and host-key checks all work; WireGuard is the network path under
+   SSH, not a mode of its own. Nothing listens on the network.
+2. **See it**: the session's screens, one at a time or all, drawn at the
+   viewer's own scale. Vergence's windows as display lists; other programs'
+   windows (Wayland, X11) as compressed pixels, only what changed (no video
+   codec yet).
+3. **Use it**: keyboard and pointer as at the desk, every key passed through
+   in full screen (Super, Alt+Tab, Ctrl+Alt+…; the Mac's Cmd mapped
+   sensibly), touch where the viewer has it.
+4. **Clipboard** both ways: text and pictures, with a switch per connection.
+5. **Files** both ways: drag onto the remote desktop or out of it, and a
+   transfer list, through SFTP on the same SSH connection (no file protocol
+   of our own).
+6. **Privacy**: blank (lock) the remote monitors while connected; unlocking
+   at the desk ends the connection.
+7. **The login and lock screens**, reached remotely (vdm takes the viewer).
+8. **The machine list**: saved machines (name, SSH host), which are
+   reachable, and switching between open ones with a key, as a KVM's button.
+9. **Who is watching**: the Dockworker's tile and End, on the remote machine.
 
-Dave: "client wise, we need to be able run on multiple platforms. and plan the
-extra protocols for later VNC, virt, RDP, etc."
+## Later (planned, not in milestone 1)
 
-**Clients run on several platforms from the start.** One client, written in
-Rust, in two layers:
-- **A portable core** (a crate of its own): the connection, the protocol, and
-  drawing what arrives (display lists through vergence-render, pixels by
-  decoding), with no platform code. The same core in every client.
-- **Thin shells per platform**: a window, input, the clipboard and the
-  screen's size and density from each system. First Vergence itself and the
-  other Linux and FreeBSD desktops (Wayland, X11 later if wanted), the Mac,
-  and Windows; phones later.
-- **The protocol is documented and versioned** (as the bus protocol is), so
-  others can write clients of their own.
+- **Sound** (Opus) and **video** for moving pictures, with the recording
+  milestone's encoder.
+- **Browse through this machine**: the same SSH connection as a proxy
+  (`ssh -D`), so the local browser reaches the remote network's pages
+  (pfSense, a NAS) with its own bookmarks and passwords.
+- **Wake-on-LAN** for a machine that is asleep.
+- **Extend** and a **separate remote login** beside the desk's session (the
+  first draft's modes).
+- **USB passthrough** (a YubiKey for the remote's sudo or ssh), printing.
+- **Accessibility**: the remote apps' meaning trees, so a screen reader on
+  the viewer's side reads them.
+- **Other hosts**: RDP and VNC as front ends on the remote screen, and
+  perhaps viewing Mac or Windows hosts.
+- Phones and tablets.
 
-**Extra protocols come later, planned for now.** The remote screen produces
-frames, damage and display lists and takes input; a protocol is a **front end
-on that screen**, so adding one never touches the screen model:
-- **Native** (milestone 1): display lists and pixels, ours.
-- **VNC (RFB)**: pixels only; any VNC viewer works. Likely the first extra.
-- **RDP**: pixels with better compression; Windows' own client works.
-- **Virtual machines** ("virt": SPICE, as virt-manager and virt-viewer use):
-  for VMs, and for showing a session to those tools.
-- Each one arrives with its own security review, and with the same rules as
-  native: logins through vdm, transport through SSH or WireGuard (or the
-  protocol's own TLS when bound only to a tunnel), the watcher indicator.
-- Whether any borrows a library is asked of Dave when its turn comes.
+## How it is built
 
-So milestone 1's work includes keeping that front-end seam clean: the native
-protocol is the first front end, not wired through the screen.
+**The host side, in the server.** A remote viewer is a screen of the
+session with no monitor behind it, as the headless sessions' in-memory
+screens are (`MEM-1`): it inherits drawing at its own scale, window memory
+for its setup, the dock, the lock screen and input routing. Its frames go to
+the viewer instead of memory. The native protocol is the first **front end**
+on that screen, kept apart so RDP or VNC can be added later without touching
+the screen.
 
-## Answers (Dave, 2026-11-22)
+**`vergence-remote`, the host's program**, run by SSH as the person: it
+reaches the session (or vdm's login screen when nobody is logged in), and
+relays the stream between the server and the SSH channel. Pictures and
+keymaps, which local apps pass as file descriptors, cross as bytes, with a
+cache so a picture crosses once.
 
-"Vergence and Mac first, all three modes, both."
-1. **Clients**: several platforms; the **Vergence and Mac shells first**,
-   Windows after.
-2. **Standard protocols**: later, planned now as front ends (above).
-3. **Modes**: **all three** in milestone 1 (extend, mirror, take over).
-4. **Sessions**: **both**: attach to the session at the desk, or a remote
-   login of its own through vdm.
+**The protocol**, documented and versioned as the bus protocol is: display
+lists and pixel tiles from the host; input, clipboard and screen sizes from
+the viewer. Every frame from the host is untrusted input on the viewer's
+side, as an app's display list is on the server's: validated, with limits.
 
-## The order: Vergence first, then a portable build (Dave, 2026-11-22)
+**The client, in two layers.**
+- **A portable core** (a Rust crate): the connection, the protocol, drawing
+  display lists and pixels into a picture (vergence-render), the clipboard
+  and transfer models, the machine list. No platform code.
+- **A thin shell per platform**: a window, input, the clipboard, the
+  screen's size and density.
+  - **The Vergence viewer** first: a vergence-ui app, the easy case.
+  - **The Mac viewer** next, as the first app of the toolkit's portable
+    build (its AppKit road), signed with the lab's Developer ID. It needs
+    Rust on Control (rustup in the home folder, not Homebrew; ask Dave
+    first), and an early check that vergence-render's GL road runs on
+    macOS's OpenGL 4.1, or whether the Mac needs a Metal road or a CPU
+    fallback.
+  - **Windows, Linux and BSD desktops** after, through the same build.
+  - Should the toolkit's Mac or Windows roads lag, the same core can sit
+    under another shell (a .NET one, if Dave wants) without being rewritten.
 
-Asked whether the Mac shell should use Avalonia, and reminded that the apps
-roadmap already plans toolkit roads for macOS and Windows, Dave set the order:
+**Consent and the tile** reuse the agent interface's machinery, as server
+features: the connection's identity, the Dockworker tile and End, the log.
+The screen stream is its own channel, never the agent interface itself
+(the agent layer stays frozen, 2026-11-22).
+
+## Questions (with leans)
+
+1. **The order of the steps** below: host side and protocol, then the
+   Vergence viewer, then clipboard and files, then the login screen, then
+   the Mac viewer as its own milestone (the portable build)? *Lean: yes.*
+2. **Name**: "Vergence Remote" for the app, `vergence-remote` for the host's
+   program? *Lean: yes.*
+3. **The machine list's source**: our own list, or the hosts in
+   `~/.ssh/config` offered to add? *Lean: our own list, with the ssh config's
+   hosts offered when adding one.*
+4. **Pixels for other programs' windows**: our own simple compression of
+   changed tiles (zstd is borrowed; a plain run-length or our own LZ is not)?
+   *Lean: our own LZ-style compression first, measured, before borrowing.*
+
+## Steps
+
+1. **The remote screen in the server**: a screen kind whose frames and
+   damage go to a front end; attaching to the running session; blanking
+   (locking) the local monitors. Tests in the headless suite.
+2. **The protocol** (a document and a crate): versioned messages, display
+   lists and tiles, input, sizes; the validation and limits on the viewer's
+   side; unit tests with hostile frames.
+3. **`vergence-remote`**: run by SSH, reaching the session over the bus,
+   relaying, the picture cache; the Dockworker tile, End, the log; "Ask the
+   person at the desk" off for the same user.
+4. **The portable core and the Vergence viewer**: connect, draw, input, full
+   screen with keys passed through, the machine list and switching.
+5. **Clipboard and files**: text and pictures both ways; drag and drop and
+   transfers through SFTP.
+6. **The login screen**: vdm takes the viewer before anyone is logged in.
+7. **Checks**: a display-suite scenario (a headless session viewed by a
+   headless viewer over a local SSH), tests on Hubble, techbench and kepler,
+   latency measured on the LAN and over WireGuard, an independent security
+   review before anything is used across the network.
+
+Then **the portable build milestone**, with the Mac viewer as its first app.
+
+## The first draft (2026-11-22), kept
+
+The backbone agreed then still holds: a remote viewer is a screen of the
+session (Dave: "should it be a new screen? ... it would inherit all the good
+work we have done on screen memory, session management and so on"), one
+screen type with three modes: **extend** (one more screen), **mirror** (a
+chosen screen, redrawn at the viewer's scale), **take over** (local monitors
+locked and blank, the remote screen the only one). Milestone 1 now builds
+the attaching case (mirror, with blanking as take over's privacy); extend
+and a separate remote login come later. Dave then: "client wise, we need to
+be able run on multiple platforms. and plan the extra protocols for later
+VNC, virt, RDP, etc."; "Vergence and Mac first, all three modes, both"; and
 "right now I think the Vergence model is the priority and then building the
-ability to compile a version like the aot for avalonia/.NET".
-
-1. **This milestone: the Vergence model.** The remote screen and its three
-   modes in the server, the native protocol as the first front end, vdm's
-   remote logins, and the client on Vergence (vergence-ui, its native road).
-   The client's core stays free of platform code so the next step can carry
-   it.
-2. **After it: a portable build of Vergence apps**, as `dotnet publish` with
-   Native AOT gives an Avalonia app: one command per platform that makes a
-   self-contained native app (a signed .app on the Mac, an .exe on Windows)
-   from the same code. That is the toolkit roads of the apps roadmap (AppKit,
-   then Win32), with vergence-render drawing on each. **The remote client is
-   its first app**, so the Mac client arrives through the toolkit, not a
-   second codebase; Edit, Reader and Vergence Music can follow.
-3. **Avalonia is not used for the client.** It stays the toolkit of Dave's
-   existing Mac, Windows and Pi apps (AlbumWall, Deadwax, Marginal).
-
-So "Vergence and Mac first" means: Vergence in this milestone, the Mac as the
-first target of the portable build that follows.
-
-## What the answers bring with them
-
-- **A Mac build** (the portable-build milestone, not this one). Control has no Rust today. The Mac shell needs Rust there
-  (rustup, which installs into the home folder; not Homebrew) and is signed
-  with the Developer ID the lab's Mac apps already use, so Gatekeeper lets it
-  run. Ask Dave before installing rustup on Control.
-- **The Mac shell draws with vergence-render**, so its GL road must run on
-  macOS (OpenGL there is old, 4.1 and deprecated): find out early whether it
-  does, or whether the core needs a Metal road or a CPU fallback for the Mac.
-- **Two sessions at once** for a remote login while someone is at the desk:
-  vdm today runs one session per seat; a remote login is a session with no
-  seat of its own (its only screen is the remote one), which vdm must allow
-  and show (who is logged in remotely, on the login screen and in About).
-- **Take over and the lock**: the local screens lock with vdm's lock screen,
-  and unlocking at the desk ends the take-over (the viewer sees why).
-
-## Next
-
-Write the protocol outline and the build steps (the remote screen in the
-server, the native front end, the portable client core, the Vergence shell,
-the Mac shell, then the modes and the vdm side), each with its tests and a
-security review before anything listens. Building starts after the terminal
-agent fixes are in and installed.
+ability to compile a version like the aot for avalonia/.NET". Avalonia was
+not to be used for the client (2026-11-22); a .NET shell over the same core
+is listed above only as Dave's own alternative.
