@@ -242,7 +242,8 @@ impl App for Viewer {
             self.send(ToHost::Resize { width: px.0, height: px.1 });
         }
         self.take_frame();
-        let state = self.session.as_ref().and_then(|s| s.shared.lock().ok().map(|sh| (sh.state.clone(), sh.notice.clone())));
+        let state =
+            self.session.as_ref().and_then(|s| s.shared.lock().ok().map(|sh| (sh.state.clone(), sh.notice.clone())));
         match state {
             Some((State::Ended(why), notice)) => {
                 let line = notice.unwrap_or_else(|| "The connection ended".into());

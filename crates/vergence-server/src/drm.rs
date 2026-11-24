@@ -2433,9 +2433,19 @@ pub fn remote_tile(state: &mut Server) {
     let mut screens: Vec<String> = views.iter().map(|v| v.1.clone()).collect();
     screens.dedup();
     let mins = secs / 60;
-    let long = if mins == 0 { "just now".to_string() } else if mins < 60 { format!("{mins} min") } else { format!("{} h {} min", mins / 60, mins % 60) };
+    let long = if mins == 0 {
+        "just now".to_string()
+    } else if mins < 60 {
+        format!("{mins} min")
+    } else {
+        format!("{} h {} min", mins / 60, mins % 60)
+    };
     let others = views.iter().filter(|v| v.0 != who).count();
-    let title = if others > 0 { format!("{who} and {others} more are viewing this computer") } else { format!("{who} is viewing this computer") };
+    let title = if others > 0 {
+        format!("{who} and {others} more are viewing this computer")
+    } else {
+        format!("{who} is viewing this computer")
+    };
     state.tile_set(
         crate::tiles::Owner::Desktop,
         Tile {

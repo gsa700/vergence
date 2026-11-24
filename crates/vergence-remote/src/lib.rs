@@ -38,7 +38,8 @@ pub fn find_socket() -> Result<std::path::PathBuf, String> {
     let dirs: Vec<std::path::PathBuf> = match std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()) {
         Some(d) => vec![d.into()],
         None => {
-            let mut v: Vec<std::path::PathBuf> = vec![format!("/run/user/{uid}").into(), format!("/tmp/xdg-{uid}").into()];
+            let mut v: Vec<std::path::PathBuf> =
+                vec![format!("/run/user/{uid}").into(), format!("/tmp/xdg-{uid}").into()];
             if let Ok(user) = std::env::var("USER") {
                 v.push(format!("/var/run/xdg/{user}").into());
             }

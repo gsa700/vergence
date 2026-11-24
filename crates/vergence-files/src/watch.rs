@@ -24,7 +24,8 @@ impl Viewer {
         if let Some(l) = self.peek.clone() {
             let keys = std::mem::take(&mut l.borrow_mut().keys);
             for sym in keys {
-                let key = Input::Key { code: 0,
+                let key = Input::Key {
+                    code: 0,
                     sym,
                     text: None,
                     pressed: true,
