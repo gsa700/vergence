@@ -6,7 +6,7 @@
 //! triple, docstring), from a triple quote not yet closed, or a one-quote string whose line
 //! ends in a backslash. Everything else ends with its line.
 
-use crate::{Highlight, Kind, Span, State, push};
+use crate::{Highlight, Kind, Span, State, char_len, push};
 
 pub struct Python;
 
@@ -201,17 +201,6 @@ impl Str {
             triple: f & TRIPLE != 0,
             kind: if f & DOC != 0 { Kind::DocComment } else { Kind::String },
         }
-    }
-}
-
-/// The byte length of the character starting with byte `c`.
-fn char_len(c: u8) -> usize {
-    match c {
-        0..0x80 => 1,
-        0xc0..0xe0 => 2,
-        0xe0..0xf0 => 3,
-        0xf0.. => 4,
-        _ => 1, // a continuation byte: never a start in valid UTF-8
     }
 }
 

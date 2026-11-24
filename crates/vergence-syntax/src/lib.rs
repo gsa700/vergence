@@ -28,6 +28,7 @@ use std::sync::OnceLock;
 
 #[cfg(test)]
 mod fuzz;
+mod markdown;
 mod python;
 
 /// What a piece of a line is. The look gives each a color (and Markdown's
@@ -100,6 +101,9 @@ pub struct Language {
     /// Names after `#!` and `env` that mean this language ("python3").
     pub interpreters: Vec<String>,
     pub words: Vec<String>,
+    /// Its plain text is prose (Markdown): spelled and completed from the
+    /// dictionary. In code only comments and strings are.
+    pub prose: bool,
     highlight: Box<dyn Highlight>,
 }
 
@@ -115,14 +119,26 @@ fn strings(list: &[&str]) -> Vec<String> {
 pub fn languages() -> &'static [Language] {
     static ALL: OnceLock<Vec<Language>> = OnceLock::new();
     ALL.get_or_init(|| {
-        vec![Language {
-            name: "Python".into(),
-            extensions: strings(&["py", "pyw", "pyi"]),
-            first_lines: Vec::new(),
-            interpreters: strings(&["python", "python3", "python2", "pypy", "pypy3"]),
-            words: python::words(),
-            highlight: Box::new(python::Python),
-        }]
+        vec![
+            Language {
+                name: "Python".into(),
+                extensions: strings(&["py", "pyw", "pyi"]),
+                first_lines: Vec::new(),
+                interpreters: strings(&["python", "python3", "python2", "pypy", "pypy3"]),
+                words: python::words(),
+                prose: false,
+                highlight: Box::new(python::Python),
+            },
+            Language {
+                name: "Markdown".into(),
+                extensions: strings(&["md", "markdown", "mdown", "mkd", "mkdn"]),
+                first_lines: Vec::new(),
+                interpreters: Vec::new(),
+                words: Vec::new(),
+                prose: true,
+                highlight: Box::new(markdown::Markdown),
+            },
+        ]
     })
 }
 
@@ -191,6 +207,17 @@ pub fn kind_at(spans: &[Span], at: usize) -> Option<Kind> {
 /// dictionary completes words: comments, docstrings, strings.
 pub fn is_prose(kind: Option<Kind>) -> bool {
     matches!(kind, Some(Kind::Comment | Kind::DocComment | Kind::String))
+}
+
+/// The byte length of the character starting with byte `c`.
+pub(crate) fn char_len(c: u8) -> usize {
+    match c {
+        0..0x80 => 1,
+        0xc0..0xe0 => 2,
+        0xe0..0xf0 => 3,
+        0xf0.. => 4,
+        _ => 1, // a continuation byte: never a start in valid UTF-8
+    }
 }
 
 /// Shared by the highlighters: spans pushed in order, merging a span into

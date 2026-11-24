@@ -260,24 +260,78 @@ impl Shaped {
     }
 }
 
+/// The faces a text area sets text in: regular, and bold and italic for
+/// the pieces a language styles (Markdown's headings and strong, its
+/// emphasis). A family without them gives its nearest, the regular.
+#[derive(Clone, Copy)]
+struct Faces {
+    regular: FaceId,
+    bold: FaceId,
+    italic: FaceId,
+}
+
+impl Faces {
+    fn of(&self, kind: Option<syntax::Kind>) -> FaceId {
+        match kind {
+            Some(syntax::Kind::Heading | syntax::Kind::Strong) => self.bold,
+            Some(syntax::Kind::Emphasis) => self.italic,
+            _ => self.regular,
+        }
+    }
+}
+
+/// The pieces of a line in a face other than the regular one: where the
+/// line's layout is cut, so a bold word is measured in bold.
+fn styled(spans: &[syntax::Span]) -> impl Iterator<Item = (usize, usize, syntax::Kind)> + '_ {
+    spans
+        .iter()
+        .filter(|s| matches!(s.kind, syntax::Kind::Heading | syntax::Kind::Strong | syntax::Kind::Emphasis))
+        .map(|s| (s.start, s.end, s.kind))
+}
+
+/// From byte `a` to `end` of a line: how far one face goes, and which face.
+fn face_run(spans: &[syntax::Span], faces: &Faces, a: usize, end: usize) -> (usize, FaceId) {
+    for (s, e, k) in styled(spans) {
+        if s <= a && a < e {
+            return (e.min(end), faces.of(Some(k)));
+        }
+        if s > a {
+            return (s.min(end), faces.regular);
+        }
+    }
+    (end, faces.regular)
+}
+
 /// Where each character falls, by advances measured in `fonts` (tabs to the
-/// next stop), and where the line wraps at `wrap_w` (0: it does not).
-fn shape_line(fonts: &mut Fonts, face: FaceId, size: f32, tab_w: f32, wrap_w: f32, s: &str) -> Shaped {
+/// next stop), each piece in its face (`spans`: the line's syntax), and
+/// where the line wraps at `wrap_w` (0: it does not).
+fn shape_line(
+    fonts: &mut Fonts,
+    faces: &Faces,
+    size: f32,
+    tab_w: f32,
+    wrap_w: f32,
+    s: &str,
+    spans: &[syntax::Span],
+) -> Shaped {
     let mut stops = Vec::with_capacity(s.len() + 1);
     let mut pen = 0.0f32;
     let mut start = 0;
     loop {
         let end = s[start..].find('\t').map_or(s.len(), |k| start + k);
-        let seg = &s[start..end];
-        if !seg.is_empty() {
+        let mut a = start;
+        while a < end {
+            let (b, face) = face_run(spans, faces, a, end);
+            let seg = &s[a..b];
             let (runs, w) = fonts.layout(face, size, seg);
             let mut xs = runs.iter().flat_map(|r| r.glyphs.iter().map(|g| g.x)).peekable();
-            for (b, c) in seg.char_indices() {
+            for (k, c) in seg.char_indices() {
                 // Control characters have no glyph: they sit where the next one does.
                 let x = if c.is_control() { xs.peek().copied().unwrap_or(w) } else { xs.next().unwrap_or(w) };
-                stops.push((start + b, pen + x));
+                stops.push((a + k, pen + x));
             }
             pen += w;
+            a = b;
         }
         if end == s.len() {
             break;
@@ -912,10 +966,26 @@ impl Doc {
             }
             let mut end = start.clone();
             let spans = syntax::highlight(lang, &mut end, self.buffer.line(j));
+            // A line whose bold or italic pieces moved is laid out again.
+            let old: Vec<_> = self.hl[j].as_ref().map(|h| styled(&h.spans).collect()).unwrap_or_default();
+            if !old.iter().copied().eq(styled(&spans))
+                && let Some(slot) = self.shaped.get_mut(j)
+            {
+                *slot = None;
+            }
             self.hl[j] = Some(Rc::new(Hl { start, spans: spans.into(), end }));
         }
         self.hl_valid = i + 1;
         self.hl[i].clone()
+    }
+
+    /// Line `i` laid out (if it is not yet), each piece in its face.
+    fn shape(&mut self, i: usize, fonts: &mut Fonts, faces: &Faces, size: f32, tab_w: f32, wrap_w: f32) {
+        let hl = self.line_syntax(i);
+        if self.shaped[i].is_none() {
+            let spans: &[syntax::Span] = hl.as_ref().map_or(&[], |h| &h.spans);
+            self.shaped[i] = Some(Rc::new(shape_line(fonts, faces, size, tab_w, wrap_w, self.buffer.line(i), spans)));
+        }
     }
 
     /// The kind of piece at `p` (None: plain text, or no language): where
@@ -1876,6 +1946,11 @@ impl Doc {
         else {
             return;
         };
+        let faces = Faces {
+            regular: face,
+            bold: fonts.face(family, 700, false).or_else(|| fonts.face("monospace", 700, false)).unwrap_or(face),
+            italic: fonts.face(family, 400, true).or_else(|| fonts.face("monospace", 400, true)).unwrap_or(face),
+        };
         let m = fonts.metrics(face, size);
         let spacing = self.options.line_spacing.filter(|s| s.is_finite()).unwrap_or(CODE_SPACING).clamp(1.0, 3.0);
         let line_h = (m.ascent + m.descent + m.line_gap).max(size * spacing).ceil();
@@ -1927,16 +2002,12 @@ impl Doc {
         // The lines above the view that show under the bar.
         while i > 0 && y > r.y {
             i -= 1;
-            if self.shaped[i].is_none() {
-                self.shaped[i] = Some(Rc::new(shape_line(fonts, face, size, tab_w, wrap_w, self.buffer.line(i))));
-            }
+            self.shape(i, fonts, &faces, size, tab_w, wrap_w);
             y -= self.line_height(i);
         }
         let mut widest = 0.0f32;
         while i < n && y < r.y + r.h {
-            if self.shaped[i].is_none() {
-                self.shaped[i] = Some(Rc::new(shape_line(fonts, face, size, tab_w, wrap_w, self.buffer.line(i))));
-            }
+            self.shape(i, fonts, &faces, size, tab_w, wrap_w);
             let s = self.shaped[i].clone().expect("laid out above");
             let h = s.rows.len() as f32 * line_h;
             widest = widest.max(s.width);
@@ -1952,8 +2023,7 @@ impl Doc {
                     let c = self.caret.col;
                     bad.retain(|(a, b)| !(*a <= c && c <= *b));
                 }
-                // High contrast keeps one ink: colors would lower it.
-                let hl = if theme.high_contrast { None } else { self.line_syntax(i) };
+                let hl = self.line_syntax(i);
                 let line = self.buffer.line(i);
                 if self.options.current_line && i == self.caret.line && !selected {
                     scene.fill(Rect::new(r.x, y, r.w, h), shade);
@@ -2027,13 +2097,19 @@ impl Doc {
                             while k < spans.len() && spans[k].end <= a {
                                 k += 1;
                             }
-                            let (b, c) = match spans.get(k) {
-                                Some(sp) if sp.start <= a => (sp.end.min(q), syntax_color(sp.kind, syn, text_c)),
-                                Some(sp) => (sp.start.min(q), text_c),
-                                None => (q, text_c),
+                            let (b, kind) = match spans.get(k) {
+                                Some(sp) if sp.start <= a => (sp.end.min(q), Some(sp.kind)),
+                                Some(sp) => (sp.start.min(q), None),
+                                None => (q, None),
+                            };
+                            // High contrast keeps one ink (colors would lower it), not the weights.
+                            let c = match kind {
+                                Some(k) if !theme.high_contrast => syntax_color(k, syn, text_c),
+                                _ => text_c,
                             };
                             if b > a {
-                                text(scene, fonts, face, size, c, Point::new(x0 + s.x_of(a), base), &line[a..b]);
+                                let f = faces.of(kind);
+                                text(scene, fonts, f, size, c, Point::new(x0 + s.x_of(a), base), &line[a..b]);
                             }
                             a = b;
                         }
@@ -2054,9 +2130,7 @@ impl Doc {
         }
         // The lines just past each end too, so Up and Down land exactly.
         for k in [self.top.checked_sub(1), (i < n).then_some(i)].into_iter().flatten() {
-            if self.shaped[k].is_none() {
-                self.shaped[k] = Some(Rc::new(shape_line(fonts, face, size, tab_w, wrap_w, self.buffer.line(k))));
-            }
+            self.shape(k, fonts, &faces, size, tab_w, wrap_w);
         }
         if wrap_w <= 0.0 {
             let room = (widest - text_w + char_w).max(0.0);
