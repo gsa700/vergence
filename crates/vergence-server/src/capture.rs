@@ -75,7 +75,7 @@ impl Server {
     /// Asks for a capture on the next frame; the files it will be written
     /// to, or why not.
     pub fn capture_ask(&mut self, req: Request) -> Result<Vec<PathBuf>, String> {
-        if self.lock.on {
+        if self.session_locked() {
             return Err("the screen is locked".into());
         }
         if crate::greeter() {
@@ -472,7 +472,7 @@ impl Server {
                 self.capture_now(what, clip);
             }
             CaptureKey::Area => {
-                if self.lock.on || crate::greeter() {
+                if self.session_locked() || crate::greeter() {
                     return;
                 }
                 self.capture_pick_open(clip, false, false);
@@ -1168,7 +1168,7 @@ fn label(b: Btn, c: &Choices, secs_left: Option<u64>) -> String {
 impl Server {
     /// Super+Shift+5: the bar opens on the screen under the pointer.
     pub fn bar_open(&mut self, clip: bool) {
-        if self.lock.on || crate::greeter() {
+        if self.session_locked() || crate::greeter() {
             return;
         }
         let mut choices =

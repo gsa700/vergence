@@ -242,7 +242,7 @@ impl Server {
     /// What is under `pos`, for the seat; and the pointer's picture there.
     pub fn target_at(&mut self, pos: Point<f64, Logical>) -> Option<Target> {
         // Locked: everything is the lock's (lock.rs).
-        if self.lock.on || crate::greeter() {
+        if self.locked_for_input() || crate::greeter() {
             return Some(Target::Server(Part::Lock));
         }
         // The log out dialog, or the elevation prompt: everything is theirs

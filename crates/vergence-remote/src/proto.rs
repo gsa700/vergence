@@ -22,7 +22,7 @@ use crate::lz;
 
 pub const MAGIC: &[u8; 4] = b"VRMT";
 /// Raised with every change to a message's layout.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 /// The longest message either side accepts.
 pub const MAX_MESSAGE: usize = 128 << 20;
 /// The largest view, each way.
@@ -185,6 +185,11 @@ pub enum ToHost {
         dy: f32,
     },
     Bye,
+    /// Blank the desk (version 2): the host's monitors locked behind a
+    /// curtain while this viewer goes on using the session; or lift it.
+    Privacy {
+        on: bool,
+    },
 }
 
 /// What the host sends.
@@ -202,6 +207,11 @@ pub enum ToViewer {
     },
     Bye {
         reason: String,
+    },
+    /// Whether the desk is blanked now (version 2): the answer to
+    /// [`ToHost::Privacy`], and `false` when the curtain went.
+    Privacy {
+        on: bool,
     },
 }
 
@@ -332,6 +342,10 @@ impl ToHost {
                 7
             }
             ToHost::Bye => 8,
+            ToHost::Privacy { on } => {
+                b.push(*on as u8);
+                9
+            }
         };
         frame_out(w, kind, &b)
     }
@@ -362,6 +376,7 @@ impl ToHost {
             6 => ToHost::Button { code: f.u32()?, pressed: f.u8()? != 0 },
             7 => ToHost::Scroll { dx: f.f32()?, dy: f.f32()? },
             8 => ToHost::Bye,
+            9 => ToHost::Privacy { on: f.u8()? != 0 },
             _ => return Err(Error::Bad("an unknown message")),
         };
         f.done()?;
@@ -407,6 +422,10 @@ impl ToViewer {
                 put_str(&mut b, reason);
                 4
             }
+            ToViewer::Privacy { on } => {
+                b.push(*on as u8);
+                5
+            }
         };
         frame_out(w, kind, &b)
     }
@@ -445,6 +464,7 @@ impl ToViewer {
             }
             3 => ToViewer::Notice { text: f.str()? },
             4 => ToViewer::Bye { reason: f.str()? },
+            5 => ToViewer::Privacy { on: f.u8()? != 0 },
             _ => return Err(Error::Bad("an unknown message")),
         };
         f.done()?;
@@ -467,6 +487,7 @@ mod tests {
             ToHost::Button { code: 0x110, pressed: false },
             ToHost::Scroll { dx: 0.0, dy: -3.0 },
             ToHost::Bye,
+            ToHost::Privacy { on: true },
         ];
         let mut b = Vec::new();
         for m in &to_host {
@@ -488,6 +509,7 @@ mod tests {
             }),
             ToViewer::Notice { text: "Ended from the desk".into() },
             ToViewer::Bye { reason: "bye".into() },
+            ToViewer::Privacy { on: false },
         ];
         let mut b = Vec::new();
         for m in &to_viewer {

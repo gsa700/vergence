@@ -165,7 +165,7 @@ impl Server {
             .unwrap_or_else(|| program.rsplit('/').next().unwrap_or("A program").to_string());
         let asked = Asked { conn, handle: handle.clone(), program: program.clone(), name, kind };
         tracing::info!("portal: {} ({program}) asks for {kind:?}", asked.name);
-        if self.lock.on || crate::greeter() || program.is_empty() {
+        if self.session_locked() || crate::greeter() || program.is_empty() {
             self.dbus_request_response(conn, &handle, 2, Value::Array("{sv}".into(), Vec::new()));
             return Ok(handle);
         }

@@ -359,7 +359,7 @@ impl Server {
             },
             // The Screenshot app opens the bar (capture.rs; bus v32).
             ClientMsg::ScreenshotBar { serial } => {
-                if self.lock.on || crate::greeter() {
+                if self.session_locked() || crate::greeter() {
                     self.bus_send(
                         id,
                         ServerMsg::Error {

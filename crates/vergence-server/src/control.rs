@@ -197,7 +197,7 @@ impl Server {
         // while idle (a test on an idle machine clicked into nothing).
         // Locked, the control socket takes nothing but a picture of the
         // screens (which show only the lock) and the lock's report (threat model T4).
-        if self.lock.on && !matches!(cmd, "shot" | "lock") {
+        if self.lock.on && !matches!(cmd, "shot" | "lock" | "remote" | "tiles") {
             return "locked".into();
         }
         // The elevation prompt is answered by the person at the machine only
@@ -320,6 +320,13 @@ impl Server {
             "lock" => {
                 if args.first() == Some(&"now") {
                     self.lock_request("vctl");
+                }
+                // A headless session's way out (tests; no vdm there).
+                if args.first() == Some(&"test-unlock") && !self.lock_test_unlock() {
+                    return "lock: test-unlock is for a locked headless session only".into();
+                }
+                if args.first() == Some(&"curtain") {
+                    return if self.lock.curtain { "curtain".into() } else { "no curtain".into() };
                 }
                 if self.lock.on { "locked".into() } else { "unlocked".into() }
             }

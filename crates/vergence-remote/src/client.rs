@@ -41,6 +41,8 @@ pub struct Shared {
     pub frames: u64,
     /// The last notice from the host, to show the person.
     pub notice: Option<String>,
+    /// The host's desk is blanked (version 2).
+    pub privacy: bool,
 }
 
 pub struct Session {
@@ -64,6 +66,7 @@ impl Session {
             dirty: Vec::new(),
             frames: 0,
             notice: None,
+            privacy: false,
         }));
         let (tx, rx) = mpsc::channel::<ToHost>();
         let child: Arc<Mutex<Option<Child>>> = Arc::default();
@@ -216,6 +219,12 @@ fn run(
             ToViewer::Notice { text } => {
                 if let Ok(mut s) = shared.lock() {
                     s.notice = Some(text);
+                }
+                wake();
+            }
+            ToViewer::Privacy { on } => {
+                if let Ok(mut s) = shared.lock() {
+                    s.privacy = on;
                 }
                 wake();
             }

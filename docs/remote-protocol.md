@@ -1,4 +1,4 @@
-# Vergence Remote protocol, version 1
+# Vergence Remote protocol, version 2
 
 The stream between a viewer and a Vergence host (remote milestone 1,
 docs/remote-milestone-1.md). The reference implementation is
@@ -39,6 +39,7 @@ fields: shorter or longer is an error, as is an unknown type.
 | 6 | Button | code u32 (evdev: 0x110 left, 0x111 right, 0x112 middle), pressed u8 |
 | 7 | Scroll | dx f32, dy f32 |
 | 8 | Bye | (none) |
+| 9 | Privacy | on u8: blank the host's desk (its monitors locked behind a curtain while this viewer goes on), or lift it |
 
 Widths and heights are 1 to 16,384.
 
@@ -50,6 +51,7 @@ Widths and heights are 1 to 16,384.
 | 2 | Frame | seq u32, width u32, height u32 (the view's pixels), scale f32, count u32 (at most 4,096), then each rectangle: x, y, w, h u32, encoding u8, length u32, data |
 | 3 | Notice | text str (to show the person: "Ended from the desk") |
 | 4 | Bye | reason str |
+| 5 | Privacy | on u8: whether the desk is blanked now (the answer to Privacy; `0` when the curtain went) |
 
 ## Frames
 
@@ -85,3 +87,5 @@ every length and offset and must produce exactly `w * h * 4` bytes.
 ## Changes
 
 Version 1 (2026-11-23): the first.
+
+Version 2 (2026-11-23): Privacy both ways (blanking the desk).

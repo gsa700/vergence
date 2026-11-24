@@ -11,7 +11,7 @@
 //! The script runs after the first frame, as a viewer's input: `pointer X Y`
 //! (the view's pixels), `press|release left|right|middle`, `key CODE` (an evdev
 //! code, down and up), `type TEXT` (small letters, digits and spaces), `scroll
-//! DX DY`, `wait MS`.
+//! DX DY`, `privacy on|off` (blank the desk), `wait MS`.
 
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::process::{Command, ExitCode, Stdio};
@@ -81,6 +81,7 @@ fn script_step(cmd: &str) -> Result<(Vec<ToHost>, u64), String> {
         }
         Some("scroll") => (vec![ToHost::Scroll { dx: num(1)?, dy: num(2)? }], 30),
         Some("wait") => (Vec::new(), num(1)? as u64),
+        Some("privacy") => (vec![ToHost::Privacy { on: words.get(1) == Some(&"on") }], 30),
         _ => return Err(format!("script: {cmd:?}")),
     })
 }
@@ -157,6 +158,7 @@ fn main() -> ExitCode {
                     }
                 }
                 ToViewer::Notice { text } => println!("notice: {text}"),
+                ToViewer::Privacy { on } => println!("privacy: {}", if on { "on" } else { "off" }),
                 ToViewer::Bye { reason } => return Err(format!("bye: {reason}")),
             }
         }

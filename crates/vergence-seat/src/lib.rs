@@ -304,6 +304,13 @@ impl Seat {
         self.locked
     }
 
+    /// The lock set aside, or set again, and nothing else done (remote
+    /// milestone 1: a Vergence Remote viewer's input passes the desk's
+    /// curtain, one event at a time; grabs, menus and focus are kept).
+    pub fn set_locked_quietly(&mut self, locked: bool) {
+        self.locked = locked;
+    }
+
     pub fn new() -> Seat {
         Seat::default()
     }

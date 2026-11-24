@@ -20,6 +20,8 @@ scenario() {
     check "$(yes_if "[ '${frames:-0}' -gt 0 ]")" "the host draws frames for it"
     # The view's size is the window's below its bar (1280 x 760 asked, at scale 1).
     check "$(yes_if "echo '$view' | grep -qE ' [0-9]+x[0-9]+ scale ' && ! echo '$view' | grep -q ' 0x0 '")" "a view of the window's size"
+    # The bar's own button (Blank the desk, greyed here: this computer) is the
+    # server's drawing, not in the window's tree: seen in the shot.
     shot MEM-1 viewer >/dev/null
     # Closing the window ends the view and the tile.
     w=$(vctl windows | grep '"vergence-remote-viewer"' | head -1 | cut -d' ' -f1)

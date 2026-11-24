@@ -20,7 +20,7 @@ use vergence_remote::client::{Session, State};
 use vergence_remote::proto::ToHost;
 use vergence_scene::{Color, Image, Point, Rect, Scene};
 use vergence_text::Fonts;
-use vergence_ui::{App, Button, Frame, Input, Waker, Window};
+use vergence_ui::{App, Bar, BarButton, BarIcon, Button, Frame, Input, Waker, Window};
 
 /// A tile's side in pixels.
 const TILE: u32 = 256;
@@ -55,6 +55,9 @@ pub struct Viewer {
     /// Only looking, no input sent: a view of this very session, where input
     /// would come back to this window and go out again, round and round.
     view_only: bool,
+    /// The bar's privacy button as last described (the host's answer, and
+    /// whether the session is live): asked again only when it changed.
+    bar_said: Option<(bool, bool)>,
 }
 
 fn this_host() -> String {
@@ -82,6 +85,7 @@ impl Viewer {
         Viewer {
             command,
             view_only,
+            bar_said: None,
             host: host.to_string(),
             session: None,
             waker: None,
@@ -152,6 +156,7 @@ impl Viewer {
     /// Input to the host; a resize always (the view follows the window).
     fn send(&self, m: ToHost) {
         let input = !matches!(m, ToHost::Resize { .. } | ToHost::Bye | ToHost::Ack { .. } | ToHost::Hello { .. });
+        // (Privacy counts as input: a view of this very computer never blanks its own desk.)
         if input && self.view_only {
             return;
         }
@@ -333,6 +338,40 @@ impl App for Viewer {
             }
             _ => {}
         }
+    }
+
+    /// The server draws the bar, and with it the window's own button (no
+    /// tabs: Bar::Tools only).
+    fn tabs_by_server(&self) -> bool {
+        true
+    }
+
+    /// The bar's own button: blank the host's desk (its monitors locked
+    /// behind a curtain while this window goes on using it), or show it.
+    fn bar(&mut self) -> Option<Bar> {
+        let (live, privacy) = self
+            .session
+            .as_ref()
+            .and_then(|s| s.shared.lock().ok().map(|sh| (sh.state == State::Live, sh.privacy)))
+            .unwrap_or((false, false));
+        let now = (live && !self.view_only, privacy);
+        if self.bar_said == Some(now) {
+            return None;
+        }
+        self.bar_said = Some(now);
+        let name = if privacy { "Show the desk" } else { "Blank the desk" };
+        Some(Bar::Tools {
+            buttons: vec![BarButton { id: 1, icon: BarIcon::Label, name: name.into(), enabled: now.0 }],
+            from: 0.0,
+        })
+    }
+
+    fn bar_button(&mut self, id: u32, _window: &mut Window) {
+        if id != 1 || self.view_only {
+            return;
+        }
+        let privacy = self.session.as_ref().and_then(|s| s.shared.lock().ok().map(|sh| sh.privacy)).unwrap_or(false);
+        self.send(ToHost::Privacy { on: !privacy });
     }
 
     fn close_asked(&mut self, _window: &mut Window) -> bool {

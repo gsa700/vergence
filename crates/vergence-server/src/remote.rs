@@ -40,6 +40,12 @@ pub enum Event {
 pub struct Remotes {
     conns: Vec<Conn>,
     pub path: Option<PathBuf>,
+    /// A remote view is being drawn now (drm.rs): behind the curtain it
+    /// draws the session, not the lock (decor.rs).
+    pub drawing: bool,
+    /// A remote viewer's input is being handled now: it passes the curtain
+    /// (lock.rs `locked_for_input`).
+    pub passing: bool,
 }
 
 struct Conn {
@@ -225,6 +231,24 @@ impl Server {
                     self.remote_input(v, msg);
                 }
             }
+            // Blank the desk, or lift the curtain (version 2): the desk's
+            // monitors locked while this viewer goes on; the answer says
+            // whether the desk is blanked now.
+            ToHost::Privacy { on } => {
+                let writer = self.remote.conns[c].writer.clone();
+                if on && !self.lock.on {
+                    if !self.lock_curtain() {
+                        send(&writer, &ToViewer::Notice { text: "The desk could not be blanked".into() });
+                    }
+                } else if on {
+                    if !self.lock.curtain {
+                        send(&writer, &ToViewer::Notice { text: "The desk is locked already".into() });
+                    }
+                } else {
+                    self.lift_curtain();
+                }
+                send(&writer, &ToViewer::Privacy { on: self.lock.on && self.lock.curtain });
+            }
             ToHost::Bye => self.remote_close(conn),
         }
     }
@@ -234,12 +258,30 @@ impl Server {
     /// decides where each goes. Counts as activity (energy.rs). Not while the
     /// server's elevation prompt is up: that is answered at the machine.
     fn remote_input(&mut self, view: u32, msg: ToHost) {
-        use smithay::backend::input::{Axis, AxisSource, ButtonState, InputTime, KeyState};
+        use smithay::backend::input::InputTime;
         if self.elevating() {
             return;
         }
         self.energy_activity();
         let now = InputTime::now();
+        // Behind the curtain the viewer's input passes, one event at a time:
+        // the seat's lock set aside around it and set again (the desk's own
+        // input meets the lock, lock.rs `locked_for_input`). A lock of any
+        // other kind is met: the keys reach its password field.
+        let curtain = self.lock.on && self.lock.curtain;
+        if curtain {
+            self.remote.passing = true;
+            self.input.seat.set_locked_quietly(false);
+        }
+        self.remote_input_now(view, msg, now);
+        if curtain {
+            self.input.seat.set_locked_quietly(true);
+            self.remote.passing = false;
+        }
+    }
+
+    fn remote_input_now(&mut self, view: u32, msg: ToHost, now: smithay::backend::input::InputTime) {
+        use smithay::backend::input::{Axis, AxisSource, ButtonState, KeyState};
         match msg {
             ToHost::Pointer { x, y } => {
                 if let Some(p) = crate::drm::remote_to_logical(self, view, x, y) {
@@ -277,6 +319,13 @@ impl Server {
         let c = self.remote.conns.remove(i);
         if let Some(v) = c.view {
             crate::drm::remote_stop(self, v);
+        }
+        // The last viewer gone behind the curtain: the desk stays locked, as
+        // any lock (whoever comes back needs the password; no later viewer
+        // passes it).
+        if self.remote.conns.is_empty() && self.lock.curtain {
+            self.lock.curtain = false;
+            tracing::info!("remote: the curtain stays as a lock (its viewer left)");
         }
         tracing::info!("remote: connection {} ({}) ended", c.id, c.program);
     }

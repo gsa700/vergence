@@ -58,7 +58,7 @@ impl Server {
             return self.elevate_key(key.sym, key.typed, pressed);
         }
         // An agent's question takes every key while it shows (agents.rs).
-        if self.agents_asking() && !self.lock.on {
+        if self.agents_asking() && !self.locked_for_input() {
             if let Some(k) = self.seat.get_keyboard() {
                 k.input::<(), _>(self, code, state, SERIAL_COUNTER.next_serial(), time, |_, _, _| {
                     FilterResult::Intercept(())
@@ -67,7 +67,7 @@ impl Server {
             return self.agent_dialog_key(key.sym, pressed);
         }
         // A program's screenshot question takes every key while it shows (portal_shot.rs).
-        if self.portal_asking() && !self.lock.on {
+        if self.portal_asking() && !self.locked_for_input() {
             if let Some(k) = self.seat.get_keyboard() {
                 k.input::<(), _>(self, code, state, SERIAL_COUNTER.next_serial(), time, |_, _, _| {
                     FilterResult::Intercept(())
@@ -76,7 +76,7 @@ impl Server {
             return self.portal_ask_key(key.sym, pressed);
         }
         // The log out dialog takes every key while it is open (session_dialog.rs).
-        if self.session_dialog.open && !self.lock.on {
+        if self.session_dialog.open && !self.locked_for_input() {
             if let Some(k) = self.seat.get_keyboard() {
                 k.input::<(), _>(self, code, state, SERIAL_COUNTER.next_serial(), time, |_, _, _| {
                     FilterResult::Intercept(())
@@ -87,7 +87,7 @@ impl Server {
         // Escape during a drag on the dock (an icon lifted, the dock dragged or
         // "Move dock"): everything goes back, and no program hears the key.
         if pressed
-            && !self.lock.on
+            && !self.locked_for_input()
             && self.shelf_busy()
             && crate::keys::seat_key(key.sym, code.raw()) == vergence_seat::keyboard::Key::Escape
         {
@@ -132,7 +132,7 @@ impl Server {
         }
         // Locked, no window is told the modifiers either (review I6).
         if key.mods_changed
-            && !self.lock.on
+            && !self.locked_for_input()
             && let Some(n) = self.input.keyboard_native.clone()
         {
             self.native_modifiers(&n);
@@ -369,7 +369,7 @@ impl Server {
     /// none then. The seat is told either way.
     pub fn focus_window(&mut self, window: &crate::win::Win, serial: smithay::utils::Serial) {
         // Locked, no window takes the keyboard (review I6); the lock gives it back.
-        if self.lock.on {
+        if self.locked_for_input() {
             return;
         }
         // A parent a modal dialog blocks gives the keyboard to the dialog (dialogs.rs).

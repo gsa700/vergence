@@ -2168,8 +2168,11 @@ fn remote_frames(
             r.pending.clear();
             r.sent = Vec::new();
         }
+        // Behind the curtain a remote view draws the session (decor.rs).
+        state.remote.drawing = true;
         let elements: Vec<OutputElements> =
             screen_elements(state, renderer, output, geo, scale, pointer_at).into_iter().map(to_output).collect();
+        state.remote.drawing = false;
         let (Some(tex), Some(damage)) = (r.tex.as_mut(), r.damage.as_mut()) else { continue };
         let mut fb = match renderer.bind(tex) {
             Ok(fb) => fb,

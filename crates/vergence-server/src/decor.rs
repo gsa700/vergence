@@ -917,7 +917,9 @@ impl Server {
     pub fn scene(&mut self, renderer: &mut GlesRenderer, output: &Output, scale: f64) -> Vec<SceneElement> {
         let Some(out) = self.space.output_geometry(output) else { return Vec::new() };
         // Locked: the lock and the wallpaper, nothing of the session (lock.rs).
-        if self.lock.on {
+        // Behind Vergence Remote's curtain, a remote view draws the session;
+        // the desk's monitors draw the lock.
+        if self.lock.on && !(self.lock.curtain && self.remote.drawing) {
             return self.lock_elements(renderer, output, out, scale);
         }
         // The login screen: its dialog and the wallpaper, nothing else (greeter.rs).

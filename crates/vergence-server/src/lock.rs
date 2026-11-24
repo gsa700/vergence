@@ -102,6 +102,13 @@ struct Talk {
 #[derive(Default)]
 pub struct Lock {
     pub on: bool,
+    /// The lock is Vergence Remote's curtain (remote milestone 1): the desk's
+    /// monitors show it and the desk's keys reach only its password field,
+    /// while a remote viewer's view draws the session and its input passes.
+    /// Unlocking at the desk ends the remote connection. A lock of any
+    /// other kind (Super+L, idle, sleep) is never passed: the viewer meets
+    /// it as the desk does.
+    pub curtain: bool,
     field: Option<Secret>,
     /// PAM's prompt (shown above the field) and whether what is typed shows.
     prompt: String,
@@ -396,6 +403,11 @@ impl Server {
     /// Why the screen could not be locked now, if it could not.
     fn lock_blocker(&self) -> Option<String> {
         use std::os::unix::fs::FileTypeExt;
+        // A headless session (tests only: no seat, no keyboard of its own)
+        // locks with no vdm; only `vctl lock test-unlock` unlocks it there.
+        if crate::headless() {
+            return None;
+        }
         // vdm answering, not only its socket's file (finding 9: a stopped vdm
         // left the file, and a lock no one could open).
         let vdm = std::fs::symlink_metadata(vergence_dm::paths::UNLOCK_SOCKET).is_ok_and(|m| m.file_type().is_socket())
@@ -522,7 +534,61 @@ impl Server {
         }
     }
 
+    /// Vergence Remote's curtain (remote milestone 1): the desk locked as by
+    /// Super+L, but the window with the keyboard keeps it (only a remote
+    /// viewer's keys reach it; the desk's go to the lock's field), and the
+    /// remote views go on drawing the session. True if locked now (it may be
+    /// refused, as any lock: no vdm to check a password).
+    pub fn lock_curtain(&mut self) -> bool {
+        if self.lock.on {
+            return false;
+        }
+        if let Some(reason) = self.lock_blocker() {
+            tracing::warn!("lock: no curtain: {reason}");
+            return false;
+        }
+        tracing::info!("lock: locked (Vergence Remote's curtain)");
+        self.lock_now_keeping(true);
+        self.lock.curtain = true;
+        true
+    }
+
+    /// The curtain lifted by the remote viewer that put it up: as an unlock
+    /// (a lock of any other kind is never lifted from afar).
+    pub fn lift_curtain(&mut self) {
+        if self.lock.on && self.lock.curtain {
+            self.lock.curtain = false;
+            self.unlock_now();
+        }
+    }
+
+    /// The tests' way out of a headless session's lock (no vdm there).
+    pub fn lock_test_unlock(&mut self) -> bool {
+        if !crate::headless() || !self.lock.on {
+            return false;
+        }
+        self.unlock_now();
+        true
+    }
+
+    /// Whether the desk's own input meets the lock now (remote milestone 1:
+    /// a remote viewer's input passes the curtain, `remote.passing`).
+    pub fn locked_for_input(&self) -> bool {
+        self.lock.on && !(self.lock.curtain && self.remote.passing)
+    }
+
+    /// Whether the session is locked for its own features (screenshots, the
+    /// session dialog, apps' screenshot requests): not behind the curtain,
+    /// where the remote person is using it.
+    pub fn session_locked(&self) -> bool {
+        self.lock.on && !self.lock.curtain
+    }
+
     fn lock_now(&mut self) {
+        self.lock_now_keeping(false);
+    }
+
+    fn lock_now_keeping(&mut self, keep_keyboard: bool) {
         self.lock.on = true;
         self.lock.presented = false;
         self.lock.queued.clear();
@@ -552,19 +618,29 @@ impl Server {
         self.drawer_close();
         self.shelf_cancel();
         // No window keeps the keyboard; no program's own cursor is drawn.
+        // Behind the curtain the window keeps it: only the remote viewer's
+        // keys reach it (the seat sends the desk's to the lock).
         self.lock.before = self.keyboard_window();
-        if let Some(k) = self.seat.get_keyboard() {
-            k.set_focus(self, None, SERIAL_COUNTER.next_serial());
+        if !keep_keyboard {
+            if let Some(k) = self.seat.get_keyboard() {
+                k.set_focus(self, None, SERIAL_COUNTER.next_serial());
+            }
+            if let Some(old) = self.input.keyboard_native.take() {
+                self.native_keyboard_leave(&old);
+            }
+            self.pointer_image.status = CursorImageStatus::default_named();
         }
-        if let Some(old) = self.input.keyboard_native.take() {
-            self.native_keyboard_leave(&old);
-        }
-        self.pointer_image.status = CursorImageStatus::default_named();
         self.redraw_all();
     }
 
     fn unlock_now(&mut self) {
         tracing::info!("lock: unlocked");
+        // The desk unlocked through Vergence Remote's curtain: the remote
+        // connection ends (Dave, 2026-11-23), its viewer told.
+        if std::mem::take(&mut self.lock.curtain) {
+            tracing::info!("lock: the curtain is gone; the remote viewers end");
+            crate::drm::remote_end_all(self);
+        }
         self.lock.on = false;
         self.lock.talk = None;
         self.lock.field = None;

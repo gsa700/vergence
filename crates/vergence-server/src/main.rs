@@ -158,6 +158,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.iter().any(|a| a == "--drm") {
         crate::drm::run(&mut event_loop, &mut state)?;
     } else if args.iter().any(|a| a == "--headless") {
+        HEADLESS.store(true, std::sync::atomic::Ordering::Relaxed);
         let screens: Vec<String> = args.windows(2).filter(|w| w[0] == "--screen").map(|w| w[1].clone()).collect();
         crate::drm::run_headless(&mut event_loop, &mut state, &screens)?;
     } else {
@@ -252,6 +253,14 @@ static GREETER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 
 pub fn greeter() -> bool {
     GREETER.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// A headless session (`--headless`, headless milestone 1): screens in
+/// memory, no seat, no keyboard or mouse of its own; for tests only.
+static HEADLESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn headless() -> bool {
+    HEADLESS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// The program `cmd` starts runs in a session of its own, with no

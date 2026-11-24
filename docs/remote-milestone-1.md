@@ -320,4 +320,24 @@ is listed above only as Dave's own alternative.
     very computer (`localhost`) is looking only: input there would come
     back to the window and go out again, round and round. Display suite 26
     (with a stand-in host: `--command`); vctl key learns `Alt`.
-  - Next in step 4: blanking.
+  - **Blanking, the curtain** (protocol version 2: `Privacy`): the viewer's
+    bar button, Blank the desk / Show the desk. The desk locks as by
+    Super+L, but the window with the keyboard keeps it; remote views draw
+    the session (decor.rs, `remote.drawing`), and the viewer's input passes
+    one event at a time (the seat's lock set aside quietly around it,
+    `remote.passing`), while the desk's monitors show the lock and its keys
+    reach only the password field. Two meanings of locked: the desk's
+    (`locked_for_input`: drawing, input routing, dialogs' keys) and the
+    session's (`session_locked`: screenshots, the session dialog, apps'
+    screenshot requests, which the remote person may use behind the
+    curtain). Left fully locked on purpose: agents' requests, and the
+    elevation prompt (answered at the machine). Unlocking at the desk ends
+    the connection; the viewer leaving leaves the desk locked, as any lock.
+    A lock of any other kind is never passed. Tests reach the lock in a
+    headless session only (`--headless`: no vdm needed there, `vctl lock
+    test-unlock`); real sessions still need vdm and a password. Display
+    suite 27.
+  - Step 4 built. Settings and packaging (Dave asked 2026-11-23 whether
+    Agents and Remote should be compile or install options; proposed: a
+    Settings switch, off by default, with no socket while off, and a
+    separate package for the remote programs): waiting for his word.

@@ -85,7 +85,7 @@ pub struct SessionDialog {
 impl Server {
     /// Open the dialog: menus close, the screens dim.
     pub fn session_dialog_open(&mut self) {
-        if self.lock.on || crate::greeter() {
+        if self.session_locked() || crate::greeter() {
             return;
         }
         self.close_menu();
