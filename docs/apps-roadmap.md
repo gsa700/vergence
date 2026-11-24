@@ -539,3 +539,18 @@ to check what was built, and the agent interface to try it.
   windows are, so its colors show and its text cannot be read. A
   setting: on or off, perhaps a strength, for every see-through window
   (the terminal first; any app with an Opacity row after).
+- **Dockworker ideas: a system log viewer and monitoring** (Vergence-wishlist-2,
+  2026-11-24). Tiles (Dockworkers) that show the system's log (socklog on
+  Void, /var/log/messages on FreeBSD) and the machine's health (CPU, memory,
+  disks, temperatures), with a window behind each for the whole of it.
+- **Zsh the default shell for Vergence, with a .zshrc of our own**, installed
+  with Vergence (Vergence-wishlist-2, 2026-11-24): "Maybe bling it up a bit?
+  Maybe not. I like the prompt I use: who @ where : working directory :
+  prompt". A session's terminal starts zsh when it is there; the package
+  could depend on it, and the first login offers it (changing a login shell
+  is the person's choice, chsh). The prompt as his, user@host:dir.
+- **Monitor color profiles** (passed 2026-11-23): what management exists (ICC
+  profiles from EDID or a file, a calibration's gamma ramps through DRM's
+  color LUT and CTM), and whether Vergence can use it (the server owns the
+  outputs, so it can load a profile per screen).
+- **The pointer in the middle of the screen at startup** (passed 2026-11-23).
