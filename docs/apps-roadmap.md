@@ -525,3 +525,17 @@ to check what was built, and the agent interface to try it.
   preview opens centered over its FileView, hiding the list it came from.
   Both seen making README screenshots; the preview shot waits for this.
 
+
+## From Dave, 2026-11-24 (wish list)
+
+- **Frosted see-through windows, as a setting.** A window whose ground
+  is less than opaque (the terminal's Opacity, techbench's at 97%) lets
+  the window behind show through sharp: on techbench an editor's text
+  read through Claude Code's terminal and looked like a stale frame (the
+  11-23 report, entry 01M85GX6SXDYSS4NJCMH1X99RK). Dave: "add frosted
+  blur to the wish list, as a setting". The frost the title bars already
+  have (vergence-render blur.rs) under a see-through window's whole
+  ground: what is behind blurred and tinted, as macOS's translucent
+  windows are, so its colors show and its text cannot be read. A
+  setting: on or off, perhaps a strength, for every see-through window
+  (the terminal first; any app with an Opacity row after).
