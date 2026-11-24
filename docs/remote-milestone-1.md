@@ -362,5 +362,9 @@ is listed above only as Dave's own alternative.
   Screen" / "Unlock Hubble's Screen"); and a viewer's keys left down when
   it went stayed down on the host (a stuck Ctrl turned Shift+F into Edit's
   Find and made Hubble's own keyboard seem dead): the host now remembers
-  what each viewer holds and lets go when it goes. Open: "some funny
-  business with the mouse" (asked what).
+  what each viewer holds and lets go when it goes. Then, at Dave's word
+  ("mute it during the curtain now"): behind the curtain the desk's
+  default sound output is muted (if it was not), and unmuted when the desk
+  unlocks; the desk's volume keys do nothing meanwhile. Sound to the viewer
+  stays for the sound step. Open: "some funny business with the mouse"
+  (asked what).

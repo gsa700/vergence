@@ -31,6 +31,11 @@ pub fn stepped(now: u8, step: i8) -> u8 {
 impl Server {
     /// A volume key: `step` +5, -5, or 0 for mute.
     pub fn volume_key(&mut self, step: i8) {
+        // Behind Vergence Remote's curtain the desk's volume keys do nothing
+        // (they would undo the curtain's mute); the remote viewer's do.
+        if self.lock.curtain && !self.remote.passing {
+            return tracing::info!("volume key: ignored behind the curtain");
+        }
         let Some(mut sound) = vergence_sound::open() else {
             return tracing::debug!("volume key: no sound system of ours here");
         };

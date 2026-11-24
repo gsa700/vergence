@@ -109,6 +109,10 @@ pub struct Lock {
     /// other kind (Super+L, idle, sleep) is never passed: the viewer meets
     /// it as the desk does.
     pub curtain: bool,
+    /// The sound output the curtain muted (it was not muted before), to
+    /// unmute when the desk unlocks: what the remote person plays must not
+    /// be heard at the desk (Dave, 2026-11-23).
+    pub curtain_muted: Option<String>,
     field: Option<Secret>,
     /// PAM's prompt (shown above the field) and whether what is typed shows.
     prompt: String,
@@ -550,7 +554,28 @@ impl Server {
         tracing::info!("lock: locked (Vergence Remote's curtain)");
         self.lock_now_keeping(true);
         self.lock.curtain = true;
+        self.curtain_mute();
         true
+    }
+
+    /// The default output muted for the curtain, if it was not muted (never in
+    /// a headless session: its sound system may be the machine's own).
+    fn curtain_mute(&mut self) {
+        if crate::headless() {
+            return;
+        }
+        let Some(mut sound) = vergence_sound::open() else { return };
+        let Some(out) = sound.outputs().ok().and_then(|o| o.into_iter().find(|o| o.default)) else { return };
+        if out.muted {
+            return;
+        }
+        match sound.set_muted(&out.id, true) {
+            Ok(()) => {
+                tracing::info!("lock: {} muted behind the curtain", out.id);
+                self.lock.curtain_muted = Some(out.id);
+            }
+            Err(e) => tracing::warn!("lock: {} could not be muted behind the curtain: {e}", out.id),
+        }
     }
 
     /// The curtain lifted by the remote viewer that put it up: as an unlock
@@ -635,6 +660,13 @@ impl Server {
 
     fn unlock_now(&mut self) {
         tracing::info!("lock: unlocked");
+        // The sound the curtain muted, back as it was.
+        if let Some(id) = self.lock.curtain_muted.take()
+            && let Some(mut sound) = vergence_sound::open()
+            && let Err(e) = sound.set_muted(&id, false)
+        {
+            tracing::warn!("lock: {id} could not be unmuted: {e}");
+        }
         // The desk unlocked through Vergence Remote's curtain: the remote
         // connection ends (Dave, 2026-11-23), its viewer told.
         if std::mem::take(&mut self.lock.curtain) {
