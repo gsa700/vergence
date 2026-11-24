@@ -155,7 +155,14 @@ impl Terminal {
                 if let Some(vergence_ui::touch::Gesture::LongPress { x, y }) = self.fingers.long_press(now)
                     && y >= self.bar_h
                 {
-                    let modifiers = Modifiers { shift: false, ctrl: false, alt: false, logo: false, caps_lock: false, num_lock: false };
+                    let modifiers = Modifiers {
+                        shift: false,
+                        ctrl: false,
+                        alt: false,
+                        logo: false,
+                        caps_lock: false,
+                        num_lock: false,
+                    };
                     self.input(&Input::PointerMoved { x, y }, window);
                     self.input(&Input::Button { button: Button::Right, pressed: true, x, y, modifiers }, window);
                     self.input(&Input::Button { button: Button::Right, pressed: false, x, y, modifiers }, window);
@@ -208,7 +215,14 @@ impl Terminal {
             }
             match self.fingers.read(input) {
                 Some(Gesture::Tap { x, y }) => {
-                    let modifiers = Modifiers { shift: false, ctrl: false, alt: false, logo: false, caps_lock: false, num_lock: false };
+                    let modifiers = Modifiers {
+                        shift: false,
+                        ctrl: false,
+                        alt: false,
+                        logo: false,
+                        caps_lock: false,
+                        num_lock: false,
+                    };
                     self.input(&Input::PointerMoved { x, y }, window);
                     self.input(&Input::Button { button: Button::Left, pressed: true, x, y, modifiers }, window);
                     self.input(&Input::Button { button: Button::Left, pressed: false, x, y, modifiers }, window);
@@ -218,7 +232,14 @@ impl Terminal {
                 // held: the window is moved by its bar, a tab along the row.
                 Some(Gesture::Drag { x, y, from, .. }) if from.1 < self.bar_h => {
                     if self.finger_pointer.is_none() {
-                        let modifiers = Modifiers { shift: false, ctrl: false, alt: false, logo: false, caps_lock: false, num_lock: false };
+                        let modifiers = Modifiers {
+                            shift: false,
+                            ctrl: false,
+                            alt: false,
+                            logo: false,
+                            caps_lock: false,
+                            num_lock: false,
+                        };
                         self.input(&Input::PointerMoved { x: from.0, y: from.1 }, window);
                         self.input(
                             &Input::Button { button: Button::Left, pressed: true, x: from.0, y: from.1, modifiers },
@@ -245,7 +266,14 @@ impl Terminal {
                         (self.dragged, self.dragged_lines) = (0.0, 0);
                     }
                     if let Some((x, y)) = self.finger_pointer.take() {
-                        let modifiers = Modifiers { shift: false, ctrl: false, alt: false, logo: false, caps_lock: false, num_lock: false };
+                        let modifiers = Modifiers {
+                            shift: false,
+                            ctrl: false,
+                            alt: false,
+                            logo: false,
+                            caps_lock: false,
+                            num_lock: false,
+                        };
                         self.input(&Input::Button { button: Button::Left, pressed: false, x, y, modifiers }, window);
                         self.input(&Input::PointerLeft, window);
                     }

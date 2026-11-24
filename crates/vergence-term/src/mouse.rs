@@ -64,7 +64,8 @@ mod tests {
     use Action::*;
     use Button::*;
 
-    const NONE: Modifiers = Modifiers { shift: false, ctrl: false, alt: false, logo: false, caps_lock: false, num_lock: false };
+    const NONE: Modifiers =
+        Modifiers { shift: false, ctrl: false, alt: false, logo: false, caps_lock: false, num_lock: false };
 
     fn sgr(mode: MouseMode, a: Action, cell: (usize, usize), m: Modifiers) -> Option<String> {
         bytes(mode, true, a, cell, m).map(|b| String::from_utf8(b).unwrap())

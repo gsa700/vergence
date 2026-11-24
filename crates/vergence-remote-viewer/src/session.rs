@@ -288,7 +288,8 @@ impl App for Viewer {
         // On whole device pixels: a tile at a fraction of a pixel is blended
         // at its edges, and the seams show as a faint grid (Dave, 2026-11-23).
         let snap = |v: f32| (v * frame.scale).round() / frame.scale;
-        let (ox, oy) = (snap((aw - self.size.0 as f32 * k) / 2.0), snap(frame.top + (ah - self.size.1 as f32 * k) / 2.0));
+        let (ox, oy) =
+            (snap((aw - self.size.0 as f32 * k) / 2.0), snap(frame.top + (ah - self.size.1 as f32 * k) / 2.0));
         self.at = (ox, oy, k);
         for (i, t) in self.tiles.iter().enumerate() {
             let (tx, ty) = (i as u32 % self.cols, i as u32 / self.cols);
