@@ -17,6 +17,8 @@ vergence-render.workspace = true
 vergence-ui.workspace = true
 vergence-look.workspace = true
 vergence-spell.workspace = true
+# Syntax colors in the text area (Edit syntax milestone 1).
+vergence-syntax.workspace = true
 vergence-types.workspace = true
 vergence-shell.workspace = true
 vergence-decode.workspace = true

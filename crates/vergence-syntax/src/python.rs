@@ -423,9 +423,11 @@ fn string(line: &str, mut seg: usize, mut i: usize, to: usize, s: Str, out: &mut
             }
             if c == b'{' {
                 push(out, seg, i, s.kind);
-                let close = expression_end(b, i + 1, to, s.quote);
+                let (close, spec) = expression_end(b, i + 1, to, s.quote);
                 push(out, i, i + 1, Kind::Operator);
-                tokens(line, i + 1, close, out);
+                tokens(line, i + 1, spec, out);
+                // The format after the colon (`:,.1f`, `:>{w}`) is the string's, not code.
+                push(out, spec, close, Kind::Escape);
                 if close < to {
                     push(out, close, close + 1, Kind::Operator);
                 }
@@ -452,26 +454,29 @@ fn string(line: &str, mut seg: usize, mut i: usize, to: usize, s: Str, out: &mut
 
 /// Where an f-string's `{expression}` that starts at `from` ends: its `}`
 /// at depth 0 (nested braces counted, other strings skipped), or the
-/// string's own quote, or the line's end.
-fn expression_end(b: &[u8], from: usize, to: usize, quote: u8) -> usize {
+/// string's own quote, or the line's end; and where its format starts (the
+/// first `:` at depth 0 that is not `:=`), the end if it has none.
+fn expression_end(b: &[u8], from: usize, to: usize, quote: u8) -> (usize, usize) {
     let mut depth = 0usize;
     let mut i = from;
     let mut inner: Option<u8> = None;
+    let mut spec: Option<usize> = None;
     while i < to {
         let c = b[i];
         match inner {
             Some(q) if c == q => inner = None,
             Some(_) => {}
-            None if c == quote => return i,
+            None if c == quote => return (i, spec.unwrap_or(i)),
             None if c == b'\'' || c == b'"' => inner = Some(c),
             None if c == b'{' || c == b'[' || c == b'(' => depth += 1,
             None if (c == b'}' || c == b']' || c == b')') && depth > 0 => depth -= 1,
-            None if c == b'}' => return i,
+            None if c == b'}' => return (i, spec.unwrap_or(i)),
+            None if c == b':' && depth == 0 && spec.is_none() && b.get(i + 1) != Some(&b'=') => spec = Some(i),
             None => {}
         }
         i += char_len(c);
     }
-    to
+    (to, spec.unwrap_or(to))
 }
 
 #[cfg(test)]
@@ -537,6 +542,10 @@ mod tests {
         assert!(has(&v, "{{", Kind::Escape));
         assert!(has(&v, "{", Kind::Operator));
         assert!(has(&v, "f\"", Kind::String));
+        let v = one(r#"f"{total:,.1f} {x:>{w}} {(y := 2)}""#);
+        assert!(has(&v, ":,.1f", Kind::Escape), "the format is the string's: {v:?}");
+        assert!(!v.iter().any(|(t, k)| t == ".1" && *k == Kind::Number));
+        assert!(has(&v, "2", Kind::Number), "a walrus in parentheses is code");
     }
 
     #[test]

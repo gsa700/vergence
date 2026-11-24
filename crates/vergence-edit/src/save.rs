@@ -123,6 +123,11 @@ impl EditWindow {
                     return;
                 };
                 if let Some(t) = self.tabs.iter_mut().find(|t| t.id == tab) {
+                    // A new name may mean a new language (notes.txt saved as
+                    // notes.py), unless one was chosen by hand.
+                    if !t.lang_chosen {
+                        t.lang = crate::tab::language_of(Some(&p), &t.doc);
+                    }
                     t.path = Some(p);
                     t.read_only = None;
                 }

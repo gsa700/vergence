@@ -33,6 +33,9 @@ pub(crate) mod cmd {
     pub const GO_TO_LINE: u32 = 32;
     pub const SETTINGS: u32 = 40;
     pub const ABOUT: u32 = 41;
+    /// View > Language: Plain Text, then each language in the registry's
+    /// order (LANGUAGE + 1 + its index).
+    pub const LANGUAGE: u32 = 100;
 }
 
 impl EditWindow {
@@ -100,6 +103,10 @@ impl EditWindow {
             cmd::NEXT_TAB => self.step_tab(1),
             cmd::PREV_TAB => self.step_tab(-1),
             cmd::SETTINGS => self.open_settings(window),
+            n if (cmd::LANGUAGE..=cmd::LANGUAGE + vergence_syntax::languages().len() as u32).contains(&n) => {
+                let lang = (n > cmd::LANGUAGE).then(|| vergence_syntax::LangId((n - cmd::LANGUAGE - 1) as u16));
+                self.set_language(lang);
+            }
             cmd::ABOUT => {
                 let about = vergence_widgets::about::About::new(
                     APP_ID,
@@ -123,45 +130,58 @@ impl EditWindow {
             }
             None => (false, false, false, false),
         };
-        Some((
-            false,
-            vec![
-                C::role(cmd::NEW_TAB, Role::NewTab).featured(),
-                C::role(cmd::NEW_WINDOW, Role::NewWindow),
-                C::role(cmd::OPEN, Role::Open).featured(),
-                C::role(cmd::SAVE, Role::Save).enabled(editable).featured(),
-                C::role(cmd::SAVE_AS, Role::SaveAs),
-                C::role(cmd::CLOSE_TAB, Role::CloseTab),
-                C::role(cmd::UNDO, Role::Undo).enabled(undo && editable),
-                C::role(cmd::REDO, Role::Redo).enabled(redo && editable),
-                C::role(cmd::CUT, Role::Cut).enabled(selected && editable),
-                C::role(cmd::COPY, Role::Copy).enabled(selected),
-                C::role(cmd::PASTE, Role::Paste).enabled(editable),
-                C::role(cmd::SELECT_ALL, Role::SelectAll),
-                C::role(cmd::FIND, Role::Find).featured(),
-                C::role(cmd::FIND_NEXT, Role::FindNext),
-                C::own(cmd::FIND_PREV, "Edit", "Find previous", "Ctrl+Shift+G"),
-                C::role(cmd::REPLACE, Role::Replace).enabled(editable),
-                C::own(cmd::GO_TO_LINE, "Edit", "Go to line…", "Ctrl+L"),
-                // The app menu's "− 100% +" Text size row, as the terminal's
-                // (see docs/app-settings-milestone-1.md): for now, this window; the lasting
-                // size is the editor's own settings window's.
-                C::role(cmd::ZOOM_OUT, Role::ZoomOut).enabled(self.zoom > ZOOM_MIN + 0.001).featured(),
-                C {
-                    label: format!("{}%", (self.zoom * 100.0).round()),
-                    ..C::role(cmd::ZOOM_RESET, Role::ZoomReset).featured()
-                },
-                C::role(cmd::ZOOM_IN, Role::ZoomIn).enabled(self.zoom < ZOOM_MAX - 0.001).featured(),
-                C::own(cmd::LINE_NUMBERS, "View", "Line numbers", "")
-                    .checked(self.flag("line-numbers", true))
-                    .featured(),
-                C::own(cmd::WRAP, "View", "Wrap lines", "").checked(self.flag("wrap", true)),
-                C::role(cmd::NEXT_TAB, Role::NextTab),
-                C::role(cmd::PREV_TAB, Role::PreviousTab),
-                C::role(cmd::SETTINGS, Role::Settings),
-                C::role(cmd::ABOUT, Role::About),
-            ],
-        ))
+        let lang = self.front_tab().and_then(|t| t.lang);
+        let mut list = vec![
+            C::role(cmd::NEW_TAB, Role::NewTab).featured(),
+            C::role(cmd::NEW_WINDOW, Role::NewWindow),
+            C::role(cmd::OPEN, Role::Open).featured(),
+            C::role(cmd::SAVE, Role::Save).enabled(editable).featured(),
+            C::role(cmd::SAVE_AS, Role::SaveAs),
+            C::role(cmd::CLOSE_TAB, Role::CloseTab),
+            C::role(cmd::UNDO, Role::Undo).enabled(undo && editable),
+            C::role(cmd::REDO, Role::Redo).enabled(redo && editable),
+            C::role(cmd::CUT, Role::Cut).enabled(selected && editable),
+            C::role(cmd::COPY, Role::Copy).enabled(selected),
+            C::role(cmd::PASTE, Role::Paste).enabled(editable),
+            C::role(cmd::SELECT_ALL, Role::SelectAll),
+            C::role(cmd::FIND, Role::Find).featured(),
+            C::role(cmd::FIND_NEXT, Role::FindNext),
+            C::own(cmd::FIND_PREV, "Edit", "Find previous", "Ctrl+Shift+G"),
+            C::role(cmd::REPLACE, Role::Replace).enabled(editable),
+            C::own(cmd::GO_TO_LINE, "Edit", "Go to line…", "Ctrl+L"),
+            // The app menu's "− 100% +" Text size row, as the terminal's
+            // (see docs/app-settings-milestone-1.md): for now, this window; the lasting
+            // size is the editor's own settings window's.
+            C::role(cmd::ZOOM_OUT, Role::ZoomOut).enabled(self.zoom > ZOOM_MIN + 0.001).featured(),
+            C {
+                label: format!("{}%", (self.zoom * 100.0).round()),
+                ..C::role(cmd::ZOOM_RESET, Role::ZoomReset).featured()
+            },
+            C::role(cmd::ZOOM_IN, Role::ZoomIn).enabled(self.zoom < ZOOM_MAX - 0.001).featured(),
+            C::own(cmd::LINE_NUMBERS, "View", "Line numbers", "").checked(self.flag("line-numbers", true)).featured(),
+            C::own(cmd::WRAP, "View", "Wrap lines", "").checked(self.flag("wrap", true)),
+            C::own(cmd::LANGUAGE, "Language", "Plain Text", "").checked(lang.is_none()),
+            C::role(cmd::NEXT_TAB, Role::NextTab),
+            C::role(cmd::PREV_TAB, Role::PreviousTab),
+            C::role(cmd::SETTINGS, Role::Settings),
+            C::role(cmd::ABOUT, Role::About),
+        ];
+        // View > Language: every language the registry has (built in or added).
+        for (i, l) in vergence_syntax::languages().iter().enumerate() {
+            let id = vergence_syntax::LangId(i as u16);
+            list.push(C::own(cmd::LANGUAGE + 1 + i as u32, "Language", &l.name, "").checked(lang == Some(id)));
+        }
+        Some((false, list))
+    }
+
+    /// The front document's language, chosen by hand (View > Language, or
+    /// the status line): kept when the file is saved under a new name.
+    pub(crate) fn set_language(&mut self, lang: Option<vergence_syntax::LangId>) {
+        if let Some(t) = self.tabs.iter_mut().find(|t| t.id == self.front) {
+            t.lang = lang;
+            t.lang_chosen = true;
+        }
+        self.apply_options();
     }
 
     pub(crate) fn on_input(&mut self, input: &Input, window: &mut Window) -> bool {

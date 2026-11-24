@@ -22,6 +22,7 @@ use std::{
 
 use vergence_render::text;
 use vergence_scene::{Color, Point, Rect, Scene};
+use vergence_syntax as syntax;
 use vergence_text::{FaceId, Fonts};
 use vergence_ui::{Modifiers, sym};
 
@@ -132,6 +133,9 @@ pub struct AreaOptions {
     /// Line height as a multiple of the text size (at least the font's own
     /// spacing); None: [`CODE_SPACING`].
     pub line_spacing: Option<f32>,
+    /// The text's language, colored by it (Edit syntax milestone 1); None:
+    /// plain text, one color.
+    pub syntax: Option<syntax::LangId>,
 }
 
 /// Line spacing for code and for prose (text milestone 1, step 6): code
@@ -155,6 +159,7 @@ impl Default for AreaOptions {
             spell: true,
             commands: Vec::new(),
             line_spacing: None,
+            syntax: None,
         }
     }
 }
@@ -360,6 +365,15 @@ pub(crate) struct Effect {
     pub paste: bool,
 }
 
+/// One line's syntax: the state it was worked out from, its colored
+/// pieces, the state it ended in.
+#[derive(Debug)]
+struct Hl {
+    start: syntax::State,
+    spans: Box<[syntax::Span]>,
+    end: syntax::State,
+}
+
 /// A document: its text, its history, its caret, its view.
 pub struct Doc {
     /// The program's own menu line chosen, until it asks (take_command).
@@ -407,6 +421,13 @@ pub struct Doc {
     ignored: HashSet<String>,
     /// A word is being typed at the caret: not marked until it is left.
     typing_word: bool,
+    /// Each line's syntax once worked out (None until then), and how many
+    /// lines from the top agree with the lines above them: an edit lowers
+    /// it to the edited line, and lines after are checked again as they
+    /// are wanted, keeping their pieces when the state they start from is
+    /// the same as before (usually at once).
+    hl: Vec<Option<Rc<Hl>>>,
+    hl_valid: usize,
 }
 
 impl Doc {
@@ -441,6 +462,8 @@ impl Doc {
             ignored: HashSet::new(),
             typing_word: false,
             asked: None,
+            hl: Vec::new(),
+            hl_valid: 0,
         }
         .with_saved_ending()
     }
@@ -448,6 +471,7 @@ impl Doc {
     fn with_saved_ending(mut self) -> Doc {
         self.saved_ending = self.buffer.ending();
         self.spelled = vec![None; self.buffer.line_count()];
+        self.hl = vec![None; self.buffer.line_count()];
         self.recount();
         self
     }
@@ -854,7 +878,51 @@ impl Doc {
     fn reshape_all(&mut self) {
         self.shaped = vec![None; self.buffer.line_count()];
         self.spelled = vec![None; self.buffer.line_count()];
+        self.hl = vec![None; self.buffer.line_count()];
+        self.hl_valid = 0;
         self.recount();
+    }
+
+    /// Line `i`'s colored pieces in the text's language (None: plain text),
+    /// working out the lines above it that need it first.
+    fn line_syntax(&mut self, i: usize) -> Option<Rc<Hl>> {
+        let lang = self.options.syntax?;
+        let n = self.buffer.line_count();
+        if i >= n {
+            return None;
+        }
+        if self.hl.len() != n {
+            self.hl = vec![None; n];
+            self.hl_valid = 0;
+        }
+        if i < self.hl_valid
+            && let Some(h) = &self.hl[i]
+        {
+            return Some(h.clone());
+        }
+        for j in self.hl_valid.min(i)..=i {
+            let start = match j {
+                0 => syntax::State::default(),
+                _ => self.hl[j - 1].as_ref().map(|h| h.end.clone()).unwrap_or_default(),
+            };
+            // A line whose start is as before is as before: the edit above
+            // stopped mattering here.
+            if matches!(&self.hl[j], Some(h) if h.start == start) {
+                continue;
+            }
+            let mut end = start.clone();
+            let spans = syntax::highlight(lang, &mut end, self.buffer.line(j));
+            self.hl[j] = Some(Rc::new(Hl { start, spans: spans.into(), end }));
+        }
+        self.hl_valid = i + 1;
+        self.hl[i].clone()
+    }
+
+    /// The kind of piece at `p` (None: plain text, or no language): where
+    /// prose is (comments, strings), for spelling and completion.
+    pub fn syntax_at(&mut self, p: Pos) -> Option<syntax::Kind> {
+        let h = self.line_syntax(p.line)?;
+        syntax::kind_at(&h.spans, p.col)
     }
 
     /// Replaces `from..to` with `with` through the history; the layouts of
@@ -866,6 +934,12 @@ impl Doc {
         let old = to.line - from.line + 1;
         let new = end.line - from.line + 1;
         self.shaped.splice(from.line..from.line + old, std::iter::repeat_n(None, new));
+        if self.hl.len() == self.shaped.len() + old - new {
+            self.hl.splice(from.line..from.line + old, std::iter::repeat_n(None, new));
+        } else {
+            self.hl = vec![None; self.shaped.len()];
+        }
+        self.hl_valid = self.hl_valid.min(from.line);
         let spelled_lines = self.spelled.len();
         if spelled_lines == self.shaped.len() + old - new {
             self.spelled.splice(from.line..from.line + old, std::iter::repeat_n(None, new));
@@ -1845,6 +1919,7 @@ impl Doc {
         let wave_c = if theme.dark { Color::rgb(255, 99, 92) } else { Color::rgb(214, 40, 40) };
         let mark_c = if theme.dark { Color::rgba(255, 200, 60, 70) } else { Color::rgba(255, 196, 0, 110) };
         let text_c = theme.text;
+        let syn = vergence_look::syntax_palette(theme.dark);
         let num_c = theme.dim;
         let text_clip = Rect::new(r.x + gutter, r.y, (r.w - gutter).max(0.0), r.h);
         let mut y = v.y + PAD_Y - self.top_off;
@@ -1877,6 +1952,8 @@ impl Doc {
                     let c = self.caret.col;
                     bad.retain(|(a, b)| !(*a <= c && c <= *b));
                 }
+                // High contrast keeps one ink: colors would lower it.
+                let hl = if theme.high_contrast { None } else { self.line_syntax(i) };
                 let line = self.buffer.line(i);
                 if self.options.current_line && i == self.caret.line && !selected {
                     scene.fill(Rect::new(r.x, y, r.w, h), shade);
@@ -1940,10 +2017,25 @@ impl Doc {
                         }
                     }
                     let mut p = rs;
+                    let spans: &[syntax::Span] = hl.as_ref().map_or(&[], |h| &h.spans);
+                    let mut k = spans.partition_point(|sp| sp.end <= rs);
                     while p < re {
                         let q = line[p..re].find('\t').map_or(re, |k| p + k);
-                        if q > p {
-                            text(scene, fonts, face, size, text_c, Point::new(x0 + s.x_of(p), base), &line[p..q]);
+                        // This piece between tabs, cut where its colors change.
+                        let mut a = p;
+                        while a < q {
+                            while k < spans.len() && spans[k].end <= a {
+                                k += 1;
+                            }
+                            let (b, c) = match spans.get(k) {
+                                Some(sp) if sp.start <= a => (sp.end.min(q), syntax_color(sp.kind, syn, text_c)),
+                                Some(sp) => (sp.start.min(q), text_c),
+                                None => (q, text_c),
+                            };
+                            if b > a {
+                                text(scene, fonts, face, size, c, Point::new(x0 + s.x_of(a), base), &line[a..b]);
+                            }
+                            a = b;
                         }
                         p = q + 1;
                     }
@@ -2170,6 +2262,34 @@ fn alpha(c: Color, a: u8) -> Color {
 
 /// A text area showing and editing `doc` (editor milestone 1). It fills
 /// the room it is given.
+/// A kind of piece's color in the style's syntax palette; the text's own
+/// for kinds that differ only in weight or slant (emphasis, strong).
+fn syntax_color(kind: syntax::Kind, p: &vergence_look::SyntaxPalette, text: Color) -> Color {
+    use syntax::Kind as K;
+    let rgb = match kind {
+        K::Keyword => p.keyword,
+        K::Type => p.type_name,
+        K::Builtin => p.builtin,
+        K::Function => p.function,
+        K::Constant => p.constant,
+        K::Variable => p.variable,
+        K::String | K::AttrValue | K::Code => p.string,
+        K::Escape => p.escape,
+        K::Number => p.number,
+        K::Comment | K::Quote => p.comment,
+        K::DocComment => p.doc_comment,
+        K::Operator => p.operator,
+        K::Meta => p.meta,
+        K::Tag => p.tag,
+        K::Attribute => p.attribute,
+        K::Heading => p.heading,
+        K::Link => p.link,
+        K::ListMarker => p.list_marker,
+        K::Emphasis | K::Strong => return text,
+    };
+    Color::rgb(rgb.0, rgb.1, rgb.2)
+}
+
 pub fn text_area<M>(doc: &TextDoc) -> Element<M> {
     Element::new(EKind::Area { doc: doc.clone(), on_change: None, autofocus: false }, Length::FILL, Length::FILL)
 }
@@ -2177,6 +2297,30 @@ pub fn text_area<M>(doc: &TextDoc) -> Element<M> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Colors follow edits across lines: opening a triple-quoted string
+    /// turns the lines after it into string, and undoing puts them back,
+    /// without the document being opened again.
+    #[test]
+    fn syntax_follows_edits_across_lines() {
+        let py = syntax::by_name("python").unwrap();
+        let options = AreaOptions { syntax: Some(py), ..AreaOptions::default() };
+        let mut d = Doc::new(Buffer::from_text("x = 1\ny = 'a'\nz = len(y)\n"), options);
+        let at = Pos { line: 2, col: 4 };
+        assert_eq!(d.syntax_at(at), Some(syntax::Kind::Builtin));
+        d.set_selection(Pos::default(), Pos::default());
+        d.insert("s = '''");
+        assert_eq!(d.syntax_at(at), Some(syntax::Kind::String), "inside the open string now");
+        d.undo();
+        assert_eq!(d.syntax_at(at), Some(syntax::Kind::Builtin), "closed again by the undo");
+        // An edit inside a line keeps the lines after it as they were.
+        d.set_selection(Pos { line: 0, col: 5 }, Pos { line: 0, col: 5 });
+        d.insert("0");
+        assert_eq!(d.syntax_at(at), Some(syntax::Kind::Builtin));
+        // No language: no pieces.
+        let mut plain = Doc::new(Buffer::from_text("z = len(y)"), AreaOptions::default());
+        assert_eq!(plain.syntax_at(Pos { line: 0, col: 4 }), None);
+    }
 
     fn doc(text: &str) -> Doc {
         let mut d = Doc::new(Buffer::from_text(text), AreaOptions::default());

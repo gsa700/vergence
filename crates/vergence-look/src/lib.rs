@@ -426,6 +426,80 @@ pub const PALETTE_LIGHT: Palette = Palette {
     hover_alpha: 15,
 };
 
+/// Syntax colors for code in a text area (Edit syntax milestone 1), one per
+/// kind of piece (vergence-syntax `Kind`; the text area maps the kinds onto
+/// these). Muted, to sit with the desktop's grays, and each readable on its
+/// style's page (4.5:1 or more, tested). Kinds not named here (emphasis,
+/// strong, plain text) keep the text's own color.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyntaxPalette {
+    pub keyword: Rgb,
+    pub type_name: Rgb,
+    pub builtin: Rgb,
+    pub function: Rgb,
+    pub constant: Rgb,
+    pub variable: Rgb,
+    pub string: Rgb,
+    pub escape: Rgb,
+    pub number: Rgb,
+    pub comment: Rgb,
+    pub doc_comment: Rgb,
+    pub operator: Rgb,
+    pub meta: Rgb,
+    pub tag: Rgb,
+    pub attribute: Rgb,
+    pub heading: Rgb,
+    pub link: Rgb,
+    pub list_marker: Rgb,
+}
+
+pub const SYNTAX_DARK: SyntaxPalette = SyntaxPalette {
+    keyword: Rgb(0xc9, 0xa2, 0xe8),
+    type_name: Rgb(0x7f, 0xc8, 0xd2),
+    builtin: Rgb(0x8f, 0xb4, 0xe3),
+    function: Rgb(0xe3, 0xc0, 0x80),
+    constant: Rgb(0xe6, 0xa0, 0x72),
+    variable: Rgb(0xe0, 0x9c, 0xa6),
+    string: Rgb(0xa9, 0xc9, 0x8c),
+    escape: Rgb(0xd8, 0xc2, 0x8c),
+    number: Rgb(0xe6, 0xa0, 0x72),
+    comment: Rgb(0x8c, 0x90, 0x98),
+    doc_comment: Rgb(0x9c, 0xa5, 0x8c),
+    operator: Rgb(0xb4, 0xb8, 0xc0),
+    meta: Rgb(0xd5, 0xa4, 0xc6),
+    tag: Rgb(0xe0, 0x9c, 0xa6),
+    attribute: Rgb(0xe3, 0xc0, 0x80),
+    heading: Rgb(0x8f, 0xb4, 0xe3),
+    link: Rgb(0x7f, 0xc8, 0xd2),
+    list_marker: Rgb(0xe6, 0xa0, 0x72),
+};
+
+pub const SYNTAX_LIGHT: SyntaxPalette = SyntaxPalette {
+    keyword: Rgb(0x86, 0x3c, 0xb0),
+    type_name: Rgb(0x10, 0x6c, 0x7a),
+    builtin: Rgb(0x2a, 0x5c, 0xa4),
+    function: Rgb(0x85, 0x5c, 0x00),
+    constant: Rgb(0xa8, 0x48, 0x12),
+    variable: Rgb(0xa8, 0x30, 0x48),
+    string: Rgb(0x3a, 0x74, 0x1c),
+    escape: Rgb(0x85, 0x5c, 0x00),
+    number: Rgb(0xa8, 0x48, 0x12),
+    comment: Rgb(0x66, 0x6b, 0x73),
+    doc_comment: Rgb(0x58, 0x66, 0x48),
+    operator: Rgb(0x50, 0x54, 0x5c),
+    meta: Rgb(0x8c, 0x3c, 0x78),
+    tag: Rgb(0xa8, 0x30, 0x48),
+    attribute: Rgb(0x85, 0x5c, 0x00),
+    heading: Rgb(0x2a, 0x5c, 0xa4),
+    link: Rgb(0x10, 0x6c, 0x7a),
+    list_marker: Rgb(0xa8, 0x48, 0x12),
+};
+
+/// The syntax colors for the dark or the light style.
+pub const fn syntax_palette(dark: bool) -> &'static SyntaxPalette {
+    if dark { &SYNTAX_DARK } else { &SYNTAX_LIGHT }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -577,6 +651,35 @@ mod tests {
             }
             for ground in [l.ground, l.alert_ground] {
                 assert!(contrast(l.ink, over(ground, white, veil)) >= 4.5, "light {light}: solid {ground:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn syntax_colors_read_on_their_page() {
+        for (p, page) in [(&SYNTAX_DARK, PALETTE_DARK.page), (&SYNTAX_LIGHT, PALETTE_LIGHT.page)] {
+            let all = [
+                p.keyword,
+                p.type_name,
+                p.builtin,
+                p.function,
+                p.constant,
+                p.variable,
+                p.string,
+                p.escape,
+                p.number,
+                p.comment,
+                p.doc_comment,
+                p.operator,
+                p.meta,
+                p.tag,
+                p.attribute,
+                p.heading,
+                p.link,
+                p.list_marker,
+            ];
+            for c in all {
+                assert!(contrast(c, page) >= 4.5, "{c:?} on {page:?}: {:.2}", contrast(c, page));
             }
         }
     }

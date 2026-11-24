@@ -13,6 +13,8 @@ description = "Vergence's text editor: plain text, tabs, line numbers, on the to
 vergence-config.workspace = true
 vergence-ui.workspace = true
 vergence-widgets.workspace = true
+# Which language a file is, for its colors (Edit syntax milestone 1).
+vergence-syntax.workspace = true
 vergence-scene.workspace = true
 vergence-types.workspace = true
 

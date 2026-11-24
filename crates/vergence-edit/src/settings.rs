@@ -63,6 +63,7 @@ impl EditWindow {
                 _ => vergence_ui::table_value(&self.desktop, "[text]", "spellcheck").as_deref() != Some("false"),
             },
             line_spacing: Some(self.spacing_for(t)),
+            syntax: if self.flag("syntax-colors", true) { t.lang } else { None },
         }
     }
 
@@ -258,6 +259,12 @@ impl Rows for EditRows {
                         Control::Switch { default: true },
                     ),
                     Row::new("current-line", "Shade the current line", "", Control::Switch { default: true }),
+                    Row::new(
+                        "syntax-colors",
+                        "Syntax colors",
+                        "Code is colored by its language: keywords, strings, comments. The language is chosen by the file's name or first line; View > Language changes it.",
+                        Control::Switch { default: true },
+                    ),
                     Row::new(
                         "spellcheck",
                         "Check spelling",

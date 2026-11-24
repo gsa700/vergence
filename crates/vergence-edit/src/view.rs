@@ -4,7 +4,7 @@
 
 use vergence_widgets::edit::Ending;
 use vergence_widgets::{
-    Align, ButtonLook, Element, Length, Padding, Theme, button, column, field, label, panel, row, rule, space,
+    Align, ButtonLook, Element, Length, Padding, Theme, button, choice, column, field, label, panel, row, rule, space,
     text_area,
 };
 
@@ -146,6 +146,11 @@ impl EditWindow {
         };
         status.push(small(indent, Msg::ToggleSpaces, "Indent with spaces or tabs"));
         status.push(small(ending.into(), Msg::ToggleEnding, "Line endings"));
+        // The language: a list to choose another (as View > Language).
+        let mut names = vec!["Plain Text".to_string()];
+        names.extend(vergence_syntax::languages().iter().map(|l| l.name.clone()));
+        let at = tab.lang.map_or(0, |l| l.0 as usize + 1);
+        status.push(choice(names, Some(at), Msg::Language).name("Language"));
         status.push(label("UTF-8").size(12.0).dim());
         all.push(rule());
         all.push(

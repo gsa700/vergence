@@ -104,6 +104,8 @@ enum Msg {
     GotoTyped(String),
     GotoGo,
     GotoClose,
+    /// The status line's language list: 0 is Plain Text, then the registry's.
+    Language(usize),
 }
 
 struct EditWindow {
@@ -351,6 +353,7 @@ impl Program for EditWindow {
                 }
                 self.apply_options();
             }
+            Msg::Language(i) => self.set_language(i.checked_sub(1).map(|k| vergence_syntax::LangId(k as u16))),
             Msg::ToggleEnding => {
                 if let Some(d) = self.doc() {
                     let mut d = d.borrow_mut();

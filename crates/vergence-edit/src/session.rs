@@ -64,6 +64,7 @@ impl EditWindow {
                     let doc = TextDoc::new(text);
                     doc.borrow_mut().mark_unsaved();
                     let spaces = doc.borrow().buffer().uses_tabs().map(|tabs| !tabs);
+                    let lang = crate::tab::language_of(path.as_deref(), &doc);
                     Some(DocTab {
                         id: w.new_tab_id(),
                         doc,
@@ -74,6 +75,8 @@ impl EditWindow {
                         spaces,
                         disk: path.as_deref().and_then(stamp),
                         changed_on_disk: false,
+                        lang,
+                        lang_chosen: false,
                     })
                 }
                 (None, Some(p)) => w.file_tab(p),

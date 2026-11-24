@@ -48,6 +48,18 @@ pub(crate) struct DocTab {
     pub(crate) disk: Option<(SystemTime, u64)>,
     /// The file changed on disk while this tab had changes of its own.
     pub(crate) changed_on_disk: bool,
+    /// The text's language, for its colors (None: plain text), and whether
+    /// it was chosen in View > Language (then a new name does not change it).
+    pub(crate) lang: Option<vergence_syntax::LangId>,
+    pub(crate) lang_chosen: bool,
+}
+
+/// A document's language: by its file's extension, else its first line
+/// (a `#!` line, a language's own opening). None: plain text.
+pub(crate) fn language_of(path: Option<&Path>, doc: &TextDoc) -> Option<vergence_syntax::LangId> {
+    let d = doc.borrow();
+    let first = if d.buffer().line_count() > 0 { d.buffer().line(0) } else { "" };
+    vergence_syntax::detect(path, first)
 }
 
 impl DocTab {
@@ -84,6 +96,8 @@ impl EditWindow {
             spaces: None,
             disk: None,
             changed_on_disk: false,
+            lang: None,
+            lang_chosen: false,
         }
     }
 
@@ -94,6 +108,7 @@ impl EditWindow {
                 let doc = TextDoc::new(&l.text);
                 doc.borrow_mut().mark_saved();
                 let spaces = doc.borrow().buffer().uses_tabs().map(|tabs| !tabs);
+                let lang = language_of(Some(path), &doc);
                 Some(DocTab {
                     id: self.new_tab_id(),
                     doc,
@@ -104,6 +119,8 @@ impl EditWindow {
                     spaces,
                     disk: stamp(path),
                     changed_on_disk: false,
+                    lang,
+                    lang_chosen: false,
                 })
             }
             Err(e) => {

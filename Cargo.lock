@@ -2231,6 +2231,7 @@ version = "0.4.0-pre.3"
 dependencies = [
  "vergence-config",
  "vergence-scene",
+ "vergence-syntax",
  "vergence-types",
  "vergence-ui",
  "vergence-widgets",
@@ -2557,6 +2558,7 @@ dependencies = [
  "vergence-scene",
  "vergence-shell",
  "vergence-spell",
+ "vergence-syntax",
  "vergence-text",
  "vergence-types",
  "vergence-ui",
