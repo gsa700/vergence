@@ -422,3 +422,15 @@ is listed above only as Dave's own alternative.
   session by name, Dave's live one with it; it now stops only its own, by
   process group, checked beside a decoy.) Still to do in step 6: a desk
   login taking that session onto the monitors (answered: yes).
+- **Next time** (Dave, 2026-11-23 ~22:47, "log it for next time"): (1)
+  **full screen** for the viewer, as a toolkit feature for every app
+  (proposed, waiting for his word): F11 (Role::FullScreen) and a bar
+  button; WinRequest full screen (bus 41), the server treating native
+  windows as fullscreen.rs treats Wayland and X11 ones; the bar slides down
+  when the pointer rests at the top edge ~0.3 s ("maybe have the top bar
+  show itself when you run the mouse to the top"), with Leave full screen
+  on it; in the viewer Ctrl+Alt then F11, or the bar. (2) The rest of
+  step 6: a desk login taking the monitorless session onto the monitors.
+  (3) Why the monitorless session drew with zink on the GTX 1650, not the
+  Intel GPU. Dave on the maximized viewer (3840x2112 at 133%, Hubble on
+  Wi-Fi): "it looks great, and pretty fast considering hubble is on wifi".
