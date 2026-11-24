@@ -2231,21 +2231,20 @@ fn remote_changed(
     stride: usize,
     rect: Rectangle<i32, smithay::utils::Physical>,
     px: &[u8],
-) -> Option<(u32, u32, u32, u32, Vec<u8>)> {
+) -> Option<RemoteRect> {
     let (x0, y0, w, h) = (rect.loc.x as usize, rect.loc.y as usize, rect.size.w as usize, rect.size.h as usize);
-    let row_of = |sent: &[u8], y: usize| -> std::ops::Range<usize> {
+    let row_of = |y: usize| -> std::ops::Range<usize> {
         let at = (y0 + y) * stride + x0 * 4;
-        let _ = sent;
         at..at + w * 4
     };
     // The rows that changed, then the columns within them.
-    let changed_row = |y: usize| sent[row_of(sent, y)] != px[y * w * 4..(y + 1) * w * 4];
+    let changed_row = |y: usize| sent[row_of(y)] != px[y * w * 4..(y + 1) * w * 4];
     let top = (0..h).find(|&y| changed_row(y))?;
     let bottom = (0..h).rev().find(|&y| changed_row(y)).unwrap_or(top);
     let mut left = w;
     let mut right = 0;
     for y in top..=bottom {
-        let old = &sent[row_of(sent, y)];
+        let old = &sent[row_of(y)];
         let new = &px[y * w * 4..(y + 1) * w * 4];
         if let Some(l) = (0..w).find(|&x| old[x * 4..x * 4 + 4] != new[x * 4..x * 4 + 4]) {
             left = left.min(l);
@@ -2270,8 +2269,11 @@ pub struct RemoteFrame {
     pub width: u32,
     pub height: u32,
     pub scale: f64,
-    pub rects: Vec<(u32, u32, u32, u32, Vec<u8>)>,
+    pub rects: Vec<RemoteRect>,
 }
+
+/// A changed rectangle: x, y, width, height in the view's pixels, and its RGBA pixels.
+pub type RemoteRect = (u32, u32, u32, u32, Vec<u8>);
 
 /// A remote view of the screen `source` for a viewer of `want` pixels; its id.
 pub fn remote_start(state: &mut Server, source: &str, want: (u32, u32)) -> Result<u32, String> {

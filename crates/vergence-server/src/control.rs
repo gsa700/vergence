@@ -655,6 +655,9 @@ impl Server {
                                 }
                             }
                         }
+                        if (frame.width, frame.height) != (w, h) {
+                            matched = false;
+                        }
                         let n = frame.rects.len();
                         save_png(format!("remote-{i}"), w, h, whole);
                         let first: Vec<String> =
