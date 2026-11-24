@@ -55,7 +55,8 @@ an AI collaborator must know to work here safely.
 - **Build and test on Hubble, techbench and kepler for every change**
   (kepler is the FreeBSD one): `. ~/.cargo/env 2>/dev/null; cd ~/src/vergence;
   CARGO_TARGET_DIR=target-check cargo test -q --workspace` (Rust is rustup's
-  on techbench and kepler, hence `~/.cargo/env`; Hubble's is Void's package). Test builds always go to target-check: a
+  on kepler, hence `~/.cargo/env`; Void's package on Hubble and, since its
+  reinstall on 2026-11-22, techbench). Test builds always go to target-check: a
   rebuilt target/release under a running session broke techbench once.
 - **Formatting:** run `cargo fmt` on a box and copy the files back
   (`rsync -a --include='*/' --include='*.rs' --exclude='*'
