@@ -45,7 +45,7 @@ releases were added late).
    files by SFTP, the login screen, the Dockworker's "viewing" tile, no
    prompt for the same user. The Vergence viewer first, then the Mac through
    the toolkit's portable build. Sound and video later, with the recording
-   milestone's encoder. Waiting for Dave's word on the steps.
+   milestone's encoder. Answered (all leans); building.
 2. **AlbumWall for Vergence** (generic name Music): AlbumWall's wall of
    covers and player rebuilt in Rust on the toolkit and Hymie
    (crates/vergence-hymie), for Vergence (docs/apps-roadmap.md).

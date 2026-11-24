@@ -7,8 +7,10 @@ access a system remotely. it should be able to really use the computer as
 though you were sitting there". And: "This could replace the need for a KVM
 if done correctly (not the hardware part obviously) but for actual USE."
 
-**Status: drafted, waiting for Dave's word on the steps** (the scope
-questions are answered below).
+**Status: answered 2026-11-23** (Dave: "all leans, go ahead"): the order of
+the steps as below, the names Vergence Remote and `vergence-remote`, our own
+machine list (ssh config hosts offered), our own compression for pixels
+first. Building, step 1.
 
 ## What it is
 
