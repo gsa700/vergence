@@ -143,8 +143,16 @@ in definition files anyone can add without building Vergence.
   (contrast tested); the text area's per-line pieces and colored drawing;
   Edit's detection, status-line list, View > Language and the Syntax colors
   switch. Seen in a headless session on Hubble, light and dark (a Python
-  sample). Tests: Hubble and techbench 1,070, kepler 1,059. Next: Dave's
-  first look, then step 4 (Markdown).
+  sample). Tests: Hubble and techbench 1,070, kepler 1,059.
+- **Steps 4 to 6 built the same evening** (5cebac7, a6b498a, 8432dd4):
+  Markdown (fences in their language) with bold and italic faces in the
+  text area's layout; HTML with JavaScript and CSS, PHP in HTML on a shared
+  C-family engine; spelling only in prose and completion with each
+  language's words (embedded code marked Source). Packages 0.4.0pre5
+  (Python, Markdown; installed on techbench) and 0.4.0pre6 (in techbench's
+  repository). Tests: Hubble and techbench 1,087, kepler 1,076. Left:
+  matching brackets and Python's auto-indent (question 8), step 7
+  (definition files), step 8 (display-suite scenario).
 
 ## Steps
 
