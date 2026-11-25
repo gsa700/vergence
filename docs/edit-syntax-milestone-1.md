@@ -1,5 +1,9 @@
 # Edit syntax milestone 1: syntax colors by file type, and each language's words in completion
 
+**Built 2026-11-24**, steps 1 to 8, in one evening; installed on techbench
+(vergence-0.4.0pre8) and looked at by Dave there ("the highlighting really
+helps the readability"). Progress below.
+
 **Drafted 2026-11-24**, from Dave's wish list (Vergence-wishlist-2, Edit and
 Terminal): "Syntax highlighting in Edit by file type, with completion of
 each language's words. Start with .md .html .php .py". After the editor
@@ -158,7 +162,14 @@ in definition files anyone can add without building Vergence.
   docs/syntax-files.md), shipped: Shell, Rust, TOML, JSON, C, YAML, INI;
   a person's own in ~/.config/vergence/syntax. Package 0.4.0pre7 in
   techbench's repository. Tests: Hubble and techbench 1,094, kepler 1,083.
-  Left: step 8 (display-suite scenario).
+- **From Dave's second screenshots** (f40f556): C# shipped as a definition,
+  Avalonia's .axaml as XML, Shell's strings not spelled (prose-strings) and
+  NAME= keys; definition files read system first, then beside the program,
+  then the person's.
+- **Step 8 built**: display-suite scenario 30-edit-syntax (a Python, a
+  Markdown, a PHP and a Rust file colored and named, light and dark; Syntax
+  colors off makes it plain), counted by the new `vergence-harness colors`.
+  Full suite 30 of 30 on Hubble and techbench. **The milestone is built.**
 
 ## Steps
 

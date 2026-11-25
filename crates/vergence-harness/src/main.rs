@@ -41,6 +41,7 @@
 //! vergence-harness iso <out> <label>   (a small ISO 9660 image, for the disk-image check)
 //! ```
 
+mod colors;
 mod cursors;
 mod db;
 mod fake;
@@ -67,7 +68,8 @@ fn usage() -> ExitCode {
          vergence-harness seams <shot.png> --scale S --window X Y W H [--bar H]\n       \
          vergence-harness same <a.png> <b.png> [--at X Y] [--corners R] [--top N] [--tolerance T]
          vergence-harness zoomed <plain.png> <zoomed.png> <px> <py> <level> [--tolerance T]
-         vergence-harness sharper <a.png> <b.png> <x> <y> <w> <h> [--by R]"
+         vergence-harness sharper <a.png> <b.png> <x> <y> <w> <h> [--by R]
+         vergence-harness colors <picture.png> [X Y W H]"
     );
     ExitCode::from(2)
 }
@@ -84,6 +86,7 @@ fn main() -> ExitCode {
         Some("measure") if args.len() >= 2 => measure::run(&args[1..]),
         Some("seams") if args.len() >= 2 => seams::run(&args[1..]),
         Some("same") if args.len() >= 3 => same::run(&args[1..]),
+        Some("colors") if args.len() >= 2 => colors::run(&args[1..]),
         Some("zoomed") if args.len() >= 6 => zoomed::run(&args[1..]),
         Some("sharper") if args.len() >= 7 => sharp::run(&args[1..]),
         Some("cursors") if args.len() == 2 => cursors::run(&args[1..]),
