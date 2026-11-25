@@ -150,9 +150,15 @@ in definition files anyone can add without building Vergence.
   C-family engine; spelling only in prose and completion with each
   language's words (embedded code marked Source). Packages 0.4.0pre5
   (Python, Markdown; installed on techbench) and 0.4.0pre6 (in techbench's
-  repository). Tests: Hubble and techbench 1,087, kepler 1,076. Left:
-  matching brackets and Python's auto-indent (question 8), step 7
-  (definition files), step 8 (display-suite scenario).
+  repository). Tests: Hubble and techbench 1,087, kepler 1,076.
+- **After Dave's first screenshots** (873cb4a): XML (processing
+  instructions, CDATA), Markdown's strikethrough; matching brackets and
+  Return's indent after a block's opening (question 8).
+- **Step 7 built** (cdb1097): languages from definition files (rules.rs,
+  docs/syntax-files.md), shipped: Shell, Rust, TOML, JSON, C, YAML, INI;
+  a person's own in ~/.config/vergence/syntax. Package 0.4.0pre7 in
+  techbench's repository. Tests: Hubble and techbench 1,094, kepler 1,083.
+  Left: step 8 (display-suite scenario).
 
 ## Steps
 
