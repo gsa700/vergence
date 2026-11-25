@@ -5,6 +5,10 @@ filenames = [".bashrc", ".bash_profile", ".bash_logout", ".profile", ".zshrc", "
 interpreters = ["sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "busybox"]
 indent-after = ""
 line-comments = ["#"]
+# A shell's strings are mostly commands and paths, not prose: no spelling there.
+prose-strings = false
+# NAME=value at a line's start: the name.
+keys = "="
 variables = true
 operators = "=|&<>!;"
 function-after = ["function"]

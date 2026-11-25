@@ -117,6 +117,9 @@ pub struct Language {
     /// A line ending in one of these opens a block: the next line is
     /// indented a level more (Python's `:`, the C family's `{`).
     pub indent_after: String,
+    /// Its strings are prose, spelled (most languages); a shell's are
+    /// commands and paths, not words to check.
+    pub prose_strings: bool,
     highlight: Box<dyn Highlight>,
 }
 
@@ -142,6 +145,7 @@ pub fn languages() -> &'static [Language] {
                 words: python::words(),
                 prose: false,
                 indent_after: ":".into(),
+                prose_strings: true,
                 highlight: Box::new(python::Python),
             },
             Language {
@@ -153,6 +157,7 @@ pub fn languages() -> &'static [Language] {
                 words: Vec::new(),
                 prose: true,
                 indent_after: "".into(),
+                prose_strings: true,
                 highlight: Box::new(markdown::Markdown),
             },
             Language {
@@ -164,13 +169,14 @@ pub fn languages() -> &'static [Language] {
                 words: html::TAGS.iter().chain(html::ATTRIBUTES).map(|s| s.to_string()).collect(),
                 prose: true,
                 indent_after: "".into(),
+                prose_strings: true,
                 highlight: Box::new(html::Html { php: false }),
             },
             Language {
                 name: "XML".into(),
                 extensions: strings(&[
                     "xml", "svg", "xsd", "xsl", "xslt", "plist", "rss", "atom", "xaml", "csproj", "fsproj", "vbproj",
-                    "props", "targets", "ui", "glade", "kml", "gpx", "wsdl", "resx", "nuspec", "opml",
+                    "props", "targets", "ui", "glade", "kml", "gpx", "wsdl", "axaml", "resx", "nuspec", "opml",
                 ]),
                 filenames: Vec::new(),
                 first_lines: strings(&["<?xml"]),
@@ -178,6 +184,7 @@ pub fn languages() -> &'static [Language] {
                 words: Vec::new(),
                 prose: true,
                 indent_after: "".into(),
+                prose_strings: true,
                 highlight: Box::new(html::Html { php: false }),
             },
             Language {
@@ -193,6 +200,7 @@ pub fn languages() -> &'static [Language] {
                 },
                 prose: true,
                 indent_after: "{[(".into(),
+                prose_strings: true,
                 highlight: Box::new(html::Html { php: true }),
             },
             Language {
@@ -204,6 +212,7 @@ pub fn languages() -> &'static [Language] {
                 words: js::RULES.words(),
                 prose: false,
                 indent_after: "{[(".into(),
+                prose_strings: true,
                 highlight: Box::new(js::JavaScript),
             },
             Language {
@@ -215,6 +224,7 @@ pub fn languages() -> &'static [Language] {
                 words: css::PROPERTIES.iter().map(|s| s.to_string()).collect(),
                 prose: false,
                 indent_after: "{(".into(),
+                prose_strings: true,
                 highlight: Box::new(css::Css),
             },
         ];
@@ -307,7 +317,8 @@ pub fn is_prose(kind: Option<Kind>) -> bool {
 /// prose (Markdown, HTML), with its headings, emphasis and quotes.
 pub fn is_prose_in(lang: LangId, kind: Option<Kind>) -> bool {
     match kind {
-        Some(Kind::Comment | Kind::DocComment | Kind::String) => true,
+        Some(Kind::Comment | Kind::DocComment) => true,
+        Some(Kind::String) => language(lang).prose_strings,
         None | Some(Kind::Heading | Kind::Emphasis | Kind::Strong | Kind::Quote) => language(lang).prose,
         _ => false,
     }

@@ -74,9 +74,11 @@ fn is_word(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_' || c >= 0x80
 }
 
-/// Where definition files are read from, shipped ones first, the person's last.
+/// Where definition files are read from, later ones replacing earlier ones
+/// of the same name: the system's, then those beside the program (a
+/// checkout's newer files over an installed copy's), then the person's.
 pub fn dirs() -> Vec<PathBuf> {
-    let mut d: Vec<PathBuf> = Vec::new();
+    let mut d: Vec<PathBuf> = vec!["/usr/share/vergence/syntax".into(), "/usr/local/share/vergence/syntax".into()];
     if let Ok(exe) = std::env::current_exe()
         && let Some(bin) = exe.parent()
     {
@@ -85,8 +87,6 @@ pub fn dirs() -> Vec<PathBuf> {
     }
     #[cfg(test)]
     d.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/syntax"));
-    d.push("/usr/local/share/vergence/syntax".into());
-    d.push("/usr/share/vergence/syntax".into());
     let config = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
@@ -265,6 +265,7 @@ pub fn parse(text_: &str) -> Result<Language, String> {
         words,
         prose: flag(&t, "prose", false)?,
         indent_after: text(&t, "indent-after")?,
+        prose_strings: flag(&t, "prose-strings", true)?,
         highlight: Box::new(rules),
     })
 }
@@ -624,6 +625,19 @@ mod tests {
         assert!(!spans("shell", &mut State::default(), "echo $# args").iter().any(|(_, k)| *k == Kind::Comment));
         assert_eq!(crate::detect(Some(Path::new("/x/build")), "#!/usr/bin/env bash"), by_name("shell"));
         assert_eq!(crate::detect(Some(Path::new("/home/d/.zshrc")), ""), by_name("shell"));
+        let sh = by_name("shell").unwrap();
+        assert!(!crate::is_prose_in(sh, Some(Kind::String)), "a shell's strings are not spelled");
+        assert!(crate::is_prose_in(sh, Some(Kind::Comment)));
+        let v = spans("shell", &mut State::default(), "HISTSIZE=5000");
+        assert!(has(&v, "HISTSIZE", Kind::Attribute), "{v:?}");
+        let v =
+            spans("c#", &mut State::default(), "public static string? FindDisc(string library) { return null; } // ok");
+        assert!(
+            has(&v, "public", Kind::Keyword) && has(&v, "string", Kind::Type) && has(&v, "null", Kind::Constant),
+            "{v:?}"
+        );
+        assert_eq!(crate::detect(Some(Path::new("LibraryIndex.cs")), ""), by_name("c#"));
+        assert_eq!(crate::detect(Some(Path::new("MainWindow.axaml")), ""), by_name("xml"));
     }
 
     #[test]

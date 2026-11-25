@@ -9,7 +9,7 @@ file, not code (Dave, 2026-11-24: "build so they can be added").
 ## Where the files live
 
 - **Shipped**: `$prefix/share/vergence/syntax/` (from the repository's
-  `data/syntax/`): Shell, Rust, TOML, JSON, C (and C++), YAML, INI.
+  `data/syntax/`): Shell, Rust, C#, TOML, JSON, C (and C++), YAML, INI.
 - **Your own**: `~/.config/vergence/syntax/` (or `$XDG_CONFIG_HOME`'s).
   A file whose `name` is a language's that already exists replaces it,
   built-in ones too; any other adds a language.
@@ -107,6 +107,7 @@ The rest:
 | `string-keys` | A string followed by this is a key: `":"` (JSON). |
 | `indent-after` | Return after a line ending in one of these indents a level more: `"{[("`, `":"`. |
 | `prose` | `true`: the language's plain text is prose, spelled and completed from the dictionary (a markup language). In code only comments and strings are. |
+| `prose-strings` | `false`: its strings are not spelled (a shell's are commands and paths). Default `true`. |
 
 ## Testing a file
 

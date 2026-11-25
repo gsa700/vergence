@@ -1,0 +1,70 @@
+# Vergence syntax definition: C# (docs/syntax-files.md).
+name = "C#"
+extensions = ["cs", "csx"]
+interpreters = ["dotnet-script"]
+indent-after = "{[("
+line-comments = ["//"]
+block-comments = [["/*", "*/"]]
+doc-comments = ["///", "/**"]
+attributes = [["[assembly:", "]"]]
+meta-lines = ["#if", "#else", "#elif", "#endif", "#region", "#endregion", "#nullable", "#pragma", "#define", "#undef"]
+operators = "=+-*/%<>!&|^~?:"
+function-after = []
+type-after = ["class", "struct", "interface", "enum", "record", "namespace", "new"]
+
+keywords = [
+  "abstract", "as", "base", "break", "case", "catch", "checked", "class", "const", "continue", "default",
+  "delegate", "do", "else", "enum", "event", "explicit", "extern", "finally", "fixed", "for", "foreach",
+  "goto", "if", "implicit", "in", "interface", "internal", "is", "lock", "namespace", "new", "operator",
+  "out", "override", "params", "private", "protected", "public", "readonly", "ref", "return", "sealed",
+  "sizeof", "stackalloc", "static", "struct", "switch", "this", "throw", "try", "typeof", "unchecked",
+  "unsafe", "using", "virtual", "volatile", "while", "async", "await", "var", "yield", "record", "init",
+  "required", "when", "where", "with", "get", "set", "value", "partial", "nameof", "global", "and", "or",
+  "not", "file", "scoped",
+]
+constants = ["true", "false", "null"]
+types = [
+  "bool", "byte", "sbyte", "char", "decimal", "double", "float", "int", "uint", "long", "ulong", "short",
+  "ushort", "object", "string", "void", "dynamic", "nint", "nuint", "String", "Object", "List",
+  "Dictionary", "HashSet", "IEnumerable", "IList", "Task", "ValueTask", "Span", "ReadOnlySpan", "Action",
+  "Func", "Exception", "IOException", "DateTime", "TimeSpan", "Guid", "StringBuilder", "CancellationToken",
+]
+builtins = [
+  "Console", "Math", "File", "Directory", "Path", "Environment", "Convert", "Encoding", "Debug", "Trace",
+  "Stream", "StreamReader", "StreamWriter", "Process", "Thread", "Interlocked", "Regex", "JsonSerializer",
+  "Enumerable", "Array", "Buffer", "GC", "Activator", "Dispatcher",
+]
+
+[[strings]]
+open = "@$\""
+close = "\""
+escape = ""
+multiline = true
+
+[[strings]]
+open = "$@\""
+close = "\""
+escape = ""
+multiline = true
+
+[[strings]]
+open = "\"\"\""
+multiline = true
+escape = ""
+
+[[strings]]
+open = "@\""
+close = "\""
+escape = ""
+multiline = true
+
+[[strings]]
+open = "$\""
+close = "\""
+
+[[strings]]
+open = "\""
+
+[[strings]]
+open = "'"
+max-chars = 8
