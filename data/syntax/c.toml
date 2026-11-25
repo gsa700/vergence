@@ -1,0 +1,38 @@
+# Vergence syntax definition: C and C++ (docs/syntax-files.md).
+name = "C"
+extensions = ["c", "h", "cc", "cpp", "cxx", "hpp", "hh", "hxx", "ino", "m"]
+indent-after = "{[("
+line-comments = ["//"]
+block-comments = [["/*", "*/"]]
+doc-comments = ["///", "/**", "//!"]
+meta-lines = ["#"]
+operators = "=+-*/%<>!&|^~?:"
+type-after = ["struct", "enum", "union", "class", "typedef", "namespace"]
+
+keywords = [
+  "auto", "break", "case", "const", "continue", "default", "do", "else", "enum", "extern", "for", "goto",
+  "if", "inline", "register", "restrict", "return", "sizeof", "static", "struct", "switch", "typedef",
+  "union", "volatile", "while", "_Alignas", "_Atomic", "_Generic", "_Noreturn", "_Static_assert",
+  "class", "namespace", "template", "typename", "public", "private", "protected", "virtual", "override",
+  "final", "new", "delete", "this", "throw", "try", "catch", "using", "operator", "friend", "constexpr",
+  "noexcept", "decltype", "static_cast", "dynamic_cast", "reinterpret_cast", "const_cast", "mutable",
+]
+types = [
+  "void", "char", "short", "int", "long", "float", "double", "signed", "unsigned", "bool", "_Bool",
+  "size_t", "ssize_t", "ptrdiff_t", "int8_t", "int16_t", "int32_t", "int64_t", "uint8_t", "uint16_t",
+  "uint32_t", "uint64_t", "uintptr_t", "FILE", "wchar_t", "std", "string", "vector",
+]
+constants = ["NULL", "true", "false", "nullptr", "EOF", "stdin", "stdout", "stderr", "EXIT_SUCCESS", "EXIT_FAILURE"]
+builtins = [
+  "printf", "fprintf", "sprintf", "snprintf", "scanf", "puts", "fputs", "fgets", "fopen", "fclose",
+  "fread", "fwrite", "malloc", "calloc", "realloc", "free", "memcpy", "memmove", "memset", "memcmp",
+  "strlen", "strcpy", "strncpy", "strcmp", "strncmp", "strcat", "strchr", "strstr", "atoi", "strtol",
+  "exit", "abort", "assert", "errno", "perror",
+]
+
+[[strings]]
+open = "\""
+
+[[strings]]
+open = "'"
+max-chars = 10

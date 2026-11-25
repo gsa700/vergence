@@ -23,6 +23,7 @@
 #   share/doc/vergence/                      LICENSE-APACHE, LICENSE-GPL, THIRD-PARTY-NOTICES.md
 #   share/vergence/words/                    the spelling list (data/words/en_US.txt, from SCOWL) and its terms
 #   share/vergence/fonts/                    Inter, JetBrains Mono and Liberation (data/fonts), with their licenses
+#   share/vergence/syntax/                   languages described in files, for Edit's colors (data/syntax)
 #   share/vergence/defaults/desktop.toml     every account's defaults: wallpaper, the dock's apps, energy (data/defaults)
 #   share/backgrounds/vergence/              Vergence's wallpapers (data/backgrounds, drawn by the project)
 #   share/vergence/icons/{places,kinds}/     Vergence's own icons for places and files (data/icons)
@@ -88,6 +89,7 @@ libexec=$destdir$prefix/libexec/vergence
 sbin=$destdir$prefix/sbin
 words=$destdir$prefix/share/vergence/words
 fonts=$destdir$prefix/share/vergence/fonts
+syntax=$destdir$prefix/share/vergence/syntax
 defaults=$destdir$prefix/share/vergence/defaults
 backgrounds=$destdir$prefix/share/backgrounds/vergence
 # Vergence's own icons for places and kinds of files (tools/make-icons.py).
@@ -131,7 +133,7 @@ if [ -n "$uninstall" ]; then
         [ -f /etc/sv/vdm/run ] && grep -q "$prefix/sbin/vdm" /etc/sv/vdm/run && rm -rf /etc/sv/vdm/run /etc/sv/vdm/log
     fi
     rm -f "$fonts"/InterVariable*.ttf "$fonts"/JetBrainsMono-Variable*.ttf "$fonts"/Liberation*.ttf "$fonts"/Inter-OFL.txt "$fonts"/JetBrainsMono-OFL.txt "$fonts"/Liberation-OFL.txt
-    rm -rf "$ownicons" "$cursortheme" "$backgrounds"
+    rm -rf "$ownicons" "$cursortheme" "$backgrounds" "$syntax"
     rm -f "$defaults/desktop.toml"; rmdir "$defaults" 2>/dev/null || true
     rmdir "$words" "$fonts" "$destdir$prefix/share/vergence" 2>/dev/null || true
     rmdir "$libexec" 2>/dev/null || true
@@ -209,6 +211,9 @@ if [ -x "$release/vergence-harness" ]; then
     chmod -R a+rX "$cursortheme" 2>/dev/null
 fi
 for f in "$root"/data/fonts/*; do install -m 644 "$f" "$fonts/"; done
+# Languages described in files (vergence-syntax rules.rs, docs/syntax-files.md).
+mkdir -p "$syntax"
+for f in "$root"/data/syntax/*.toml; do install -m 644 "$f" "$syntax/"; done
 # Every account's defaults (read under /etc's and each person's own) and the
 # wallpapers they name; the prefix written in, so the default picture is found.
 mkdir -p "$defaults" "$backgrounds"

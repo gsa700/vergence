@@ -1,0 +1,16 @@
+# Vergence syntax definition: YAML (docs/syntax-files.md).
+name = "YAML"
+extensions = ["yaml", "yml"]
+filenames = [".clang-format", ".gitlab-ci.yml"]
+line-comments = ["#"]
+keys = ":"
+operators = "-|>&*"
+constants = ["true", "false", "null", "yes", "no", "on", "off", "True", "False", "Null", "~"]
+meta-lines = ["---", "..."]
+
+[[strings]]
+open = "\""
+
+[[strings]]
+open = "'"
+escape = ""

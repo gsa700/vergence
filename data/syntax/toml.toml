@@ -1,0 +1,25 @@
+# Vergence syntax definition: TOML (docs/syntax-files.md).
+name = "TOML"
+extensions = ["toml"]
+filenames = ["Cargo.lock", "Pipfile"]
+line-comments = ["#"]
+keys = "="
+sections = [["[", "]"]]
+operators = "="
+constants = ["true", "false", "inf", "nan"]
+
+[[strings]]
+open = "\"\"\""
+multiline = true
+
+[[strings]]
+open = "'''"
+escape = ""
+multiline = true
+
+[[strings]]
+open = "\""
+
+[[strings]]
+open = "'"
+escape = ""

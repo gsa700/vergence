@@ -1,0 +1,13 @@
+# Vergence syntax definition: INI files, systemd units, .desktop entries,
+# git and editor configuration (docs/syntax-files.md).
+name = "INI"
+extensions = ["ini", "cfg", "conf", "desktop", "service", "socket", "timer", "target", "mount", "path", "network", "netdev", "link", "container", "volume", "pod", "kube", "editorconfig", "gitconfig", "properties"]
+filenames = [".gitconfig", ".editorconfig", ".npmrc"]
+line-comments = ["#", ";"]
+keys = "="
+sections = [["[", "]"]]
+operators = "="
+constants = ["true", "false", "yes", "no", "on", "off"]
+
+[[strings]]
+open = "\""

@@ -1,0 +1,66 @@
+# Vergence syntax definition: Rust (docs/syntax-files.md).
+name = "Rust"
+extensions = ["rs"]
+interpreters = ["rust-script"]
+indent-after = "{[("
+line-comments = ["//"]
+block-comments = [["/*", "*/"]]
+nested-comments = true
+doc-comments = ["///", "//!", "/**", "/*!"]
+attributes = [["#![", "]"], ["#[", "]"]]
+operators = "=+-*/%<>!&|^~?:"
+function-after = ["fn"]
+type-after = ["struct", "enum", "trait", "type", "union", "impl"]
+
+keywords = [
+  "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern", "fn",
+  "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return",
+  "static", "struct", "super", "trait", "type", "union", "unsafe", "use", "where", "while", "yield",
+]
+constants = ["true", "false", "self", "Self", "None"]
+types = [
+  "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f32", "f64",
+  "bool", "char", "str", "String", "Vec", "Option", "Result", "Box", "Rc", "Arc", "RefCell", "Cell",
+  "HashMap", "HashSet", "BTreeMap", "Path", "PathBuf",
+]
+builtins = [
+  "Some", "Ok", "Err", "println", "print", "eprintln", "eprint", "format", "vec", "panic", "assert",
+  "assert_eq", "assert_ne", "debug_assert", "todo", "unimplemented", "unreachable", "write", "writeln",
+  "matches", "dbg", "include_str", "include_bytes", "env", "concat", "cfg",
+]
+
+[[strings]]
+open = "r##\""
+close = "\"##"
+escape = ""
+multiline = true
+
+[[strings]]
+open = "r#\""
+close = "\"#"
+escape = ""
+multiline = true
+
+[[strings]]
+open = "r\""
+close = "\""
+escape = ""
+multiline = true
+
+[[strings]]
+open = "b\""
+close = "\""
+multiline = true
+
+[[strings]]
+open = "\""
+multiline = true
+
+[[strings]]
+open = "b'"
+close = "'"
+max-chars = 10
+
+[[strings]]
+open = "'"
+max-chars = 10

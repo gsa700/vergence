@@ -2491,6 +2491,9 @@ version = "0.4.0-pre.3"
 [[package]]
 name = "vergence-syntax"
 version = "0.4.0-pre.3"
+dependencies = [
+ "toml",
+]
 
 [[package]]
 name = "vergence-sysinfo"

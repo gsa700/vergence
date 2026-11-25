@@ -34,6 +34,7 @@ mod html;
 mod js;
 mod markdown;
 mod python;
+mod rules;
 
 /// What a piece of a line is. The look gives each a color (and Markdown's
 /// structure a weight or slant).
@@ -103,6 +104,8 @@ pub struct Language {
     pub name: String,
     /// File extensions, lower case, without the dot ("py", "pyw").
     pub extensions: Vec<String>,
+    /// Whole file names that are this language (".zshrc", "PKGBUILD").
+    pub filenames: Vec<String>,
     /// A first line starting with one of these is this language ("#!/usr/bin/env python").
     pub first_lines: Vec<String>,
     /// Names after `#!` and `env` that mean this language ("python3").
@@ -129,10 +132,11 @@ fn strings(list: &[&str]) -> Vec<String> {
 pub fn languages() -> &'static [Language] {
     static ALL: OnceLock<Vec<Language>> = OnceLock::new();
     ALL.get_or_init(|| {
-        vec![
+        let mut all = vec![
             Language {
                 name: "Python".into(),
                 extensions: strings(&["py", "pyw", "pyi"]),
+                filenames: Vec::new(),
                 first_lines: Vec::new(),
                 interpreters: strings(&["python", "python3", "python2", "pypy", "pypy3"]),
                 words: python::words(),
@@ -143,6 +147,7 @@ pub fn languages() -> &'static [Language] {
             Language {
                 name: "Markdown".into(),
                 extensions: strings(&["md", "markdown", "mdown", "mkd", "mkdn"]),
+                filenames: Vec::new(),
                 first_lines: Vec::new(),
                 interpreters: Vec::new(),
                 words: Vec::new(),
@@ -153,6 +158,7 @@ pub fn languages() -> &'static [Language] {
             Language {
                 name: "HTML".into(),
                 extensions: strings(&["html", "htm", "xhtml", "shtml"]),
+                filenames: Vec::new(),
                 first_lines: strings(&["<!doctype html", "<html"]),
                 interpreters: Vec::new(),
                 words: html::TAGS.iter().chain(html::ATTRIBUTES).map(|s| s.to_string()).collect(),
@@ -166,6 +172,7 @@ pub fn languages() -> &'static [Language] {
                     "xml", "svg", "xsd", "xsl", "xslt", "plist", "rss", "atom", "xaml", "csproj", "fsproj", "vbproj",
                     "props", "targets", "ui", "glade", "kml", "gpx", "wsdl", "resx", "nuspec", "opml",
                 ]),
+                filenames: Vec::new(),
                 first_lines: strings(&["<?xml"]),
                 interpreters: Vec::new(),
                 words: Vec::new(),
@@ -176,6 +183,7 @@ pub fn languages() -> &'static [Language] {
             Language {
                 name: "PHP".into(),
                 extensions: strings(&["php", "phtml", "php3", "php4", "php5", "php7", "php8", "phps"]),
+                filenames: Vec::new(),
                 first_lines: strings(&["<?php"]),
                 interpreters: strings(&["php"]),
                 words: {
@@ -190,6 +198,7 @@ pub fn languages() -> &'static [Language] {
             Language {
                 name: "JavaScript".into(),
                 extensions: strings(&["js", "mjs", "cjs", "jsx", "ts", "tsx", "mts", "cts"]),
+                filenames: Vec::new(),
                 first_lines: Vec::new(),
                 interpreters: strings(&["node", "nodejs", "deno", "bun"]),
                 words: js::RULES.words(),
@@ -200,6 +209,7 @@ pub fn languages() -> &'static [Language] {
             Language {
                 name: "CSS".into(),
                 extensions: strings(&["css"]),
+                filenames: Vec::new(),
                 first_lines: Vec::new(),
                 interpreters: Vec::new(),
                 words: css::PROPERTIES.iter().map(|s| s.to_string()).collect(),
@@ -207,7 +217,16 @@ pub fn languages() -> &'static [Language] {
                 indent_after: "{(".into(),
                 highlight: Box::new(css::Css),
             },
-        ]
+        ];
+        // Then the languages described in files (shipped, then the
+        // person's own): one with a built-in's name replaces it.
+        for l in rules::load(&rules::dirs()) {
+            match all.iter().position(|o| o.name.eq_ignore_ascii_case(&l.name)) {
+                Some(i) => all[i] = l,
+                None => all.push(l),
+            }
+        }
+        all
     })
 }
 
@@ -229,6 +248,11 @@ pub fn by_name(name: &str) -> Option<LangId> {
 /// plain text.
 pub fn detect(path: Option<&Path>, first_line: &str) -> Option<LangId> {
     let all = languages();
+    if let Some(name) = path.and_then(|p| p.file_name()).and_then(|n| n.to_str())
+        && let Some(i) = all.iter().position(|l| l.filenames.iter().any(|f| f == name))
+    {
+        return Some(LangId(i as u16));
+    }
     if let Some(ext) = path.and_then(|p| p.extension()).and_then(|e| e.to_str()) {
         let ext = ext.to_ascii_lowercase();
         if let Some(i) = all.iter().position(|l| l.extensions.contains(&ext)) {
@@ -348,7 +372,7 @@ mod tests {
         assert_eq!(detect(Some(Path::new("tool")), "#!/usr/local/bin/python"), Some(py));
         assert_eq!(detect(None, "\u{feff}#!/usr/bin/python3"), Some(py), "a byte-order mark first");
         assert_eq!(detect(Some(Path::new("notes.txt")), "hello"), None);
-        assert_eq!(detect(None, "#!/bin/sh"), None, "no shell yet");
+        assert_eq!(detect(None, "#!/bin/sh"), by_name("shell"), "a language from a definition file");
     }
 
     #[test]

@@ -1,0 +1,38 @@
+# Vergence syntax definition: the POSIX shell, Bash and Zsh (docs/syntax-files.md).
+name = "Shell"
+extensions = ["sh", "bash", "zsh", "ksh", "dash", "command"]
+filenames = [".bashrc", ".bash_profile", ".bash_logout", ".profile", ".zshrc", ".zprofile", ".zshenv", ".zlogin", ".kshrc", "PKGBUILD", "APKBUILD", "template"]
+interpreters = ["sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "busybox"]
+indent-after = ""
+line-comments = ["#"]
+variables = true
+operators = "=|&<>!;"
+function-after = ["function"]
+
+keywords = [
+  "if", "then", "elif", "else", "fi", "for", "in", "do", "done", "while", "until", "case", "esac",
+  "function", "select", "time", "return", "break", "continue", "local", "export", "readonly",
+  "declare", "typeset", "unset", "shift", "exit", "trap", "eval", "exec", "source",
+]
+builtins = [
+  "echo", "printf", "read", "cd", "pwd", "pushd", "popd", "test", "true", "false", "alias", "unalias",
+  "set", "getopts", "wait", "kill", "jobs", "bg", "fg", "type", "command", "builtin", "hash", "umask",
+  "ulimit", "mapfile", "let", "autoload", "compinit", "setopt", "unsetopt", "bindkey", "zstyle",
+  "grep", "sed", "awk", "find", "xargs", "cut", "sort", "uniq", "head", "tail", "cat", "tr", "wc",
+  "sudo", "doas", "ssh", "scp", "rsync", "curl", "git", "make", "cargo", "xbps-install",
+]
+
+[[strings]]
+open = "\""
+multiline = true
+variables = true
+
+[[strings]]
+open = "'"
+escape = ""
+multiline = true
+
+[[strings]]
+open = "`"
+multiline = true
+variables = true

@@ -1,0 +1,12 @@
+# Vergence syntax definition: JSON, and JSON with comments (docs/syntax-files.md).
+name = "JSON"
+extensions = ["json", "jsonc", "json5", "geojson", "webmanifest", "har"]
+filenames = [".babelrc", ".eslintrc", "composer.lock", "flake.lock"]
+line-comments = ["//"]
+block-comments = [["/*", "*/"]]
+string-keys = ":"
+constants = ["true", "false", "null"]
+indent-after = "{["
+
+[[strings]]
+open = "\""
