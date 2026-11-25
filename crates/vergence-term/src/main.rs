@@ -553,9 +553,19 @@ impl App for Terminal {
     }
 
     fn bar_style(&mut self) -> Option<vergence_ui::BarStyle> {
-        (self.bar_style_told != Some(self.bar_style)).then(|| {
-            self.bar_style_told = Some(self.bar_style);
+        // Frosted, the bar is the window's own glass (its ground under it):
+        // its title and buttons in the terminal's colors, light ink on a dark
+        // scheme and dark on a light one, whatever the Title bar setting.
+        let style = if self.frosted_now() {
+            let bg = self.palette.bg;
+            let luma = 0.2126 * bg.r as f32 + 0.7152 * bg.g as f32 + 0.0722 * bg.b as f32;
+            if luma < 128.0 { vergence_ui::BarStyle::Dark } else { vergence_ui::BarStyle::Light }
+        } else {
             self.bar_style
+        };
+        (self.bar_style_told != Some(style)).then(|| {
+            self.bar_style_told = Some(style);
+            style
         })
     }
 

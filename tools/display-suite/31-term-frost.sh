@@ -1,5 +1,5 @@
 # Frost milestone 1: frosted glass behind a see-through terminal
-# (docs/frost-milestone-1.md). The terminal at 80% over a busy test pattern:
+# (docs/frost-milestone-1.md). The terminal at 80% over a bright test pattern:
 # with Frosted glass on, the pattern seen through it is blurred (far less
 # sharp than with it off); while another window is in front, the terminal's
 # dark ground is more opaque (less of the bright pattern shows through) than
@@ -13,7 +13,7 @@ scenario() {
         headless "1920x1080 531x299@60" || return 1
         kept=$(cat "$cfg")
         printf '\n[terminal]\nopacity = 0.8\nfrosted = %s\n' "$1" >> "$cfg"
-        pattern P --rich --size 900 600 || return 1
+        pattern P --size 900 600 || return 1
         move P 100 100
         pattern Q --size 300 200 || return 1
         move Q 1450 800
@@ -35,8 +35,9 @@ scenario() {
     }
     look true frosted || { check 0 "frosted session"; return; }
     look false clear || { check 0 "clear session"; return; }
-    # Inside the terminal's body over the pattern's bright border, its
-    # bottom-right corner (the pattern's middle is a plain dark page).
+    # Inside the terminal's body over the pattern's bottom-right corner: its
+    # bright color against the dark desktop (an edge to blur, and enough
+    # brightness behind for the ground's opacity to show).
     region="880 560 170 190"
     r=$("$HARNESS" sharper "$OUT/clear-front.png" "$OUT/frosted-front.png" $region --by 1.5)
     echo "  .. sharpness, clear then frosted: $r"
@@ -55,7 +56,7 @@ scenario() {
     front=$("$HARNESS" colors "$OUT/frosted-front.png" $region | awk '{print $6}')
     behind=$("$HARNESS" colors "$OUT/frosted-behind.png" $region | awk '{print $6}')
     echo "  .. brightness through the frosted terminal: in front $front, behind $behind"
-    check "$(yes_if "awk -v a=\"$front\" -v b=\"$behind\" 'BEGIN { exit !(a > b + 1) }'")" \
+    check "$(yes_if "awk -v a=\"$front\" -v b=\"$behind\" 'BEGIN { exit !(a > b + 2) }'")" \
         "frosted: clearer while in front (less ground over what is behind)"
     cf=$("$HARNESS" colors "$OUT/clear-front.png" $region | awk '{print $6}')
     cb=$("$HARNESS" colors "$OUT/clear-behind.png" $region | awk '{print $6}')

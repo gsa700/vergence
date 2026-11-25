@@ -1371,15 +1371,21 @@ impl Server {
                             (false, true) => (style.ground, style.ink),
                             (false, false) => (style.ground_off, style.ink_off),
                         };
+                        // A frosted window that also draws under its bar (the terminal's
+                        // frosted glass; frost milestone 1) paints its own ground over the
+                        // glass, its bar's strip too: the frost is the blur alone, so the
+                        // window's color and opacity are the glass's, bar and body alike.
+                        // Without a strip (the preview) the bar's tint makes the glass.
+                        let own_glass = w.native().is_some_and(|n| n.inset() > 0);
                         let look = crate::backdrop::Look {
                             tint: crate::backdrop::unit(ground),
-                            strength,
+                            strength: if own_glass { 0.0 } else { strength },
                             ink: crate::backdrop::unit(ink),
-                            need: need_of(light, active),
+                            need: if own_glass { 0.0 } else { need_of(light, active) },
                             radius: frost_r * scale as f32,
                             corner: if rounded { vergence_look::RADIUS * scale as f32 } else { 0.0 },
                             bottom: true,
-                            cap: light,
+                            cap: light && !own_glass,
                         };
                         body_frost = Some((look, bar_px, ground));
                     }
