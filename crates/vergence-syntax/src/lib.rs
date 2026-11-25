@@ -26,8 +26,12 @@
 use std::path::Path;
 use std::sync::OnceLock;
 
+mod clike;
+mod css;
 #[cfg(test)]
 mod fuzz;
+mod html;
+mod js;
 mod markdown;
 mod python;
 
@@ -137,6 +141,46 @@ pub fn languages() -> &'static [Language] {
                 words: Vec::new(),
                 prose: true,
                 highlight: Box::new(markdown::Markdown),
+            },
+            Language {
+                name: "HTML".into(),
+                extensions: strings(&["html", "htm", "xhtml", "shtml"]),
+                first_lines: strings(&["<!doctype html", "<html"]),
+                interpreters: Vec::new(),
+                words: html::TAGS.iter().chain(html::ATTRIBUTES).map(|s| s.to_string()).collect(),
+                prose: true,
+                highlight: Box::new(html::Html { php: false }),
+            },
+            Language {
+                name: "PHP".into(),
+                extensions: strings(&["php", "phtml", "php3", "php4", "php5", "php7", "php8", "phps"]),
+                first_lines: strings(&["<?php"]),
+                interpreters: strings(&["php"]),
+                words: {
+                    let mut w = html::PHP_RULES.words();
+                    w.extend(html::TAGS.iter().chain(html::ATTRIBUTES).map(|s| s.to_string()));
+                    w
+                },
+                prose: true,
+                highlight: Box::new(html::Html { php: true }),
+            },
+            Language {
+                name: "JavaScript".into(),
+                extensions: strings(&["js", "mjs", "cjs", "jsx", "ts", "tsx", "mts", "cts"]),
+                first_lines: Vec::new(),
+                interpreters: strings(&["node", "nodejs", "deno", "bun"]),
+                words: js::RULES.words(),
+                prose: false,
+                highlight: Box::new(js::JavaScript),
+            },
+            Language {
+                name: "CSS".into(),
+                extensions: strings(&["css"]),
+                first_lines: Vec::new(),
+                interpreters: Vec::new(),
+                words: css::PROPERTIES.iter().map(|s| s.to_string()).collect(),
+                prose: false,
+                highlight: Box::new(css::Css),
             },
         ]
     })
