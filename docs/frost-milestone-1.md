@@ -31,6 +31,13 @@ more frosted).
   measure); in front it is brighter than behind (34.9 against 32.7); frost
   off, focus changes nothing. Full suite 31 of 31 on Hubble.
 
+- **After Dave's screenshots** (fd40550, pre10): the bar tracks the window
+  (blur-only frost for a window whose glass is its own; its ground colors
+  bar and body) and takes the terminal's colors (Dark or Light by its
+  scheme). Dave settled on 92% ("close to the macOS"). The Title bar row is
+  shown locked while the glass applies. Text scrolling under the bar is
+  parked (docs/apps-roadmap.md).
+
 The design below was written before the answer: where it says every app or
 Appearance, read the terminal and its Settings.
 

@@ -55,6 +55,16 @@ impl Rows for TermRows {
         };
         let opacity = vergence_ui::opacity_setting(text, "[appearance]");
         let styles = vec![Choice::text("Dark", "dark"), Choice::text("Light", "light")];
+        // With frosted glass on and the window see-through, the bar is the
+        // window's own glass, in the terminal's colors (frost milestone 1):
+        // the Title bar choice waits, shown locked, until the glass is off.
+        let glass =
+            crate::settings::term_flag(text, "frosted", true) && vergence_ui::opacity_setting(text, "[terminal]") < 1.0;
+        let bar_lock = if glass {
+            Some("The bar takes the terminal's colors while Frosted glass is on".to_string())
+        } else {
+            forced_by_desktop(text)
+        };
         vec![
             Part {
                 title: "Terminal".into(),
@@ -85,7 +95,7 @@ impl Rows for TermRows {
                 title: "On this desktop".into(),
                 rows: vec![
                     Row::new("style", "Style", "While the desktop's Style is App default.", Control::Choose { choices: styles.clone(), desktop: Some("Built-in (Dark)".into()), app_default: 0 }).locked(forced_by_desktop(text)),
-                    Row::new("bar-style", "Title bar", "", Control::Choose { choices: styles, desktop: Some("Built-in (Dark)".into()), app_default: 0 }).locked(forced_by_desktop(text)),
+                    Row::new("bar-style", "Title bar", "", Control::Choose { choices: styles, desktop: Some("Built-in (Dark)".into()), app_default: 0 }).locked(bar_lock),
                     Row::new("opacity", "Opacity", "30 to 100: how much of the window's ground shows; the text stays as it is.", Control::Percent { min: 30, desktop: format!("Desktop default ({:.0})", opacity * 100.0), now: (opacity * 100.0).round() as u32 }),
                     Row::new("frosted", "Frosted glass", "Below 100% opacity, what is behind the window is blurred, so its text is not read through yours; a little clearer while the terminal is in front.", Control::Switch { default: true }),
                     Row { key: String::new(), name: "Window places".into(), help: "Where the desktop puts the terminal's windows, for each set of screens.".into(), control: Control::Button { label: "Forget…".into(), id: FORGET } , locked: None },
