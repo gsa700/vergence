@@ -199,6 +199,10 @@ struct Terminal {
     /// How opaque the ground is (vergence_ui::opacity_setting): less than 1,
     /// the desktop shows through behind the text.
     opacity: f32,
+    /// Frosted glass behind a see-through window (`[terminal] frosted`, on
+    /// by default; frost milestone 1): what is behind is blurred, so its
+    /// text is not read through the terminal's.
+    frosted: bool,
     settings: Settings,
     metrics: Option<Metrics>,
     focused: bool,
@@ -275,7 +279,22 @@ struct Terminal {
     for_agent: Option<String>,
 }
 
+/// How much more opaque a frosted terminal's ground is when it is not the
+/// window in front (frost milestone 1): as macOS's Terminal, the one being
+/// typed in is the more see-through and the others settle back.
+const UNFOCUSED_MORE: f32 = 0.10;
+
 impl Terminal {
+    /// Frosted glass is on and the window is see-through.
+    pub(crate) fn frosted_now(&self) -> bool {
+        self.frosted && self.opacity < 1.0
+    }
+
+    /// The ground's opacity now: as set, a little more when frosted and not
+    /// in front.
+    pub(crate) fn ground_opacity(&self) -> f32 {
+        if self.frosted_now() && !self.focused { (self.opacity + UNFOCUSED_MORE).min(1.0) } else { self.opacity }
+    }
     fn new() -> Terminal {
         let program = Rc::new(RefCell::new(program::Program::default()));
         let key = program.borrow_mut().add();
@@ -322,6 +341,7 @@ impl Terminal {
             asking: Rc::new(std::cell::Cell::new(false)),
             palette: palette(),
             opacity: vergence_ui::opacity_setting(&config("desktop.toml"), "[terminal]"),
+            frosted: settings::term_flag(&config("desktop.toml"), "frosted", true),
             settings: Settings::load(),
             metrics: None,
             focused: false,
@@ -406,7 +426,10 @@ impl App for Terminal {
     /// Small enough for a corner, never smaller than a few lines (window
     /// styles milestone 1); no largest size, so it can be maximized.
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { min: (320.0, 160.0), ..Default::default() }
+        // Frosted while see-through (frost milestone 1): the server blurs what
+        // is behind the window, its bar and body as one glass, and the ground
+        // is drawn over that at its opacity.
+        vergence_ui::Style { min: (320.0, 160.0), frosted: self.frosted_now(), ..Default::default() }
     }
 
     // Step 6: the terminal keeps its windows' tokens (program.rs).
@@ -546,7 +569,7 @@ impl App for Terminal {
 
     fn background(&self) -> Color {
         let bg = self.palette.bg;
-        Color::rgba(bg.r, bg.g, bg.b, (self.opacity * 255.0).round() as u8)
+        Color::rgba(bg.r, bg.g, bg.b, (self.ground_opacity() * 255.0).round() as u8)
     }
 
     fn animating(&self) -> bool {
@@ -623,6 +646,7 @@ impl App for Terminal {
             // worked out again at the next frame, and the grids follow it.
             self.palette = palette();
             self.opacity = vergence_ui::opacity_setting(&config("desktop.toml"), "[terminal]");
+            self.frosted = settings::term_flag(&config("desktop.toml"), "frosted", true);
             self.bar_style =
                 vergence_ui::bar_style_setting(&config("desktop.toml"), "[terminal]", vergence_ui::BarStyle::Desktop);
             let desktop = config("desktop.toml");

@@ -145,6 +145,10 @@ struct Win<'a> {
     meaning: Option<MeaningTree>,
     /// The wallpaper's color behind it, as the server last said (Tint).
     tint: Option<Color>,
+    /// The style last told the server (None: none yet), so a change while
+    /// the window is open is sent again (the terminal's frosted glass
+    /// follows its opacity; frost milestone 1).
+    style: Option<crate::Style>,
 }
 
 /// The connection and what a program's windows share.
@@ -368,6 +372,7 @@ impl<'a> Win<'a> {
             inset: 0.0,
             meaning: None,
             tint: None,
+            style: None,
         }
     }
 }
@@ -630,6 +635,7 @@ impl<'a> Native<'a> {
                         // A window another opened always says its kind: until it
                         // does, the server takes it for a dialog (no window memory).
                         let style = self.windows[i].app.get().style();
+                        self.windows[i].style = Some(style);
                         let opened = self.windows[i].opened_by != 0;
                         if let Some(r) = style_request(style, window).or_else(|| {
                             opened.then_some(WinRequest::Style {
@@ -1211,6 +1217,19 @@ impl<'a> Native<'a> {
         }
         if let Some(style) = self.windows[i].app.get().bar_style() {
             self.send(WinRequest::BarStyle { window: id, style })?;
+        }
+        // Its kind, limits and frost, when they have changed since told.
+        let style = self.windows[i].app.get().style();
+        if self.windows[i].style.is_some_and(|s| s != style) {
+            self.windows[i].style = Some(style);
+            self.send(WinRequest::Style {
+                window: id,
+                kind: style.kind,
+                modal: style.modal,
+                min: style.min,
+                max: style.max,
+                frosted: style.frosted,
+            })?;
         }
         Ok(())
     }

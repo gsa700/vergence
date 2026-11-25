@@ -87,6 +87,7 @@ impl Rows for TermRows {
                     Row::new("style", "Style", "While the desktop's Style is App default.", Control::Choose { choices: styles.clone(), desktop: Some("Built-in (Dark)".into()), app_default: 0 }).locked(forced_by_desktop(text)),
                     Row::new("bar-style", "Title bar", "", Control::Choose { choices: styles, desktop: Some("Built-in (Dark)".into()), app_default: 0 }).locked(forced_by_desktop(text)),
                     Row::new("opacity", "Opacity", "30 to 100: how much of the window's ground shows; the text stays as it is.", Control::Percent { min: 30, desktop: format!("Desktop default ({:.0})", opacity * 100.0), now: (opacity * 100.0).round() as u32 }),
+                    Row::new("frosted", "Frosted glass", "Below 100% opacity, what is behind the window is blurred, so its text is not read through yours; a little clearer while the terminal is in front.", Control::Switch { default: true }),
                     Row { key: String::new(), name: "Window places".into(), help: "Where the desktop puts the terminal's windows, for each set of screens.".into(), control: Control::Button { label: "Forget…".into(), id: FORGET } , locked: None },
                 ],
             },

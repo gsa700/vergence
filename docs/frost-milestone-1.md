@@ -11,7 +11,28 @@ window behind it sharp; an editor's text read through Claude Code's terminal
 looked like a stale frame (entry 01M85GX6SXDYSS4NJCMH1X99RK). Frosted, what
 is behind keeps its colors and shapes and loses its text.
 
-Questions with leans at the end; nothing is built until Dave answers.
+**Answered 2026-11-24** (Dave): "only do this to the terminal window, none
+of the other apps will benefit from this". So the terminal alone; the switch
+is the terminal's own (its Settings, beside Opacity), not the desktop's; the
+other leans taken (the bar frosted with the window; the terminal not in front
+more frosted).
+
+**Built 2026-11-24**, the same evening: no server change and no bus change.
+- vergence-ui sends a window's style again when it changes while the window
+  is open (it was sent at creation only), so the frost follows the opacity
+  and the switch at once.
+- vergence-term: `[terminal] frosted` (on by default; Settings > On this
+  desktop > Frosted glass). While on and below 100% it asks for the frosted
+  style; its ground is drawn over the frost at its opacity, 10 points more
+  opaque while another window is in front (UNFOCUSED_MORE); the strip under
+  the bar stays empty (lines there would show sharp behind the tabs).
+- Display-suite scenario 31-term-frost: a terminal at 80% over a pattern;
+  frosted, the pattern's edges behind it are gone (14,292 to 0 on the
+  measure); in front it is brighter than behind (34.9 against 32.7); frost
+  off, focus changes nothing. Full suite 31 of 31 on Hubble.
+
+The design below was written before the answer: where it says every app or
+Appearance, read the terminal and its Settings.
 
 ## Where things stand
 

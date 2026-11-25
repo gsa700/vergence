@@ -175,8 +175,11 @@ impl Terminal {
                 let row = s.top_line() + if up { 0 } else { s.grid.rows - 1 };
                 s.drag_selection((col, row));
             }
-            // A pane along the top of a window that draws under its bar fills the strip above it.
-            let above = if !self.own_bar && area.y <= self.bar_h + 0.5 { self.bar_h } else { 0.0 };
+            // A pane along the top of a window that draws under its bar fills the strip above it;
+            // not a frosted one's, whose bar is glass over what is behind the window (frost
+            // milestone 1): lines there would show sharp behind the tabs.
+            let above =
+                if !self.own_bar && !self.frosted_now() && area.y <= self.bar_h + 0.5 { self.bar_h } else { 0.0 };
             let look = PaneLook {
                 palette: p,
                 metrics: mt,
