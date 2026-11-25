@@ -21,6 +21,8 @@ const COMMENT: u32 = 3;
 const SCRIPT: u32 = 4;
 const STYLE: u32 = 5;
 const PHP: u32 = 6;
+/// XML's `<![CDATA[ ... ]]>`, open across lines.
+const CDATA: u32 = 7;
 
 /// What follows a tag's `>`: text, or a script's or style's inside.
 const THEN_TEXT: u32 = 0;
@@ -419,6 +421,17 @@ fn html_run(st: &mut Vec<u32>, line: &str, from: usize, to: usize, out: &mut Vec
     let mut i = from;
     while i < to {
         match st.first().copied().unwrap_or(TEXT) {
+            CDATA => match line[i..to].find("]]>") {
+                Some(k) => {
+                    push(out, i, i + k + 3, Kind::String);
+                    i += k + 3;
+                    *st = vec![TEXT];
+                }
+                None => {
+                    push(out, i, to, Kind::String);
+                    return;
+                }
+            },
             COMMENT => match line[i..to].find("-->") {
                 Some(k) => {
                     push(out, i, i + k + 3, Kind::Comment);
@@ -477,8 +490,26 @@ fn html_run(st: &mut Vec<u32>, line: &str, from: usize, to: usize, out: &mut Vec
                         push(out, i, i + 4, Kind::Comment);
                         i += 4;
                         *st = vec![COMMENT];
+                    } else if line[i..to].starts_with("<![CDATA[") {
+                        // XML's raw text: as a string, to its ]]>.
+                        match line[i + 9..to].find("]]>") {
+                            Some(k) => {
+                                push(out, i, i + 9 + k + 3, Kind::String);
+                                i += 9 + k + 3;
+                            }
+                            None => {
+                                push(out, i, to, Kind::String);
+                                *st = vec![CDATA];
+                                return;
+                            }
+                        }
                     } else if line[i..to].starts_with("<!") {
                         let end = line[i..to].find('>').map_or(to, |k| i + k + 1);
+                        push(out, i, end, Kind::Meta);
+                        i = end;
+                    } else if line[i..to].starts_with("<?") {
+                        // A processing instruction (<?xml version="1.0"?>), where PHP is not on.
+                        let end = line[i..to].find("?>").map_or(to, |k| i + k + 2);
                         push(out, i, end, Kind::Meta);
                         i = end;
                     } else {
@@ -688,6 +719,20 @@ mod tests {
         let line = "result = compute(value)";
         let s = highlight(md, &mut st, line);
         assert!(!crate::is_prose_in(md, crate::kind_at(&s, 0)), "{s:?}");
+    }
+
+    #[test]
+    fn xml_declarations_and_cdata() {
+        let mut st = State::default();
+        let v = spans("xml", &mut st, "<?xml version='1.0' encoding='UTF-8'?>");
+        assert!(has(&v, "<?xml version='1.0' encoding='UTF-8'?>", Kind::Meta), "{v:?}");
+        let v = spans("xml", &mut st, r#"<Audible type="i" default="1">1</Audible><![CDATA[a < b"#);
+        assert!(has(&v, "<Audible", Kind::Tag), "{v:?}");
+        assert!(has(&v, "default", Kind::Attribute));
+        let v = spans("xml", &mut st, "and c ]]><x/>");
+        assert!(has(&v, "and c ]]>", Kind::String), "{v:?}");
+        assert!(has(&v, "<x/>", Kind::Tag));
+        assert_eq!(crate::detect(None, "<?xml version=\"1.0\"?>"), by_name("xml"));
     }
 
     #[test]

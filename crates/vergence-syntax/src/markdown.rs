@@ -270,6 +270,16 @@ fn inline_from(line: &str, from: usize, out: &mut Vec<Span>, state: &mut State, 
                 }
                 None => i += 1,
             },
+            b'~' if line[i..].starts_with("~~") && !b.get(i + 2).is_none_or(u8::is_ascii_whitespace) => {
+                // ~~struck through~~ (GitHub's), drawn quiet.
+                match line[i + 2..].find("~~") {
+                    Some(k) if k > 0 => {
+                        push(out, i, i + 2 + k + 2, Kind::Quote);
+                        i += 2 + k + 2;
+                    }
+                    _ => i += 2,
+                }
+            }
             b'*' | b'_' => {
                 let run = b[i..].iter().take_while(|x| **x == c).count();
                 match emphasis(line, i, c, run) {
@@ -488,6 +498,7 @@ mod tests {
         assert!(has(&mid("_under_ it"), "_under_", Kind::Emphasis));
         assert!(has(&mid("``a ` b``"), "``a ` b``", Kind::Code));
         assert!(has(&mid(r"\*not emphasis\*"), r"\*", Kind::Escape));
+        assert!(has(&mid("a ~~gone~~ word"), "~~gone~~", Kind::Quote));
     }
 
     #[test]

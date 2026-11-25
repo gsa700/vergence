@@ -111,6 +111,9 @@ pub struct Language {
     /// Its plain text is prose (Markdown): spelled and completed from the
     /// dictionary. In code only comments and strings are.
     pub prose: bool,
+    /// A line ending in one of these opens a block: the next line is
+    /// indented a level more (Python's `:`, the C family's `{`).
+    pub indent_after: String,
     highlight: Box<dyn Highlight>,
 }
 
@@ -134,6 +137,7 @@ pub fn languages() -> &'static [Language] {
                 interpreters: strings(&["python", "python3", "python2", "pypy", "pypy3"]),
                 words: python::words(),
                 prose: false,
+                indent_after: ":".into(),
                 highlight: Box::new(python::Python),
             },
             Language {
@@ -143,6 +147,7 @@ pub fn languages() -> &'static [Language] {
                 interpreters: Vec::new(),
                 words: Vec::new(),
                 prose: true,
+                indent_after: "".into(),
                 highlight: Box::new(markdown::Markdown),
             },
             Language {
@@ -152,6 +157,20 @@ pub fn languages() -> &'static [Language] {
                 interpreters: Vec::new(),
                 words: html::TAGS.iter().chain(html::ATTRIBUTES).map(|s| s.to_string()).collect(),
                 prose: true,
+                indent_after: "".into(),
+                highlight: Box::new(html::Html { php: false }),
+            },
+            Language {
+                name: "XML".into(),
+                extensions: strings(&[
+                    "xml", "svg", "xsd", "xsl", "xslt", "plist", "rss", "atom", "xaml", "csproj", "fsproj", "vbproj",
+                    "props", "targets", "ui", "glade", "kml", "gpx", "wsdl", "resx", "nuspec", "opml",
+                ]),
+                first_lines: strings(&["<?xml"]),
+                interpreters: Vec::new(),
+                words: Vec::new(),
+                prose: true,
+                indent_after: "".into(),
                 highlight: Box::new(html::Html { php: false }),
             },
             Language {
@@ -165,6 +184,7 @@ pub fn languages() -> &'static [Language] {
                     w
                 },
                 prose: true,
+                indent_after: "{[(".into(),
                 highlight: Box::new(html::Html { php: true }),
             },
             Language {
@@ -174,6 +194,7 @@ pub fn languages() -> &'static [Language] {
                 interpreters: strings(&["node", "nodejs", "deno", "bun"]),
                 words: js::RULES.words(),
                 prose: false,
+                indent_after: "{[(".into(),
                 highlight: Box::new(js::JavaScript),
             },
             Language {
@@ -183,6 +204,7 @@ pub fn languages() -> &'static [Language] {
                 interpreters: Vec::new(),
                 words: css::PROPERTIES.iter().map(|s| s.to_string()).collect(),
                 prose: false,
+                indent_after: "{(".into(),
                 highlight: Box::new(css::Css),
             },
         ]

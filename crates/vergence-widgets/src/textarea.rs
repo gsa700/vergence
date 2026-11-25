@@ -419,6 +419,9 @@ pub(crate) struct Effect {
     pub paste: bool,
 }
 
+/// A bracket and its partner.
+type Pair = (Pos, Pos);
+
 /// One line's syntax: the state it was worked out from, its colored
 /// pieces, the state it ended in.
 #[derive(Debug)]
@@ -482,6 +485,9 @@ pub struct Doc {
     /// the same as before (usually at once).
     hl: Vec<Option<Rc<Hl>>>,
     hl_valid: usize,
+    /// The bracket at the caret and its partner, worked out for this
+    /// revision and caret (Edit syntax milestone 1, question 8).
+    brackets: Option<(u64, Pos, Option<Pair>)>,
 }
 
 impl Doc {
@@ -518,6 +524,7 @@ impl Doc {
             asked: None,
             hl: Vec::new(),
             hl_valid: 0,
+            brackets: None,
         }
         .with_saved_ending()
     }
@@ -1035,6 +1042,123 @@ impl Doc {
         (!self.prose_at(c.line, c.col.saturating_sub(1))).then(|| syntax::language(lang).words.as_slice())
     }
 
+    /// A bracket at byte `col` of line `line` that is code (not in a
+    /// string, a comment or prose): which, and whether it opens.
+    fn code_bracket(&mut self, line: usize, col: usize) -> Option<(u8, bool)> {
+        let c = *self.buffer.line(line).as_bytes().get(col)?;
+        let opens = match c {
+            b'(' | b'[' | b'{' => true,
+            b')' | b']' | b'}' => false,
+            _ => return None,
+        };
+        let lang = self.options.syntax?;
+        let h = self.line_syntax(line)?;
+        let kind = syntax::kind_at(&h.spans, col);
+        (!syntax::is_prose_in(lang, kind) && !matches!(kind, Some(syntax::Kind::Code | syntax::Kind::AttrValue)))
+            .then_some((c, opens))
+    }
+
+    /// The bracket next to the caret (after it, else before it) and the one
+    /// it pairs with, brackets in strings and comments skipped; looked for
+    /// over at most 2,000 lines. Kept until the text or the caret moves.
+    fn bracket_pair(&mut self) -> Option<(Pos, Pos)> {
+        let caret = self.caret;
+        if let Some((rev, at, pair)) = self.brackets
+            && rev == self.revision
+            && at == caret
+        {
+            return pair;
+        }
+        let pair = self.find_pair(caret);
+        self.brackets = Some((self.revision, caret, pair));
+        pair
+    }
+
+    fn find_pair(&mut self, caret: Pos) -> Option<(Pos, Pos)> {
+        self.options.syntax?;
+        // After the caret first, then before it (none before at a line's start).
+        let here = [Some(caret.col), caret.col.checked_sub(1)];
+        let (col, (c, opens)) =
+            here.iter().flatten().find_map(|&k| self.code_bracket(caret.line, k).map(|b| (k, b)))?;
+        let (open, close) = match c {
+            b'(' | b')' => (b'(', b')'),
+            b'[' | b']' => (b'[', b']'),
+            _ => (b'{', b'}'),
+        };
+        let n = self.buffer.line_count();
+        let mut depth = 0i32;
+        let mut line = caret.line;
+        let mut k = col;
+        for _ in 0..2_000 {
+            let len = self.buffer.line(line).len();
+            // The columns to look at on this line, in the search's direction.
+            let cols: Vec<usize> = if opens {
+                let from = if line == caret.line { k } else { 0 };
+                (from..len).collect()
+            } else {
+                let to = if line == caret.line { k + 1 } else { len };
+                (0..to).rev().collect()
+            };
+            for j in cols {
+                let b = self.buffer.line(line).as_bytes()[j];
+                if (b == open || b == close) && self.code_bracket(line, j).is_some() {
+                    depth += if (b == open) == opens { 1 } else { -1 };
+                    if depth == 0 {
+                        return Some((Pos::new(caret.line, col), Pos::new(line, j)));
+                    }
+                }
+            }
+            if opens {
+                line += 1;
+                if line >= n {
+                    return None;
+                }
+            } else {
+                line = line.checked_sub(1)?;
+            }
+            k = 0;
+        }
+        None
+    }
+
+    /// What Return types: a new line with this one's indent, a level more
+    /// after a line that opens a block (Python's `:`, an open bracket in
+    /// the C family), and between a pair of braces the closing one on a
+    /// line of its own below.
+    fn newline_text(&mut self, a: Pos) -> (String, Option<String>) {
+        let ind = self.buffer.indent(a.line);
+        let ind = ind[..ind.len().min(a.col)].to_string();
+        let Some(lang) = self.options.syntax else { return (format!("\n{ind}"), None) };
+        let opens = &syntax::language(lang).indent_after;
+        let line = self.buffer.line(a.line).to_string();
+        let before = line[..a.col].trim_end();
+        let last = before.len().checked_sub(1);
+        let block = last.is_some_and(|k| {
+            let c = before.as_bytes()[k] as char;
+            opens.contains(c) && {
+                let h = self.line_syntax(a.line);
+                let kind = h.as_ref().and_then(|h| syntax::kind_at(&h.spans, k));
+                !syntax::is_prose_in(lang, kind)
+            }
+        });
+        if !block {
+            return (format!("\n{ind}"), None);
+        }
+        let unit = if self.options.spaces { " ".repeat(self.options.tab_width) } else { "\t".into() };
+        let opener = before.as_bytes()[last.unwrap_or(0)];
+        let closer = match opener {
+            b'{' => '}',
+            b'[' => ']',
+            b'(' => ')',
+            _ => '\0',
+        };
+        // Between a pair: the closing one goes below, at this line's indent.
+        if closer != '\0' && line[a.col..].trim_start().starts_with(closer) {
+            return (format!("\n{ind}{unit}"), Some(format!("\n{ind}")));
+        }
+        (format!("\n{ind}{unit}"), None)
+    }
+
     /// The kind of piece at `p` (None: plain text, or no language): where
     /// prose is (comments, strings), for spelling and completion.
     pub fn syntax_at(&mut self, p: Pos) -> Option<syntax::Kind> {
@@ -1277,11 +1401,15 @@ impl Doc {
                 e.moved = true;
             }
             sym::RETURN | KP_ENTER if editable && !command => {
-                // The new line starts with the indent of this one.
-                let c = a;
-                let ind = self.buffer.indent(c.line);
-                let ind = ind[..ind.len().min(c.col)].to_string();
-                let end = self.edit(a, b, &format!("\n{ind}"), Kind::Typing);
+                // The new line starts with the indent of this one (a level
+                // more after a line opening a block).
+                let (text, after) = self.newline_text(a);
+                let end = self.edit(a, b, &format!("{text}{}", after.as_deref().unwrap_or("")), Kind::Typing);
+                // With a closing bracket moved below, the caret stays on the new line.
+                let end = match &after {
+                    Some(_) => Pos::new(a.line + 1, text.len() - 1),
+                    None => end,
+                };
                 self.set_caret(end, false);
                 self.reveal();
                 e.text = true;
@@ -2056,6 +2184,7 @@ impl Doc {
         let syn = vergence_look::syntax_palette(theme.dark);
         let num_c = theme.dim;
         let text_clip = Rect::new(r.x + gutter, r.y, (r.w - gutter).max(0.0), r.h);
+        let pair = if focused { self.bracket_pair() } else { None };
         let mut y = v.y + PAD_Y - self.top_off;
         let mut i = self.top;
         // The lines above the view that show under the bar.
@@ -2122,6 +2251,18 @@ impl Doc {
                             }
                             if w > 0.0 {
                                 scene.fill(Rect::new(x0 + s.x_of(from), ry, w, line_h), sel_c);
+                            }
+                        }
+                    }
+                    // The bracket at the caret and its partner, boxed lightly.
+                    if let Some((p1, p2)) = pair {
+                        for p in [p1, p2] {
+                            if p.line == i && p.col >= rs && p.col < re.max(rs + 1) {
+                                let w = (s.x_of(p.col + 1) - s.x_of(p.col)).max(2.0);
+                                scene.fill(
+                                    Rect::new(x0 + s.x_of(p.col), ry + 1.0, w, line_h - 2.0),
+                                    alpha(theme.accent, if theme.dark { 80 } else { 60 }),
+                                );
                             }
                         }
                     }
@@ -2430,6 +2571,33 @@ pub fn text_area<M>(doc: &TextDoc) -> Element<M> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Brackets pair past those in strings; Return indents after a
+    /// block's opening and puts a closing brace on its own line.
+    #[test]
+    fn brackets_pair_and_return_indents() {
+        let js = syntax::by_name("javascript").unwrap();
+        let options = AreaOptions { syntax: Some(js), ..AreaOptions::default() };
+        let mut d = Doc::new(Buffer::from_text("f(a, \")\", [1, 2])\nx"), options);
+        d.set_selection(Pos::new(0, 1), Pos::new(0, 1));
+        assert_eq!(d.bracket_pair(), Some((Pos::new(0, 1), Pos::new(0, 16))), "the ) in the string is skipped");
+        d.set_selection(Pos::new(0, 17), Pos::new(0, 17));
+        assert_eq!(d.bracket_pair(), Some((Pos::new(0, 16), Pos::new(0, 1))), "from after the closing one");
+        let mut d = Doc::new(Buffer::from_text("(x)"), AreaOptions { syntax: Some(js), ..AreaOptions::default() });
+        assert_eq!(d.bracket_pair(), Some((Pos::new(0, 0), Pos::new(0, 2))), "at a line's start");
+
+        let py = syntax::by_name("python").unwrap();
+        let options = AreaOptions { syntax: Some(py), ..AreaOptions::default() };
+        let mut d = Doc::new(Buffer::from_text("    if x:  # note"), options);
+        d.set_selection(Pos::new(0, 9), Pos::new(0, 9));
+        assert_eq!(d.newline_text(Pos::new(0, 9)).0, "\n        ", "a level more after the colon");
+        assert_eq!(d.newline_text(Pos::new(0, 17)).0, "\n    ", "a colon in a comment opens nothing");
+
+        let options = AreaOptions { syntax: Some(js), ..AreaOptions::default() };
+        let mut d = Doc::new(Buffer::from_text("fn() {}"), options);
+        let (text, after) = d.newline_text(Pos::new(0, 6));
+        assert_eq!((text.as_str(), after.as_deref()), ("\n    ", Some("\n")), "the brace goes below");
+    }
 
     /// In code, spelling checks only the prose (a comment here), and
     /// completion offers the language's words, not the dictionary's.
