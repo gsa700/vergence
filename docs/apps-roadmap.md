@@ -554,3 +554,15 @@ to check what was built, and the agent interface to try it.
   color LUT and CTM), and whether Vergence can use it (the server owns the
   outputs, so it can load a profile per screen).
 - **The pointer in the middle of the screen at startup** (passed 2026-11-23).
+- **Middle-click paste (the primary selection)**, parked 2026-11-24
+  (techbench's handoff 01M887N46A18X4F8VQGEGFGSHC; Dave then: "nevermind all
+  that", it was working as he expected). Selecting in Claude Code already
+  copies (Claude Code's own copy, OSC 52, which the terminal passes on);
+  what Vergence lacks is the Linux primary selection: selecting sets it, a
+  middle click pastes it (Shift+middle-click in the terminal when a program
+  has the mouse), in the server (Wayland primary selection, X11 PRIMARY),
+  the toolkit and the terminal; a bus change. With a switch in Settings, as
+  GNOME's.
+- **The screenshot area's shade a little darker** (Vergence-wishlist-2,
+  2026-11-24): "When selecting an area to screenshot with shift super 4,
+  maybe we should shade it more?"
