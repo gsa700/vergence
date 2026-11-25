@@ -8,7 +8,7 @@
 //! `[PHP, n, the HTML state (n words), PHP's own...]`: the HTML to go back to at `?>`.
 
 use crate::clike::Rules;
-use crate::{Highlight, Kind, Span, State, char_len, css, js, push};
+use crate::{Highlight, Kind, Span, State, char_len, css, fill_source, js, push};
 
 pub struct Html {
     /// `<?php` opens PHP's code (PHP's files); plain HTML leaves it as text.
@@ -372,7 +372,10 @@ impl Highlight for Html {
             if st.first() == Some(&PHP) {
                 let n = st.get(1).copied().unwrap_or(0) as usize;
                 let (html, mut code) = (st[2..2 + n.min(st.len() - 2)].to_vec(), st[(2 + n).min(st.len())..].to_vec());
-                match PHP_RULES.run(&mut code, line, pos, line.len(), out) {
+                let first = out.len();
+                let closed = PHP_RULES.run(&mut code, line, pos, line.len(), out);
+                fill_source(out, first, pos, closed.unwrap_or(line.len()));
+                match closed {
                     Some(k) => {
                         push(out, k, k + 2, Kind::Meta);
                         st = if html.is_empty() { vec![TEXT] } else { html };
@@ -433,11 +436,13 @@ fn html_run(st: &mut Vec<u32>, line: &str, from: usize, to: usize, out: &mut Vec
                 let lower = line[i..to].to_ascii_lowercase();
                 let end = lower.find(close).map_or(to, |k| i + k);
                 let mut inner = st[1..].to_vec();
+                let first = out.len();
                 if script {
                     js::RULES.run(&mut inner, line, i, end, out);
                 } else {
                     css::run(&mut inner, line, i, end, out);
                 }
+                fill_source(out, first, i, end);
                 if end < to {
                     *st = vec![TEXT];
                     i = end;
@@ -664,6 +669,25 @@ mod tests {
         let v = spans("php", &mut State::default(), "  <?php foreach ($rows as $r): ?>");
         assert!(has(&v, "foreach", Kind::Keyword), "{v:?}");
         assert!(has(&v, "as", Kind::Keyword), "{v:?}");
+    }
+
+    /// Code inside a page is marked as code throughout, so its plain words
+    /// are not taken for the page's prose; text between tags is prose.
+    #[test]
+    fn embedded_code_is_not_prose() {
+        let php = by_name("php").unwrap();
+        let line = "<p>Some words <?php echo watts($o); ?> more words</p>";
+        let s = highlight(php, &mut State::default(), line);
+        let at = |w: &str| crate::kind_at(&s, line.find(w).unwrap());
+        assert!(!crate::is_prose_in(php, at("watts")), "{s:?}");
+        assert!(crate::is_prose_in(php, at("Some")));
+        assert!(crate::is_prose_in(php, at("more")));
+        let md = by_name("markdown").unwrap();
+        let mut st = State(vec![1]);
+        highlight(md, &mut st, "```python");
+        let line = "result = compute(value)";
+        let s = highlight(md, &mut st, line);
+        assert!(!crate::is_prose_in(md, crate::kind_at(&s, 0)), "{s:?}");
     }
 
     #[test]

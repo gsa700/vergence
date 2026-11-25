@@ -73,6 +73,9 @@ pub enum Kind {
     Link,
     Quote,
     ListMarker,
+    /// Code drawn in the text's own color, marked so it is not taken for
+    /// prose: a page's script, style and PHP, a Markdown fence's code.
+    Source,
 }
 
 /// A piece of a line: bytes `start..end`, of a kind.
@@ -251,6 +254,35 @@ pub fn kind_at(spans: &[Span], at: usize) -> Option<Kind> {
 /// dictionary completes words: comments, docstrings, strings.
 pub fn is_prose(kind: Option<Kind>) -> bool {
     matches!(kind, Some(Kind::Comment | Kind::DocComment | Kind::String))
+}
+
+/// Prose at a piece of this kind in `lang`: comments, docstrings and
+/// strings in any language; plain text too in one whose plain text is
+/// prose (Markdown, HTML), with its headings, emphasis and quotes.
+pub fn is_prose_in(lang: LangId, kind: Option<Kind>) -> bool {
+    match kind {
+        Some(Kind::Comment | Kind::DocComment | Kind::String) => true,
+        None | Some(Kind::Heading | Kind::Emphasis | Kind::Strong | Kind::Quote) => language(lang).prose,
+        _ => false,
+    }
+}
+
+/// The gaps between the spans in `out[first..]` within `start..end` filled
+/// with [`Kind::Source`]: code handed to another language inside a page
+/// (its plain words are code, not prose).
+pub(crate) fn fill_source(out: &mut Vec<Span>, first: usize, start: usize, end: usize) {
+    let tail: Vec<Span> = out.drain(first..).collect();
+    let mut at = start;
+    for s in tail {
+        if s.start > at {
+            push(out, at, s.start.min(end), Kind::Source);
+        }
+        at = at.max(s.end);
+        out.push(s);
+    }
+    if at < end {
+        push(out, at, end, Kind::Source);
+    }
 }
 
 /// The byte length of the character starting with byte `c`.

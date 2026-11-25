@@ -103,11 +103,12 @@ impl Highlight for Markdown {
                     // The fence's language, with its own state kept after ours.
                     Some(l) if (l as usize) < crate::languages().len() => {
                         let mut inner = State(state.0[4..].to_vec());
-                        let mut spans = Vec::new();
+                        let first = out.len();
                         if line.len() <= crate::MAX_LINE {
-                            language(LangId(l as u16)).highlight.line(&mut inner, line, &mut spans);
+                            language(LangId(l as u16)).highlight.line(&mut inner, line, out);
                         }
-                        out.extend(spans);
+                        // Its plain words are code too, not the document's prose.
+                        crate::fill_source(out, first, 0, line.len());
                         state.0.truncate(4);
                         state.0.extend(inner.0);
                     }

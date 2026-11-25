@@ -576,6 +576,16 @@ impl Doc {
     /// the caret (nearer and more often first), then the ones from outside.
     pub fn completions(&self, prefix: &str, limit: usize) -> Vec<String> {
         let want = prefix.to_lowercase();
+        // In code: the language's own words first (keywords, builtins), then
+        // names from the documents; no dictionary words (Edit syntax
+        // milestone 1, step 6). In prose, as before.
+        let code = self.code_words();
+        let mut lang_first: Vec<String> = code
+            .map(|ws| {
+                ws.iter().filter(|w| w.len() > prefix.len() && w.to_lowercase().starts_with(&want)).cloned().collect()
+            })
+            .unwrap_or_default();
+        lang_first.sort_by_key(|w| w.len());
         let n = self.buffer.line_count();
         let here = self.caret.line;
         let (from, to) = (here.saturating_sub(NEAR_LINES), (here + NEAR_LINES + 1).min(n));
@@ -597,13 +607,20 @@ impl Doc {
         }
         let mut found: Vec<(&str, f32)> = score.into_iter().collect();
         found.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(b.0)));
-        let mut out: Vec<String> = found.into_iter().map(|(w, _)| w.to_string()).take(limit).collect();
+        let mut out: Vec<String> = Vec::new();
+        for w in lang_first.into_iter().chain(found.into_iter().map(|(w, _)| w.to_string())) {
+            if out.len() < limit && !out.contains(&w) {
+                out.push(w);
+            }
+        }
         let mut sources: Vec<Vec<String>> = Vec::new();
         if let Some(more) = &self.words_from {
             sources.push(more(prefix, limit));
         }
-        // The dictionary's words last (step 7), as TextEdit offers them.
-        if let Some(sp) = vergence_spell::speller() {
+        // The dictionary's words last (step 7), as TextEdit offers them; not in code.
+        if code.is_none()
+            && let Some(sp) = vergence_spell::speller()
+        {
             sources.push(sp.complete(prefix, limit));
         }
         for more in sources {
@@ -647,6 +664,12 @@ impl Doc {
     /// after it is a space, not the suggestion.
     fn known_word(&self, word: &str) -> bool {
         if vergence_spell::speller().is_some_and(|sp| sp.check(word)) {
+            return true;
+        }
+        // A word of the language (`in`, `elif`, `isset`) is one of its own.
+        if let Some(lang) = self.options.syntax
+            && syntax::language(lang).words.iter().any(|w| w.eq_ignore_ascii_case(word))
+        {
             return true;
         }
         let n = self.buffer.line_count();
@@ -973,6 +996,10 @@ impl Doc {
             {
                 *slot = None;
             }
+            // Its words may have moved in or out of prose (a string opened above).
+            if let Some(slot) = self.spelled.get_mut(j) {
+                *slot = None;
+            }
             self.hl[j] = Some(Rc::new(Hl { start, spans: spans.into(), end }));
         }
         self.hl_valid = i + 1;
@@ -986,6 +1013,26 @@ impl Doc {
             let spans: &[syntax::Span] = hl.as_ref().map_or(&[], |h| &h.spans);
             self.shaped[i] = Some(Rc::new(shape_line(fonts, faces, size, tab_w, wrap_w, self.buffer.line(i), spans)));
         }
+    }
+
+    /// Byte `col` of line `line` is prose (as its pieces were last worked
+    /// out; a line not yet worked out counts as prose). Always, with no
+    /// language.
+    fn prose_at(&self, line: usize, col: usize) -> bool {
+        let Some(lang) = self.options.syntax else { return true };
+        match self.hl.get(line).and_then(|h| h.as_ref()) {
+            Some(h) => syntax::is_prose_in(lang, syntax::kind_at(&h.spans, col)),
+            None => true,
+        }
+    }
+
+    /// The language's words when the caret is in its code (not in a
+    /// comment, a string or prose): what completion offers there.
+    fn code_words(&self) -> Option<&'static [String]> {
+        let lang = self.options.syntax?;
+        let c = self.caret;
+        // The piece of the word just typed (its last character).
+        (!self.prose_at(c.line, c.col.saturating_sub(1))).then(|| syntax::language(lang).words.as_slice())
     }
 
     /// The kind of piece at `p` (None: plain text, or no language): where
@@ -1545,6 +1592,9 @@ impl Doc {
         let sp = vergence_spell::speller()?;
         let line = self.buffer.line(p.line);
         let (a, b) = vergence_spell::words_to_check(line).into_iter().find(|(a, b)| *a <= p.col && p.col <= *b)?;
+        if !self.prose_at(p.line, a) {
+            return None;
+        }
         let w = &line[a..b];
         (!sp.check(w) && !self.ignored.contains(w)).then(|| (Pos::new(p.line, a), Pos::new(p.line, b), w.to_string()))
     }
@@ -1554,11 +1604,20 @@ impl Doc {
         if let Some(Some(s)) = self.spelled.get(i) {
             return s.clone();
         }
+        // In code only its prose is checked (comments, strings; Markdown's
+        // text): a name is not a word spelled wrong.
+        let hl = self.line_syntax(i);
+        let lang = self.options.syntax;
         let line = self.buffer.line(i);
+        let prose = |a: usize| match (lang, &hl) {
+            (Some(l), Some(h)) => syntax::is_prose_in(l, syntax::kind_at(&h.spans, a)),
+            _ => true,
+        };
         let bad: Rc<[(usize, usize)]> = match vergence_spell::speller() {
-            Some(sp) => {
-                vergence_spell::words_to_check(line).into_iter().filter(|(a, b)| !sp.check(&line[*a..*b])).collect()
-            }
+            Some(sp) => vergence_spell::words_to_check(line)
+                .into_iter()
+                .filter(|(a, b)| prose(*a) && !sp.check(&line[*a..*b]))
+                .collect(),
             None => Rc::from(Vec::new()),
         };
         if let Some(slot) = self.spelled.get_mut(i) {
@@ -2359,7 +2418,7 @@ fn syntax_color(kind: syntax::Kind, p: &vergence_look::SyntaxPalette, text: Colo
         K::Heading => p.heading,
         K::Link => p.link,
         K::ListMarker => p.list_marker,
-        K::Emphasis | K::Strong => return text,
+        K::Emphasis | K::Strong | K::Source => return text,
     };
     Color::rgb(rgb.0, rgb.1, rgb.2)
 }
@@ -2371,6 +2430,26 @@ pub fn text_area<M>(doc: &TextDoc) -> Element<M> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// In code, spelling checks only the prose (a comment here), and
+    /// completion offers the language's words, not the dictionary's.
+    #[test]
+    fn code_spells_its_prose_and_completes_its_words() {
+        let py = syntax::by_name("python").unwrap();
+        let options = AreaOptions { syntax: Some(py), ..AreaOptions::default() };
+        let mut d = Doc::new(Buffer::from_text("import jsonx  # a helo here\nx = isi"), options);
+        if vergence_spell::speller().is_some() {
+            let bad: Vec<String> =
+                d.spelled_wrong(0).iter().map(|(a, b)| d.buffer.line(0)[*a..*b].to_string()).collect();
+            assert_eq!(bad, ["helo"], "names are not spelled; the comment is");
+        }
+        d.line_syntax(1);
+        d.set_selection(Pos { line: 1, col: 7 }, Pos { line: 1, col: 7 });
+        let got = d.completions("isi", 5);
+        assert_eq!(got.first().map(String::as_str), Some("isinstance"), "{got:?}");
+        assert!(got.iter().all(|w| w != "isinglass"), "no dictionary words in code: {got:?}");
+        assert!(d.known_word("elif"), "a keyword is a word of its own");
+    }
 
     /// Colors follow edits across lines: opening a triple-quoted string
     /// turns the lines after it into string, and undoing puts them back,
