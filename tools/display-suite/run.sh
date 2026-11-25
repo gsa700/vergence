@@ -27,6 +27,11 @@ PATTERN=$TARGET/examples/testpattern
 HARNESS=$TARGET/vergence-harness
 BASE=${XDG_CACHE_HOME:-$HOME/.cache}/vergence-lab/display-suite/$(date +%Y%m%d-%H%M%S)
 mkdir -p "$BASE"
+# The test session's own place for sessions with no monitors (the same as
+# vergence-headless gives its programs): vergence-remote run here must find
+# the test session alone, not a real monitorless session the person left
+# running (it looks in that place always; Hubble, 2026-11-24).
+export VERGENCE_MONITORLESS_DIR=$HOME/.cache/vergence-headless/monitorless
 
 if [ $# -gt 0 ]; then
     list=$(for n in "$@"; do ls "$ROOT"/tools/display-suite/"$n"*.sh; done)

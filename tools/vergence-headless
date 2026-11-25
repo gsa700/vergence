@@ -76,6 +76,7 @@ EOF
     PATH=$(dirname "$bin"):$PATH
     env -u WAYLAND_DISPLAY -u VERGENCE_BUS -u DBUS_SESSION_BUS_ADDRESS -u DISPLAY \
         HOME="$home" XDG_RUNTIME_DIR="$run" VERGENCE_CONTROL=1 PATH="$PATH" \
+        VERGENCE_MONITORLESS_DIR="$base/monitorless" \
         VERGENCE_DEFAULTS="${VERGENCE_DEFAULTS:-none}" \
         LANG="${LANG:-C.UTF-8}" \
         RUST_LOG="${RUST_LOG:-info}" \
@@ -93,6 +94,9 @@ EOF
 env)
     running || { echo "vergence-headless: not running" >&2; exit 1; }
     echo "VCTL_SOCKET=$run/vergence-control; export VCTL_SOCKET"
+    # Its own place for sessions with no monitors: vergence-remote run here
+    # finds this session, not a real one left running.
+    echo "VERGENCE_MONITORLESS_DIR=$base/monitorless; export VERGENCE_MONITORLESS_DIR"
     # Its session bus, for bus clients (vtile, vagent): never the monitors' session's.
     bus=$(ls "$run"/vergence-bus-* 2>/dev/null | head -n 1)
     [ -n "$bus" ] && echo "VERGENCE_BUS=$bus; export VERGENCE_BUS"
