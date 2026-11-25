@@ -48,6 +48,12 @@ an AI collaborator must know to work here safely.
 
 ## How work moves
 
+- **Nothing of the lab's in a home folder's top level** (Dave, 2026-11-24:
+  "a growing number of folders and files in ~"). Every tool's output goes
+  to `~/.cache/vergence-lab/<tool>/` (display-suite, display-check,
+  agent-check, showcase, hero, gpu-reports, shots, native), and so do
+  scratch scripts, screenshots and logs made by hand (`scratch/`, `logs/`).
+
 - Edit on Control only. **Sync** with `tools/lab/sync.sh <host>` (rsync to
   `~/src/vergence`, keeping the host's build output). After a sync cargo may
   skip edits that look older than its last build: touch the changed files on
@@ -69,7 +75,7 @@ an AI collaborator must know to work here safely.
   minutes a machine; before pushing anything that draws, on Hubble and
   techbench. Never run a headless test on a host while the suite runs there
   (they share the headless session). Logs and shots stay on the host in
-  `~/vergence-display-suite/`: copy shots back and look at them.
+  `~/.cache/vergence-lab/display-suite/`: copy shots back and look at them.
 - **The display check** on a live screen (`tools/lab/display-check.sh`)
   changes that screen's scale for minutes: never on a screen Dave is working
   at without asking; `--headless "<spec>"` instead.
@@ -77,8 +83,9 @@ an AI collaborator must know to work here safely.
   tests build there as always (target-check), but a change reaches its
   session through a package: bump `revision` in the template, a `git
   archive` tarball into Hubble's ~/void-packages/hostdir/sources, `./xbps-src
-  pkg vergence` on Hubble, copy the .xbps into techbench's ~/vergence-repo,
-  `xbps-rindex -a`, `sudo xbps-install -u --repository=$HOME/vergence-repo
+  pkg vergence` on Hubble, copy the .xbps into techbench's
+  ~/.local/share/vergence-repo, `xbps-rindex -a`, `sudo xbps-install -u
+  --repository=$HOME/.local/share/vergence-repo
   vergence` (docs/packaging-milestone-1.md). install.sh refuses there.
 - **Installing (Hubble, kepler):** `cargo build --release` on the box, `sudo tools/install.sh`
   (it restarts the desktop's icons and installs the helpers in
@@ -99,7 +106,7 @@ an AI collaborator must know to work here safely.
 - `vctl` (tools/vctl, installed) finds the socket in `$XDG_RUNTIME_DIR`:
   `/tmp/xdg-<uid>` on Void, `/var/run/xdg/<user>` on FreeBSD. `vctl shot`
   returns before the PNG is written: wait about 2 s, then copy
-  `~/vergence-shots/*.png`. Window indices are the stacking order (they
+  `~/.cache/vergence-lab/shots/*.png`. Window indices are the stacking order (they
   change on focus). `vctl tree` prints every native window's tree (its
   argument is ignored): cut the window's part out by its title.
 - `vctl key` goes to the focused window, and a vctl-spawned window takes no

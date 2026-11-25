@@ -10,7 +10,7 @@
 # (tools/display-suite/NN-*.sh) in a headless session of its own: the
 # session on the monitors is never touched. One line per scenario, PASS or
 # FAIL, its checks below a failure; everything in
-# ~/vergence-display-suite/<time>/. Exit 1 if any failed.
+# ~/.cache/vergence-lab/display-suite/<time>/. Exit 1 if any failed.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
@@ -25,7 +25,7 @@ CARGO_TARGET_DIR=$ROOT/target-check cargo build -q --release --manifest-path "$R
 CARGO_TARGET_DIR=$ROOT/target-check cargo build -q --release --manifest-path "$ROOT/Cargo.toml" --workspace --bins || exit 2
 PATTERN=$TARGET/examples/testpattern
 HARNESS=$TARGET/vergence-harness
-BASE=$HOME/vergence-display-suite/$(date +%Y%m%d-%H%M%S)
+BASE=${XDG_CACHE_HOME:-$HOME/.cache}/vergence-lab/display-suite/$(date +%Y%m%d-%H%M%S)
 mkdir -p "$BASE"
 
 if [ $# -gt 0 ]; then

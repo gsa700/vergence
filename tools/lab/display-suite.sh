@@ -9,7 +9,7 @@
 # tools/display-suite/run.sh there: each scenario in a headless session of
 # its own, the session on the monitors untouched. On your own machine, run
 # tools/display-suite/run.sh directly. Logs and shots stay on the host in
-# ~/vergence-display-suite/.
+# ~/.cache/vergence-lab/display-suite/.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 host=${1:?usage: display-suite.sh <host> [scenario...]}

@@ -14,7 +14,7 @@
 #
 # Builds into target-check (never the session's build). One line per check;
 # exit 1 if any failed. The MCP conversation is kept in
-# ~/vergence-agent-check/<time>/.
+# ~/.cache/vergence-lab/agent-check/<time>/.
 set -u
 ONLY=${1:-all}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -22,7 +22,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 T=$ROOT/target-check/release
 echo "building into target-check"
 CARGO_TARGET_DIR=$ROOT/target-check cargo build -q --release --manifest-path "$ROOT/Cargo.toml" -p vergence-server -p vergence-protocol -p vergence-edit -p vergence-settings -p vergence-files -p vergence-reader -p vergence-pdf -p vergence-term || exit 2
-OUT=$HOME/vergence-agent-check/$(date +%Y%m%d-%H%M%S)
+OUT=${XDG_CACHE_HOME:-$HOME/.cache}/vergence-lab/agent-check/$(date +%Y%m%d-%H%M%S)
 mkdir -p "$OUT"
 H=$HOME/.cache/vergence-headless/home
 
@@ -211,7 +211,7 @@ cp "$log" "$OUT/agents.log" 2>/dev/null
 
 exec 3>&-
 kill ${MCP:-} 2>/dev/null
-vctl shot >/dev/null; sleep 2; cp "$H"/vergence-shots/*.png "$OUT/" 2>/dev/null
+vctl shot >/dev/null; sleep 2; cp "$H"/.cache/vergence-lab/shots/*.png "$OUT/" 2>/dev/null
 "$ROOT/tools/vergence-headless" stop >/dev/null 2>&1
 echo "$FAILS failed; the conversation in $OUT"
 [ "$FAILS" -eq 0 ]

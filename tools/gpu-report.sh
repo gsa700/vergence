@@ -5,7 +5,7 @@
 #
 # Usage: tools/gpu-report.sh [pid ...]
 #
-# Writes ~/gpu-reports/<host>-<time>/ with: the system and its GPU stack's
+# Writes ~/.cache/vergence-lab/gpu-reports/<host>-<time>/ with: the system and its GPU stack's
 # versions; for each pid given (and every vergence program running), its
 # state, what each thread waits on and its kernel stacks; the i915 error
 # state if the driver kept one; the kernel's log; the server's log's end.
@@ -16,7 +16,7 @@
 set -u
 os=$(uname -s)
 host=$(hostname -s 2>/dev/null || hostname)
-dir="$HOME/gpu-reports/$host-$(date +%Y%m%d-%H%M%S)"
+dir="${XDG_CACHE_HOME:-$HOME/.cache}/vergence-lab/gpu-reports/$host-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$dir" || exit 1
 root() { sudo -n "$@" 2>/dev/null; }
 say() { printf '%s\n' "$*" >>"$dir/summary.txt"; }

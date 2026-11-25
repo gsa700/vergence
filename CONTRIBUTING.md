@@ -151,7 +151,7 @@ the machine.
 - **The display suite**, `sh tools/display-suite/run.sh [scenario...]`: each
   scenario in tools/display-suite/NN-*.sh runs in a headless session of its
   own and checks windows, pixels and app behavior; logs and screenshots go to
-  `~/vergence-display-suite/`. Run it before pushing anything that draws. It
+  `~/.cache/vergence-lab/display-suite/`. Run it before pushing anything that draws. It
   builds what it needs in release into the checkout's `target-check/`
   (whatever `CARGO_TARGET_DIR` says), a few minutes the first time.
 - **The display check**, `sh tools/display-check.sh <screen> [scale...]` (or

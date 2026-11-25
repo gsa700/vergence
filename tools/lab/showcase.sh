@@ -7,11 +7,11 @@
 # Each shot: a new session (state cleared, the test profile plus the shot's own
 # settings), sample files from this checkout under /tmp/vergence-showcase, the
 # windows placed, then `vctl shot`. PNGs land in OUTDIR (default
-# ~/vergence-showcase); copy them back and look at them before using them.
+# ~/.cache/vergence-lab/showcase); copy them back and look at them before using them.
 set -u
 cd "$(dirname "$0")/../.." || exit 1
 ROOT=$(pwd)
-OUT=${1:-$HOME/vergence-showcase}
+OUT=${1:-${XDG_CACHE_HOME:-$HOME/.cache}/vergence-lab/showcase}
 mkdir -p "$OUT"
 H=$HOME/.cache/vergence-headless/home
 DEMO=/tmp/vergence-showcase
@@ -34,7 +34,7 @@ vctl() { "$ROOT/tools/vctl" "$@"; }
 # A fresh session; $1: lines added to its desktop.toml (the shot's settings).
 fresh() {
     tools/vergence-headless stop >/dev/null 2>&1
-    rm -rf "$H/.local/state" "$H/vergence-shots" "$H/.config/vergence/desktop.toml"
+    rm -rf "$H/.local/state" "$H/.cache/vergence-lab/shots" "$H/.config/vergence/desktop.toml"
     tools/vergence-headless start --screen "2560x1440 597x336@60" >/dev/null 2>&1 || { echo "showcase: no session" >&2; exit 1; }
     eval "$(tools/vergence-headless env)"
     [ -n "${1:-}" ] && printf '\n%s\n' "$1" >> "$H/.config/vergence/desktop.toml"
@@ -61,11 +61,11 @@ front() {
 # shot <name>: the screen, saved as OUT/<name>.png.
 shot() {
     sleep 2
-    rm -f "$H/vergence-shots/MEM-1.png"
+    rm -f "$H/.cache/vergence-lab/shots/MEM-1.png"
     vctl shot >/dev/null
-    i=0; while [ ! -s "$H/vergence-shots/MEM-1.png" ] && [ $i -lt 50 ]; do sleep 0.2; i=$((i + 1)); done
+    i=0; while [ ! -s "$H/.cache/vergence-lab/shots/MEM-1.png" ] && [ $i -lt 50 ]; do sleep 0.2; i=$((i + 1)); done
     sleep 1
-    cp "$H/vergence-shots/MEM-1.png" "$OUT/$1.png" && echo "showcase: $OUT/$1.png"
+    cp "$H/.cache/vergence-lab/shots/MEM-1.png" "$OUT/$1.png" && echo "showcase: $OUT/$1.png"
 }
 icons='[files]
 view = "icons"'

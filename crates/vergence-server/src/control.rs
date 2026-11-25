@@ -16,7 +16,7 @@
 // ~/.config/vergence/control-socket. One command per connection, one line in (at most LINE_MAX
 // bytes), text out; a client gets IO_TIMEOUT to send its line and take the reply:
 //
-//   shot                 PNG of every monitor as shown -> ~/vergence-shots/
+//   shot                 PNG of every monitor as shown -> ~/.cache/vergence-lab/shots/
 //   windows              the windows: index, kind, title, class, geometry, monitor
 //   dbus                 the D-Bus edge: connections, names, every call seen
 //   notes                the notifications on screen
@@ -867,8 +867,16 @@ impl Server {
     }
 }
 
+/// Where `vctl shot` writes: the lab's cache, `$XDG_CACHE_HOME/vergence-lab/shots`
+/// (`~/.cache/...`), not the home folder itself (Dave, 2026-11-24: the lab's
+/// output was piling up in ~). A person's own screenshots go to Pictures.
 pub fn shot_dir() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp")).join("vergence-shots")
+    let cache = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    cache.join("vergence-lab/shots")
 }
 
 /// Write RGBA pixels as a PNG, off the main thread. A screenshot is the

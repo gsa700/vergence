@@ -15,7 +15,7 @@
 # (set with `vctl scale`, never saved; the screen's own afterwards) moves it
 # one point at a time through eight places, takes a shot of the screen at
 # each and checks it pixel by pixel. Shots and report.txt in
-# ~/vergence-display-check/<time>/. Exit 1 if any check failed.
+# ~/.cache/vergence-lab/display-check/<time>/. Exit 1 if any check failed.
 set -u
 root=$(cd "$(dirname "$0")/.." && pwd)
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
@@ -46,13 +46,13 @@ if [ -n "$headless" ]; then
     "$root/tools/vergence-headless" stop >/dev/null 2>&1
     VERGENCE_SERVER=$target/release/vergence-server "$root/tools/vergence-headless" start --screen "$headless" || exit 2
     eval "$("$root/tools/vergence-headless" env)"
-    SHOTS_DIR=$HOME/.cache/vergence-headless/home/vergence-shots
+    SHOTS_DIR=$HOME/.cache/vergence-headless/home/.cache/vergence-lab/shots
     trap '"$root/tools/vergence-headless" stop >/dev/null' EXIT
 fi
 
 # Where the server writes its shots: its HOME's (a headless session has its own).
-shots=${SHOTS_DIR:-$HOME/vergence-shots}
-out=$HOME/vergence-display-check/$(date +%Y%m%d-%H%M%S)
+shots=${SHOTS_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/vergence-lab/shots}
+out=${XDG_CACHE_HOME:-$HOME/.cache}/vergence-lab/display-check/$(date +%Y%m%d-%H%M%S)
 mkdir -p "$out"
 report=$out/report.txt
 : >"$report"

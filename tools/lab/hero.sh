@@ -8,14 +8,14 @@
 # default). Each shot: the wallpaper and its tint, the frosted dock with its
 # tiles, and four of Vergence's own apps overlapping (FileView, Reader on the
 # 17-days story, Terminal, Settings > Appearance); no third-party programs.
-# PNGs land in OUTDIR (default ~/vergence-hero); look at them before use.
+# PNGs land in OUTDIR (default ~/.cache/vergence-lab/hero); look at them before use.
 # The README's picture (docs/screenshots/desktop.jpg) is dusk-default, the
 # desktop as shipped (Dave, 2026-11-22), made 2560 wide at JPEG quality 85.
 # Variations are <wallpaper>-<style>; style default is App default.
 set -u
 cd "$(dirname "$0")/../.." || exit 1
 ROOT=$(pwd)
-OUT=${1:-$HOME/vergence-hero}
+OUT=${1:-${XDG_CACHE_HOME:-$HOME/.cache}/vergence-lab/hero}
 [ $# -gt 0 ] && shift
 VARIATIONS=${*:-tide-dark ember-dark graphite-dark dusk-light mist-light}
 mkdir -p "$OUT"
@@ -39,7 +39,7 @@ for f in docs/screenshots/*.jpg docs/screenshots/*.png; do [ -f "$f" ] && cp "$f
 vctl() { "$ROOT/tools/vctl" "$@"; }
 fresh() {
     tools/vergence-headless stop >/dev/null 2>&1
-    rm -rf "$H/.local/state" "$H/vergence-shots" "$H/.config/vergence/desktop.toml"
+    rm -rf "$H/.local/state" "$H/.cache/vergence-lab/shots" "$H/.config/vergence/desktop.toml"
     # A 27-inch 4K screen, as on techbench.
     tools/vergence-headless start --screen "3840x2160 597x336@60" >/dev/null 2>&1 || { echo "hero: no session" >&2; exit 1; }
     eval "$(tools/vergence-headless env)"
@@ -81,11 +81,11 @@ front() {
 }
 shot() {
     sleep 3
-    rm -f "$H/vergence-shots/MEM-1.png"
+    rm -f "$H/.cache/vergence-lab/shots/MEM-1.png"
     vctl shot >/dev/null
-    i=0; while [ ! -s "$H/vergence-shots/MEM-1.png" ] && [ $i -lt 50 ]; do sleep 0.2; i=$((i + 1)); done
+    i=0; while [ ! -s "$H/.cache/vergence-lab/shots/MEM-1.png" ] && [ $i -lt 50 ]; do sleep 0.2; i=$((i + 1)); done
     sleep 1
-    cp "$H/vergence-shots/MEM-1.png" "$OUT/$1.png" && echo "hero: $OUT/$1.png"
+    cp "$H/.cache/vergence-lab/shots/MEM-1.png" "$OUT/$1.png" && echo "hero: $OUT/$1.png"
 }
 
 for v in $VARIATIONS; do

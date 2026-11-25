@@ -18,7 +18,7 @@ headless() {
     grep -q '^\[remote\]' "$cfg" 2>/dev/null || printf '\n[remote]\nenabled = true\n' >> "$cfg"
     VERGENCE_SERVER="$TARGET/vergence-server" "$ROOT/tools/vergence-headless" start "$@" >/dev/null || return 1
     eval "$("$ROOT/tools/vergence-headless" env)"
-    SHOTS=$HOME/.cache/vergence-headless/home/vergence-shots
+    SHOTS=$HOME/.cache/vergence-headless/home/.cache/vergence-lab/shots
     mkdir -p "$SHOTS"
 }
 

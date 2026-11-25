@@ -26,7 +26,7 @@ else
     ssh "$host" "sh src/vergence/tools/display-check.sh $screen $*"
 fi
 status=$?
-last=$(ssh "$host" 'ls -td ~/vergence-display-check/*/ | head -1')
+last=$(ssh "$host" 'ls -td ~/.cache/vergence-lab/display-check/*/ | head -1')
 dest=$HOME/vergence-display-checks/$host-$(basename "$last")
 mkdir -p "$dest"
 scp -q "$host:${last}report.txt" "$dest/"
