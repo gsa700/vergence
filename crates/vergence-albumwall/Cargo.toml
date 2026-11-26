@@ -12,6 +12,7 @@ description = "AlbumWall for Vergence: a wall of every album you own, played gap
 # license as its author (as Hymie's decoders were, preview milestone 1).
 [dependencies]
 vergence-config.workspace = true
+vergence-hymie.workspace = true
 vergence-ui.workspace = true
 vergence-widgets.workspace = true
 

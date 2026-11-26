@@ -2,3 +2,4 @@
 //! not the window, kept here so they can be tested on their own.
 
 pub mod libraries;
+pub mod library;

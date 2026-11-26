@@ -2156,6 +2156,7 @@ name = "vergence-albumwall"
 version = "0.4.0-pre.3"
 dependencies = [
  "vergence-config",
+ "vergence-hymie",
  "vergence-ui",
  "vergence-widgets",
 ]
