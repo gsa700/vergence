@@ -462,6 +462,12 @@ pub enum WinRequest {
         node: u64,
         agent: String,
     },
+    /// The whole screen, with no bar and no dock, or back to its place (bus
+    /// v41, AlbumWall's F11): the screen the window is mostly on.
+    Fullscreen {
+        window: u32,
+        on: bool,
+    },
     /// Every key to this window while it has the keyboard, the server's own
     /// shortcuts included (bus v40, remote milestone 1: Vergence Remote's
     /// viewer), or no longer. The server answers [`WinEvent::KeysCaptured`];
@@ -1045,6 +1051,7 @@ pub(crate) mod op {
     pub const TEXT_PAGE: u16 = 128;
     pub const REVOKE_AGENT: u16 = 129;
     pub const CAPTURE_KEYS: u16 = 130;
+    pub const FULLSCREEN: u16 = 131;
     // Server to client.
     pub const CREATED: u16 = 100;
     pub const CONFIGURE: u16 = 101;
@@ -1529,6 +1536,11 @@ impl WinRequest {
                 e.u32(*window).bool(*on);
                 e
             }
+            WinRequest::Fullscreen { window, on } => {
+                let mut e = Encoder::frame(op::FULLSCREEN);
+                e.u32(*window).bool(*on);
+                e
+            }
             WinRequest::TextPage { window, serial, node, found, offset, total, text } => {
                 let mut e = Encoder::frame(op::TEXT_PAGE);
                 e.u32(*window).u32(*serial).u64(*node).bool(*found).u32(*offset).u32(*total).str(text);
@@ -1731,6 +1743,7 @@ impl WinRequest {
             op::ACTED => WinRequest::Acted { window: d.u32()?, serial: d.u32()?, ok: d.bool()?, why: d.str()? },
             op::REVOKE_AGENT => WinRequest::RevokeAgent { window: d.u32()?, node: d.u64()?, agent: d.str()? },
             op::CAPTURE_KEYS => WinRequest::CaptureKeys { window: d.u32()?, on: d.bool()? },
+            op::FULLSCREEN => WinRequest::Fullscreen { window: d.u32()?, on: d.bool()? },
             op::TEXT_PAGE => {
                 let (window, serial, node, found, offset, total) =
                     (d.u32()?, d.u32()?, d.u64()?, d.bool()?, d.u32()?, d.u32()?);
@@ -2430,6 +2443,8 @@ mod tests {
             WinRequest::Acted { window: 2, serial: 8, ok: true, why: String::new() },
             WinRequest::RevokeAgent { window: 3, node: 1 << 60 | 9, agent: "Claude".into() },
             WinRequest::CaptureKeys { window: 3, on: true },
+            WinRequest::Fullscreen { window: 3, on: true },
+            WinRequest::Fullscreen { window: 4, on: false },
             WinRequest::TextPage {
                 window: 1,
                 serial: 9,

@@ -515,6 +515,7 @@ impl<'a> Native<'a> {
                 }
                 Command::GroundClicked => self.send(WinRequest::GroundClicked { window: id })?,
                 Command::Minimize => self.send(WinRequest::Minimize { window: id })?,
+                Command::Fullscreen(on) => self.send(WinRequest::Fullscreen { window: id, on })?,
                 Command::Copy(text) => {
                     self.send(WinRequest::Copy {
                         input_serial: self.input_serial,

@@ -665,6 +665,11 @@ impl Client {
         self.send(Writer::new(toplevel, if maximized { 9 } else { 10 }))
     }
 
+    /// set_fullscreen (on the compositor's choice of output) or unset_fullscreen.
+    pub fn set_fullscreen(&mut self, toplevel: u32, on: bool) -> io::Result<()> {
+        if on { self.send(Writer::new(toplevel, 11).object(0)) } else { self.send(Writer::new(toplevel, 12)) }
+    }
+
     pub fn set_minimized(&mut self, toplevel: u32) -> io::Result<()> {
         self.send(Writer::new(toplevel, 13))
     }

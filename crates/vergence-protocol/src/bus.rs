@@ -82,11 +82,13 @@
 //! the tabs agents hold a grant for, for the window's stop keys.
 //! Version 40 (remote milestone 1, Vergence Remote's viewer): `window::WinRequest::CaptureKeys`
 //! and `window::WinEvent::KeysCaptured`, a window that takes every key while it has the keyboard.
+//! Version 41 (AlbumWall milestone 1, step 7): `window::WinRequest::Fullscreen`, a native window
+//! asking for the whole screen (F11) and back.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 40;
+pub const VERSION: u32 = 41;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

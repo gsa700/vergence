@@ -750,6 +750,16 @@ impl Server {
                     self.toggle_maximize(&w);
                 }
             }
+            // The whole screen and back (bus v41), as a Wayland or X11
+            // window's request is answered (fullscreen.rs).
+            WinRequest::Fullscreen { window, on } => {
+                let Some(w) = self.natives.get(&(client, window)).cloned() else { return };
+                if on {
+                    self.enter_fullscreen(&w, None);
+                } else {
+                    self.leave_fullscreen(&w);
+                }
+            }
             // It draws under its bar (look milestone 1): told the inset at once.
             // Its kind, modal, limits (window styles milestone 1). A dialog or
             // palette of another connection's window is a normal window: a

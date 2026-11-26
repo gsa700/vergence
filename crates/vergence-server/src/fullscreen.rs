@@ -39,6 +39,9 @@ impl Server {
         } else if let Some(x) = w.x11_surface() {
             let _ = x.set_fullscreen(true);
             let _ = x.configure(screen);
+        } else if let Win::Native(n) = w {
+            // Filled as it is: off the pixel grid, as a maximized window.
+            self.native_configure(n, screen.size, true);
         }
         self.put(w.clone(), screen.loc, true);
         tracing::info!("full screen: {:?} on {:?}", self.window_title(w), screen);
@@ -57,6 +60,9 @@ impl Server {
         } else if let Some(x) = w.x11_surface() {
             let _ = x.set_fullscreen(false);
             let _ = x.configure(before);
+        } else if let Win::Native(n) = w {
+            let maximized = self.restore.contains_key(w);
+            self.native_configure(n, before.size, maximized);
         }
         self.put(w.clone(), before.loc, true);
         tracing::info!("full screen: {:?} back to {:?}", self.window_title(w), before);

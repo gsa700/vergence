@@ -392,7 +392,7 @@ impl Server {
         // Every native window's bar is the server's (bar milestone 1, step 8),
         // but the desktop's icons have none (desktop.rs).
         if w.native().is_some() {
-            return !self.is_desktop(w);
+            return !self.is_desktop(w) && !self.fullscreen.contains_key(w);
         }
         if let Some(x) = w.x11_surface() {
             return !x.is_override_redirect() && !x.is_decorated() && !x.is_fullscreen();

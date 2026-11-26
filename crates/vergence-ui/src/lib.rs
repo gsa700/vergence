@@ -520,6 +520,7 @@ enum Command {
     /// The person stopped an agent at this scope node (bus v38).
     RevokeAgent(u64, String),
     CaptureKeys(bool),
+    Fullscreen(bool),
 }
 
 /// What a program may ask of its window while it handles input.
@@ -621,6 +622,12 @@ impl Window {
 
     pub fn minimize(&mut self) {
         self.commands.push(Command::Minimize);
+    }
+
+    /// The whole screen, with no bar and no dock, or back to the window's
+    /// place (bus v41; xdg_toplevel's under other desktops).
+    pub fn set_fullscreen(&mut self, on: bool) {
+        self.commands.push(Command::Fullscreen(on));
     }
 
     /// Puts text on the clipboard, in answer to the key or button just pressed.
@@ -1562,6 +1569,7 @@ impl<'a> Runner<'a> {
                 | Command::CaptureKeys(..)
                 | Command::GroundClicked => {}
                 Command::Minimize => self.client.set_minimized(toplevel)?,
+                Command::Fullscreen(on) => self.client.set_fullscreen(toplevel, on)?,
                 Command::Copy(text) => {
                     if let (Some(manager), Some(device)) = (self.data_manager, self.data_device) {
                         if let Some((old, _)) = self.copied.take() {
