@@ -2159,6 +2159,7 @@ dependencies = [
  "vergence-decode",
  "vergence-hymie",
  "vergence-scene",
+ "vergence-sound",
  "vergence-ui",
  "vergence-widgets",
 ]

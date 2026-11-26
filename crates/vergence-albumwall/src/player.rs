@@ -1,0 +1,696 @@
+//! Playing (docs/albumwall-milestone-1.md, step 6; the Avalonia app's
+//! HymieEngine): one album's tracks, gaplessly, at each file's own rate.
+//!
+//! - **One stream, tracks fed back to back.** The decoders already trim each
+//!   file's padding (Hymie: an MP3's LAME tag, an MP4's edit list), so one
+//!   track's last sample and the next one's first meet in the same write.
+//!   The next track is opened ahead (its own helper). The output is opened
+//!   again only when the rate or the channels change.
+//! - **ReplayGain** by album, by track, or off (clipping prevented by the
+//!   peak, as mpv does), and the app's own volume, then dithered to 16 bits.
+//! - **Where it is** is what has been heard: what was written less what the
+//!   output still holds. A track change is heard that much later too, so
+//!   the track shown changes when its first sample comes out.
+//! - The player runs on a thread of its own; the window sends it commands
+//!   and reads its state, and is woken when something changes.
+//!
+//! Decoders and the output are behind two small traits, so the engine is
+//! tested with made-up tracks and a stream that records what it is given.
+
+use std::collections::VecDeque;
+use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+/// A decoded track the player reads from.
+pub trait Source: Send {
+    fn rate(&self) -> u32;
+    fn channels(&self) -> u16;
+    /// Its length in frames.
+    fn frames(&self) -> u64;
+    fn gain(&self) -> vergence_hymie::ReplayGain;
+    /// Up to `frames` frames from where it is, interleaved; fewer only at the end.
+    fn read(&mut self, frames: u32) -> Result<Vec<f32>, String>;
+    fn seek(&mut self, frame: u64) -> Result<(), String>;
+}
+
+/// A file's track, in Hymie's confined helper.
+impl Source for vergence_hymie::helper::Sound {
+    fn rate(&self) -> u32 {
+        self.info.rate
+    }
+    fn channels(&self) -> u16 {
+        self.info.channels
+    }
+    fn frames(&self) -> u64 {
+        self.info.frames
+    }
+    fn gain(&self) -> vergence_hymie::ReplayGain {
+        self.info.gain
+    }
+    fn read(&mut self, frames: u32) -> Result<Vec<f32>, String> {
+        vergence_hymie::helper::Sound::read(self, frames).map_err(|e| e.to_string())
+    }
+    fn seek(&mut self, frame: u64) -> Result<(), String> {
+        vergence_hymie::helper::Sound::seek(self, frame).map_err(|e| e.to_string())
+    }
+}
+
+/// Opens a track; opens the output for a rate and channels.
+pub type OpenTrack = dyn Fn(&std::path::Path) -> Result<Box<dyn Source>, String> + Send + Sync;
+pub type OpenOutput = dyn Fn(u32, u32) -> std::io::Result<Box<dyn vergence_sound::Stream>> + Send + Sync;
+
+/// The installed decoders and output.
+pub fn system() -> (Arc<OpenTrack>, Arc<OpenOutput>) {
+    let track: Arc<OpenTrack> = Arc::new(|p: &std::path::Path| {
+        vergence_hymie::helper::Sound::open(p).map(|s| Box::new(s) as Box<dyn Source>).map_err(|e| e.to_string())
+    });
+    let output: Arc<OpenOutput> = Arc::new(|rate, ch| vergence_sound::named_stream(rate, ch, "AlbumWall"));
+    (track, output)
+}
+
+/// How loud: ReplayGain by album, by track, or not at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Loudness {
+    Album,
+    Track,
+    Off,
+}
+
+/// What the window asks of the player.
+pub enum Command {
+    /// Play `tracks` (an album's, in order) from `from`; `tag` says which
+    /// album they are (the window's), handed back in the state.
+    Play {
+        tracks: Vec<PathBuf>,
+        from: usize,
+        tag: usize,
+        loudness: Loudness,
+    },
+    /// As Play, loaded paused at `seconds` into its track (picking up where
+    /// it was left): nothing is heard until Pause(false).
+    Load {
+        tracks: Vec<PathBuf>,
+        from: usize,
+        tag: usize,
+        loudness: Loudness,
+        seconds: f64,
+    },
+    Pause(bool),
+    Next,
+    /// Back a track, or to the start of this one if more than 3 s in.
+    Previous,
+    Seek(f64),
+    Stop,
+    /// The app's own volume, 0 to 1.
+    Volume(f32),
+}
+
+/// What is playing, as heard.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Now {
+    pub tag: usize,
+    pub track: usize,
+    pub seconds: f64,
+    pub length: f64,
+    pub paused: bool,
+    pub rate: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct State {
+    pub now: Option<Now>,
+    /// The last album played to its end (its tag): what to do next is the window's.
+    pub ended: Option<usize>,
+    /// Why nothing plays ("No sound output: …"), until something plays.
+    pub problem: Option<String>,
+    /// The loudest sample of each side in the last piece heard, 0 to 1 (the meters').
+    pub levels: [f32; 2],
+}
+
+/// The player: its thread, the commands it takes, its state.
+pub struct Player {
+    tx: Sender<Command>,
+    pub state: Arc<Mutex<State>>,
+}
+
+/// How much is decoded and written at once.
+const PIECE: Duration = Duration::from_millis(50);
+
+impl Player {
+    pub fn new(track: Arc<OpenTrack>, output: Arc<OpenOutput>, wake: impl Fn() + Send + 'static) -> Player {
+        let (tx, rx) = channel();
+        let state: Arc<Mutex<State>> = Arc::default();
+        let s = state.clone();
+        let _ = std::thread::Builder::new()
+            .name("player".into())
+            .spawn(move || Engine::new(track, output, s, Box::new(wake)).run(rx));
+        Player { tx, state }
+    }
+
+    pub fn send(&self, c: Command) {
+        let _ = self.tx.send(c);
+    }
+
+    pub fn state(&self) -> State {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+}
+
+/// One track open: its number in the queue and its source.
+struct Open {
+    index: usize,
+    source: Box<dyn Source>,
+}
+
+/// A point in the output's timeline where a track starts: frames written
+/// before it, the track, and the frame of the track it starts at (a seek).
+#[derive(Clone, Copy)]
+struct Mark {
+    at: u64,
+    track: usize,
+    from: u64,
+}
+
+struct Engine {
+    open_track: Arc<OpenTrack>,
+    open_output: Arc<OpenOutput>,
+    state: Arc<Mutex<State>>,
+    wake: Box<dyn Fn() + Send>,
+    tracks: Vec<PathBuf>,
+    tag: usize,
+    loudness: Loudness,
+    volume: f32,
+    current: Option<Open>,
+    next: Option<Open>,
+    out: Option<Box<dyn vergence_sound::Stream>>,
+    /// Frames written to the output since it opened, and where tracks start in that.
+    written: u64,
+    marks: VecDeque<Mark>,
+    paused: bool,
+    dither: u32,
+}
+
+impl Engine {
+    fn new(
+        open_track: Arc<OpenTrack>,
+        open_output: Arc<OpenOutput>,
+        state: Arc<Mutex<State>>,
+        wake: Box<dyn Fn() + Send>,
+    ) -> Engine {
+        Engine {
+            open_track,
+            open_output,
+            state,
+            wake,
+            tracks: Vec::new(),
+            tag: 0,
+            loudness: Loudness::Album,
+            volume: 1.0,
+            current: None,
+            next: None,
+            out: None,
+            written: 0,
+            marks: VecDeque::new(),
+            paused: false,
+            dither: 0x1234_5678,
+        }
+    }
+
+    fn run(mut self, rx: Receiver<Command>) {
+        loop {
+            // Idle or paused: wait for a command. Playing: take what came, then play a piece.
+            let idle = self.current.is_none() || self.paused;
+            let c = if idle {
+                match rx.recv() {
+                    Ok(c) => Some(c),
+                    Err(_) => return,
+                }
+            } else {
+                match rx.try_recv() {
+                    Ok(c) => Some(c),
+                    Err(TryRecvError::Empty) => None,
+                    Err(TryRecvError::Disconnected) => return,
+                }
+            };
+            if let Some(c) = c {
+                self.command(c);
+                continue;
+            }
+            self.piece();
+        }
+    }
+
+    fn command(&mut self, c: Command) {
+        match c {
+            Command::Play { tracks, from, tag, loudness } => {
+                self.tracks = tracks;
+                self.tag = tag;
+                self.loudness = loudness;
+                self.paused = false;
+                self.next = None;
+                self.flush();
+                self.start(from, 0);
+            }
+            Command::Load { tracks, from, tag, loudness, seconds } => {
+                self.tracks = tracks;
+                self.tag = tag;
+                self.loudness = loudness;
+                self.next = None;
+                self.flush();
+                let at =
+                    self.tracks.get(from).and_then(|p| (self.open_track)(p).ok()).map(|s| s.rate()).unwrap_or(44100);
+                self.start(from, (seconds.max(0.0) * at as f64) as u64);
+                self.paused = self.current.is_some();
+            }
+            Command::Pause(on) => {
+                if self.current.is_some() && on != self.paused {
+                    self.paused = on;
+                    if let Some(o) = self.out.as_mut() {
+                        let _ = o.pause(on);
+                    }
+                }
+            }
+            Command::Next => {
+                if let Some(c) = &self.current {
+                    let i = c.index + 1;
+                    self.flush();
+                    if i < self.tracks.len() { self.start(i, 0) } else { self.finish() }
+                }
+            }
+            Command::Previous => {
+                if let Some(c) = &self.current {
+                    let i = c.index;
+                    let back = if self.heard().map_or(0.0, |n| n.seconds) > 3.0 { i } else { i.saturating_sub(1) };
+                    self.flush();
+                    self.start(back, 0);
+                }
+            }
+            Command::Seek(seconds) => {
+                if let Some(c) = &self.current {
+                    let (i, rate) = (c.index, c.source.rate());
+                    self.flush();
+                    self.start(i, (seconds.max(0.0) * rate as f64) as u64);
+                }
+            }
+            Command::Stop => {
+                self.flush();
+                self.current = None;
+                self.next = None;
+                self.out = None;
+                self.publish(None);
+            }
+            Command::Volume(v) => self.volume = v.clamp(0.0, 1.0),
+        }
+        self.publish(None);
+    }
+
+    /// What is buffered thrown away, so what comes next is heard at once.
+    fn flush(&mut self) {
+        if let Some(o) = self.out.as_mut() {
+            let _ = o.flush();
+            if self.paused {
+                let _ = o.pause(false);
+            }
+        }
+        self.paused = false;
+        self.marks.clear();
+        self.written = 0;
+        // A stream that cannot flush still holds what it has; counted afresh from here.
+    }
+
+    /// Track `i` started at its frame `from` (the queue's next one opened ahead).
+    fn start(&mut self, i: usize, from: u64) {
+        let source = match self.next.take() {
+            Some(n) if n.index == i && from == 0 => Ok(n.source),
+            _ => match self.tracks.get(i) {
+                Some(p) => (self.open_track)(p),
+                None => Err("no such track".into()),
+            },
+        };
+        match source {
+            Ok(mut s) => {
+                if from > 0 {
+                    let _ = s.seek(from);
+                }
+                self.marks.push_back(Mark { at: self.written, track: i, from });
+                self.current = Some(Open { index: i, source: s });
+            }
+            Err(e) => {
+                self.current = None;
+                self.publish(Some(format!("This track could not be played: {e}")));
+            }
+        }
+    }
+
+    /// The album played to its end.
+    fn finish(&mut self) {
+        self.current = None;
+        self.next = None;
+        let tag = self.tag;
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).ended = Some(tag);
+        self.publish(None);
+    }
+
+    /// One piece decoded, made louder or softer, and written.
+    fn piece(&mut self) {
+        let Some(cur) = self.current.as_mut() else { return };
+        let (rate, ch) = (cur.source.rate(), cur.source.channels().max(1) as u32);
+        let want = ((rate as f64 * PIECE.as_secs_f64()) as u32).max(1);
+        let read = cur.source.read(want);
+        let index = cur.index;
+        let gain = match self.loudness {
+            Loudness::Album => cur.source.gain().multiplier(true),
+            Loudness::Track => cur.source.gain().multiplier(false),
+            Loudness::Off => 1.0,
+        } * self.volume;
+        let mut samples = match read {
+            Ok(s) => s,
+            Err(e) => {
+                self.publish(Some(format!("This track stopped: {e}")));
+                Vec::new()
+            }
+        };
+        let mut gain = gain;
+        let mut short = samples.len() < (want * ch) as usize;
+        // The next track opened ahead, ready for the seam.
+        if self.next.is_none()
+            && index + 1 < self.tracks.len()
+            && let Ok(s) = (self.open_track)(&self.tracks[index + 1])
+        {
+            self.next = Some(Open { index: index + 1, source: s });
+        }
+        // At the end: the next track's first frames go in the same write
+        // when it is the same rate and channels (gapless), else after a new output.
+        if short {
+            match self.next.take() {
+                Some(n) if n.source.rate() == rate && n.source.channels() as u32 == ch => {
+                    let at = self.written + (samples.len() as u64 / ch as u64);
+                    self.marks.push_back(Mark { at, track: n.index, from: 0 });
+                    let rest = want - (samples.len() as u32 / ch);
+                    let mut s = n.source;
+                    let more = s.read(rest).unwrap_or_default();
+                    // The rest of the piece at the new track's gain.
+                    let g2 = match self.loudness {
+                        Loudness::Album => s.gain().multiplier(true),
+                        Loudness::Track => s.gain().multiplier(false),
+                        Loudness::Off => 1.0,
+                    } * self.volume;
+                    self.write(&samples, gain, ch, rate);
+                    samples = more;
+                    gain = g2;
+                    short = samples.len() < (rest * ch) as usize;
+                    self.current = Some(Open { index: n.index, source: s });
+                }
+                Some(n) => {
+                    self.write(&samples, gain, ch, rate);
+                    // Another rate: the old output played out, a new one for it.
+                    self.out = None;
+                    self.written = 0;
+                    self.marks.clear();
+                    self.marks.push_back(Mark { at: 0, track: n.index, from: 0 });
+                    self.current = Some(n);
+                    self.publish(None);
+                    return;
+                }
+                None => {
+                    self.write(&samples, gain, ch, rate);
+                    self.finish();
+                    return;
+                }
+            }
+        }
+        self.write(&samples, gain, ch, rate);
+        if short {
+            // The new track was shorter than the rest of the piece: let the next piece find its end.
+        }
+        self.publish(None);
+    }
+
+    /// Samples written to the output (opened for their rate and channels),
+    /// at `gain`, dithered to 16 bits; the meters' levels kept.
+    fn write(&mut self, samples: &[f32], gain: f32, ch: u32, rate: u32) {
+        if samples.is_empty() {
+            return;
+        }
+        if self.out.as_ref().is_none_or(|o| o.rate() != rate || o.channels() != ch) && self.out.is_none() {
+            match (self.open_output)(rate, ch) {
+                Ok(o) => self.out = Some(o),
+                Err(e) => {
+                    self.current = None;
+                    self.publish(Some(format!("No sound output: {e}")));
+                    return;
+                }
+            }
+        }
+        let Some(out) = self.out.as_mut() else { return };
+        let (orate, och) = (out.rate(), out.channels().max(1));
+        let frames = samples.len() / ch as usize;
+        let mut levels = [0f32; 2];
+        let mut pcm: Vec<i16> = Vec::with_capacity(frames * och as usize);
+        // The output's rate if it would not take the file's (an ALSA device
+        // with a rate of its own): linear between frames.
+        let step = rate as f64 / orate as f64;
+        let n_out = if orate == rate { frames } else { ((frames as f64) / step).floor() as usize };
+        for f in 0..n_out {
+            let pos = f as f64 * step;
+            let (i, t) = (pos.floor() as usize, (pos - pos.floor()) as f32);
+            for c in 0..och as usize {
+                let src = |frame: usize| -> f32 {
+                    let frame = frame.min(frames - 1);
+                    let base = frame * ch as usize;
+                    match (ch, och) {
+                        (1, _) => samples[base],
+                        (_, 1) => (samples[base] + samples[base + 1.min(ch as usize - 1)]) / 2.0,
+                        _ if c < ch as usize => samples[base + c],
+                        _ => 0.0,
+                    }
+                };
+                let v = (src(i) * (1.0 - t) + src(i + 1) * t) * gain;
+                levels[c.min(1)] = levels[c.min(1)].max(v.abs());
+                // TPDF dither: two uniform randoms of a half step each.
+                let mut r = || {
+                    self.dither ^= self.dither << 13;
+                    self.dither ^= self.dither >> 17;
+                    self.dither ^= self.dither << 5;
+                    self.dither as f32 / u32::MAX as f32 - 0.5
+                };
+                let d = r() + r();
+                pcm.push((v * 32767.0 + d).round().clamp(-32768.0, 32767.0) as i16);
+            }
+        }
+        if och == 1 {
+            levels[1] = levels[0];
+        }
+        if let Err(e) = out.write(&pcm) {
+            self.out = None;
+            self.current = None;
+            self.publish(Some(format!("Sound output stopped: {e}")));
+            return;
+        }
+        self.written += n_out as u64;
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).levels = levels;
+    }
+
+    /// What is being heard: the track whose start the output has reached, and how far in.
+    fn heard(&self) -> Option<Now> {
+        let cur = self.current.as_ref()?;
+        let rate = self.out.as_ref().map_or(cur.source.rate(), |o| o.rate()).max(1);
+        let latency = self.out.as_ref().map_or(0, |o| (o.latency().as_secs_f64() * rate as f64) as u64);
+        let heard = self.written.saturating_sub(latency);
+        let mark = self.marks.iter().rev().find(|m| m.at <= heard).or(self.marks.front()).copied()?;
+        let seconds = (mark.from + heard.saturating_sub(mark.at)) as f64 / rate as f64;
+        let length =
+            if mark.track == cur.index { cur.source.frames() as f64 / cur.source.rate().max(1) as f64 } else { 0.0 };
+        Some(Now { tag: self.tag, track: mark.track, seconds, length, paused: self.paused, rate: cur.source.rate() })
+    }
+
+    fn publish(&mut self, problem: Option<String>) {
+        // Marks the output has passed are forgotten (all but the one being heard).
+        let now = self.heard();
+        if let Some(n) = &now {
+            while self.marks.len() > 1 && self.marks.get(1).is_some_and(|m| m.track <= n.track && m.at <= self.written)
+            {
+                if self.marks[1].track == n.track {
+                    self.marks.pop_front();
+                } else {
+                    break;
+                }
+            }
+        }
+        {
+            let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            let changed = s.now.as_ref().map(|n| (n.track, n.paused)) != now.as_ref().map(|n| (n.track, n.paused));
+            s.now = now;
+            if problem.is_some() {
+                s.problem = problem;
+            } else if s.now.is_some() {
+                s.problem = None;
+            }
+            if changed && s.now.is_some() {
+                s.ended = None;
+            }
+        }
+        (self.wake)();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A made-up track: `frames` frames of a ramp, `ch` channels.
+    struct Ramp {
+        rate: u32,
+        ch: u16,
+        frames: u64,
+        at: u64,
+        level: f32,
+    }
+
+    impl Source for Ramp {
+        fn rate(&self) -> u32 {
+            self.rate
+        }
+        fn channels(&self) -> u16 {
+            self.ch
+        }
+        fn frames(&self) -> u64 {
+            self.frames
+        }
+        fn gain(&self) -> vergence_hymie::ReplayGain {
+            vergence_hymie::ReplayGain::default()
+        }
+        fn read(&mut self, frames: u32) -> Result<Vec<f32>, String> {
+            let n = (frames as u64).min(self.frames - self.at);
+            self.at += n;
+            Ok(vec![self.level; (n * self.ch as u64) as usize])
+        }
+        fn seek(&mut self, frame: u64) -> Result<(), String> {
+            self.at = frame.min(self.frames);
+            Ok(())
+        }
+    }
+
+    /// An output that keeps what it is given (and takes no time).
+    struct Tape {
+        rate: u32,
+        ch: u32,
+        kept: Arc<Mutex<Vec<i16>>>,
+    }
+
+    impl vergence_sound::Stream for Tape {
+        fn rate(&self) -> u32 {
+            self.rate
+        }
+        fn channels(&self) -> u32 {
+            self.ch
+        }
+        fn write(&mut self, samples: &[i16]) -> std::io::Result<()> {
+            self.kept.lock().unwrap().extend_from_slice(samples);
+            Ok(())
+        }
+    }
+
+    fn engine(tracks: Vec<(u32, u64, f32)>, kept: Arc<Mutex<Vec<i16>>>) -> Engine {
+        let tracks = Arc::new(tracks);
+        let t2 = tracks.clone();
+        let open: Arc<OpenTrack> = Arc::new(move |p: &std::path::Path| {
+            let i: usize = p.to_string_lossy().parse().map_err(|_| "?".to_string())?;
+            let (rate, frames, level) = t2[i];
+            Ok(Box::new(Ramp { rate, ch: 2, frames, at: 0, level }) as Box<dyn Source>)
+        });
+        let out: Arc<OpenOutput> = Arc::new(move |rate, ch| {
+            Ok(Box::new(Tape { rate, ch, kept: kept.clone() }) as Box<dyn vergence_sound::Stream>)
+        });
+        let mut e = Engine::new(open, out, Arc::default(), Box::new(|| {}));
+        e.tracks = (0..tracks.len()).map(|i| PathBuf::from(i.to_string())).collect();
+        e
+    }
+
+    fn play_out(e: &mut Engine) {
+        for _ in 0..10_000 {
+            if e.current.is_none() {
+                return;
+            }
+            e.piece();
+        }
+        panic!("never ended");
+    }
+
+    #[test]
+    fn tracks_are_played_back_to_back_with_nothing_between() {
+        let kept: Arc<Mutex<Vec<i16>>> = Arc::default();
+        let mut e = engine(vec![(44100, 3001, 0.25), (44100, 2999, 0.5)], kept.clone());
+        e.command(Command::Play { tracks: e.tracks.clone(), from: 0, tag: 7, loudness: Loudness::Off });
+        play_out(&mut e);
+        let k = kept.lock().unwrap();
+        assert_eq!(k.len(), (3001 + 2999) * 2, "every frame, none added");
+        // The seam: the first track's last frame, then the second's first.
+        let q = |v: f32| (v * 32767.0).round() as i32;
+        let near = |s: i16, v: f32| (s as i32 - q(v)).abs() <= 1;
+        assert!(near(k[3000 * 2], 0.25) && near(k[3001 * 2], 0.5));
+        assert_eq!(e.state.lock().unwrap().ended, Some(7));
+    }
+
+    #[test]
+    fn another_rate_opens_the_output_again() {
+        let kept: Arc<Mutex<Vec<i16>>> = Arc::default();
+        let mut e = engine(vec![(44100, 2000, 0.25), (96000, 2000, 0.5)], kept.clone());
+        e.command(Command::Play { tracks: e.tracks.clone(), from: 0, tag: 1, loudness: Loudness::Off });
+        play_out(&mut e);
+        assert_eq!(kept.lock().unwrap().len(), 4000 * 2);
+    }
+
+    #[test]
+    fn volume_and_position_and_next() {
+        let kept: Arc<Mutex<Vec<i16>>> = Arc::default();
+        let mut e = engine(vec![(48000, 48000 * 10, 1.0), (48000, 48000, 1.0)], kept.clone());
+        e.command(Command::Volume(0.5));
+        e.command(Command::Play { tracks: e.tracks.clone(), from: 0, tag: 3, loudness: Loudness::Off });
+        for _ in 0..20 {
+            e.piece();
+        }
+        let n = e.heard().unwrap();
+        assert_eq!((n.tag, n.track), (3, 0));
+        assert!((n.seconds - 1.0).abs() < 0.01, "{}", n.seconds);
+        assert!((n.length - 10.0).abs() < 0.001);
+        assert!((kept.lock().unwrap()[100] as f32 - 16383.5).abs() <= 1.5, "half volume");
+        e.command(Command::Seek(5.0));
+        e.piece();
+        assert!((e.heard().unwrap().seconds - 5.05).abs() < 0.01);
+        e.command(Command::Next);
+        assert_eq!(e.heard().unwrap().track, 1);
+        // Previous within 3 s of a track's start goes back a track.
+        e.command(Command::Previous);
+        assert_eq!(e.heard().unwrap().track, 0);
+    }
+
+    #[test]
+    fn a_track_loaded_paused_is_where_it_was_and_silent() {
+        let kept: Arc<Mutex<Vec<i16>>> = Arc::default();
+        let mut e = engine(vec![(44100, 44100 * 60, 0.5)], kept.clone());
+        e.command(Command::Load { tracks: e.tracks.clone(), from: 0, tag: 2, loudness: Loudness::Off, seconds: 30.0 });
+        let n = e.heard().unwrap();
+        assert!(n.paused && (n.seconds - 30.0).abs() < 0.01);
+        assert!(kept.lock().unwrap().is_empty(), "nothing heard while paused");
+        e.command(Command::Pause(false));
+        e.piece();
+        assert!(!kept.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn no_output_is_said_so() {
+        let open: Arc<OpenTrack> = Arc::new(|_: &std::path::Path| {
+            Ok(Box::new(Ramp { rate: 44100, ch: 2, frames: 9000, at: 0, level: 0.1 }) as Box<dyn Source>)
+        });
+        let out: Arc<OpenOutput> = Arc::new(|_, _| Err(std::io::Error::other("nothing here")));
+        let mut e = Engine::new(open, out, Arc::default(), Box::new(|| {}));
+        e.command(Command::Play { tracks: vec!["a".into()], from: 0, tag: 0, loudness: Loudness::Off });
+        e.piece();
+        let s = e.state.lock().unwrap().clone();
+        assert_eq!(s.problem.as_deref(), Some("No sound output: nothing here"));
+        assert!(s.now.is_none());
+    }
+}

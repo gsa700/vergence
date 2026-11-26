@@ -7,6 +7,7 @@ pub mod index;
 pub mod libraries;
 pub mod library;
 pub mod panel;
+pub mod player;
 pub mod scan;
 pub mod wall;
 pub mod watch;

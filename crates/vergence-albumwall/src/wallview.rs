@@ -73,6 +73,8 @@ pub struct OpenView {
     pub palette: Palette,
     /// How far its tile has turned over toward its back, 0 to 1.
     pub turn: f32,
+    /// The track of it playing, if it is the album playing.
+    pub playing: Option<usize>,
 }
 
 /// One tile: the cover (or its placeholder), the title and the artist.
@@ -164,11 +166,21 @@ pub fn wall(
     g: Ground,
     open: Option<OpenView>,
     fades: Rc<Fades>,
+    extra_foot: f32,
 ) -> Element<Msg> {
     let text = t.text_factor;
     let count = albums.len();
     let panel_el = open.as_ref().filter(|o| o.index < count && o.height > 0.5).map(|o| {
-        let el = crate::panelview::open(o.index, &albums[o.index], &o.palette, covers.clone(), scale, text, o.shown);
+        let el = crate::panelview::open(
+            o.index,
+            &albums[o.index],
+            &o.palette,
+            covers.clone(),
+            scale,
+            text,
+            o.shown,
+            o.playing,
+        );
         (o.index, o.height, el)
     });
     let mut tiles = grid(
@@ -187,7 +199,13 @@ pub fn wall(
     // Only panels and buttons take padding: the wall's margins are a panel's.
     scroll(
         panel(tiles)
-            .padding(Padding { top: wall::PAD_TOP, right: wall::PAD_SIDE, bottom: wall::PAD_TOP, left: wall::PAD_SIDE })
+            .padding(Padding {
+                top: wall::PAD_TOP,
+                right: wall::PAD_SIDE,
+                // The play bar floats over the wall's foot: room under the last row for it.
+                bottom: wall::PAD_TOP + extra_foot,
+                left: wall::PAD_SIDE,
+            })
             .radius(0.0)
             .width(Length::FILL),
     )

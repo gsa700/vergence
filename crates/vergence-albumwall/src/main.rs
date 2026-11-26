@@ -13,6 +13,7 @@
 //! (question 3: the covers are the point); its bar is the server's, dark.
 
 mod panelview;
+mod playbar;
 mod reading;
 mod wallview;
 
@@ -26,12 +27,13 @@ use vergence_albumwall::colors::{self, Ground};
 use vergence_albumwall::covers::{self, Covers};
 use vergence_albumwall::libraries::{self, Libraries};
 use vergence_albumwall::library::Album;
+use vergence_albumwall::player::{Command, Loudness};
 use vergence_albumwall::scan::Unreachable;
 use vergence_albumwall::{panel, wall};
 use vergence_ui::{AppCommand as C, BarStyle, Role};
 use vergence_widgets::{
     Align, ButtonLook, Element, Length, Padding, Program, Theme, Waker, Window, button, column, label, panel, row,
-    space,
+    space, stack,
 };
 
 const SECTION: &str = "[albumwall]";
@@ -49,6 +51,8 @@ mod timer {
     pub const RETRY: u64 = 1;
     /// A library no watcher covers (a share), looked at again.
     pub const POLL: u64 = 2;
+    /// The status line's moment over.
+    pub const SAID: u64 = 3;
 }
 
 #[derive(Debug, Clone)]
@@ -59,8 +63,18 @@ pub enum Msg {
     Open(usize),
     /// A library chosen in the bottom bar's picker.
     Library(usize),
-    /// Play album `.0` from its track `.1` (step 6).
+    /// Play album `.0` from its track `.1`.
     Play(usize, usize),
+    PlayPause,
+    Next,
+    Previous,
+    /// The play mode: what happens when the album ends (cycled).
+    Ending,
+    /// The seek bar dragged to (seconds), and let go.
+    Scrub(f64),
+    SeekDone,
+    /// The play bar's cover pressed: the playing album opened on the wall.
+    GoToPlaying,
 }
 
 /// The open album and its motion (the Avalonia app's timings).
@@ -120,8 +134,20 @@ struct AlbumWall {
     fades: Rc<wallview::Fades>,
     /// The screen's text factor, as last laid out.
     text: std::cell::Cell<f32>,
-    /// What was asked to play (step 6 plays it).
-    wanted: Option<(usize, usize)>,
+    /// The player (started with the window's waker), the album playing
+    /// (its library and index on the wall), the play mode, the albums a
+    /// random play has had, the seek bar while dragged.
+    player: Option<vergence_albumwall::player::Player>,
+    playing: Option<(PathBuf, usize)>,
+    ending: playbar::Ending,
+    played: std::collections::HashSet<usize>,
+    scrub: Option<f64>,
+    /// Where it was left last time, to pick up from once the library is read.
+    resume: Option<Session>,
+    /// A word for the status line for a moment (the play mode just chosen).
+    said: Option<(String, std::time::Instant)>,
+    /// The meters' needles and when they last moved (VU ballistics).
+    needles: std::cell::Cell<([f32; 2], std::time::Instant)>,
     /// The library on the wall cannot be reached, and why (and how many
     /// tracks it held last time).
     unreachable: Option<(Unreachable, usize)>,
@@ -168,7 +194,14 @@ impl AlbumWall {
             size: (1444.0, 1080.0),
             fades: Rc::default(),
             text: std::cell::Cell::new(1.0),
-            wanted: None,
+            player: None,
+            playing: None,
+            ending: playbar::Ending::Stop,
+            played: std::collections::HashSet::new(),
+            scrub: None,
+            needles: std::cell::Cell::new(([0.0; 2], std::time::Instant::now())),
+            said: None,
+            resume: Session::load(),
         }
     }
 
@@ -384,8 +417,34 @@ impl AlbumWall {
         } else {
             String::new()
         };
+        let state = self.player.as_ref().map(|p| p.state()).unwrap_or_default();
+        let status = match (&state.problem, &self.said) {
+            (_, Some((w, at))) if at.elapsed() < std::time::Duration::from_secs(2) => w.clone(),
+            (Some(p), _) if status.is_empty() => p.clone(),
+            _ => status,
+        };
         let names: Vec<String> = self.libraries.list.iter().map(|l| l.name.clone()).collect();
-        column(vec![
+        // The play bar while an album of this library is playing (or paused).
+        let bar = match (&state.now, &self.playing) {
+            (Some(n), Some((root, a))) if Some(root) == self.libraries.current().map(|l| &l.folder) && n.tag == *a => {
+                albums.get(*a).map(|album| {
+                    let shown = playbar::Shown {
+                        album,
+                        track: n.track,
+                        seconds: n.seconds,
+                        length: n.length,
+                        paused: n.paused,
+                        ending: self.ending,
+                        levels: self.needles(if n.paused { [0.0; 2] } else { state.levels }),
+                        scrub: self.scrub,
+                    };
+                    playbar::bar(&shown, &self.palette_of(album), self.covers.as_ref(), self.scale)
+                })
+            }
+            _ => None,
+        };
+        let foot = if bar.is_some() { playbar::HEIGHT } else { 0.0 };
+        let page = column(vec![
             wallview::wall(
                 albums.clone(),
                 self.covers.clone(),
@@ -394,9 +453,18 @@ impl AlbumWall {
                 g,
                 self.open_view(albums, t),
                 self.fades.clone(),
+                foot,
             )
             .height(Length::FILL),
             wallview::bar(status, counts, names, self.libraries.current, &g),
+        ]);
+        let Some(bar) = bar else { return page.width(Length::FILL).height(Length::FILL) };
+        // The play bar floats over the wall's foot, just above the bottom bar.
+        stack(vec![
+            page.width(Length::FILL).height(Length::FILL),
+            column(vec![space().height(Length::FILL), bar, space().height(Length::Fixed(wallview::BAR))])
+                .width(Length::FILL)
+                .height(Length::FILL),
         ])
         .width(Length::FILL)
         .height(Length::FILL)
@@ -453,7 +521,180 @@ fn group(n: usize) -> String {
     out
 }
 
+/// Where AlbumWall was left: the library, the album (by what it is), its
+/// track and how far in. `~/.config/vergence/albumwall/session`, a few
+/// lines of our own.
+#[derive(Debug, Clone, PartialEq)]
+struct Session {
+    folder: PathBuf,
+    album_artist: String,
+    album: String,
+    track: usize,
+    seconds: f64,
+}
+
+impl Session {
+    fn path() -> Option<PathBuf> {
+        libraries::config_dir().map(|d| d.join("session"))
+    }
+
+    fn load() -> Option<Session> {
+        let text = std::fs::read_to_string(Session::path()?).ok()?;
+        let mut l = text.lines().skip_while(|l| l.starts_with('#'));
+        Some(Session {
+            folder: PathBuf::from(l.next()?),
+            album_artist: l.next()?.to_string(),
+            album: l.next()?.to_string(),
+            track: l.next()?.parse().ok()?,
+            seconds: l.next()?.parse().ok()?,
+        })
+    }
+
+    fn save(&self) {
+        let Some(p) = Session::path() else { return };
+        if [self.album_artist.as_str(), self.album.as_str()].iter().any(|s| s.contains('\n'))
+            || self.folder.to_string_lossy().contains('\n')
+        {
+            return;
+        }
+        let text = format!(
+            "# AlbumWall for Vergence: where it was left (library, album artist, album, track, seconds)\n{}\n{}\n{}\n{}\n{:.1}\n",
+            self.folder.to_string_lossy(),
+            self.album_artist,
+            self.album,
+            self.track,
+            self.seconds
+        );
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let tmp = p.with_extension("new");
+        if std::fs::write(&tmp, text).is_ok() {
+            let _ = std::fs::rename(&tmp, &p);
+        }
+    }
+}
+
 impl AlbumWall {
+    /// Where it is now, to pick up from next time.
+    fn session(&self) -> Option<Session> {
+        let (root, a) = self.playing.as_ref()?;
+        let (shown_root, albums, _) = self.shown.as_ref()?;
+        let album = albums.get(*a).filter(|_| shown_root == root)?;
+        let now = self.player.as_ref()?.state().now.filter(|n| n.tag == *a)?;
+        Some(Session {
+            folder: root.clone(),
+            album_artist: album.album_artist.clone(),
+            album: album.title.clone(),
+            track: now.track,
+            seconds: now.seconds,
+        })
+    }
+
+    fn keep_session(&self) {
+        if let Some(s) = self.session() {
+            s.save();
+        }
+    }
+
+    /// Picking up where it was left, once, when its library is first on
+    /// the wall: the album open, paused at the track and second it was at.
+    fn resume(&mut self) {
+        let Some(s) = self.resume.take() else { return };
+        let Some((root, albums, _)) = &self.shown else {
+            self.resume = Some(s);
+            return;
+        };
+        if *root != s.folder {
+            return;
+        }
+        let Some(a) = albums.iter().position(|x| x.album_artist == s.album_artist && x.title == s.album) else {
+            return;
+        };
+        let album = &albums[a];
+        if s.track >= album.tracks.len() {
+            return;
+        }
+        let tracks = album.tracks.iter().map(|t| t.path.clone()).collect();
+        self.playing = Some((root.clone(), a));
+        self.send(Command::Load { tracks, from: s.track, tag: a, loudness: Loudness::Album, seconds: s.seconds });
+        self.press(a);
+    }
+
+    fn send(&self, c: Command) {
+        if let Some(p) = &self.player {
+            p.send(c);
+        }
+    }
+
+    /// Album `a` played from its track `t`.
+    fn play(&mut self, a: usize, t: usize) {
+        let Some((root, albums, _)) = &self.shown else { return };
+        let Some(album) = albums.get(a) else { return };
+        let tracks = album.tracks.iter().map(|t| t.path.clone()).collect();
+        let loudness = if self.ending == playbar::Ending::RandomAlbum { Loudness::Track } else { Loudness::Album };
+        self.playing = Some((root.clone(), a));
+        self.played.insert(a);
+        self.send(Command::Play { tracks, from: t, tag: a, loudness });
+    }
+
+    /// An album played to its end: what the play mode says comes next (the
+    /// wall opening it as it starts).
+    fn album_ended(&mut self) {
+        let Some(p) = &self.player else { return };
+        let ended = {
+            let mut s = p.state.lock().unwrap_or_else(|e| e.into_inner());
+            s.ended.take()
+        };
+        let (Some(tag), Some((_, albums, _))) = (ended, &self.shown) else { return };
+        let n = albums.len();
+        if n == 0 {
+            return;
+        }
+        let next = match self.ending {
+            playbar::Ending::Stop => None,
+            playbar::Ending::NextAlbum => Some((tag + 1) % n),
+            playbar::Ending::RandomAlbum => {
+                // No album again until every one has played.
+                if self.played.len() >= n {
+                    self.played.clear();
+                }
+                let unplayed: Vec<usize> = (0..n).filter(|i| !self.played.contains(i)).collect();
+                let seed = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.subsec_nanos() as usize);
+                unplayed.get(seed % unplayed.len().max(1)).copied()
+            }
+        };
+        if let Some(a) = next {
+            self.play(a, 0);
+            if self.opened.as_ref().is_none_or(|o| o.index != a) {
+                self.press(a);
+            }
+        }
+    }
+
+    /// The track playing of album `a` on the wall, if it is the album playing.
+    fn playing_track(&self, a: usize) -> Option<usize> {
+        let (root, playing) = self.playing.as_ref()?;
+        let now = self.player.as_ref()?.state().now?;
+        (*playing == a && now.tag == a && Some(root) == self.libraries.current().map(|l| &l.folder))
+            .then_some(now.track)
+    }
+
+    /// The meters' needles: toward the levels heard, with a VU meter's
+    /// 300 ms ballistics.
+    fn needles(&self, target: [f32; 2]) -> [f32; 2] {
+        let (mut v, then) = self.needles.get();
+        let now = std::time::Instant::now();
+        let k = (now.saturating_duration_since(then).as_secs_f32() / 0.3).min(1.0);
+        for c in 0..2 {
+            v[c] += (target[c] - v[c]) * k;
+        }
+        self.needles.set((v, now));
+        v
+    }
+
     fn reduced(&self) -> bool {
         self.theme().reduced_motion
     }
@@ -504,6 +745,7 @@ impl AlbumWall {
                 shown,
                 palette: self.palette_of(album),
                 turn: o.turn.in_out(now),
+                playing: self.playing_track(o.index),
             });
         }
         let f = self.folding.as_ref()?;
@@ -515,6 +757,7 @@ impl AlbumWall {
             shown: 0.0,
             palette: self.palette_of(album),
             turn: left,
+            playing: None,
         })
     }
 
@@ -674,7 +917,42 @@ impl Program for AlbumWall {
             Msg::ChooseFolder => self.choose_folder(window),
             Msg::TryAgain => self.read(false),
             Msg::Open(i) => self.press(i),
-            Msg::Play(album, track) => self.wanted = Some((album, track)),
+            Msg::Play(album, track) => self.play(album, track),
+            Msg::PlayPause => {
+                if let Some(p) = &self.player {
+                    match p.state().now {
+                        Some(n) => {
+                            p.send(Command::Pause(!n.paused));
+                            self.keep_session();
+                        }
+                        None => {
+                            if let Some((_, a)) = self.playing {
+                                self.play(a, 0);
+                            }
+                        }
+                    }
+                }
+            }
+            Msg::Next => self.send(Command::Next),
+            Msg::Previous => self.send(Command::Previous),
+            Msg::Ending => {
+                self.ending = self.ending.next();
+                self.said = Some((self.ending.words().to_string(), std::time::Instant::now()));
+                window.wake_after(timer::SAID, std::time::Duration::from_secs(2));
+            }
+            Msg::Scrub(v) => self.scrub = Some(v),
+            Msg::SeekDone => {
+                if let Some(v) = self.scrub.take() {
+                    self.send(Command::Seek(v));
+                }
+            }
+            Msg::GoToPlaying => {
+                if let Some((_, a)) = self.playing
+                    && self.opened.as_ref().is_none_or(|o| o.index != a)
+                {
+                    self.press(a);
+                }
+            }
             Msg::Library(i) => {
                 if i < self.libraries.list.len() && i != self.libraries.current {
                     self.libraries.current = i;
@@ -712,6 +990,10 @@ impl Program for AlbumWall {
         // Covers decoded on two workers; each one ready wakes the window.
         let w = waker.clone();
         self.covers = Some(Arc::new(Covers::new(2, covers::helpers(), move || w.wake())));
+        // The player on a thread of its own; it wakes the window as it plays.
+        let (track, output) = vergence_albumwall::player::system();
+        let w = waker.clone();
+        self.player = Some(vergence_albumwall::player::Player::new(track, output, move || w.wake()));
         self.waker = Some(waker);
         // The library on the wall last time, read as the window opens.
         self.read(false);
@@ -720,6 +1002,10 @@ impl Program for AlbumWall {
     fn woken(&mut self, window: &mut Window) -> bool {
         let chosen = self.take_chosen();
         let read = self.take_outcome();
+        if read {
+            self.resume();
+        }
+        self.album_ended();
         if self.library_changed() {
             self.read(false);
         }
@@ -768,6 +1054,19 @@ impl Program for AlbumWall {
             _ => {}
         }
         window.redraw();
+    }
+
+    fn closed(&mut self) {
+        self.keep_session();
+    }
+
+    fn session_ending(&mut self) {
+        self.keep_session();
+    }
+
+    fn close_asked(&mut self, _window: &mut Window) -> bool {
+        self.keep_session();
+        true
     }
 
     fn resized(&mut self, width: f32, height: f32) {

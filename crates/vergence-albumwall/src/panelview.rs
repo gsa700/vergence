@@ -59,7 +59,7 @@ fn ground(item: usize, p: &Palette) -> Element<Msg> {
 }
 
 /// One line of the track list.
-fn line(album_index: usize, album: &Album, l: &Line, p: &Palette, text: f32) -> Element<Msg> {
+fn line(album_index: usize, album: &Album, l: &Line, p: &Palette, text: f32, playing: Option<usize>) -> Element<Msg> {
     match l {
         Line::Disc(words) => boxed(label(words.clone()).size(11.0).weight(700).color(color(p.accent)))
             .padding(Padding { top: 14.0, right: 0.0, bottom: 5.0, left: 0.0 })
@@ -67,15 +67,51 @@ fn line(album_index: usize, album: &Album, l: &Line, p: &Palette, text: f32) -> 
         Line::Track(i) => {
             let t = &album.tracks[*i];
             let number = if t.number > 0 { t.number.to_string() } else { String::new() };
+            let num_w = (panel::NUMBER * text).ceil() - 10.0;
+            // The track coming out of the speakers: a ▶ where its number was,
+            // pulsing slowly, and its title in semibold.
+            let here = playing == Some(*i);
+            let mark: Element<Msg> = if here {
+                let pulse = 0.55
+                    + 0.45
+                        * (std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0.0, |d| d.as_secs_f32())
+                            * std::f32::consts::PI)
+                            .sin()
+                            .abs();
+                let c = color(p.accent);
+                row(vec![
+                    space().width(Length::FILL),
+                    drawing(move |scene, _, r: Rect, _| {
+                        let (h, w) = (9.0, 8.0);
+                        let cy = r.y + r.h / 2.0;
+                        for k in 0..18 {
+                            let t = (k as f32 + 0.5) / 18.0;
+                            let len = w * (1.0 - (2.0 * t - 1.0).abs());
+                            scene.fill(
+                                Rect::new(r.x + r.w - w, cy - h / 2.0 + t * h, len, h / 18.0 + 0.05),
+                                Color::rgba(c.r, c.g, c.b, (255.0 * pulse) as u8),
+                            );
+                        }
+                    })
+                    .width(Length::Fixed(10.0))
+                    .height(Length::Fixed(12.0)),
+                ])
+                .width(Length::Fixed(num_w))
+            } else {
+                label(number).size(12.0).color(color(p.text_dim)).align(Align::End).width(Length::Fixed(num_w))
+            };
             button(
                 row(vec![
-                    label(number)
-                        .size(12.0)
-                        .color(color(p.text_dim))
-                        .align(Align::End)
-                        .width(Length::Fixed((panel::NUMBER * text).ceil() - 10.0)),
+                    mark,
                     space().width(Length::Fixed(10.0)),
-                    label(t.title.clone()).size(14.0).color(color(p.text)).elide().width(Length::FILL),
+                    label(t.title.clone())
+                        .size(14.0)
+                        .weight(if here { 600 } else { 400 })
+                        .color(color(p.text))
+                        .elide()
+                        .width(Length::FILL),
                     label(panel::duration(t.millis)).size(12.0).color(color(p.text_dim)),
                 ])
                 .align(Align::Center)
@@ -123,10 +159,19 @@ fn sleeve(album_index: usize, album: &Album, covers: Option<&Covers>, scale: f32
 }
 
 /// The panel's contents: the header, the track list, the sleeve.
-fn contents(i: usize, album: &Album, p: &Palette, covers: Option<&Covers>, scale: f32, text: f32) -> Element<Msg> {
+#[allow(clippy::too_many_arguments)]
+fn contents(
+    i: usize,
+    album: &Album,
+    p: &Palette,
+    covers: Option<&Covers>,
+    scale: f32,
+    text: f32,
+    playing: Option<usize>,
+) -> Element<Msg> {
     let (left, right) = panel::columns(album);
     let col = |lines: &[Line]| -> Element<Msg> {
-        column(lines.iter().map(|l| line(i, album, l, p, text)).collect()).width(Length::FILL)
+        column(lines.iter().map(|l| line(i, album, l, p, text, playing)).collect()).width(Length::FILL)
     };
     let words = column(vec![
         label(album.title.clone()).size(21.0).weight(700).color(color(p.text)).elide().width(Length::FILL),
@@ -161,10 +206,11 @@ pub fn open(
     scale: f32,
     text: f32,
     shown: f32,
+    playing: Option<usize>,
 ) -> Element<Msg> {
     let mut layers = vec![ground(i, p)];
     if shown > 0.0 {
-        layers.push(contents(i, album, p, covers.as_deref(), scale, text).opacity(shown));
+        layers.push(contents(i, album, p, covers.as_deref(), scale, text, playing).opacity(shown));
     }
     stack(layers).width(Length::FILL).height(Length::FILL)
 }

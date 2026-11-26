@@ -273,3 +273,28 @@ where any app can use it, not inside AlbumWall):
   version 3). Seen on techbench with Dave's library. Not yet: the panel
   staying above when an album in the row below it is pressed (pointing
   down at it); the scrolling measurement on kepler.
+- **Step 6, playing** (2026-11-25): player.rs (one stream, tracks back to
+  back with nothing between, the next opened ahead, a new output only for
+  another rate or channels, ReplayGain by album or track, dither to 16
+  bits, where it is as heard, previous going back a track only in a
+  track's first 3 s, loading paused at a position for resume; tested with
+  made-up tracks and a recording stream: two tracks of 3,001 and 2,999
+  frames come out as 6,000); playbar.rs (82 points over the wall's foot
+  in the album's light tone: cover to the playing album, title and artist,
+  previous, play or pause, next, the play mode, elapsed, seek, remaining,
+  the VU meters with 300 ms ballistics); the playing track's pulsing ▶ in
+  the open panel; when an album ends: stop, the next album, or a random
+  one not played yet (the wall opening it); picking up where it was left
+  (~/.config/vergence/albumwall/session: the album open, paused). Played
+  silently (VERGENCE_SOUND_OFF=pace) on techbench against Dave's library.
+  - **Decided** (Dave, 2026-11-25, techbench handoff
+    src:vergence-now-playing): no in-app volume: the stream stays at 100%
+    (bit-perfect), turned down in the dock's mixer row (the Avalonia app's
+    132-point slider is left out on purpose). Later, not this milestone:
+    app-declared title bar items (AlbumWall's own wordmark and buttons, the
+    server drawing them); a system Now Playing Dockworker fed by MPRIS,
+    with the media keys (AlbumWall publishes MPRIS in milestone 2).
+  - **The look's reference** (Dave, src:vergence-albumwall-look-reference):
+    the Avalonia AlbumWall; at each step a side-by-side, every difference
+    fixed or written down as a decision. Shots in techbench
+    ~/Pictures/AlbumWall-Reference/.
