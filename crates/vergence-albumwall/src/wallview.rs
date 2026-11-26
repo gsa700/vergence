@@ -18,8 +18,8 @@ use vergence_albumwall::library::Album;
 use vergence_albumwall::wall;
 use vergence_scene::Color;
 use vergence_widgets::{
-    Align, ButtonLook, Element, Length, Padding, Theme, button, choice, column, grid, label, panel, picture, row,
-    scroll, space, stack,
+    Align, ButtonLook, Element, Length, Padding, Theme, button, choice, column, field, grid, label, panel, picture,
+    row, scroll, space, stack,
 };
 
 use crate::Msg;
@@ -75,6 +75,8 @@ pub struct OpenView {
     pub turn: f32,
     /// The track of it playing, if it is the album playing.
     pub playing: Option<usize>,
+    /// The keyboard's track in it (the arrows), if the keyboard is in its tracks.
+    pub cursor: Option<usize>,
 }
 
 /// One tile: the cover (or its placeholder), the title and the artist.
@@ -88,6 +90,7 @@ fn tile(
     g: &Ground,
     open: Option<&OpenView>,
     fades: &Fades,
+    keyed: bool,
 ) -> Element<Msg> {
     let now = Instant::now();
     let ph = color(wall::placeholder(&album.album_artist, &album.title));
@@ -146,6 +149,23 @@ fn tile(
                 .height(Length::Fixed(w)),
         ]);
     }
+    // The keyboard's album: a light ring with a dark rim inside it, so it
+    // shows on any cover (the Avalonia app's key ring).
+    if keyed {
+        face = stack(vec![
+            face,
+            panel(space())
+                .edge(Color::rgba(0, 0, 0, 150), 4.0)
+                .radius(3.0)
+                .width(Length::Fixed(w))
+                .height(Length::Fixed(w)),
+            panel(space())
+                .edge(Color::rgba(255, 255, 255, 235), 2.0)
+                .radius(3.0)
+                .width(Length::Fixed(w))
+                .height(Length::Fixed(w)),
+        ]);
+    }
     let body = column(vec![
         face,
         label(album.title.clone()).size(wall::TITLE).weight(500).elide().width(Length::Fixed(w)).color(color(g.text)),
@@ -160,6 +180,8 @@ fn tile(
 #[allow(clippy::too_many_arguments)]
 pub fn wall(
     albums: Rc<Vec<Album>>,
+    order: Rc<Vec<usize>>,
+    keyed: Option<usize>,
     covers: Option<Arc<Covers>>,
     scale: f32,
     t: &Theme,
@@ -169,20 +191,25 @@ pub fn wall(
     extra_foot: f32,
 ) -> Element<Msg> {
     let text = t.text_factor;
-    let count = albums.len();
-    let panel_el = open.as_ref().filter(|o| o.index < count && o.height > 0.5).map(|o| {
-        let el = crate::panelview::open(
-            o.index,
-            &albums[o.index],
-            &o.palette,
-            covers.clone(),
-            scale,
-            text,
-            o.shown,
-            o.playing,
-        );
-        (o.index, o.height, el)
-    });
+    let count = order.len();
+    // The open album's place on the wall as searched (none: not found).
+    let open_at = open.as_ref().and_then(|o| order.iter().position(|&i| i == o.index));
+    let panel_el =
+        open.as_ref().zip(open_at).filter(|(o, _)| o.index < albums.len() && o.height > 0.5).map(|(o, at)| {
+            let el = crate::panelview::open(
+                o.index,
+                at,
+                o.cursor,
+                &albums[o.index],
+                &o.palette,
+                covers.clone(),
+                scale,
+                text,
+                o.shown,
+                o.playing,
+            );
+            (at, o.height, el)
+        });
     let mut tiles = grid(
         count,
         move |w| {
@@ -191,7 +218,10 @@ pub fn wall(
         },
         wall::GAP,
         wall::GAP,
-        move |i, w| tile(&albums[i], i, w, covers.as_deref(), scale, &g, open.as_ref(), &fades),
+        move |at, w| {
+            let i = order[at];
+            tile(&albums[i], i, w, covers.as_deref(), scale, &g, open.as_ref(), &fades, keyed == Some(i))
+        },
     );
     if let Some((i, h, el)) = panel_el {
         tiles = tiles.after_item(i, h, el);
@@ -214,7 +244,16 @@ pub fn wall(
 
 /// The bottom bar: the status line on the left, the library picker and its
 /// counts on the right.
-pub fn bar(status: String, counts: String, libraries: Vec<String>, current: usize, g: &Ground) -> Element<Msg> {
+/// The bottom bar: the status line, the search box (320 points, as in the
+/// Avalonia app), the library picker and the counts.
+pub fn bar(
+    status: String,
+    query: &str,
+    counts: String,
+    libraries: Vec<String>,
+    current: usize,
+    g: &Ground,
+) -> Element<Msg> {
     let mut right: Vec<Element<Msg>> = vec![label(counts).size(12.0).color(color(g.text_dim))];
     if libraries.len() > 1 {
         right.push(choice(libraries, Some(current), Msg::Library));
@@ -222,7 +261,10 @@ pub fn bar(status: String, counts: String, libraries: Vec<String>, current: usiz
     panel(
         row(vec![
             label(status).size(12.0).color(color(g.text_dim)).elide().width(Length::FILL),
-            row(right).spacing(12.0).align(Align::Center),
+            field(query, Msg::Search).placeholder("Search artist or album…").name("search").width(Length::Fixed(320.0)),
+            row(vec![space().width(Length::FILL), row(right).spacing(12.0).align(Align::Center)])
+                .align(Align::Center)
+                .width(Length::FILL),
         ])
         .spacing(12.0)
         .align(Align::Center)

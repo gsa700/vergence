@@ -78,6 +78,8 @@ pub enum Msg {
     SeekDone,
     /// The play bar's cover pressed: the playing album opened on the wall.
     GoToPlaying,
+    /// The search box's text.
+    Search(String),
 }
 
 /// The open album and its motion (the Avalonia app's timings).
@@ -101,6 +103,15 @@ struct Folding {
 const UNFOLD_MS: u64 = 330;
 const CONTENTS_MS: u64 = 110;
 const TURN_MS: u64 = 400;
+/// The wall's albums for a search, as indexes in wall order.
+type Order = Rc<Vec<usize>>;
+/// The last search: its query, the library it ran on, what it found.
+type Searched = (String, *const Vec<Album>, Order);
+/// Shift+Left and Right: seconds back and on (the Avalonia app's SeekStep).
+const SEEK_STEP: f64 = 10.0;
+/// Keys vergence_ui::sym does not name: Enter on the keypad, F11.
+const KP_ENTER: u32 = 0xff8d;
+const F11: u32 = 0xffc8;
 /// The meters' tick: 30 a second (VuMeter.cs: half the frames, the same spring).
 const METER_TICK: Duration = Duration::from_millis(33);
 
@@ -169,6 +180,25 @@ struct AlbumWall {
     /// When an unwatched library was last looked at again on the window
     /// coming to the front (at most once a minute).
     looked: Option<std::time::Instant>,
+    /// The search box's text, and the wall's albums for it (cached by the
+    /// query and the library: their indexes in wall order).
+    query: String,
+    order: std::cell::RefCell<Option<Searched>>,
+    /// Where the wall was when a search began (the open album, the album
+    /// at the top of the view), to put it back when the search is cleared:
+    /// "searching is a detour, not a destination".
+    before_search: Option<(Option<usize>, Option<usize>)>,
+    /// The keyboard's album, and its track when it is in the open album's
+    /// tracks (MainWindow.Keyboard.cs: the cursor is an album, not a control).
+    keyed: Option<usize>,
+    track: Option<usize>,
+    /// The element with the keyboard ("search": typing in the search box),
+    /// and where to put it at the next build.
+    focus: Option<String>,
+    focus_wanted: Option<Option<String>>,
+    /// Full screen (F11), and a place to jump the wall to (no glide).
+    fullscreen: bool,
+    jump: Option<f32>,
 }
 
 impl AlbumWall {
@@ -213,6 +243,15 @@ impl AlbumWall {
             meters_wanted: false,
             said: None,
             resume: Session::load(),
+            query: String::new(),
+            order: std::cell::RefCell::new(None),
+            before_search: None,
+            keyed: None,
+            track: None,
+            focus: None,
+            focus_wanted: None,
+            fullscreen: false,
+            jump: None,
         }
     }
 
@@ -428,6 +467,12 @@ impl AlbumWall {
         } else {
             String::new()
         };
+        let order = self.order_of(albums);
+        let status = if vergence_albumwall::search::normalize(&self.query).is_empty() {
+            status
+        } else {
+            format!("{} of {} albums", group(order.len()), group(albums.len()))
+        };
         let state = self.player.as_ref().map(|p| p.state()).unwrap_or_default();
         let status = match (&state.problem, &self.said) {
             (_, Some((w, at))) if at.elapsed() < std::time::Duration::from_secs(2) => w.clone(),
@@ -458,6 +503,8 @@ impl AlbumWall {
         let page = column(vec![
             wallview::wall(
                 albums.clone(),
+                order,
+                self.keyed.filter(|_| self.track.is_none()),
                 self.covers.clone(),
                 self.scale,
                 t,
@@ -467,7 +514,7 @@ impl AlbumWall {
                 foot,
             )
             .height(Length::FILL),
-            wallview::bar(status, counts, names, self.libraries.current, &g),
+            wallview::bar(status, &self.query, counts, names, self.libraries.current, &g),
         ]);
         let Some(bar) = bar else { return page.width(Length::FILL).height(Length::FILL) };
         // The play bar floats over the wall's foot, just above the bottom bar.
@@ -760,6 +807,7 @@ impl AlbumWall {
                 palette: self.palette_of(album),
                 turn: o.turn.in_out(now),
                 playing: self.playing_track(o.index),
+                cursor: self.track.filter(|_| self.keyed == Some(o.index)),
             });
         }
         let f = self.folding.as_ref()?;
@@ -772,6 +820,7 @@ impl AlbumWall {
             palette: self.palette_of(album),
             turn: left,
             playing: None,
+            cursor: None,
         })
     }
 
@@ -780,8 +829,17 @@ impl AlbumWall {
     /// the panel's place where it stands, its contents changing.
     fn press(&mut self, i: usize) {
         let reduced = self.reduced();
-        let Some((_, albums, _)) = &self.shown else { return };
+        let Some(albums) = self.shown.as_ref().map(|s| s.1.clone()) else { return };
         let Some(album) = albums.get(i) else { return };
+        // An album the search does not show (the next album playing, say):
+        // the search gives way, and the wall is the whole library again.
+        if !self.order_of(&albums).contains(&i) {
+            self.query.clear();
+            self.before_search = None;
+        }
+        let order = self.order_of(&albums);
+        let place = |i: usize| order.iter().position(|&x| x == i);
+        let at = place(i).unwrap_or(i);
         let text = self.text.get();
         let (cols, cover) = wall::columns(self.wall_width());
         let tile_h = wall::tile_height(cover, text);
@@ -796,7 +854,7 @@ impl AlbumWall {
                 });
                 return;
             }
-            if o.index / cols == i / cols {
+            if place(o.index).map(|p| p / cols) == Some(at / cols) {
                 self.opened = Some(Opened {
                     index: i,
                     unfold: o.unfold,
@@ -809,7 +867,7 @@ impl AlbumWall {
         self.folding = None;
         self.opened = Some(Opened { index: i, unfold: tween(UNFOLD_MS), swap: None, turn: tween(TURN_MS) });
         // The album and its panel centered in the wall, as far as they fit.
-        let row_top = wall::PAD_TOP + (i / cols) as f32 * (tile_h + wall::GAP);
+        let row_top = wall::PAD_TOP + (at / cols) as f32 * (tile_h + wall::GAP);
         let view_h = (self.size.1 - wallview::BAR).max(1.0);
         let block = tile_h + wall::GAP + full;
         let target = (row_top - ((view_h - block) / 2.0).max(0.0)).max(0.0);
@@ -821,6 +879,326 @@ impl AlbumWall {
         let Some(o) = &self.opened else { return false };
         self.press(o.index);
         true
+    }
+
+    /// The wall's albums for the search box's text, as indexes in wall order.
+    fn order_of(&self, albums: &Rc<Vec<Album>>) -> Rc<Vec<usize>> {
+        let query = vergence_albumwall::search::normalize(&self.query);
+        let key = Rc::as_ptr(albums);
+        if let Some((q, k, order)) = &*self.order.borrow()
+            && *q == query
+            && *k == key
+        {
+            return order.clone();
+        }
+        let order = Rc::new(vergence_albumwall::search::found(albums, &query));
+        *self.order.borrow_mut() = Some((query, key, order.clone()));
+        order
+    }
+
+    /// The library on the wall and its albums in search order.
+    fn wall_albums(&self) -> Option<(Rc<Vec<Album>>, Order)> {
+        let albums = self.shown.as_ref()?.1.clone();
+        let order = self.order_of(&albums);
+        Some((albums, order))
+    }
+
+    /// The wall's columns and a tile's height, as laid out now.
+    fn grid(&self) -> (usize, f32) {
+        let (cols, cover) = wall::columns(self.wall_width());
+        (cols.max(1), wall::tile_height(cover, self.text.get()))
+    }
+
+    /// The top of the row holding place `at`, the open panel above it counted.
+    fn row_top(&self, at: usize, order: &[usize], albums: &[Album]) -> f32 {
+        let (cols, tile_h) = self.grid();
+        let mut y = wall::PAD_TOP + (at / cols) as f32 * (tile_h + wall::GAP);
+        if let Some(o) = &self.opened
+            && let Some(p) = order.iter().position(|&i| i == o.index)
+            && p / cols < at / cols
+        {
+            y += albums.get(o.index).map_or(0.0, |a| panel::height(a, self.text.get())) + wall::GAP;
+        }
+        y
+    }
+
+    /// The album at the top of the view now (by rows, near enough).
+    fn top_album(&self) -> Option<usize> {
+        let (_, order) = self.wall_albums()?;
+        let (cols, tile_h) = self.grid();
+        let row = ((self.wall_offset - wall::PAD_TOP).max(0.0) / (tile_h + wall::GAP)).floor() as usize;
+        order.get((row * cols).min(order.len().saturating_sub(1))).copied()
+    }
+
+    /// The search box's text changed: the wall shows what it finds (live;
+    /// the wall builds only the rows in view, so no pause for the keys).
+    fn search(&mut self, text: String) {
+        let was = !vergence_albumwall::search::normalize(&self.query).is_empty();
+        let now = !vergence_albumwall::search::normalize(&text).is_empty();
+        if now && !was && self.before_search.is_none() {
+            // On the way in only: every key runs this.
+            self.before_search = Some((self.opened.as_ref().map(|o| o.index), self.top_album()));
+        }
+        self.query = text;
+        let Some((_, order)) = self.wall_albums() else { return };
+        // A search that hides the open album closes it: a panel pointing at
+        // a cover no longer on the wall is worse than none.
+        if self.opened.as_ref().is_some_and(|o| !order.contains(&o.index)) {
+            self.opened = None;
+            self.folding = None;
+            self.track = None;
+        }
+        if self.keyed.is_some_and(|k| !order.contains(&k)) {
+            (self.keyed, self.track) = (None, None);
+        }
+        self.jump = Some(0.0);
+        if !now && was {
+            self.restore_after_search();
+        }
+    }
+
+    /// The wall put back where the search interrupted it: the album that
+    /// was open opened again (it carries its place with it), else the album
+    /// that was at the top of the view at the top again.
+    fn restore_after_search(&mut self) {
+        let Some((open, top)) = self.before_search.take() else { return };
+        let Some((albums, order)) = self.wall_albums() else { return };
+        self.jump = None;
+        if let Some(i) = open.filter(|&i| i < albums.len()) {
+            if self.opened.as_ref().is_some_and(|o| o.index == i) {
+                let at = order.iter().position(|&x| x == i).unwrap_or(i);
+                self.jump = Some((self.row_top(at, &order, &albums) - wall::GAP).max(0.0));
+            } else {
+                self.press(i);
+            }
+            return;
+        }
+        if let Some(i) = top {
+            let at = order.iter().position(|&x| x == i).unwrap_or(i);
+            self.jump = Some((self.row_top(at, &order, &albums) - wall::GAP).max(0.0));
+        }
+    }
+
+    /// The keyboard on album `i`: its row brought wholly into view, the wall
+    /// not moving at all if it already is (walking along a row).
+    fn key_to(&mut self, i: usize) {
+        let Some((albums, order)) = self.wall_albums() else { return };
+        let Some(at) = order.iter().position(|&x| x == i) else { return };
+        (self.keyed, self.track) = (Some(i), None);
+        let (_, tile_h) = self.grid();
+        let top = self.row_top(at, &order, &albums);
+        let view = (self.size.1 - wallview::BAR - if self.player_showing() { playbar::HEIGHT } else { 0.0 }).max(1.0);
+        let at_y = self.wall_offset;
+        if top < at_y {
+            self.jump = Some((top - wall::GAP).max(0.0));
+        } else if top + tile_h > at_y + view {
+            self.jump = Some(top + tile_h - view + wall::GAP);
+        }
+    }
+
+    /// The keyboard on track `t` of the open album, its line brought into view.
+    fn track_to(&mut self, t: usize) {
+        let Some(o) = &self.opened else { return };
+        let i = o.index;
+        let Some((albums, order)) = self.wall_albums() else { return };
+        let Some(at) = order.iter().position(|&x| x == i) else { return };
+        let Some(album) = albums.get(i) else { return };
+        (self.keyed, self.track) = (Some(i), Some(t));
+        let (_, tile_h) = self.grid();
+        let text = self.text.get();
+        // The track's line: its column's lines above it, under the panel's header.
+        let (left, right) = panel::columns(album);
+        let line_of = |lines: &[panel::Line]| {
+            lines.iter().position(|l| matches!(l, panel::Line::Track(k) if *k == t)).map(|n| {
+                lines[..n].iter().map(|l| if matches!(l, panel::Line::Disc(_)) { 30.0 } else { 0.0 }).sum::<f32>()
+                    + n as f32 * (panel::LINE * text).ceil()
+            })
+        };
+        let within = line_of(&left).or_else(|| line_of(&right)).unwrap_or(0.0);
+        let header = panel::MARGIN + panel::PAD + 60.0 * text + panel::BUTTON_GAP + panel::LIST_GAP;
+        let y = self.row_top(at, &order, &albums) + tile_h + wall::GAP + header + within;
+        let line_h = (panel::LINE * text).ceil();
+        let view = (self.size.1 - wallview::BAR - if self.player_showing() { playbar::HEIGHT } else { 0.0 }).max(1.0);
+        if y < self.wall_offset {
+            self.jump = Some((y - wall::GAP).max(0.0));
+        } else if y + line_h > self.wall_offset + view {
+            self.jump = Some(y + line_h - view + wall::GAP);
+        }
+    }
+
+    /// The play bar is over the wall's foot.
+    fn player_showing(&self) -> bool {
+        self.player.as_ref().is_some_and(|p| p.state().now.is_some())
+    }
+
+    /// Where the keyboard starts: the open album, else the first at the top
+    /// of the view.
+    fn key_start(&mut self) {
+        let Some((_, order)) = self.wall_albums() else { return };
+        let open = self.opened.as_ref().map(|o| o.index).filter(|i| order.contains(i));
+        if let Some(i) = open.or_else(|| self.top_album()).or_else(|| order.first().copied()) {
+            self.key_to(i);
+        }
+    }
+
+    /// The wall's keys (MainWindow.Keyboard.cs): the arrows from cover to
+    /// cover, Down from the open album into its tracks, Enter to open or
+    /// play, Home and End, Page Up and Down. True if the key was used.
+    fn wall_key(&mut self, key: u32) -> bool {
+        use vergence_ui::sym;
+        let Some((albums, order)) = self.wall_albums() else { return false };
+        if order.is_empty() {
+            return false;
+        }
+        let open = self.opened.as_ref().map(|o| o.index);
+        // In the open album's tracks.
+        if let (Some(t), Some(k)) = (self.track, self.keyed)
+            && open == Some(k)
+        {
+            let count = albums.get(k).map_or(0, |a| a.tracks.len());
+            match key {
+                sym::UP if t > 0 => self.track_to(t - 1),
+                sym::UP => self.key_to(k),
+                sym::DOWN if t + 1 < count => self.track_to(t + 1),
+                sym::DOWN => {
+                    // Off the end: on to the row under the album.
+                    let (cols, _) = self.grid();
+                    let at = order.iter().position(|&x| x == k).unwrap_or(0);
+                    self.key_to(order[wall::row_move(at, 1, cols, order.len())]);
+                }
+                sym::HOME => self.track_to(0),
+                sym::END => self.track_to(count.saturating_sub(1)),
+                sym::RETURN | KP_ENTER => self.play(k, t),
+                _ => return false,
+            }
+            return true;
+        }
+        let Some(at) = self.keyed.and_then(|k| order.iter().position(|&x| x == k)) else {
+            // The first key lands somewhere sensible before it moves anything.
+            if key == sym::RETURN || key == KP_ENTER {
+                return false;
+            }
+            self.key_start();
+            return true;
+        };
+        let (cols, tile_h) = self.grid();
+        let view = (self.size.1 - wallview::BAR).max(1.0);
+        let per_screen = ((view / (tile_h + wall::GAP)) as usize).max(1);
+        let last = order.len() - 1;
+        let k = order[at];
+        match key {
+            sym::LEFT => self.key_to(order[at.saturating_sub(1)]),
+            sym::RIGHT => self.key_to(order[(at + 1).min(last)]),
+            sym::UP => self.key_to(order[wall::row_move(at, -1, cols, order.len())]),
+            sym::DOWN if open == Some(k) && albums.get(k).is_some_and(|a| !a.tracks.is_empty()) => self.track_to(0),
+            sym::DOWN => self.key_to(order[wall::row_move(at, 1, cols, order.len())]),
+            sym::HOME => self.key_to(order[0]),
+            sym::END => self.key_to(order[last]),
+            sym::PAGE_UP => self.key_to(order[at.saturating_sub(cols * per_screen)]),
+            sym::PAGE_DOWN => self.key_to(order[(at + cols * per_screen).min(last)]),
+            sym::RETURN | KP_ENTER => {
+                // Open it; Enter on the open one goes into its tracks.
+                if open != Some(k) {
+                    self.press(k);
+                    self.keyed = Some(k);
+                } else if albums.get(k).is_some_and(|a| !a.tracks.is_empty()) {
+                    self.track_to(0);
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// Escape: out of whatever was last gone into: the tracks back to their
+    /// cover first (the wall's own key), then full screen ("in full screen it
+    /// should return to the normal window on first press", Dave
+    /// 2026-10-14), the search, the box, the album.
+    fn escape(&mut self, window: &mut Window) -> bool {
+        let typing = self.focus.as_deref() == Some("search");
+        if let (Some(_), Some(k), false) = (self.track, self.keyed, typing) {
+            self.key_to(k);
+        } else if self.fullscreen {
+            self.fullscreen = false;
+            window.set_fullscreen(false);
+        } else if !self.query.is_empty() {
+            self.search(String::new());
+        } else if typing {
+            self.focus_wanted = Some(None);
+        } else if !self.fold() {
+            return false;
+        }
+        true
+    }
+
+    /// Every key of the window's own, before the widgets: true (changed) or
+    /// false when taken, None to leave it to them (typing in the search box).
+    fn key(&mut self, input: &vergence_widgets::Input, window: &mut Window) -> Option<bool> {
+        use vergence_ui::sym;
+        let vergence_widgets::Input::Key { sym: key, pressed: true, repeat, composing: false, modifiers: m, .. } =
+            *input
+        else {
+            return None;
+        };
+        let typing = self.focus.as_deref() == Some("search");
+        let plain = !m.ctrl && !m.alt && !m.logo && !m.shift;
+        let letter = |c: char| key == c as u32 || key == c.to_ascii_uppercase() as u32;
+        let loaded = self.player.as_ref().and_then(|p| p.state().now);
+        match key {
+            sym::ESCAPE if !m.ctrl && !m.alt => return Some(self.escape(window)).filter(|&used| used),
+            F11 if !m.ctrl => {
+                self.fullscreen = !self.fullscreen;
+                window.set_fullscreen(self.fullscreen);
+                return Some(false);
+            }
+            _ if m.ctrl && letter('f') || plain && !typing && key == '/' as u32 => {
+                self.focus_wanted = Some(Some("search".into()));
+                return Some(true);
+            }
+            _ if m.ctrl && letter('l') => {
+                self.update(Msg::GoToPlaying, window);
+                return Some(true);
+            }
+            _ if key == ' ' as u32 && plain && !typing => {
+                // One toggle a press, not one a repeat.
+                if !repeat && (loaded.is_some() || self.playing.is_some()) {
+                    self.update(Msg::PlayPause, window);
+                }
+                return Some(true);
+            }
+            sym::RIGHT | sym::LEFT if m.ctrl && !m.shift && !m.alt => {
+                loaded?;
+                self.send(if key == sym::RIGHT { Command::Next } else { Command::Previous });
+                return Some(true);
+            }
+            sym::RIGHT | sym::LEFT if m.shift && !m.ctrl && !m.alt && !typing => {
+                let n = loaded?;
+                let to = (n.seconds + if key == sym::RIGHT { SEEK_STEP } else { -SEEK_STEP }).clamp(0.0, n.length);
+                self.send(Command::Seek(to));
+                return Some(true);
+            }
+            _ => {}
+        }
+        // From the search box only Down leaves it: onto the first album
+        // found, or with nothing typed, where the keyboard would start.
+        if typing {
+            if key != sym::DOWN || !plain {
+                return None;
+            }
+            self.focus_wanted = Some(None);
+            let first = self.wall_albums().and_then(|(_, o)| o.first().copied());
+            match first {
+                Some(i) if !self.query.is_empty() => self.key_to(i),
+                _ => self.key_start(),
+            }
+            return Some(true);
+        }
+        // The wall's keys only where no other control has the keyboard (the
+        // seek bar keeps its own arrows).
+        if !plain || self.focus.is_some() {
+            return None;
+        }
+        self.wall_key(key).then_some(true)
     }
 
     /// The retry timer asked for when a read found the library out of reach;
@@ -934,7 +1312,11 @@ impl Program for AlbumWall {
         match message {
             Msg::ChooseFolder => self.choose_folder(window),
             Msg::TryAgain => self.read(false),
-            Msg::Open(i) => self.press(i),
+            // A click: the keyboard's ring goes (a click never shows it).
+            Msg::Open(i) => {
+                (self.keyed, self.track) = (None, None);
+                self.press(i);
+            }
             Msg::Play(album, track) => self.play(album, track),
             Msg::PlayPause => {
                 if let Some(p) = &self.player {
@@ -971,6 +1353,7 @@ impl Program for AlbumWall {
                     self.press(a);
                 }
             }
+            Msg::Search(text) => self.search(text),
             Msg::Library(i) => {
                 if i < self.libraries.list.len() && i != self.libraries.current {
                     self.libraries.current = i;
@@ -1111,6 +1494,10 @@ impl Program for AlbumWall {
 
     /// The wall gliding to center an album that opened.
     fn scroll_to(&mut self) -> Vec<(String, f32)> {
+        if let Some(y) = self.jump.take() {
+            self.glide = None;
+            return vec![("wall".into(), y)];
+        }
         let now = std::time::Instant::now();
         let Some((from, to, t)) = &self.glide else { return Vec::new() };
         let at = vergence_widgets::motion::mix(*from, *to, t.out(now));
@@ -1120,11 +1507,18 @@ impl Program for AlbumWall {
         vec![("wall".into(), at)]
     }
 
-    fn input(&mut self, input: &vergence_widgets::Input, _window: &mut Window) -> bool {
-        match input {
-            vergence_widgets::Input::Key { sym, pressed: true, .. } if *sym == vergence_ui::sym::ESCAPE => self.fold(),
-            _ => false,
-        }
+    /// The window's keys (step 7): the search, the wall's arrows, play,
+    /// seek, full screen and the Escape chain, before any widget sees them.
+    fn key_first(&mut self, input: &vergence_widgets::Input, window: &mut Window) -> Option<bool> {
+        self.key(input, window)
+    }
+
+    fn focus_to(&mut self) -> Option<Option<String>> {
+        self.focus_wanted.take()
+    }
+
+    fn focus_moved(&mut self, name: Option<String>) {
+        self.focus = name;
     }
 
     fn animating(&self) -> bool {

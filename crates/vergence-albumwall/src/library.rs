@@ -164,7 +164,7 @@ pub struct Track {
 }
 
 /// An album on the wall.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Album {
     pub album_artist: String,
     pub title: String,

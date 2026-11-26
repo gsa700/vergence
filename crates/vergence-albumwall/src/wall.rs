@@ -66,6 +66,24 @@ pub fn placeholder(album_artist: &str, title: &str) -> Rgb {
     from_hsl(hue, sat, light)
 }
 
+/// The place a row up (`rows` < 0) or down from place `at` on a wall of
+/// `count` albums in `cols` columns (the Avalonia app's MoveRow). Off the
+/// top row it stays (clamping took Up from anywhere in the top row to the
+/// first album: "I hit the up arrow from alice in chains and it move to
+/// acdc", Dave, 2026-10-22); down onto a short last row with nothing
+/// straight below goes to its last album; down from the last row stays.
+pub fn row_move(at: usize, rows: isize, cols: usize, count: usize) -> usize {
+    let cols = cols.max(1) as isize;
+    let to = at as isize + rows * cols;
+    if to < 0 {
+        return at;
+    }
+    if to as usize >= count {
+        return if (count.saturating_sub(1)) / cols as usize > at / cols as usize { count - 1 } else { at };
+    }
+    to as usize
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,5 +113,16 @@ mod tests {
         let a = placeholder("Toto", "IV");
         assert_eq!(a, placeholder("Toto", "IV"));
         assert_ne!(a, placeholder("Toto", "Isolation"));
+    }
+
+    #[test]
+    fn rows_up_and_down_keep_to_the_wall() {
+        // 10 albums in 4 columns: rows 0-3, 4-7, 8-9.
+        assert_eq!(row_move(2, -1, 4, 10), 2, "up from the top row stays");
+        assert_eq!(row_move(6, -1, 4, 10), 2);
+        assert_eq!(row_move(5, 1, 4, 10), 9, "down onto the short last row: its last album");
+        assert_eq!(row_move(4, 1, 4, 10), 8);
+        assert_eq!(row_move(9, 1, 4, 10), 9, "down from the last row stays");
+        assert_eq!(row_move(1, 1, 4, 3), 1, "one row only: down stays");
     }
 }

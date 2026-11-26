@@ -59,7 +59,15 @@ fn ground(item: usize, p: &Palette) -> Element<Msg> {
 }
 
 /// One line of the track list.
-fn line(album_index: usize, album: &Album, l: &Line, p: &Palette, text: f32, playing: Option<usize>) -> Element<Msg> {
+fn line(
+    album_index: usize,
+    album: &Album,
+    l: &Line,
+    p: &Palette,
+    text: f32,
+    playing: Option<usize>,
+    cursor: Option<usize>,
+) -> Element<Msg> {
     match l {
         Line::Disc(words) => boxed(label(words.clone()).size(11.0).weight(700).color(color(p.accent)))
             .padding(Padding { top: 14.0, right: 0.0, bottom: 5.0, left: 0.0 })
@@ -118,7 +126,13 @@ fn line(album_index: usize, album: &Album, l: &Line, p: &Palette, text: f32, pla
                 .width(Length::FILL)
                 .height(Length::Fixed((panel::LINE * text).ceil())),
             )
-            .look(ButtonLook::Plain)
+            // The keyboard's track: a wash of the panel's text color (the
+            // pointer's hover, held where the arrows put it).
+            .look(if cursor == Some(*i) {
+                ButtonLook::Custom { fill: Some(alpha(p.text, 38)), edge: Some((alpha(p.text, 110), 1.0)), radius: 3.0 }
+            } else {
+                ButtonLook::Plain
+            })
             .padding(0.0)
             .width(Length::FILL)
             .on_press(Msg::Play(album_index, *i))
@@ -168,10 +182,11 @@ fn contents(
     scale: f32,
     text: f32,
     playing: Option<usize>,
+    cursor: Option<usize>,
 ) -> Element<Msg> {
     let (left, right) = panel::columns(album);
     let col = |lines: &[Line]| -> Element<Msg> {
-        column(lines.iter().map(|l| line(i, album, l, p, text, playing)).collect()).width(Length::FILL)
+        column(lines.iter().map(|l| line(i, album, l, p, text, playing, cursor)).collect()).width(Length::FILL)
     };
     let words = column(vec![
         label(album.title.clone()).size(21.0).weight(700).color(color(p.text)).elide().width(Length::FILL),
@@ -200,6 +215,8 @@ fn contents(
 #[allow(clippy::too_many_arguments)]
 pub fn open(
     i: usize,
+    at: usize,
+    cursor: Option<usize>,
     album: &Album,
     p: &Palette,
     covers: Option<Arc<Covers>>,
@@ -208,9 +225,10 @@ pub fn open(
     shown: f32,
     playing: Option<usize>,
 ) -> Element<Msg> {
-    let mut layers = vec![ground(i, p)];
+    // The arrow points at the album's place on the wall as searched.
+    let mut layers = vec![ground(at, p)];
     if shown > 0.0 {
-        layers.push(contents(i, album, p, covers.as_deref(), scale, text, playing).opacity(shown));
+        layers.push(contents(i, album, p, covers.as_deref(), scale, text, playing, cursor).opacity(shown));
     }
     stack(layers).width(Length::FILL).height(Length::FILL)
 }

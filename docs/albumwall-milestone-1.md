@@ -320,6 +320,40 @@ where any app can use it, not inside AlbumWall):
     Avalonia glyphs point for point, the play mode dimmed at Stop, the seek
     bar dark on light (the toolkit's slider takes a program's colors:
     `slider_colors`).
+- **Step 7, search and keys** (2026-11-26; Dave: "go ahead with step 7"):
+  - **Search** in the bottom bar (320 points, "Search artist or album…",
+    between the status line and the counts): live over album artist and
+    title; `art:missing`, `art:small` (under 300 pixels on the shorter
+    side), `art:nonsquare` (sides more than 5% apart; unmeasured art matches
+    none); "N of M albums" in the status line. No pause for the keys (the
+    Avalonia app waited 150 ms because each key rebuilt the whole wall; the
+    toolkit's grid builds only the rows in view). A search that hides the
+    open album closes it; clearing it puts the wall back (the album that was
+    open, else the album at the top of the view). Playing an album the
+    search hides clears the search. search.rs, with tests.
+  - **The keyboard** (MainWindow.Keyboard.cs): the arrows from cover to
+    cover with a ring on the keyboard's album (light, with a dark rim, for
+    any cover), Up off the top row stays (wall::row_move, with Dave's
+    2026-10-22 cases as tests), Down from the open album into its tracks
+    and off their end to the next row, Enter opens or plays, Home/End,
+    Page Up/Down; Space plays or pauses (once a press, not a repeat),
+    Ctrl+Left/Right previous/next, Shift+Left/Right seek 10 s, Ctrl+L to
+    the album playing, `/` or Ctrl+F to the search box (its text chosen),
+    Down from the box to the first album found. A click clears the ring.
+    Not ported: Ctrl+Up/Down volume (no in-app volume, decided).
+  - **Escape**: the tracks back to their cover, then full screen, then the
+    search, then the box, then the open album.
+  - **Full screen** (F11): Vergence's own windows had no way to ask for it,
+    so the bus gained `WinRequest::Fullscreen` (v41) and the server answers
+    it as it does a Wayland or X11 window's (no bar, no dock, the place
+    kept); vergence-ui's `Window::set_fullscreen` (xdg_toplevel's under
+    other desktops).
+  - **Toolkit**: `Program::focus_to` (the keyboard put in a named element,
+    a field's text chosen) and `Program::focus_moved` (where it went), so a
+    program's keys can mean one thing on its page and another in a field.
+  - Checked headless on techbench against Dave's library: "alice" finds 6
+    of 372; Down, Enter, Down into the tracks; Escape back out; the wall put
+    back; F11 and Escape.
   - **The look's reference** (Dave, src:vergence-albumwall-look-reference):
     the Avalonia AlbumWall; at each step a side-by-side, every difference
     fixed or written down as a decision. Shots in techbench
