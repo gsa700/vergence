@@ -221,6 +221,20 @@ fn simple_shapes_agree_with_the_reference() {
     s.fill(Rect::new(0.0, 0.0, 30.0, 4.0), Color::rgb(0, 255, 0));
     s.pop_clip();
     scenes.push(("clips", s));
+    // Shapes in the corners of two rounded clips at once, and a rounded clip
+    // cut by a square one off the pixel grid (Files, 2026-11-24: one of these
+    // switched every window's scenes to the CPU).
+    let mut s = Scene::new(40.0, 40.0);
+    s.push_clip(Rect::new(0.0, 0.0, 40.0, 40.0), 12.0);
+    s.push_clip(Rect::new(5.0, 5.0, 30.0, 30.0), 8.0);
+    s.fill(Rect::new(0.0, 0.0, 40.0, 40.0), white);
+    s.line(Point::new(0.0, 40.0), Point::new(40.0, 0.0), 2.5, Color::rgb(255, 0, 0));
+    s.pop_clip();
+    s.push_clip(Rect::new(20.5, 0.0, 19.5, 40.0), 0.0);
+    s.fill_rounded(Rect::new(10.0, 10.0, 25.0, 25.0), 4.0, Color::rgb(0, 200, 90));
+    s.pop_clip();
+    s.pop_clip();
+    scenes.push(("two clips", s));
     let mut s = Scene::new(16.0, 8.0);
     let two = s.image(Image { width: 2, height: 1, rgba: vec![255, 0, 0, 255, 0, 0, 255, 255] });
     let half =
@@ -329,7 +343,9 @@ fn what_the_gpu_does_not_draw_yet_is_refused_not_wrong() {
     let mut s = Scene::new(40.0, 40.0);
     s.push_clip(Rect::new(0.0, 0.0, 40.0, 40.0), 12.0);
     s.push_clip(Rect::new(5.0, 5.0, 30.0, 30.0), 8.0);
+    s.push_clip(Rect::new(2.0, 2.0, 34.0, 34.0), 10.0);
     s.fill(Rect::new(0.0, 0.0, 40.0, 40.0), Color::rgb(255, 255, 255));
+    s.pop_clip();
     s.pop_clip();
     s.pop_clip();
     assert!(matches!(gpu.render(&s, &mut none(), 1.0, BLACK), Err(GpuError::Unsupported(_))));

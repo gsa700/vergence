@@ -218,7 +218,11 @@ impl Server {
                     return Ok(());
                 }
                 Err(e) => {
-                    tracing::warn!("scenes: the GPU renderer failed ({e}): scenes drawn on the CPU from now");
+                    tracing::warn!(
+                        "scenes: the GPU renderer failed on {:?} window {} ({e}): scenes drawn on the CPU from now",
+                        n.app_id,
+                        n.id
+                    );
                     let all: Vec<GpuBuffer> = self
                         .scenes
                         .buffers

@@ -83,8 +83,8 @@ impl From<RenderError> for GpuError {
     }
 }
 
-/// Floats in one instance: eight attributes of four.
-const FLOATS: usize = 32;
+/// Floats in one instance: nine attributes of four.
+const FLOATS: usize = 36;
 
 const KIND_FILL: f32 = 0.0;
 const KIND_STROKE: f32 = 1.0;
@@ -102,6 +102,7 @@ layout(location = 4) in vec4 a_color;
 layout(location = 5) in vec4 a_uv;
 layout(location = 6) in vec4 a_clip;
 layout(location = 7) in vec4 a_clip_param;
+layout(location = 8) in vec4 a_clip2;
 uniform vec2 u_size;
 flat out vec4 v_shape;
 flat out vec4 v_inner;
@@ -110,6 +111,7 @@ flat out vec4 v_color;
 flat out vec4 v_uv;
 flat out vec4 v_clip;
 flat out vec4 v_clip_param;
+flat out vec4 v_clip2;
 void main() {
     vec2 corner = vec2(float(gl_VertexID & 1), float((gl_VertexID >> 1) & 1));
     vec2 p = mix(a_rect.xy, a_rect.zw, corner);
@@ -122,6 +124,7 @@ void main() {
     v_uv = a_uv;
     v_clip = a_clip;
     v_clip_param = a_clip_param;
+    v_clip2 = a_clip2;
 }
 "#;
 
@@ -138,6 +141,7 @@ flat in vec4 v_color;
 flat in vec4 v_uv;
 flat in vec4 v_clip;
 flat in vec4 v_clip_param;
+flat in vec4 v_clip2;
 out vec4 o_color;
 //_TEXT_LOOK_
 
@@ -202,6 +206,9 @@ void main() {
     c = clamp(c, 0.0, 1.0);
     if (v_clip_param.y > 0.5) {
         c *= cover(v_clip, v_clip_param.x, p);
+    }
+    if (v_clip_param.w > 0.5) {
+        c *= cover(v_clip2, v_clip_param.z, p);
     }
     float a = color.a * c;
     if (a <= 0.0) {
@@ -414,7 +421,7 @@ impl Gpu {
             (gl.glBindVertexArray)(vertex_array);
             (gl.glGenBuffers)(1, &mut buffer);
             (gl.glBindBuffer)(gl::GL_ARRAY_BUFFER, buffer);
-            for i in 0..8 {
+            for i in 0..9 {
                 (gl.glEnableVertexAttribArray)(i);
                 (gl.glVertexAttribDivisor)(i, 1);
             }
@@ -960,7 +967,7 @@ impl Gpu {
                 }
                 // ES 3.0 has no "first instance": the attributes are pointed at the batch's first.
                 let base = batch.first * FLOATS * 4;
-                for i in 0..8usize {
+                for i in 0..9usize {
                     (gl.glVertexAttribPointer)(i as u32, 4, gl::GL_FLOAT, 0, stride, (base + i * 16) as *const c_void);
                 }
                 (gl.glDrawArraysInstanced)(gl::GL_TRIANGLE_STRIP, 0, 4, batch.count as i32);
@@ -1012,7 +1019,7 @@ impl Gpu {
         let rect = |r: &RRect| [r.x0, r.y0, r.x1, r.y1];
         // One instance, put together and then added whole: the list is grown and
         // checked once for it, not once for each of its eight parts.
-        fn emit(data: &mut Vec<f32>, batches: &mut Vec<Batch>, parts: [[f32; 4]; 8], image: Option<usize>) {
+        fn emit(data: &mut Vec<f32>, batches: &mut Vec<Batch>, parts: [[f32; 4]; 9], image: Option<usize>) {
             let first = data.len() / FLOATS;
             let mut instance = [0.0f32; FLOATS];
             for (to, part) in instance.chunks_exact_mut(4).zip(parts) {
@@ -1028,17 +1035,27 @@ impl Gpu {
         let whole = |b: [i32; 4]| [b[0] as f32, b[1] as f32, b[2] as f32, b[3] as f32];
         for p in prims.iter() {
             let chain = &chains[p.chain as usize];
-            let (clip, clip_param) = match chain.as_slice() {
-                [] => ([0.0; 4], [0.0; 4]),
-                [one] => (rect(one), [one.radius, 1.0, 0.0, 0.0]),
-                // Several: as one, where that is exact (one_clip). Before, such
-                // a frame was drawn in software and lost the frost under its
-                // window's bar (the settings app at 133⅓%).
+            // At most two clips per shape: one_clip's one where that is exact (before, a
+            // frame with several was drawn in software and lost the frost under its
+            // window's bar, the settings app at 133⅓%), else the two that matter (two_clips).
+            // Before that, a shape in the corners of two rounded clips (Files, resized on
+            // techbench 2026-11-24) switched every window's scenes to the CPU.
+            let (first, second) = match chain.as_slice() {
+                [] => (None, None),
+                [one] => (Some(*one), None),
                 many => match one_clip(many, p.bounds) {
-                    Some(one) => (rect(&one), [one.radius, 1.0, 0.0, 0.0]),
-                    None => return Err(GpuError::Unsupported("a shape inside more than one rounded clip")),
+                    Some(one) => (Some(one), None),
+                    None => two_clips(many, p.bounds)
+                        .ok_or(GpuError::Unsupported("a shape inside more than two rounded clips"))?,
                 },
             };
+            let (clip, clip2) = (first.map_or([0.0; 4], |c| rect(&c)), second.map_or([0.0; 4], |c| rect(&c)));
+            let clip_param = [
+                first.map_or(0.0, |c| c.radius),
+                if first.is_some() { 1.0 } else { 0.0 },
+                second.map_or(0.0, |c| c.radius),
+                if second.is_some() { 1.0 } else { 0.0 },
+            ];
             let (mut shape, mut inner, mut uv) = ([0.0f32; 4], [0.0f32; 4], [0.0f32; 4]);
             let mut param: [f32; 4];
             let mut image = None;
@@ -1095,6 +1112,7 @@ impl Gpu {
                                     [0.0; 4],
                                     clip,
                                     clip_param,
+                                    clip2,
                                 ],
                                 None,
                             );
@@ -1219,6 +1237,7 @@ impl Gpu {
                                         [u as f32, v as f32, px as f32, py as f32],
                                         clip,
                                         clip_param,
+                                        clip2,
                                     ],
                                     None,
                                 );
@@ -1231,7 +1250,7 @@ impl Gpu {
             emit(
                 &mut data,
                 &mut batches,
-                [whole(p.bounds), shape, inner, param, color(p.color), uv, clip, clip_param],
+                [whole(p.bounds), shape, inner, param, color(p.color), uv, clip, clip_param, clip2],
                 image,
             );
         }
@@ -1381,20 +1400,8 @@ unsafe fn link(gl: &Gles) -> Result<u32, GpuError> {
 /// when two rounded clips both matter there, or a rectangle cuts the one
 /// that does.
 pub(crate) fn one_clip(chain: &[RRect], bounds: [i32; 4]) -> Option<RRect> {
-    let b = [bounds[0] as f32, bounds[1] as f32, bounds[2] as f32, bounds[3] as f32];
-    let meets = |a: [f32; 4], c: [f32; 4]| a[0] < c[2] && c[0] < a[2] && a[1] < c[3] && c[1] < a[3];
-    let reaches_corner = |c: &RRect| {
-        let r = c.radius;
-        r > 0.0
-            && [
-                [c.x0, c.y0, c.x0 + r, c.y0 + r],
-                [c.x1 - r, c.y0, c.x1, c.y0 + r],
-                [c.x0, c.y1 - r, c.x0 + r, c.y1],
-                [c.x1 - r, c.y1 - r, c.x1, c.y1],
-            ]
-            .iter()
-            .any(|q| meets(*q, b))
-    };
+    let b = float_bounds(bounds);
+    let reaches_corner = |c: &RRect| reaches_corner(c, b);
     let mut square = [f32::NEG_INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::INFINITY];
     let mut rounded: Option<RRect> = None;
     for c in chain {
@@ -1407,12 +1414,51 @@ pub(crate) fn one_clip(chain: &[RRect], bounds: [i32; 4]) -> Option<RRect> {
             square = [square[0].max(c.x0), square[1].max(c.y0), square[2].min(c.x1), square[3].min(c.y1)];
         }
     }
-    let inside = |a: [f32; 4], c: [f32; 4]| a[0] >= c[0] && a[1] >= c[1] && a[2] <= c[2] && a[3] <= c[3];
     match rounded {
         None => Some(RRect { x0: square[0], y0: square[1], x1: square[2], y1: square[3], radius: 0.0 }),
         // The rectangles leave the rounded one whole, or the pixels lie inside them.
         Some(c) if inside([c.x0, c.y0, c.x1, c.y1], square) || inside(b, square) => Some(c),
         Some(_) => None,
+    }
+}
+
+fn float_bounds(b: [i32; 4]) -> [f32; 4] {
+    [b[0] as f32, b[1] as f32, b[2] as f32, b[3] as f32]
+}
+
+/// Does rectangle `a` lie within `c`?
+fn inside(a: [f32; 4], c: [f32; 4]) -> bool {
+    a[0] >= c[0] && a[1] >= c[1] && a[2] <= c[2] && a[3] <= c[3]
+}
+
+/// Do pixels `b` reach into one of rounded clip `c`'s corners?
+fn reaches_corner(c: &RRect, b: [f32; 4]) -> bool {
+    let meets = |a: [f32; 4], c: [f32; 4]| a[0] < c[2] && c[0] < a[2] && a[1] < c[3] && c[1] < a[3];
+    let r = c.radius;
+    r > 0.0
+        && [
+            [c.x0, c.y0, c.x0 + r, c.y0 + r],
+            [c.x1 - r, c.y0, c.x1, c.y0 + r],
+            [c.x0, c.y1 - r, c.x0 + r, c.y1],
+            [c.x1 - r, c.y1 - r, c.x1, c.y1],
+        ]
+        .iter()
+        .any(|q| meets(*q, b))
+}
+
+/// A chain the GPU draws with two clips: the clips that cover pixels `bounds`
+/// whole are left out (their coverage there is 1, as the reference renderer's
+/// product has it), and if at most two are left, those two; with more, the
+/// rest as one where that is exact (one_clip). None if neither.
+pub(crate) fn two_clips(chain: &[RRect], bounds: [i32; 4]) -> Option<(Option<RRect>, Option<RRect>)> {
+    let b = float_bounds(bounds);
+    let matter: Vec<RRect> =
+        chain.iter().copied().filter(|c| !(inside(b, [c.x0, c.y0, c.x1, c.y1]) && !reaches_corner(c, b))).collect();
+    match matter.as_slice() {
+        [] => Some((None, None)),
+        [one] => Some((Some(*one), None)),
+        [a, b] => Some((Some(*a), Some(*b))),
+        many => one_clip(many, bounds).map(|one| (Some(one), None)),
     }
 }
 
@@ -1445,5 +1491,25 @@ mod clip_tests {
         assert!(one_clip(&[a, b], [0, 0, 15, 15]).is_none());
         // A rectangle cutting through the rounded clip that matters: not one clip.
         assert!(one_clip(&[a, rr(50.0, 0.0, 300.0, 300.0, 0.0)], [0, 0, 100, 100]).is_none());
+    }
+
+    #[test]
+    fn two_rounded_clips_that_matter_are_both_kept() {
+        // The case one_clip refuses: a shape in the corner both rounded clips share.
+        let a = rr(0.0, 0.0, 100.0, 100.0, 10.0);
+        let b = rr(0.0, 0.0, 200.0, 200.0, 20.0);
+        let (one, two) = two_clips(&[a, b], [0, 0, 15, 15]).unwrap();
+        assert_eq!((one.unwrap().radius, two.unwrap().radius), (10.0, 20.0));
+        // A rectangle cutting through a rounded clip: both kept.
+        let cut = rr(50.5, 0.0, 300.0, 300.0, 0.0);
+        let (one, two) = two_clips(&[a, cut], [0, 0, 100, 100]).unwrap();
+        assert!(one.is_some() && two.is_some());
+        // An outer clip that covers the pixels whole is left out.
+        let outer = rr(-10.0, -10.0, 1000.0, 1000.0, 10.0);
+        let (one, two) = two_clips(&[outer, a, b], [0, 0, 15, 15]).unwrap();
+        assert_eq!((one.unwrap().radius, two.unwrap().radius), (10.0, 20.0));
+        // Three rounded clips sharing the corner: not drawn on the GPU.
+        let c = rr(0.0, 0.0, 300.0, 300.0, 30.0);
+        assert!(two_clips(&[a, b, c], [0, 0, 15, 15]).is_none());
     }
 }
