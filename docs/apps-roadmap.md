@@ -549,10 +549,48 @@ to check what was built, and the agent interface to try it.
   prompt". A session's terminal starts zsh when it is there; the package
   could depend on it, and the first login offers it (changing a login shell
   is the person's choice, chsh). The prompt as his, user@host:dir.
-- **Monitor color profiles** (passed 2026-11-23): what management exists (ICC
-  profiles from EDID or a file, a calibration's gamma ramps through DRM's
-  color LUT and CTM), and whether Vergence can use it (the server owns the
-  outputs, so it can load a profile per screen).
+- **Color consistency across monitors** (back on the roadmap 2026-11-25;
+  was "Monitor color profiles", passed 2026-11-23). Dave: "we are going for
+  app consistency, and awesome best possible text rendering, seems like
+  color management should be in the conversation?"; "Vergence is designed
+  to excel with multiple monitors, so there again color accuracy and more
+  importantly color consistency are desired". **Consistency across screens
+  first, absolute accuracy second.** Roadmap entry only: nothing built
+  without his go; a milestone draft (docs/color-milestone-1.md) on request.
+  From techbench's handoff (shared memory 01M8AYS7QS3TNFP7MA84EXT9P7):
+  - What shows side by side, in order: the same white (D65) on every
+    screen; the same luminance target (say 120 cd/m², capped at the dimmest
+    panel); the same tone curve (sRGB/2.2); the same gamut for desktop
+    content (the interface stays sRGB everywhere, so a wide-gamut panel
+    does not make the same window more saturated than its neighbor).
+  - **The text link**: vergence-render's textlook.rs tunes coverage at gamma
+    1.45 assuming the panel follows the sRGB curve; a panel with another
+    midtone curve makes stems heavier or thinner. The same curve everywhere
+    is the same text weight everywhere (as the per-screen text factor,
+    2026-11-18). After calibrating, the 1.45 and contrast defaults are
+    checked again by eye (they were tuned on uncalibrated panels).
+  - **Where it fits**: everything stays sRGB and composed as today, each
+    monitor in its own buffer; then one transform per output at the end,
+    sRGB to the panel (a 3x3 in linear light and the panel's curve): in DRM
+    (DEGAMMA_LUT, CTM, GAMMA_LUT, after composition, free) where the driver
+    offers it, a last shader pass otherwise (to check: i915, nouveau,
+    amdgpu; Hubble's NVIDIA screen is relayed, so the transform belongs to
+    the GPU that shows it, or is baked in before the relay). Apps get it
+    for nothing; wide-gamut apps later through wp_color_management_v1. A
+    window across two screens keeps its color; night light becomes a shift
+    of each screen's calibrated white, so screens stay matched under it.
+  - **Profiles**: a measured ICC per screen (a colorimeter) first, EDID
+    colorimetry only as a fallback (vergence-edid reads none yet: only
+    fake.rs's gamma). One target for every screen (white, luminance, curve)
+    in Settings; per screen, its profile and how close it lands; a switch
+    to turn it off, to compare. techbench's LG Ultra HD's EDID: gamma 2.2,
+    the sRGB-default flag, primaries R .652,.335 G .305,.637 B .148,.062,
+    white .3135,.3291 (about 1.10x sRGB). The LG 6K's not read yet (does it
+    state its P3 primaries honestly? look in the CTA and DisplayID
+    extensions too).
+  - Hardware (a suggestion, not decided): one colorimeter, used on every
+    screen against the same target (it would also calibrate the 6K for the
+    Mac); no subscriptions.
 - **The pointer in the middle of the screen at startup** (passed 2026-11-23).
 - **Middle-click paste (the primary selection)**, parked 2026-11-24
   (techbench's handoff 01M887N46A18X4F8VQGEGFGSHC; Dave then: "nevermind all
