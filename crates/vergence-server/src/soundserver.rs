@@ -14,7 +14,18 @@
 // session (it would take the sound card from the person's session). Off with
 // desktop.toml `[sound] pipewire = false`; nothing is started when a sound
 // server already runs for the user or PipeWire is not installed. FreeBSD
-// keeps OSS (PipeWire there is the user's choice). For tests,
+// keeps OSS (PipeWire there is the user's choice).
+//
+// Each record at its own rate (Dave, 2026-11-26: "go with the
+// session-scoped config"): a PipeWire started here is told, at run time
+// through its own tool (pw-metadata, settings clock.allowed-rates), that the
+// card may follow the music's rate (44.1 to 192 kHz, as the card allows), so
+// a CD rip plays at 44.1 kHz instead of resampled to 48. Nothing is written
+// to any file: it lives as long as this session's PipeWire and touches no
+// other session. A rate list in the person's own PipeWire configuration is
+// left as it is; desktop.toml `[sound] native-rates = false` asks for none
+// (whitepaper principle 8: the system's own tool, the person's own
+// configuration first). For tests,
 // VERGENCE_SOUND_SERVER=on starts it in any session (a headless one too) and
 // =off never.
 
@@ -69,6 +80,9 @@ pub fn start() {
                 tracing::warn!("sound server: {program} is not installed");
             }
         }
+        if native_rates(&text) {
+            allow_rates();
+        }
     });
 }
 
@@ -82,6 +96,49 @@ pub fn stop() {
     for pid in pids.into_iter().rev() {
         // SAFETY: kill only sends a signal; the pids are our own children.
         unsafe { kill(pid as i32, 15) };
+    }
+}
+
+/// The rates the card may follow: CD's and DAT's families, as far as 192 kHz.
+const RATES: &str = "[ 44100 48000 88200 96000 176400 192000 ]";
+
+/// `[sound] native-rates`, true unless set false.
+fn native_rates(text: &str) -> bool {
+    text.parse::<toml::Table>().ok().and_then(|t| t.get("sound")?.get("native-rates")?.as_bool()).unwrap_or(true)
+}
+
+/// The allowed rates in pw-metadata's listing of the settings, if listed:
+/// `update: id:0 key:'clock.allowed-rates' value:'[ 48000 ]' type:''`.
+fn listed_rates(listing: &str) -> Option<Vec<u32>> {
+    let line = listing.lines().find(|l| l.contains("key:'clock.allowed-rates'"))?;
+    let value = line.split("value:'").nth(1)?.split('\'').next()?;
+    // "[ 44100, 48000, 88200, 96000 ]": PipeWire separates them with commas.
+    Some(
+        value
+            .split(|c: char| c == ',' || c.is_whitespace() || c == '[' || c == ']')
+            .filter_map(|v| v.parse().ok())
+            .collect(),
+    )
+}
+
+/// The card allowed to follow the music's rate, unless the person's own
+/// configuration already lists rates (more than PipeWire's one default).
+fn allow_rates() {
+    let Some(tool) = which("pw-metadata") else {
+        return tracing::info!("sound server: pw-metadata is not installed; every rate is resampled to the card's");
+    };
+    let listing = std::process::Command::new(&tool).args(["-n", "settings"]).output();
+    let rates = listing.ok().and_then(|o| listed_rates(&String::from_utf8_lossy(&o.stdout)));
+    if rates.as_ref().is_some_and(|r| r.len() > 1) {
+        return tracing::info!("sound server: allowed rates already set ({rates:?}); left as they are");
+    }
+    let set = std::process::Command::new(&tool)
+        .args(["-n", "settings", "0", "clock.allowed-rates", RATES])
+        .stdout(std::process::Stdio::null())
+        .status();
+    match set {
+        Ok(s) if s.success() => tracing::info!("sound server: the card may follow the music's rate ({RATES})"),
+        other => tracing::warn!("sound server: allowed rates not set: {other:?}"),
     }
 }
 
@@ -181,6 +238,18 @@ mod tests {
         assert!(wanted("[sound]\nvolume-step = 5\n"));
         assert!(!wanted("[sound]\npipewire = false\n"));
         assert!(wanted("[sound]\npipewire = true\n"));
+    }
+
+    #[test]
+    fn native_rates_unless_switched_off_and_the_listing_read() {
+        assert!(native_rates(""));
+        assert!(!native_rates("[sound]\nnative-rates = false\n"));
+        let listing = "Found \"settings\" metadata 31\nupdate: id:0 key:'log.level' value:'2' type:''\nupdate: id:0 key:'clock.allowed-rates' value:'[ 48000 ]' type:''\n";
+        assert_eq!(listed_rates(listing), Some(vec![48000]));
+        // As techbench's PipeWire lists a person's own rates (2026-11-26).
+        let mine = "update: id:0 key:'clock.allowed-rates' value:'[ 44100, 48000, 88200, 96000 ]' type:''";
+        assert_eq!(listed_rates(mine), Some(vec![44100, 48000, 88200, 96000]));
+        assert_eq!(listed_rates("nothing here"), None);
     }
 
     #[test]

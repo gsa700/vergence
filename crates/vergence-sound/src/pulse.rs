@@ -370,6 +370,12 @@ impl Pulse {
     }
 
     fn connect() -> io::Result<Pulse> {
+        Pulse::connect_as("Vergence", "vergence")
+    }
+
+    /// Connected as the program `name` (`id` its app id): what the sound
+    /// server's lists and mixers call its streams ("AlbumWall", not "Vergence").
+    fn connect_as(name: &str, id: &str) -> io::Result<Pulse> {
         let path = socket_path().ok_or_else(|| bad("no socket named"))?;
         let sock = UnixStream::connect(&path)?;
         sock.set_read_timeout(Some(Duration::from_secs(3)))?;
@@ -383,7 +389,7 @@ impl Pulse {
             return Err(bad(&format!("the server speaks version {theirs}, older than ours")));
         }
         p.ask(SET_CLIENT_NAME, |t| {
-            t.props(&[("application.name", "Vergence"), ("application.id", "vergence")]);
+            t.props(&[("application.name", name), ("application.id", id)]);
         })?;
         let (name, version, _) = p.server_info()?;
         p.server = format!("{name} {version}");
@@ -708,7 +714,14 @@ pub fn stream(rate: u32, channels: u32) -> io::Result<Box<dyn crate::Stream>> {
 /// A playback stream named `name`, buffering about `buffer` (the server's
 /// own default, about two seconds, when None).
 pub fn stream_as(rate: u32, channels: u32, name: &str, buffer: Option<Duration>) -> io::Result<Box<dyn crate::Stream>> {
-    let mut p = Pulse::connect()?;
+    // A stream named for a program connects as that program, so the sound
+    // server lists it by its name (techbench, 2026-11-26: pw-top showed
+    // "+ Vergence" for AlbumWall).
+    let mut p = if name == "Preview" {
+        Pulse::connect()?
+    } else {
+        Pulse::connect_as(name, &format!("vergence-{}", name.to_lowercase()))?
+    };
     let sink = p.sink("@DEFAULT_SINK@")?;
     let ch = channels.clamp(1, 8) as u8;
     let frame = ch as u32 * 2;
