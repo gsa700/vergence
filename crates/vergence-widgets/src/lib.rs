@@ -40,6 +40,7 @@ mod element;
 pub mod filedialog;
 pub mod files;
 mod layout;
+pub mod motion;
 pub mod prefs;
 pub mod session;
 pub mod textarea;
@@ -216,6 +217,15 @@ pub trait Program {
     /// A named scroll moved: how far down it is, in points. Told after the
     /// frame is laid out, once for each change.
     fn scrolled(&mut self, _name: &str, _offset: f32) {}
+
+    /// True while the program's own picture moves by itself (an album
+    /// unfolding, a cover turning over, a fade): a frame is wanted every
+    /// time the monitor can show one, and the tree is built again for each
+    /// (the program works out where things are from the clock in `view`).
+    /// See [`motion`] for timing and easing that honors reduced motion.
+    fn animating(&self) -> bool {
+        false
+    }
 
     /// Another thread used the [`Waker`]. True if the state changed.
     fn woken(&mut self, _window: &mut Window) -> bool {
@@ -510,7 +520,7 @@ impl<P: Program> vergence_ui::App for Host<P> {
     }
 
     fn animating(&self) -> bool {
-        self.ui.animating()
+        self.ui.animating() || self.program.animating()
     }
 
     /// The tree's meaning for the server (native road), when it has changed
@@ -681,8 +691,9 @@ impl<P: Program> Host<P> {
     /// The frame's scene: the tree built again if anything changed, then drawn.
     fn build(&mut self, frame: &Frame, fonts: &mut Fonts) -> Scene {
         self.native = frame.native;
-        // A grid scrolled past the rows it built: built again for where it is.
-        self.stale |= self.ui.take_relayout();
+        // A grid scrolled past the rows it built: built again for where it
+        // is; the program's own motion: built again for this frame's time.
+        self.stale |= self.ui.take_relayout() || self.program.animating();
         if frame.scale != self.scale {
             self.scale = frame.scale;
             self.stale |= self.program.scale(frame.scale);

@@ -346,7 +346,8 @@ impl Layout<'_> {
             Kind::Scroll { child } => self.measure(child, avail),
             Kind::Grid { count, fit, gap, after, .. } => {
                 let (cols, _, cell_h) = fit(avail);
-                Size { w: avail, h: grid_rows(*count, cols, cell_h, gap.1, after.as_ref().map(|a| (a.0, a.1))).1 }
+                let after = after.as_ref().map(|a| (a.0 / cols.max(1), a.1));
+                Size { w: avail, h: grid_rows(*count, cols, cell_h, gap.1, after).1 }
             }
             Kind::Picture { .. } | Kind::Drawing { .. } | Kind::Area { .. } => Size { w: 0.0, h: 0.0 },
         };
@@ -670,7 +671,7 @@ impl Layout<'_> {
                 let (cols, cell_w, cell_h) = fit(rect.w);
                 let cols = cols.max(1);
                 let rows = count.div_ceil(cols);
-                let after_row = after.as_ref().map(|a| (a.0, a.1));
+                let after_row = after.as_ref().map(|a| (a.0 / cols, a.1));
                 // A row's top: the element after a row pushes those below it down.
                 let top = |r: usize| {
                     let mut y = rect.y + r as f32 * (cell_h + gap.1);
@@ -701,9 +702,10 @@ impl Layout<'_> {
                         self.arrange(cell, Rect::new(x, y, cell_w, cell_h), Some(me), cid, out);
                     }
                 }
-                if let Some((ar, extra, e)) = after
-                    && ar < rows
+                if let Some((item, extra, e)) = after
+                    && item / cols < rows
                 {
+                    let ar = item / cols;
                     let y = top(ar) + cell_h + gap.1;
                     let cid = child_id(id, count + 1, e.key);
                     self.arrange(*e, Rect::new(rect.x, y, rect.w, extra), Some(me), cid, out);

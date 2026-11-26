@@ -1142,7 +1142,8 @@ fn a_grid_builds_only_the_rows_in_view_and_its_height_is_true() {
 fn an_element_after_a_row_moves_the_rows_below_down() {
     let make = |after: bool| {
         let g = grid(8, |_| (4, 100.0, 120.0), 10.0, 10.0, |i, _| label(format!("cell {i}")));
-        let g = if after { g.after_row(0, 300.0, label("panel")) } else { g };
+        // After item 2: the first row (4 to a row).
+        let g = if after { g.after_item(2, 300.0, label("panel")) } else { g };
         column(vec![g])
     };
     let plain = laid(make(false), 450.0, 2000.0);

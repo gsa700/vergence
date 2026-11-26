@@ -210,7 +210,8 @@ pub(crate) enum Kind<M> {
         fit: GridFit,
         gap: (f32, f32),
         build: GridBuild<M>,
-        /// A full-width element after a row: its row, its height, itself.
+        /// A full-width element after the row holding an item: the item, its
+        /// height, itself.
         after: Option<(usize, f32, Box<Element<M>>)>,
     },
     Picture {
@@ -761,11 +762,12 @@ pub fn drawing<M>(draw: impl Fn(&mut Scene, &mut Fonts, Rect, &Theme) + 'static)
 
 impl<M> Element<M> {
     /// A grid with `element`, `height` tall and as wide as the grid, after
-    /// its row `row` (an album unfolding under its row); the rows after it
-    /// move down to make room.
-    pub fn after_row(mut self, row: usize, height: f32, element: Element<M>) -> Self {
+    /// the row that holds cell `item` (an album unfolding under its row:
+    /// which row that is depends on the width, so the grid works it out);
+    /// the rows after it move down to make room.
+    pub fn after_item(mut self, item: usize, height: f32, element: Element<M>) -> Self {
         if let Kind::Grid { after, .. } = &mut self.kind {
-            *after = Some((row, height.max(0.0), Box::new(element)));
+            *after = Some((item, height.max(0.0), Box::new(element)));
         }
         self
     }
