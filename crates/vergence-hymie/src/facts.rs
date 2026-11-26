@@ -23,7 +23,8 @@ use crate::{Error, Format, ReplayGain, Tags, format_of};
 pub struct Facts {
     pub rate: u32,
     pub channels: u16,
-    /// Bits per sample as stored (0 for floating point; 16 for AAC).
+    /// Bits per sample as stored (0 for floating point and for lossy files,
+    /// MP3 and AAC, as their decoders say: they keep no depth of their own).
     pub bits: u16,
     pub frames: u64,
     pub gain: ReplayGain,
@@ -182,7 +183,7 @@ pub fn facts(size: u64, head: &[u8], tail: &[u8]) -> Result<Result<Facts, Want>,
         && let Some((rate, channels, frames)) = crate::mp4::aac_facts(&data)
     {
         let gain = ReplayGain::from_tags(&tags.values);
-        return Ok(Ok(Facts { rate, channels, bits: 16, frames, gain, tags, cover }));
+        return Ok(Ok(Facts { rate, channels, bits: 0, frames, gain, tags, cover }));
     }
     let t = crate::open(data)?;
     Ok(Ok(Facts {
@@ -486,7 +487,7 @@ mod tests {
     fn an_aac_track_is_measured_from_its_container() {
         let d = include_bytes!("../fixtures/aac44.m4a");
         let f = facts(d.len() as u64, d, &[]).unwrap().unwrap();
-        assert_eq!((f.rate, f.bits), (44100, 16));
+        assert_eq!((f.rate, f.bits), (44100, 0));
         assert!(f.seconds() > 0.1 && f.seconds() < 60.0, "{}", f.seconds());
     }
 

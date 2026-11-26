@@ -258,3 +258,18 @@ where any app can use it, not inside AlbumWall):
   techbench with Dave's FLAC library (372 albums): covers load, scrolling
   to the end builds the rows there. Moved to step 5 with the transitions:
   the covers' 220 ms fade-in; the scrolling measurement on kepler.
+- **Step 5, the album panel** (2026-11-25): panel.rs (the header line,
+  "mixed" when tracks differ; the track list down the left column and then
+  the right, never ending on a disc heading; the panel's height worked out,
+  at least the sleeve tall); panelview.rs (the arrow over the tile and the
+  body in the album's palette, fading over its last 28%; title, artist,
+  header line, the two-column list with lengths at the right, the 260-point
+  sleeve with its play overlay under the pointer); the unfold (330 ms, the
+  contents fading in after, 110 ms), the tile turning over to back.jpg
+  (400 ms) and ringed in the album's accent, another album in the same row
+  swapping the contents in place, a press on the open album or Escape
+  folding it (330 ms), the wall gliding to center an album as it opens,
+  covers fading in (220 ms). AAC files now report no bit depth (index
+  version 3). Seen on techbench with Dave's library. Not yet: the panel
+  staying above when an album in the row below it is pressed (pointing
+  down at it); the scrolling measurement on kepler.

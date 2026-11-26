@@ -12,6 +12,7 @@
 //! The window is AlbumWall's own dark one whatever the desktop's scheme
 //! (question 3: the covers are the point); its bar is the server's, dark.
 
+mod panelview;
 mod reading;
 mod wallview;
 
@@ -26,6 +27,7 @@ use vergence_albumwall::covers::{self, Covers};
 use vergence_albumwall::libraries::{self, Libraries};
 use vergence_albumwall::library::Album;
 use vergence_albumwall::scan::Unreachable;
+use vergence_albumwall::{panel, wall};
 use vergence_ui::{AppCommand as C, BarStyle, Role};
 use vergence_widgets::{
     Align, ButtonLook, Element, Length, Padding, Program, Theme, Waker, Window, button, column, label, panel, row,
@@ -53,11 +55,35 @@ mod timer {
 pub enum Msg {
     ChooseFolder,
     TryAgain,
-    /// A tile pressed (the album unfolds in step 5).
+    /// A tile pressed: its album unfolds (or folds, if it is the open one).
     Open(usize),
     /// A library chosen in the bottom bar's picker.
     Library(usize),
+    /// Play album `.0` from its track `.1` (step 6).
+    Play(usize, usize),
 }
+
+/// The open album and its motion (the Avalonia app's timings).
+struct Opened {
+    index: usize,
+    /// Its panel unfolding (330 ms), then its contents fading in (110 ms).
+    unfold: vergence_widgets::motion::Tween,
+    /// Its contents changing in place (another album in the same row).
+    swap: Option<vergence_widgets::motion::Tween>,
+    /// Its tile turning over to its back (400 ms).
+    turn: vergence_widgets::motion::Tween,
+}
+
+/// The album folding away: its index, its height when open, the fold (330 ms).
+struct Folding {
+    index: usize,
+    height: f32,
+    fold: vergence_widgets::motion::Tween,
+}
+
+const UNFOLD_MS: u64 = 330;
+const CONTENTS_MS: u64 = 110;
+const TURN_MS: u64 = 400;
 
 struct AlbumWall {
     libraries: Libraries,
@@ -81,8 +107,21 @@ struct AlbumWall {
     scale: f32,
     /// The library's hue (its folder and the hue), measured from its covers.
     hue: Arc<Mutex<Option<(PathBuf, f64)>>>,
-    /// The album pressed last (step 5 unfolds it).
-    opened: Option<usize>,
+    /// The open album, and one folding away.
+    opened: Option<Opened>,
+    folding: Option<Folding>,
+    /// How far down the wall is scrolled (told by the toolkit), and a glide
+    /// to center an album as it opens: from, to, its timing.
+    wall_offset: f32,
+    glide: Option<(f32, f32, vergence_widgets::motion::Tween)>,
+    /// The window's size in points.
+    size: (f32, f32),
+    /// The covers' fade-ins.
+    fades: Rc<wallview::Fades>,
+    /// The screen's text factor, as last laid out.
+    text: std::cell::Cell<f32>,
+    /// What was asked to play (step 6 plays it).
+    wanted: Option<(usize, usize)>,
     /// The library on the wall cannot be reached, and why (and how many
     /// tracks it held last time).
     unreachable: Option<(Unreachable, usize)>,
@@ -123,6 +162,13 @@ impl AlbumWall {
             scale: 1.0,
             hue: Arc::default(),
             opened: None,
+            folding: None,
+            wall_offset: 0.0,
+            glide: None,
+            size: (1444.0, 1080.0),
+            fades: Rc::default(),
+            text: std::cell::Cell::new(1.0),
+            wanted: None,
         }
     }
 
@@ -192,6 +238,15 @@ impl AlbumWall {
                 self.measure_hue(&root, &albums);
                 if self.shown.as_ref().is_none_or(|s| s.0 != root) {
                     self.opened = None;
+                    self.folding = None;
+                } else if let (Some(o), Some((_, before, _))) = (self.opened.as_mut(), self.shown.as_ref()) {
+                    // The same library read again: the open album found by
+                    // what it is (an album added before it moves it along).
+                    let was = before.get(o.index).map(|a| (a.album_artist.clone(), a.title.clone()));
+                    match was.and_then(|w| albums.iter().position(|a| (a.album_artist.clone(), a.title.clone()) == w)) {
+                        Some(i) => o.index = i,
+                        None => self.opened = None,
+                    }
                 }
                 self.shown = Some((root, Rc::new(albums), files));
                 self.unreachable = None;
@@ -312,6 +367,7 @@ impl AlbumWall {
     /// The library read: its wall over its ground, and the bottom bar.
     fn library_view(&self, albums: &Rc<Vec<Album>>, files: usize, t: &Theme) -> Element<Msg> {
         let g = self.ground();
+        self.fades.reduced.set(t.reduced_motion);
         let tracks: usize = albums.iter().map(|a| a.tracks.len()).sum();
         let mut counts = format!("{} albums · {} tracks", group(albums.len()), group(tracks));
         if files > tracks {
@@ -330,7 +386,16 @@ impl AlbumWall {
         };
         let names: Vec<String> = self.libraries.list.iter().map(|l| l.name.clone()).collect();
         column(vec![
-            wallview::wall(albums.clone(), self.covers.clone(), self.scale, t, g).height(Length::FILL),
+            wallview::wall(
+                albums.clone(),
+                self.covers.clone(),
+                self.scale,
+                t,
+                g,
+                self.open_view(albums, t),
+                self.fades.clone(),
+            )
+            .height(Length::FILL),
             wallview::bar(status, counts, names, self.libraries.current, &g),
         ])
         .width(Length::FILL)
@@ -389,6 +454,118 @@ fn group(n: usize) -> String {
 }
 
 impl AlbumWall {
+    fn reduced(&self) -> bool {
+        self.theme().reduced_motion
+    }
+
+    /// An album's palette: from its cover's colors once decoded, else the neutral.
+    fn palette_of(&self, album: &Album) -> colors::Palette {
+        album
+            .front
+            .as_ref()
+            .and_then(|art| {
+                let px = (wall::columns(self.wall_width()).1 * self.scale).ceil();
+                self.covers.as_ref()?.get(&covers::Key::of(art, covers::bucket(px)))
+            })
+            .map_or(colors::Palette::neutral(colors::DEFAULT_LIGHT), |c| {
+                colors::Palette::of(&c.colors, colors::DEFAULT_LIGHT)
+            })
+    }
+
+    /// The wall's width for its tiles, as the grid will have it (the
+    /// window less the wall's margins and the scroll bar's gutter).
+    fn wall_width(&self) -> f32 {
+        (self.size.0 - 2.0 * wall::PAD_SIDE - 10.0).max(1.0)
+    }
+
+    /// The open (or folding) album as the wall shows it this frame.
+    fn open_view(&self, albums: &[Album], t: &Theme) -> Option<wallview::OpenView> {
+        let now = std::time::Instant::now();
+        self.text.set(t.text_factor);
+        if let Some(o) = &self.opened {
+            let album = albums.get(o.index)?;
+            let full = panel::height(album, t.text_factor);
+            let unfold = o.unfold.out(now);
+            let since = now.saturating_duration_since(o.unfold.start).as_millis() as u64;
+            // The contents fade in once the panel is open (and again when they swap).
+            let mut shown = if unfold < 1.0 {
+                0.0
+            } else if self.reduced() {
+                1.0
+            } else {
+                ((since.saturating_sub(UNFOLD_MS)) as f32 / CONTENTS_MS as f32).clamp(0.0, 1.0)
+            };
+            if let Some(sw) = &o.swap {
+                shown = shown.min(sw.out(now));
+            }
+            return Some(wallview::OpenView {
+                index: o.index,
+                height: full * unfold,
+                shown,
+                palette: self.palette_of(album),
+                turn: o.turn.in_out(now),
+            });
+        }
+        let f = self.folding.as_ref()?;
+        let album = albums.get(f.index)?;
+        let left = 1.0 - f.fold.out(now);
+        (left > 0.0).then(|| wallview::OpenView {
+            index: f.index,
+            height: f.height * left,
+            shown: 0.0,
+            palette: self.palette_of(album),
+            turn: left,
+        })
+    }
+
+    /// Album `i` pressed: it unfolds under its row (the wall gliding to
+    /// center it); pressed again, it folds; another in the same row takes
+    /// the panel's place where it stands, its contents changing.
+    fn press(&mut self, i: usize) {
+        let reduced = self.reduced();
+        let Some((_, albums, _)) = &self.shown else { return };
+        let Some(album) = albums.get(i) else { return };
+        let text = self.text.get();
+        let (cols, cover) = wall::columns(self.wall_width());
+        let tile_h = wall::tile_height(cover, text);
+        let full = panel::height(album, text);
+        let tween = |ms| vergence_widgets::motion::Tween::new(ms, reduced);
+        if let Some(o) = self.opened.take() {
+            if o.index == i {
+                self.folding = Some(Folding {
+                    index: i,
+                    height: albums.get(i).map_or(0.0, |a| panel::height(a, text)),
+                    fold: tween(UNFOLD_MS),
+                });
+                return;
+            }
+            if o.index / cols == i / cols {
+                self.opened = Some(Opened {
+                    index: i,
+                    unfold: o.unfold,
+                    swap: Some(tween(CONTENTS_MS * 2)),
+                    turn: tween(TURN_MS),
+                });
+                return;
+            }
+        }
+        self.folding = None;
+        self.opened = Some(Opened { index: i, unfold: tween(UNFOLD_MS), swap: None, turn: tween(TURN_MS) });
+        // The album and its panel centered in the wall, as far as they fit.
+        let row_top = wall::PAD_TOP + (i / cols) as f32 * (tile_h + wall::GAP);
+        let view_h = (self.size.1 - wallview::BAR).max(1.0);
+        let block = tile_h + wall::GAP + full;
+        let target = (row_top - ((view_h - block) / 2.0).max(0.0)).max(0.0);
+        self.glide = Some((self.wall_offset, target, tween(UNFOLD_MS)));
+    }
+
+    /// Escape: the open album folds.
+    fn fold(&mut self) -> bool {
+        let Some(o) = &self.opened else { return false };
+        self.press(o.index);
+        true
+    }
+
     /// The retry timer asked for when a read found the library out of reach;
     /// the 15-minute look for a library no watcher covers.
     fn ask_retry(&mut self, window: &mut Window) {
@@ -496,7 +673,8 @@ impl Program for AlbumWall {
         match message {
             Msg::ChooseFolder => self.choose_folder(window),
             Msg::TryAgain => self.read(false),
-            Msg::Open(i) => self.opened = Some(i),
+            Msg::Open(i) => self.press(i),
+            Msg::Play(album, track) => self.wanted = Some((album, track)),
             Msg::Library(i) => {
                 if i < self.libraries.list.len() && i != self.libraries.current {
                     self.libraries.current = i;
@@ -590,6 +768,54 @@ impl Program for AlbumWall {
             _ => {}
         }
         window.redraw();
+    }
+
+    fn resized(&mut self, width: f32, height: f32) {
+        self.size = (width, height);
+    }
+
+    fn scrolled(&mut self, name: &str, offset: f32) {
+        if name == "wall" {
+            self.wall_offset = offset;
+        }
+    }
+
+    /// The wall gliding to center an album that opened.
+    fn scroll_to(&mut self) -> Vec<(String, f32)> {
+        let now = std::time::Instant::now();
+        let Some((from, to, t)) = &self.glide else { return Vec::new() };
+        let at = vergence_widgets::motion::mix(*from, *to, t.out(now));
+        if !t.running(now) {
+            self.glide = None;
+        }
+        vec![("wall".into(), at)]
+    }
+
+    fn input(&mut self, input: &vergence_widgets::Input, _window: &mut Window) -> bool {
+        match input {
+            vergence_widgets::Input::Key { sym, pressed: true, .. } if *sym == vergence_ui::sym::ESCAPE => self.fold(),
+            _ => false,
+        }
+    }
+
+    fn animating(&self) -> bool {
+        let now = std::time::Instant::now();
+        // A little past each motion's end, so the last frame drawn is the
+        // finished one (not one from just before it: a folded tile kept its ring).
+        let past = std::time::Duration::from_millis(60);
+        let busy = |t: &vergence_widgets::motion::Tween| now.saturating_duration_since(t.start) < t.duration + past;
+        let opening = self.opened.as_ref().is_some_and(|o| {
+            busy(&o.turn)
+                || o.swap.as_ref().is_some_and(busy)
+                || now.saturating_duration_since(o.unfold.start)
+                    < o.unfold.duration
+                        + past
+                        + std::time::Duration::from_millis(if self.reduced() { 0 } else { CONTENTS_MS })
+        });
+        opening
+            || self.folding.as_ref().is_some_and(|f| busy(&f.fold))
+            || self.glide.is_some()
+            || self.fades.fading(now)
     }
 
     fn style(&self) -> vergence_ui::Style {
