@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=AlbumWall
+GenericName=Music
+Comment=A wall of every album you own, played gaplessly
+Exec=vergence-albumwall
+Icon=vergence-albumwall
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;albums;player;audio;flac;covers;
+StartupWMClass=vergence-albumwall

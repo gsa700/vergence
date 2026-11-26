@@ -1,0 +1,23 @@
+[package]
+name = "vergence-albumwall"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "AlbumWall for Vergence: a wall of every album you own, played gaplessly, on vergence-ui and Hymie"
+
+# AlbumWall rebuilt in Rust (docs/albumwall-milestone-1.md): it looks and works
+# as the Avalonia AlbumWall does. Its library rules, colors and icon are ported
+# from that app's own code, which Dave wrote and brings under Vergence's
+# license as its author (as Hymie's decoders were, preview milestone 1).
+[dependencies]
+vergence-config.workspace = true
+vergence-ui.workspace = true
+vergence-widgets.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "vergence-albumwall"
+path = "src/main.rs"

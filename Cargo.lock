@@ -2152,6 +2152,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
+name = "vergence-albumwall"
+version = "0.4.0-pre.3"
+dependencies = [
+ "vergence-config",
+ "vergence-ui",
+ "vergence-widgets",
+]
+
+[[package]]
 name = "vergence-archive"
 version = "0.4.0-pre.3"
 dependencies = [

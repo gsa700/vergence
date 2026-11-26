@@ -185,3 +185,18 @@ where any app can use it, not inside AlbumWall):
 9. **The checks**: display-suite scenarios (the wall, unfolding, playing
    with the paced silent output, search); a package for techbench; your pass
    on your own library.
+
+## Progress
+
+- **Step 1, the skeleton** (2026-11-25): crates/vergence-albumwall; the
+  window (AlbumWall's dark one whatever the desktop's scheme, the server's
+  dark bar titled AlbumWall); the first-run welcome in the Avalonia app's
+  words, its "On this computer" half (the music server's comes with
+  Navidrome); Choose a folder… through the toolkit's folder dialog; the
+  library list in `~/.config/vergence/albumwall/libraries` (our own small
+  text file, written whole and renamed over, tested); the app menu (Library
+  › Add a folder…, About); the desktop entry (Name AlbumWall, GenericName
+  Music) and AlbumWall's own icon, in install.sh's lists. AlbumWall is
+  GPL-3.0; what is ported from it (its rules, colors, icon) is Dave's own
+  work, brought under Vergence's license as its author, as Hymie's decoders
+  were. Tests: Hubble 1,101, kepler 1,090, techbench 1,101.
