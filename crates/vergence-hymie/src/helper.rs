@@ -14,6 +14,11 @@
 //!   two channels); none when the waveform is whole.
 //! - `S` a frame (u64): the playing cursor put there.
 //! - `R` frames (u32): the next samples from the cursor, interleaved floats.
+//! - `F` a library's question (AlbumWall's scan): the file's size (u64), the
+//!   head's length (u64), the head, the tail (the rest of the body). The
+//!   answer is the file's [`crate::facts::Facts`], or kind 3: how much of
+//!   each end is wanted (two u64), asked again with more. Nothing stays
+//!   open: one helper answers for a whole library ([`Scanner`]).
 //!
 //! An answer of kind 0 is the answer; kind 1 a refusal, its body why; kind 2
 //! (to `D` only) "AAC: ask the AAC helper", which [`Sound`] answers by
@@ -156,6 +161,8 @@ fn write_frame(w: &mut impl Write, kind: u8, body: &[u8]) -> std::io::Result<()>
 
 /// The answer kind that says "AAC: ask the AAC helper".
 const NEEDS_AAC: u8 = 2;
+/// The answer kind that says "more of the file's ends" (to `F`).
+const WANT: u8 = 3;
 
 /// The helper's work: requests from `input`, answers to `output`, until the pipe closes.
 pub fn serve(input: &mut impl Read, output: &mut impl Write) -> std::io::Result<()> {
@@ -179,6 +186,8 @@ pub fn serve_with(
     let mut open: Option<Open> = None;
     while let Some((kind, body)) = read_frame(input, crate::MAX_FILE as usize + 16)? {
         let mut refusal = 1u8;
+        // The kind an answer goes back as: 0, or WANT for an F that needs more.
+        let mut answered = 0u8;
         let answer: Result<Vec<u8>, String> = match kind {
             b'D' => (|| -> Result<Vec<u8>, Error> {
                 let tags = crate::tags(&body);
@@ -209,6 +218,23 @@ pub fn serve_with(
                 }
                 e.to_string()
             }),
+            b'F' => (|| -> Result<Vec<u8>, String> {
+                let size = u64::from_le_bytes(body.get(..8).ok_or("short")?.try_into().map_err(|_| "short")?);
+                let head_len =
+                    u64::from_le_bytes(body.get(8..16).ok_or("short")?.try_into().map_err(|_| "short")?) as usize;
+                let rest = &body[16..];
+                let head = rest.get(..head_len).ok_or("short")?;
+                let tail = &rest[head_len..];
+                match crate::facts::facts(size, head, tail).map_err(|e| e.to_string())? {
+                    Ok(f) => Ok(f.encode()),
+                    Err(w) => {
+                        answered = WANT;
+                        let mut b = w.head.to_le_bytes().to_vec();
+                        b.extend_from_slice(&w.tail.to_le_bytes());
+                        Ok(b)
+                    }
+                }
+            })(),
             b'P' => (|| {
                 let o = open.as_mut().ok_or("no file")?;
                 let slices = u32::from_le_bytes(body.get(..4).ok_or("short")?.try_into().map_err(|_| "short")?)
@@ -283,7 +309,7 @@ pub fn serve_with(
             _ => Err("an unknown request".into()),
         };
         match answer {
-            Ok(b) => write_frame(output, 0, &b)?,
+            Ok(b) => write_frame(output, answered, &b)?,
             Err(why) => write_frame(output, refusal, why.as_bytes())?,
         }
     }
@@ -396,25 +422,10 @@ impl Sound {
 
     /// One request and its answer, timed: past the time the helper is stopped.
     fn ask(&mut self, op: u8, body: &[u8]) -> Result<Vec<u8>, Error> {
-        let pid = self.child.id();
-        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
-        let watchman = std::thread::spawn(move || {
-            if done_rx.recv_timeout(TIMEOUT) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
-                unsafe extern "C" {
-                    fn kill(pid: i32, sig: i32) -> i32;
-                }
-                // SAFETY: kill(2) on our own child; no memory passed.
-                unsafe { kill(pid as i32, 9) };
-            }
-        });
-        let result = write_frame(&mut self.to, op, body).and_then(|_| read_frame(&mut self.from, 64 << 20));
-        let _ = done_tx.send(());
-        let _ = watchman.join();
-        match result {
-            Ok(Some((0, b))) => Ok(b),
-            Ok(Some((NEEDS_AAC, _))) if op == b'D' => Err(Error::NeedsAac),
-            Ok(Some((_, why))) => Err(crate::damaged(String::from_utf8_lossy(&why).into_owned())),
-            _ => Err(Error::Io("the sound helper stopped (a limit, or a fault in the file)".into())),
+        match ask_child(&self.child, &mut self.to, &mut self.from, op, body)? {
+            (0, b) => Ok(b),
+            (NEEDS_AAC, _) if op == b'D' => Err(Error::NeedsAac),
+            (_, why) => Err(crate::damaged(String::from_utf8_lossy(&why).into_owned())),
         }
     }
 
@@ -444,6 +455,140 @@ impl Sound {
     pub fn read(&mut self, frames: u32) -> Result<Vec<f32>, Error> {
         let b = self.ask(b'R', &frames.to_le_bytes())?;
         Ok(b.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect())
+    }
+}
+
+/// One request to a helper and its answer's kind and body, timed: past
+/// [`TIMEOUT`] the helper is stopped and the answer is an error.
+fn ask_child(
+    child: &std::process::Child,
+    to: &mut std::process::ChildStdin,
+    from: &mut std::process::ChildStdout,
+    op: u8,
+    body: &[u8],
+) -> Result<(u8, Vec<u8>), Error> {
+    let pid = child.id();
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+    let watchman = std::thread::spawn(move || {
+        if done_rx.recv_timeout(TIMEOUT) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
+            unsafe extern "C" {
+                fn kill(pid: i32, sig: i32) -> i32;
+            }
+            // SAFETY: kill(2) on our own child; no memory passed.
+            unsafe { kill(pid as i32, 9) };
+        }
+    });
+    let result = write_frame(to, op, body).and_then(|_| read_frame(from, 64 << 20));
+    let _ = done_tx.send(());
+    let _ = watchman.join();
+    match result {
+        Ok(Some(answer)) => Ok(answer),
+        _ => Err(Error::Io("the sound helper stopped (a limit, or a fault in the file)".into())),
+    }
+}
+
+/// A library's scan (AlbumWall, docs/albumwall-milestone-1.md step 2): one
+/// helper answers for every file, each sent only its two ends
+/// ([`crate::facts`]), more when the helper asks. A helper stopped by a
+/// limit or by a file is started again for the next file; the file that
+/// stopped it is an error (and is not tried twice).
+pub struct Scanner {
+    program: PathBuf,
+    running: Option<Running>,
+}
+
+struct Running {
+    child: std::process::Child,
+    to: std::process::ChildStdin,
+    from: std::process::ChildStdout,
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl Scanner {
+    /// A scanner with the installed helper (started at the first file).
+    pub fn new() -> Result<Scanner, Error> {
+        let program = helper_path()
+            .ok_or_else(|| Error::Io("the sound helper (libexec/vergence/vergence-hymie) is not installed".into()))?;
+        Ok(Scanner::with_program(&program))
+    }
+
+    /// A scanner with the helper at `program` (tests use the one cargo built).
+    pub fn with_program(program: &Path) -> Scanner {
+        Scanner { program: program.to_path_buf(), running: None }
+    }
+
+    fn start(&mut self) -> Result<&mut Running, Error> {
+        if self.running.is_none() {
+            let mut child = std::process::Command::new(&self.program)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map_err(|e| Error::Io(e.to_string()))?;
+            let (Some(to), Some(from)) = (child.stdin.take(), child.stdout.take()) else {
+                return Err(Error::Io("no pipe".into()));
+            };
+            self.running = Some(Running { child, to, from });
+        }
+        Ok(self.running.as_mut().expect("started"))
+    }
+
+    /// The facts of the file at `path`. An error of kind Io means the file
+    /// could not be read (gone, the share dropped): not a fact about it.
+    pub fn facts(&mut self, path: &Path) -> Result<crate::facts::Facts, Error> {
+        use crate::facts::{HEAD, MOST, TAIL};
+        use std::io::{Seek, SeekFrom};
+        let mut file = std::fs::File::open(path).map_err(|e| Error::Io(e.to_string()))?;
+        let size = file.metadata().map_err(|e| Error::Io(e.to_string()))?.len();
+        if size > crate::MAX_FILE {
+            return Err(Error::Unsupported("Larger than Hymie reads.".into()));
+        }
+        let (mut head, mut tail) = (HEAD.min(size), TAIL.min(size.saturating_sub(HEAD)));
+        for _ in 0..8 {
+            if head + tail >= size || head > MOST || tail > MOST {
+                (head, tail) = (size, 0);
+            }
+            let mut body = Vec::with_capacity(16 + (head + tail) as usize);
+            body.extend_from_slice(&size.to_le_bytes());
+            body.extend_from_slice(&head.to_le_bytes());
+            let mut read = |at: u64, n: u64, body: &mut Vec<u8>| -> Result<(), Error> {
+                file.seek(SeekFrom::Start(at)).map_err(|e| Error::Io(e.to_string()))?;
+                let from = body.len();
+                body.resize(from + n as usize, 0);
+                file.read_exact(&mut body[from..]).map_err(|e| Error::Io(e.to_string()))
+            };
+            read(0, head, &mut body)?;
+            read(size - tail, tail, &mut body)?;
+            let r = self.start()?;
+            let answer = ask_child(&r.child, &mut r.to, &mut r.from, b'F', &body);
+            let (kind, b) = match answer {
+                Ok(a) => a,
+                Err(_) => {
+                    // Stopped: by this file, or by its limits. Started afresh for the next.
+                    self.running = None;
+                    return Err(crate::damaged("The sound helper stopped on this file."));
+                }
+            };
+            match kind {
+                0 => return crate::facts::Facts::decode(&b).ok_or_else(|| crate::damaged("a garbled answer")),
+                WANT if b.len() == 16 => {
+                    let want = |i: usize| u64::from_le_bytes(b[i..i + 8].try_into().unwrap_or([0; 8]));
+                    let (h, t) = (want(0).min(size), want(8).min(size));
+                    if h <= head && t <= tail {
+                        return Err(crate::damaged("The helper asked for nothing more."));
+                    }
+                    (head, tail) = (h.max(head), t.max(tail).min(size - h.max(head)));
+                }
+                _ => return Err(crate::damaged(String::from_utf8_lossy(&b).into_owned())),
+            }
+        }
+        Err(crate::damaged("Its tags could not be found in its ends."))
     }
 }
 

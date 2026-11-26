@@ -60,6 +60,12 @@ impl Tags {
         self.values.entry(key).or_insert(value);
     }
 
+    /// The picture taken out (a library keeps only its size).
+    pub(crate) fn take_picture(&mut self) -> Option<Picture> {
+        self.front = false;
+        self.picture.take()
+    }
+
     /// A picture of `kind` (3 the front cover): kept if none is yet, or it
     /// is the front cover and the one kept is not.
     pub(crate) fn put_picture(&mut self, kind: u32, mime: String, data: &[u8]) {
@@ -168,6 +174,13 @@ fn read_tag(tag: &[u8], tags: &mut Tags) {
             b"TIT2" | b"TT2" => tags.put_text("TITLE", text_frame(frame)),
             b"TPE1" | b"TP1" => tags.put_text("ARTIST", text_frame(frame)),
             b"TALB" | b"TAL" => tags.put_text("ALBUM", text_frame(frame)),
+            // What a library groups and orders by (AlbumWall's scan), under the
+            // Vorbis comment names: the album artist, track and disc ("n/count"),
+            // the date (2.4's recording time, 2.3's year, 2.2's TYE).
+            b"TPE2" | b"TP2" => tags.put_value("ALBUMARTIST", text_frame(frame)),
+            b"TRCK" | b"TRK" => tags.put_value("TRACKNUMBER", text_frame(frame)),
+            b"TPOS" | b"TPA" => tags.put_value("DISCNUMBER", text_frame(frame)),
+            b"TDRC" | b"TYER" | b"TYE" | b"TDOR" => tags.put_value("DATE", text_frame(frame)),
             b"APIC" => apic(frame, tags, false),
             b"PIC" => apic(frame, tags, true),
             _ => {}

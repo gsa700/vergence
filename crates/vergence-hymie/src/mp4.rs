@@ -367,6 +367,12 @@ impl Walker<'_> {
                 b"\xa9ART" => self.text_item(body, body_end, movie, "ARTIST"),
                 b"\xa9alb" => self.text_item(body, body_end, movie, "ALBUM"),
                 b"covr" => self.cover(body, body_end, movie),
+                // What a library groups and orders by (AlbumWall's scan), under
+                // the Vorbis comment names the rest of Hymie's tags use.
+                b"aART" => self.value_item(body, body_end, movie, "ALBUMARTIST"),
+                b"\xa9day" => self.value_item(body, body_end, movie, "DATE"),
+                b"trkn" => self.number_item(body, body_end, movie, "TRACKNUMBER"),
+                b"disk" => self.number_item(body, body_end, movie, "DISCNUMBER"),
                 _ => {}
             }
             at += size;
@@ -553,6 +559,32 @@ impl Walker<'_> {
             at += len;
         }
         out
+    }
+
+    /// A text item kept as a value under `key` (its first data box).
+    fn value_item(&self, start: u64, end: u64, movie: &mut Movie, key: &str) {
+        for (kind, value) in self.data_atoms(start, end) {
+            if kind == 1 {
+                movie.tags.put_value(key, String::from_utf8_lossy(value).into_owned());
+                return;
+            }
+        }
+    }
+
+    /// trkn and disk: binary (type 0), two bytes of padding, the number and
+    /// the count as big-endian 16-bit values; kept as "n" or "n/count".
+    fn number_item(&self, start: u64, end: u64, movie: &mut Movie, key: &str) {
+        for (kind, value) in self.data_atoms(start, end) {
+            if kind == 0 && value.len() >= 4 {
+                let n = u16::from_be_bytes([value[2], value[3]]);
+                let of = if value.len() >= 6 { u16::from_be_bytes([value[4], value[5]]) } else { 0 };
+                if n > 0 {
+                    let text = if of > 0 { format!("{n}/{of}") } else { n.to_string() };
+                    movie.tags.put_value(key, text);
+                }
+                return;
+            }
+        }
     }
 
     fn text_item(&self, start: u64, end: u64, movie: &mut Movie, which: &str) {
@@ -868,6 +900,31 @@ impl Track for Mp4Track {
         self.from = self.skip.max(target);
         Ok(())
     }
+}
+
+/// An AAC track's rate, channels and length without its decoder (a library
+/// scan; the AAC decoder is GPL code in a helper of its own): the rate and
+/// channels from the AudioSpecificConfig, the length from mdhd (or stts) in
+/// the track's timescale. None if this MP4 holds no AAC track.
+pub(crate) fn aac_facts(data: &[u8]) -> Option<(u32, u16, u64)> {
+    let (movie, walked) = parse(data);
+    walked.ok()?;
+    let asc = movie.asc.as_ref().filter(|_| movie.alac_cookie.is_none())?;
+    const RATES: [u32; 13] = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+    let (b0, b1) = (*asc.first()? as u32, *asc.get(1)? as u32);
+    let index = ((b0 & 0x07) << 1 | b1 >> 7) as usize;
+    let rate = *RATES.get(index)?;
+    let channels = ((b1 >> 3) & 0x0F) as u16;
+    if !(1..=crate::MAX_CHANNELS).contains(&channels) {
+        return None;
+    }
+    let length = if movie.mdhd_duration > 0 { movie.mdhd_duration } else { movie.stts_total };
+    let frames = if movie.track_timescale > 0 && movie.track_timescale != rate as i64 {
+        rescale(length.max(0), rate as i64, movie.track_timescale)
+    } else {
+        length.max(0)
+    };
+    Some((rate, channels, frames.max(0) as u64))
 }
 
 /// The tags alone, of any MP4 (AAC too): the ilst's title, artist, album,

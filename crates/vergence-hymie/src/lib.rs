@@ -34,6 +34,7 @@
 //! crate.
 
 mod alac;
+pub mod facts;
 mod flac;
 pub mod helper;
 mod md5;
