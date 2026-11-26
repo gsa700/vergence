@@ -52,8 +52,8 @@ use std::io;
 use std::time::Instant;
 
 pub use element::{
-    Align, ButtonLook, Element, Fit, Length, Padding, Touch, Weight, button, choice, column, drawing, field, grid,
-    label, panel, picture, row, rule, scroll, slider, space, stack, switch, vrule,
+    Align, ButtonLook, Element, Fit, Length, Padding, SliderColors, Touch, Weight, button, choice, column, drawing,
+    field, grid, label, panel, picture, row, rule, scroll, slider, space, stack, switch, vrule,
 };
 pub use layout::{Id, Line, Measure};
 pub use textarea::{AreaOptions, CODE_SPACING, PROSE_SPACING, TextDoc, WeakDoc, Words, text_area};

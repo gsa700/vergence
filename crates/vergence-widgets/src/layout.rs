@@ -70,6 +70,7 @@ pub(crate) enum What<M> {
         step: f32,
         value: f32,
         marks: Vec<f32>,
+        colors: Option<crate::element::SliderColors>,
         on_change: Option<Box<dyn Fn(f32) -> M>>,
         on_release: Option<M>,
     },
@@ -635,8 +636,8 @@ impl Layout<'_> {
                 }
             }
             Kind::Switch { on, on_toggle } => push(out, What::Switch { on, on_toggle }),
-            Kind::Slider { min, max, step, value, marks, on_change, on_release } => {
-                push(out, What::Slider { min, max, step, value, marks, on_change, on_release })
+            Kind::Slider { min, max, step, value, marks, colors, on_change, on_release } => {
+                push(out, What::Slider { min, max, step, value, marks, colors, on_change, on_release })
             }
             Kind::Field { value, placeholder, secret, autofocus, on_input, on_submit } => {
                 let baseline = self.field_baseline(rect.h);

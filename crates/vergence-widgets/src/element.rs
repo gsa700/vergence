@@ -81,6 +81,16 @@ pub enum ButtonLook {
     Custom { fill: Option<Color>, edge: Option<(Color, f32)>, radius: f32 },
 }
 
+/// A slider's own colors: the track up to its value, the rest of it, the
+/// thumb and the thumb's edge.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SliderColors {
+    pub filled: Color,
+    pub track: Color,
+    pub thumb: Color,
+    pub edge: Color,
+}
+
 /// A text's weight: 400 regular, 600 semibold, 700 bold.
 pub type Weight = u16;
 
@@ -185,6 +195,7 @@ pub(crate) enum Kind<M> {
         step: f32,
         value: f32,
         marks: Vec<f32>,
+        colors: Option<SliderColors>,
         on_change: Option<Box<dyn Fn(f32) -> M>>,
         on_release: Option<M>,
     },
@@ -506,6 +517,15 @@ impl<M> Element<M> {
         self
     }
 
+    /// A slider in the program's own colors (AlbumWall's seek bar, dark on
+    /// the light tone taken from a cover), not the theme's accent.
+    pub fn slider_colors(mut self, colors: SliderColors) -> Self {
+        if let Kind::Slider { colors: c, .. } = &mut self.kind {
+            *c = Some(colors);
+        }
+        self
+    }
+
     /// The text a field shows while it is empty, or a choice while none is chosen.
     pub fn placeholder(mut self, text: impl Into<String>) -> Self {
         if let Kind::Field { placeholder, .. } | Kind::Choice { placeholder, .. } = &mut self.kind {
@@ -672,6 +692,7 @@ pub fn slider<M>(min: f32, max: f32, value: f32, on_change: impl Fn(f32) -> M + 
             step: 0.0,
             value: value.clamp(min, max),
             marks: Vec::new(),
+            colors: None,
             on_change: Some(Box::new(on_change)),
             on_release: None,
         },

@@ -2351,7 +2351,7 @@ impl<M: Clone> Ui<M> {
                         ring(scene, r, r.h / 2.0);
                     }
                 }
-                What::Slider { min, max, value, marks, on_change, .. } => {
+                What::Slider { min, max, value, marks, colors, on_change, .. } => {
                     let usable = on_change.is_some();
                     let v = match self.drag {
                         Some(Drag::Slider { id, value, .. }) if id == n.id => value,
@@ -2360,30 +2360,38 @@ impl<M: Clone> Ui<M> {
                     let (x0, w) = slider_track(&r);
                     let f = ((v - min) / (max - min)).clamp(0.0, 1.0);
                     let cy = r.y + (r.h / 2.0).round() - if marks.is_empty() { 0.0 } else { 2.0 };
-                    let line = if theme.high_contrast { theme.dim } else { over(theme.line, alpha(theme.text, 30)) };
+                    // The program's own colors yield to high contrast.
+                    let own = colors.filter(|_| !theme.high_contrast);
+                    let line = match own {
+                        Some(c) => c.track,
+                        None if theme.high_contrast => theme.dim,
+                        None => over(theme.line, alpha(theme.text, 30)),
+                    };
                     scene.fill_rounded(Rect::new(x0, cy - 2.0, w, 4.0), 2.0, line);
-                    scene.fill_rounded(
-                        Rect::new(x0, cy - 2.0, w * f, 4.0),
-                        2.0,
-                        if usable { theme.accent } else { theme.dim },
-                    );
+                    let filled = match own {
+                        Some(c) if usable => c.filled,
+                        _ if usable => theme.accent,
+                        _ => theme.dim,
+                    };
+                    scene.fill_rounded(Rect::new(x0, cy - 2.0, w * f, 4.0), 2.0, filled);
                     for m in marks {
                         let mf = ((m - min) / (max - min)).clamp(0.0, 1.0);
                         scene.fill(Rect::new((x0 + w * mf - 0.5).round(), cy + 5.0, 1.0, 5.0), theme.dim);
                     }
                     let thumb = Rect::new(x0 + w * f - THUMB / 2.0, cy - THUMB / 2.0, THUMB, THUMB);
                     let held = matches!(self.drag, Some(Drag::Slider { id, .. }) if id == n.id);
-                    let mut tc = white;
+                    let mut tc = own.map_or(white, |c| c.thumb);
                     if held || self.hover == Some(n.id) {
-                        tc = over(tc, alpha(Color::rgb(0, 0, 0), 25));
+                        let shade = if own.is_some() { alpha(white, 30) } else { alpha(Color::rgb(0, 0, 0), 25) };
+                        tc = over(tc, shade);
                     }
                     scene.fill_rounded(thumb, THUMB / 2.0, tc);
-                    scene.stroke(
-                        thumb,
-                        THUMB / 2.0,
-                        1.0,
-                        if theme.high_contrast { theme.text } else { alpha(Color::rgb(0, 0, 0), 60) },
-                    );
+                    let edge = match own {
+                        Some(c) => c.edge,
+                        None if theme.high_contrast => theme.text,
+                        None => alpha(Color::rgb(0, 0, 0), 60),
+                    };
+                    scene.stroke(thumb, THUMB / 2.0, 1.0, edge);
                     if ringed {
                         ring(scene, thumb, THUMB / 2.0);
                     }
