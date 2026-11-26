@@ -232,6 +232,11 @@ pub struct Ui<M> {
     ring: bool,
     fields: HashMap<Id, FieldState>,
     scrolls: HashMap<Id, ScrollState>,
+    /// Scrolling places holding a grid, and the span of their content laid
+    /// out (layout.rs `built`): scrolled outside it, the tree is laid out again.
+    lazy: HashMap<Id, (f32, f32)>,
+    /// A layout is wanted (a grid scrolled past what was built).
+    relayout: bool,
     /// Places to scroll to, by the scroll's name (Element::name), taken at
     /// the next layout where it appears (session milestone 1: a page kept
     /// from the last run, or from a close a while ago).
@@ -290,6 +295,8 @@ impl<M> Default for Ui<M> {
             ring: false,
             fields: HashMap::new(),
             scrolls: HashMap::new(),
+            lazy: HashMap::new(),
+            relayout: false,
             scroll_wanted: HashMap::new(),
             under_bar: 0.0,
             text_factor: 1.0,
@@ -433,11 +440,18 @@ impl<M: Clone> Ui<M> {
 
     pub fn layout(&mut self, root: Element<M>, width: f32, height: f32, measure: &mut dyn Measure, text_size: f32) {
         let mut nodes = Vec::new();
-        Layout { measure, text_size, factor: self.text_factor, lines_seen: Default::default() }.run(
-            root,
-            Rect::new(0.0, 0.0, width, height),
-            &mut nodes,
-        );
+        let mut l = Layout {
+            measure,
+            text_size,
+            factor: self.text_factor,
+            lines_seen: Default::default(),
+            offsets: self.scrolls.iter().map(|(id, s)| (*id, s.offset)).collect(),
+            window: None,
+            grid_seen: false,
+            built: Vec::new(),
+        };
+        l.run(root, Rect::new(0.0, 0.0, width, height), &mut nodes);
+        self.lazy = l.built.into_iter().map(|(id, lo, hi)| (id, (lo, hi))).collect();
         let before: HashSet<Id> = self.nodes.iter().map(|n| n.id).collect();
         self.nodes = nodes;
         self.size = (width, height);
@@ -670,10 +684,24 @@ impl<M: Clone> Ui<M> {
     fn scroll_by(&mut self, i: usize, dy: f32) -> bool {
         let What::Scroll { content } = self.nodes[i].what else { return false };
         let max = (content - self.nodes[i].rect.h).max(0.0);
-        let s = self.scrolls.entry(self.nodes[i].id).or_default();
+        let (id, h) = (self.nodes[i].id, self.nodes[i].rect.h);
+        let s = self.scrolls.entry(id).or_default();
         let before = s.offset;
         s.offset = (s.offset + dy).clamp(0.0, max);
-        s.offset != before
+        let moved = s.offset != before;
+        // A grid inside, scrolled past the rows laid out: laid out again.
+        if let Some((lo, hi)) = self.lazy.get(&id)
+            && (s.offset < *lo || s.offset + h > *hi)
+        {
+            self.relayout = true;
+        }
+        moved
+    }
+
+    /// Whether the tree must be laid out again: a grid was scrolled past the
+    /// rows built for it (taken once).
+    pub fn take_relayout(&mut self) -> bool {
+        std::mem::take(&mut self.relayout)
     }
 
     /// How much taller the outermost scrolling place's content is than the

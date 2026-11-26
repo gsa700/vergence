@@ -161,6 +161,29 @@ pub(crate) struct Layout<'a> {
     /// without it a long wrapped text was broken into lines dozens of times
     /// (the settings app's License page took 6 s to lay out).
     pub lines_seen: HashMap<LinesKey, (Vec<Line>, f32)>,
+    /// How far each scrolling place is scrolled (Ui's), so a grid in one
+    /// builds only the rows in view.
+    pub offsets: HashMap<Id, f32>,
+    /// The span, in this layout's coordinates, of the scrolling place being
+    /// laid out that is worth building: what shows and a screen either side.
+    pub window: Option<(f32, f32)>,
+    /// A grid was laid out inside the scrolling place being laid out.
+    pub grid_seen: bool,
+    /// Each scrolling place holding a grid, and the span of its content
+    /// (from its top) built this time: scrolling outside it lays out again.
+    pub built: Vec<(Id, f32, f32)>,
+}
+
+/// A grid's rows, the height of each and where the element after a row goes.
+fn grid_rows(count: usize, cols: usize, cell_h: f32, gap_y: f32, after: Option<(usize, f32)>) -> (usize, f32) {
+    let rows = count.div_ceil(cols.max(1));
+    let mut h = rows as f32 * cell_h + rows.saturating_sub(1) as f32 * gap_y;
+    if let Some((row, extra)) = after
+        && row < rows
+    {
+        h += extra + gap_y;
+    }
+    (rows, h)
 }
 
 /// What a label's line breaks depend on: its text, size, weight and the width.
@@ -321,6 +344,10 @@ impl Layout<'_> {
                 Size { w: (widest + 2.0 * FIELD_PAD_H + CHEVRON).ceil(), h: self.field_height() }
             }
             Kind::Scroll { child } => self.measure(child, avail),
+            Kind::Grid { count, fit, gap, after, .. } => {
+                let (cols, _, cell_h) = fit(avail);
+                Size { w: avail, h: grid_rows(*count, cols, cell_h, gap.1, after.as_ref().map(|a| (a.0, a.1))).1 }
+            }
             Kind::Picture { .. } | Kind::Drawing { .. } | Kind::Area { .. } => Size { w: 0.0, h: 0.0 },
         };
         Size {
@@ -637,8 +664,58 @@ impl Layout<'_> {
             Kind::Picture { image, fit, radius, opacity } => push(out, What::Picture { image, fit, radius, opacity }),
             Kind::Drawing { draw, on_touch, cursor } => push(out, What::Drawing { draw, on_touch, cursor }),
             Kind::Area { doc, on_change, autofocus } => push(out, What::Area { doc, on_change, autofocus }),
+            Kind::Grid { count, fit, gap, build, after } => {
+                push(out, What::Group);
+                self.grid_seen = true;
+                let (cols, cell_w, cell_h) = fit(rect.w);
+                let cols = cols.max(1);
+                let rows = count.div_ceil(cols);
+                let after_row = after.as_ref().map(|a| (a.0, a.1));
+                // A row's top: the element after a row pushes those below it down.
+                let top = |r: usize| {
+                    let mut y = rect.y + r as f32 * (cell_h + gap.1);
+                    if let Some((ar, extra)) = after_row
+                        && r > ar
+                    {
+                        y += extra + gap.1;
+                    }
+                    y
+                };
+                let (lo, hi) = self.window.unwrap_or((f32::NEG_INFINITY, f32::INFINITY));
+                for r in 0..rows {
+                    let y = top(r);
+                    if y + cell_h < lo {
+                        continue;
+                    }
+                    if y > hi {
+                        break;
+                    }
+                    for c in 0..cols {
+                        let i = r * cols + c;
+                        if i >= count {
+                            break;
+                        }
+                        let cell = build(i, cell_w);
+                        let cid = child_id(id, i, cell.key);
+                        let x = rect.x + c as f32 * (cell_w + gap.0);
+                        self.arrange(cell, Rect::new(x, y, cell_w, cell_h), Some(me), cid, out);
+                    }
+                }
+                if let Some((ar, extra, e)) = after
+                    && ar < rows
+                {
+                    let y = top(ar) + cell_h + gap.1;
+                    let cid = child_id(id, count + 1, e.key);
+                    self.arrange(*e, Rect::new(rect.x, y, rect.w, extra), Some(me), cid, out);
+                }
+            }
             Kind::Scroll { child } => {
                 push(out, What::Scroll { content: rect.h });
+                // What is worth building of a grid inside: what shows and a
+                // screen either side (scrolled further, it is laid out again).
+                let offset = self.offsets.get(&id).copied().unwrap_or(0.0).max(0.0);
+                let window = (rect.y + offset - rect.h, rect.y + offset + 2.0 * rect.h);
+                let (outer_window, outer_seen) = (self.window.replace(window), std::mem::take(&mut self.grid_seen));
                 // The child as tall as it needs (or the place, if more), at the place's width.
                 let w = clamp_w(
                     &child,
@@ -668,6 +745,11 @@ impl Layout<'_> {
                 if let What::Scroll { content } = &mut out[me].what {
                     *content = h;
                 }
+                if self.grid_seen {
+                    self.built.push((id, window.0 - rect.y, window.1 - rect.y));
+                }
+                self.window = outer_window;
+                self.grid_seen = outer_seen;
             }
         }
     }

@@ -132,6 +132,11 @@ pub enum Fit {
 
 pub(crate) type Draw = Box<dyn Fn(&mut Scene, &mut Fonts, Rect, &Theme)>;
 pub(crate) type OnTouch<M> = Box<dyn Fn(Touch) -> Option<M>>;
+/// How a [grid] fills its width: for a width, its columns and each cell's
+/// width and height.
+pub(crate) type GridFit = Box<dyn Fn(f32) -> (usize, f32, f32)>;
+/// A [grid]'s cell: built for its number and its width, only when in view.
+pub(crate) type GridBuild<M> = std::rc::Rc<dyn Fn(usize, f32) -> Element<M>>;
 
 pub(crate) enum Kind<M> {
     Space,
@@ -199,6 +204,14 @@ pub(crate) enum Kind<M> {
     },
     Scroll {
         child: Box<Element<M>>,
+    },
+    Grid {
+        count: usize,
+        fit: GridFit,
+        gap: (f32, f32),
+        build: GridBuild<M>,
+        /// A full-width element after a row: its row, its height, itself.
+        after: Option<(usize, f32, Box<Element<M>>)>,
     },
     Picture {
         image: Arc<Image>,
@@ -714,6 +727,27 @@ pub fn picture<M>(image: Arc<Image>) -> Element<M> {
     )
 }
 
+/// Many cells in rows, of which only those in view are built (a wall of
+/// covers, thousands of them): inside a [scroll], the rows within about a
+/// screen of what shows are built and laid out, and scrolling further lays
+/// them out again. `fit` gives, for the width it has, the columns and each
+/// cell's width and height; `build` makes cell `i` at its width. As wide as
+/// its place; as tall as all its rows, built or not, so the scroll bar is
+/// true.
+pub fn grid<M>(
+    count: usize,
+    fit: impl Fn(f32) -> (usize, f32, f32) + 'static,
+    gap_x: f32,
+    gap_y: f32,
+    build: impl Fn(usize, f32) -> Element<M> + 'static,
+) -> Element<M> {
+    Element::new(
+        Kind::Grid { count, fit: Box::new(fit), gap: (gap_x, gap_y), build: std::rc::Rc::new(build), after: None },
+        Length::FILL,
+        Length::Shrink,
+    )
+}
+
 /// A place the program draws itself: `draw` is given the scene, the fonts
 /// (for `vergence_render::text`), the place, and the theme; `on_touch`, if
 /// any, is told of the pointer and fingers in the place's own coordinates.
@@ -726,6 +760,16 @@ pub fn drawing<M>(draw: impl Fn(&mut Scene, &mut Fonts, Rect, &Theme) + 'static)
 }
 
 impl<M> Element<M> {
+    /// A grid with `element`, `height` tall and as wide as the grid, after
+    /// its row `row` (an album unfolding under its row); the rows after it
+    /// move down to make room.
+    pub fn after_row(mut self, row: usize, height: f32, element: Element<M>) -> Self {
+        if let Kind::Grid { after, .. } = &mut self.kind {
+            *after = Some((row, height.max(0.0), Box::new(element)));
+        }
+        self
+    }
+
     /// The message a text area sends when its text or caret changed.
     pub fn on_change(mut self, m: M) -> Self {
         if let Kind::Area { on_change, .. } = &mut self.kind {

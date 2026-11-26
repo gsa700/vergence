@@ -51,8 +51,8 @@ use std::io;
 use std::time::Instant;
 
 pub use element::{
-    Align, ButtonLook, Element, Fit, Length, Padding, Touch, Weight, button, choice, column, drawing, field, label,
-    panel, picture, row, rule, scroll, slider, space, stack, switch, vrule,
+    Align, ButtonLook, Element, Fit, Length, Padding, Touch, Weight, button, choice, column, drawing, field, grid,
+    label, panel, picture, row, rule, scroll, slider, space, stack, switch, vrule,
 };
 pub use layout::{Id, Line, Measure};
 pub use textarea::{AreaOptions, CODE_SPACING, PROSE_SPACING, TextDoc, WeakDoc, Words, text_area};
@@ -681,6 +681,8 @@ impl<P: Program> Host<P> {
     /// The frame's scene: the tree built again if anything changed, then drawn.
     fn build(&mut self, frame: &Frame, fonts: &mut Fonts) -> Scene {
         self.native = frame.native;
+        // A grid scrolled past the rows it built: built again for where it is.
+        self.stale |= self.ui.take_relayout();
         if frame.scale != self.scale {
             self.scale = frame.scale;
             self.stale |= self.program.scale(frame.scale);

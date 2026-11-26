@@ -1090,3 +1090,65 @@ fn a_text_area_set_by_action_is_one_step_to_undo() {
     let mut ui = laid(column(vec![crate::textarea::text_area::<Msg>(&ro).name("Log")]), 300.0, 200.0);
     assert_eq!(act(&mut ui, "Log", Action::Set("y".into())), Err("it is off".into()));
 }
+
+/// A wall of 10,000 cells in a scrolling place, 4 columns of 100 x 120
+/// with gaps of 10, in a place 400 x 600.
+fn wall(count: usize) -> Element<Msg> {
+    scroll(grid(
+        count,
+        |w| {
+            let cols = ((w + 10.0) / 110.0).floor().max(1.0) as usize;
+            (cols, (w - 10.0 * (cols - 1) as f32) / cols as f32, 120.0)
+        },
+        10.0,
+        10.0,
+        |i, _| label(format!("cell {i}")),
+    ))
+}
+
+fn built(ui: &Ui<Msg>) -> Vec<usize> {
+    let mut v: Vec<usize> =
+        ui.meaning().into_iter().filter_map(|m| m.name.strip_prefix("cell ")?.parse().ok()).collect();
+    v.sort();
+    v
+}
+
+#[test]
+fn a_grid_builds_only_the_rows_in_view_and_its_height_is_true() {
+    let mut ui = laid(wall(10_000), 450.0, 600.0);
+    let cells = built(&ui);
+    // What shows (600 high: 5 rows) and a screen below: about 10 rows of 4.
+    assert!(!cells.is_empty() && cells.len() <= 4 * 12, "{} built", cells.len());
+    assert_eq!(cells[0], 0);
+    // The scroll's content is all 2,500 rows tall, built or not.
+    assert_eq!(ui.overflow(), Some(2500.0 * 120.0 + 2499.0 * 10.0 - 600.0));
+    // Scrolled far: a relayout is asked for, and the rows there are built.
+    assert!(!ui.take_relayout());
+    ui.input(&Input::Scroll { x: 20.0, y: 50.0, dx: 0.0, dy: 130.0 * 1000.0 / 15.0 });
+    assert!(ui.take_relayout());
+    ui.layout(wall(10_000), 450.0, 600.0, &mut Fixed, 10.0);
+    let row = (ui.scroll_offset() / 130.0) as usize;
+    assert!(row > 20, "scrolled to row {row}");
+    let cells = built(&ui);
+    assert!(cells.contains(&(row * 4)), "row {row}: {:?}", &cells[..cells.len().min(8)]);
+    assert!(!cells.contains(&0));
+    assert!(cells.len() <= 4 * 16);
+    // A small scroll within what was built asks for nothing.
+    ui.input(&Input::Scroll { x: 20.0, y: 50.0, dx: 0.0, dy: 15.0 });
+    assert!(!ui.take_relayout());
+}
+
+#[test]
+fn an_element_after_a_row_moves_the_rows_below_down() {
+    let make = |after: bool| {
+        let g = grid(8, |_| (4, 100.0, 120.0), 10.0, 10.0, |i, _| label(format!("cell {i}")));
+        let g = if after { g.after_row(0, 300.0, label("panel")) } else { g };
+        column(vec![g])
+    };
+    let plain = laid(make(false), 450.0, 2000.0);
+    let opened = laid(make(true), 450.0, 2000.0);
+    assert_eq!(bounds(&plain, "cell 4").y, 130.0);
+    assert_eq!(bounds(&opened, "cell 3").y, 0.0);
+    assert_eq!(bounds(&opened, "panel").y, 130.0);
+    assert_eq!(bounds(&opened, "cell 4").y, 130.0 + 310.0);
+}
