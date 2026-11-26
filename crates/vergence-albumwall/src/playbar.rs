@@ -13,8 +13,8 @@ use vergence_albumwall::library::Album;
 use vergence_albumwall::panel;
 use vergence_scene::{Color, Point, Rect};
 use vergence_widgets::{
-    Align, ButtonLook, Element, Length, Padding, button, column, drawing, label, panel as boxed, picture, row, slider,
-    space, stack,
+    Align, ButtonLook, Element, Length, Padding, SliderColors, button, column, drawing, label, panel as boxed, picture,
+    row, slider, space, stack,
 };
 
 use crate::Msg;
@@ -73,50 +73,62 @@ fn tri(scene: &mut vergence_scene::Scene, x: f32, cy: f32, w: f32, h: f32, right
     }
 }
 
+/// The Avalonia app's glyphs (BuildTransport, ShowPlayMode), point for
+/// point: paths in a small box, stroked 1.6 wide, the triangles filled.
 pub fn glyph(g: Glyph, s: f32, c: Rgb) -> Element<Msg> {
     let c = color(c);
     drawing(move |scene, _, r: Rect, _| {
-        let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
-        let u = s / 24.0;
+        // Each path's box, centered in the button.
+        let (bw, bh) = match g {
+            Glyph::Previous | Glyph::Next => (10.0, 12.0),
+            Glyph::Play => (12.0, 14.0),
+            Glyph::Pause => (11.0, 14.0),
+            Glyph::Ending(Ending::RandomAlbum) => (14.0, 14.0),
+            Glyph::Ending(_) => (14.0, 12.0),
+        };
+        let (x0, y0) = (r.x + (r.w - bw) / 2.0, r.y + (r.h - bh) / 2.0);
+        let p = |x: f32, y: f32| Point::new(x0 + x, y0 + y);
+        let w = 1.6;
+        let line = |scene: &mut vergence_scene::Scene, a: (f32, f32), b: (f32, f32)| {
+            scene.line(p(a.0, a.1), p(b.0, b.1), w, c);
+        };
         match g {
-            Glyph::Play => tri(scene, cx - 7.0 * u, cy, 16.0 * u, 18.0 * u, true, c),
-            Glyph::Pause => {
-                scene.fill_rounded(Rect::new(cx - 7.0 * u, cy - 9.0 * u, 5.0 * u, 18.0 * u), 1.0, c);
-                scene.fill_rounded(Rect::new(cx + 2.0 * u, cy - 9.0 * u, 5.0 * u, 18.0 * u), 1.0, c);
+            Glyph::Previous => {
+                line(scene, (1.0, 0.0), (1.0, 12.0));
+                tri(scene, x0 + 1.0, y0 + 6.0, 8.0, 12.0, false, c);
             }
             Glyph::Next => {
-                tri(scene, cx - 8.0 * u, cy, 12.0 * u, 14.0 * u, true, c);
-                scene.fill(Rect::new(cx + 4.0 * u, cy - 7.0 * u, 2.5 * u, 14.0 * u), c);
+                line(scene, (9.0, 0.0), (9.0, 12.0));
+                tri(scene, x0 + 1.0, y0 + 6.0, 8.0, 12.0, true, c);
             }
-            Glyph::Previous => {
-                scene.fill(Rect::new(cx - 6.5 * u, cy - 7.0 * u, 2.5 * u, 14.0 * u), c);
-                tri(scene, cx - 4.0 * u, cy, 12.0 * u, 14.0 * u, false, c);
+            Glyph::Play => tri(scene, x0 + 2.0, y0 + 7.0, 10.0, 14.0, true, c),
+            Glyph::Pause => {
+                line(scene, (2.0, 0.0), (2.0, 14.0));
+                line(scene, (9.0, 0.0), (9.0, 14.0));
             }
-            Glyph::Ending(e) => {
-                // Stop: a square; next album: two arrows; random: crossed lines.
-                match e {
-                    Ending::Stop => {
-                        scene.fill_rounded(Rect::new(cx - 5.0 * u, cy - 5.0 * u, 10.0 * u, 10.0 * u), 1.5, c);
+            // Stop shows the next album's arrow, dimmed (the caller's color).
+            Glyph::Ending(Ending::Stop | Ending::NextAlbum) => {
+                line(scene, (0.0, 6.0), (11.0, 6.0));
+                line(scene, (7.0, 2.0), (11.0, 6.0));
+                line(scene, (11.0, 6.0), (7.0, 10.0));
+                line(scene, (14.0, 1.0), (14.0, 11.0));
+            }
+            Glyph::Ending(Ending::RandomAlbum) => {
+                // Crossed arrows, a box 14 tall from y -1 to 13.
+                let d = 1.0;
+                let pts = [
+                    [(0.0, 2.0), (3.0, 2.0), (10.0, 10.0), (14.0, 10.0)],
+                    [(0.0, 10.0), (3.0, 10.0), (10.0, 2.0), (14.0, 2.0)],
+                ];
+                for path in pts {
+                    for k in 0..3 {
+                        line(scene, (path[k].0, path[k].1 + d), (path[k + 1].0, path[k + 1].1 + d));
                     }
-                    Ending::NextAlbum => {
-                        tri(scene, cx - 9.0 * u, cy, 9.0 * u, 12.0 * u, true, c);
-                        tri(scene, cx, cy, 9.0 * u, 12.0 * u, true, c);
-                    }
-                    Ending::RandomAlbum => {
-                        scene.line(
-                            Point::new(cx - 8.0 * u, cy - 6.0 * u),
-                            Point::new(cx + 8.0 * u, cy + 6.0 * u),
-                            2.0 * u,
-                            c,
-                        );
-                        scene.line(
-                            Point::new(cx - 8.0 * u, cy + 6.0 * u),
-                            Point::new(cx + 8.0 * u, cy - 6.0 * u),
-                            2.0 * u,
-                            c,
-                        );
-                    }
-                };
+                }
+                line(scene, (11.0, 7.0 + d), (14.0, 10.0 + d));
+                line(scene, (14.0, 10.0 + d), (11.0, 13.0 + d));
+                line(scene, (11.0, -1.0 + d), (14.0, 2.0 + d));
+                line(scene, (14.0, 2.0 + d), (11.0, 5.0 + d));
             }
         }
     })
@@ -124,38 +136,17 @@ pub fn glyph(g: Glyph, s: f32, c: Rgb) -> Element<Msg> {
     .height(Length::Fixed(s))
 }
 
+/// A round transport button (Button.transport: 32 across, 40 for play, a
+/// faint dark disc that darkens under the pointer, dark on the light bar).
 fn press(g: Glyph, s: f32, c: Rgb, m: Msg) -> Element<Msg> {
-    button(glyph(g, s, c)).look(ButtonLook::Plain).padding(4.0).on_press(m)
+    let look = ButtonLook::Custom { fill: Some(Color::rgba(0, 0, 0, 0x18)), edge: None, radius: s / 2.0 };
+    button(glyph(g, s, c)).look(look).padding(0.0).on_press(m)
 }
 
-/// The VU meters: two needles swinging on arcs, as a pair of analog meters
-/// (the levels already have VU ballistics: VuMeter.cs's 300 ms).
-fn meters(levels: [f32; 2], c: Rgb) -> Element<Msg> {
-    let (ink, face) = (color(c), Color::rgba(c.0, c.1, c.2, 40));
-    drawing(move |scene, _, r: Rect, _| {
-        let w = (r.w - 10.0) / 2.0;
-        for (i, level) in levels.iter().enumerate() {
-            let x = r.x + i as f32 * (w + 10.0);
-            let face_r = Rect::new(x, r.y, w, r.h);
-            scene.fill_rounded(face_r, 4.0, face);
-            // The scale: -20 VU at the left, 0 at 70%, +3 at the right, in dB.
-            let pivot = Point::new(x + w / 2.0, r.y + r.h - 4.0);
-            let len = r.h - 12.0;
-            let db = if *level > 0.0 { 20.0 * level.log10() + 18.0 } else { -40.0 };
-            let t = ((db + 20.0) / 23.0).clamp(0.0, 1.0);
-            let angle = (-50.0 + 100.0 * t).to_radians();
-            for k in 0..=10 {
-                let a = (-50.0 + 10.0 * k as f32).to_radians();
-                let p1 = Point::new(pivot.x + a.sin() * (len - 4.0), pivot.y - a.cos() * (len - 4.0));
-                let p2 = Point::new(pivot.x + a.sin() * len, pivot.y - a.cos() * len);
-                scene.line(p1, p2, if k >= 7 { 1.6 } else { 1.0 }, ink);
-            }
-            let tip = Point::new(pivot.x + angle.sin() * (len - 2.0), pivot.y - angle.cos() * (len - 2.0));
-            scene.line(pivot, tip, 1.4, ink);
-        }
-    })
-    .width(Length::Fixed(METERS))
-    .height(Length::Fixed(HEIGHT - 26.0))
+/// `c` at 40% over the bar's ground `g` (the Avalonia button's opacity 0.4).
+fn faded(c: Rgb, g: Rgb) -> Rgb {
+    let m = |a: u8, b: u8| (a as f32 * 0.4 + b as f32 * 0.6).round() as u8;
+    Rgb(m(c.0, g.0), m(c.1, g.1), m(c.2, g.2))
 }
 
 /// What the bar shows.
@@ -166,7 +157,8 @@ pub struct Shown<'a> {
     pub length: f64,
     pub paused: bool,
     pub ending: Ending,
-    pub levels: [f32; 2],
+    /// The meters' needles (0 to about 1.05 of their arcs).
+    pub needles: [f32; 2],
     /// The seek bar while it is dragged (seconds).
     pub scrub: Option<f64>,
 }
@@ -186,12 +178,12 @@ pub fn bar(s: &Shown, p: &Palette, covers: Option<&Arc<Covers>>, scale: f32) -> 
     let words = column(vec![
         label(t.map_or(String::new(), |t| t.title.clone()))
             .size(16.0)
-            .weight(600)
+            .weight(500)
             .color(color(p.on_light))
             .elide()
             .width(Length::FILL),
         label(t.map_or(album.album_artist.clone(), |t| t.artist.clone()))
-            .size(12.0)
+            .size(11.0)
             .color(color(p.on_light_dim))
             .elide()
             .width(Length::FILL),
@@ -199,27 +191,50 @@ pub fn bar(s: &Shown, p: &Palette, covers: Option<&Arc<Covers>>, scale: f32) -> 
     .spacing(2.0)
     .width(Length::Fixed(260.0));
     let controls = row(vec![
-        press(Glyph::Previous, 24.0, p.on_light, Msg::Previous),
-        press(if s.paused { Glyph::Play } else { Glyph::Pause }, 30.0, p.on_light, Msg::PlayPause),
-        press(Glyph::Next, 24.0, p.on_light, Msg::Next),
-        press(Glyph::Ending(s.ending), 22.0, p.on_light_dim, Msg::Ending),
+        press(Glyph::Previous, 32.0, p.on_light, Msg::Previous),
+        press(if s.paused { Glyph::Play } else { Glyph::Pause }, 40.0, p.on_light, Msg::PlayPause),
+        press(Glyph::Next, 32.0, p.on_light, Msg::Next),
+        // Dimmed at Stop, lit while the music would go on (ShowPlayMode).
+        press(
+            Glyph::Ending(s.ending),
+            32.0,
+            if s.ending == Ending::Stop { faded(p.on_light, p.light) } else { p.on_light },
+            Msg::Ending,
+        ),
     ])
-    .spacing(2.0)
+    .spacing(4.0)
     .align(Align::Center);
     let at = s.scrub.unwrap_or(s.seconds).min(s.length.max(0.0));
     let length = s.length.max(0.001);
     let seek = row(vec![
-        label(panel::duration((at * 1000.0) as u64)).size(11.0).color(color(p.on_light_dim)),
-        slider(0.0, length as f32, at as f32, |v| Msg::Scrub(v as f64)).on_release(Msg::SeekDone).width(Length::FILL),
+        // Fixed places for the times (46 and 52, as in the Avalonia bar): a
+        // label as wide as its digits moved the seek bar every second.
+        label(panel::duration((at * 1000.0) as u64))
+            .size(11.0)
+            .color(color(p.on_light_dim))
+            .align(Align::End)
+            .width(Length::Fixed(46.0)),
+        slider(0.0, length as f32, at as f32, |v| Msg::Scrub(v as f64))
+            .on_release(Msg::SeekDone)
+            // Slider.onlight: dark on the light bar (#CC000000 played,
+            // #33000000 to come, a near-black thumb with a light edge).
+            .slider_colors(SliderColors {
+                filled: Color::rgba(0, 0, 0, 0xCC),
+                track: Color::rgba(0, 0, 0, 0x33),
+                thumb: Color::rgb(0x1A, 0x15, 0x12),
+                edge: Color::rgba(0xFF, 0xFF, 0xFF, 0x55),
+            })
+            .width(Length::FILL),
         label(format!("-{}", panel::duration(((length - at).max(0.0) * 1000.0) as u64)))
             .size(11.0)
-            .color(color(p.on_light_dim)),
+            .color(color(p.on_light_dim))
+            .width(Length::Fixed(52.0)),
     ])
-    .spacing(10.0)
+    .spacing(12.0)
     .align(Align::Center)
     .width(Length::FILL);
     boxed(
-        row(vec![face, words, controls, seek, meters(s.levels, p.on_light)])
+        row(vec![face, words, controls, seek, crate::vumeter::pair(s.needles, METERS, HEIGHT - 20.0)])
             .spacing(18.0)
             .align(Align::Center)
             .width(Length::FILL)

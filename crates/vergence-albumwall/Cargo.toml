@@ -16,6 +16,8 @@ vergence-hymie.workspace = true
 vergence-decode.workspace = true
 vergence-scene.workspace = true
 vergence-sound.workspace = true
+vergence-text.workspace = true
+vergence-render.workspace = true
 vergence-ui.workspace = true
 vergence-widgets.workspace = true
 

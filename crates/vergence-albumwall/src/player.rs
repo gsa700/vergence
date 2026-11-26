@@ -125,8 +125,55 @@ pub struct State {
     pub ended: Option<usize>,
     /// Why nothing plays ("No sound output: …"), until something plays.
     pub problem: Option<String>,
-    /// The loudest sample of each side in the last piece heard, 0 to 1 (the meters').
-    pub levels: [f32; 2],
+    /// The meters' levels, by where they are in the output (Spindle's level blocks).
+    pub meter: Meter,
+}
+
+/// Frames in a level block (Spindle's LevelShift 10), and blocks kept.
+const BLOCK_SHIFT: u32 = 10;
+const BLOCKS: usize = 512;
+
+/// The RMS of each 1024-frame block written, as the record was mastered
+/// (before ReplayGain and volume), keyed by its place in the output's
+/// timeline; read for the block being heard now, so the meters move with
+/// what comes out of the speakers, not with what was sent 200 ms before.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Meter {
+    blocks: Vec<(i64, f32, f32)>,
+    written: u64,
+    latency: u64,
+    rate: u32,
+    at: Option<std::time::Instant>,
+    paused: bool,
+}
+
+impl Default for Meter {
+    fn default() -> Meter {
+        Meter { blocks: vec![(-1, 0.0, 0.0); BLOCKS], written: 0, latency: 0, rate: 1, at: None, paused: false }
+    }
+}
+
+impl Meter {
+    /// The RMS of each side being heard at `now`, in dBFS (negative
+    /// infinity: silence, paused, nothing playing).
+    pub fn dbfs(&self, now: std::time::Instant) -> [f64; 2] {
+        let silent = [f64::NEG_INFINITY; 2];
+        let Some(at) = self.at.filter(|_| !self.paused) else { return silent };
+        // The output has gone on playing since the last write.
+        let since = (now.saturating_duration_since(at).as_secs_f64() * self.rate as f64) as u64;
+        let heard = (self.written.saturating_sub(self.latency) + since).min(self.written);
+        // The block being heard, or the last one finished when that one is
+        // still being summed (an output that buffers nothing).
+        let block = (heard >> BLOCK_SHIFT) as i64;
+        let found = [block, block - 1]
+            .into_iter()
+            .filter(|b| *b >= 0)
+            .map(|b| self.blocks[b as usize % BLOCKS])
+            .find(|(b, _, _)| *b == block || *b == block - 1);
+        let Some((_, l, r)) = found else { return silent };
+        let db = |ms: f32| if ms > 0.0 { 10.0 * (ms as f64).log10() } else { f64::NEG_INFINITY };
+        [db(l), db(r)]
+    }
 }
 
 /// The player: its thread, the commands it takes, its state.
@@ -190,6 +237,11 @@ struct Engine {
     marks: VecDeque<Mark>,
     paused: bool,
     dither: u32,
+    /// The level block being summed: its number, the sums of squares, frames.
+    level: (i64, f32, f32, u32),
+    /// When the window was last woken: at most 4 times a second unless
+    /// something changed (the battery: the window keeps its own time).
+    woke: Option<std::time::Instant>,
 }
 
 impl Engine {
@@ -215,6 +267,8 @@ impl Engine {
             marks: VecDeque::new(),
             paused: false,
             dither: 0x1234_5678,
+            level: (0, 0.0, 0.0, 0),
+            woke: None,
         }
     }
 
@@ -317,6 +371,8 @@ impl Engine {
         self.paused = false;
         self.marks.clear();
         self.written = 0;
+        self.level = (0, 0.0, 0.0, 0);
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).meter = Meter::default();
         // A stream that cannot flush still holds what it has; counted afresh from here.
     }
 
@@ -447,8 +503,8 @@ impl Engine {
         let Some(out) = self.out.as_mut() else { return };
         let (orate, och) = (out.rate(), out.channels().max(1));
         let frames = samples.len() / ch as usize;
-        let mut levels = [0f32; 2];
         let mut pcm: Vec<i16> = Vec::with_capacity(frames * och as usize);
+        let mut done_blocks: Vec<(i64, f32, f32)> = Vec::new();
         // The output's rate if it would not take the file's (an ALSA device
         // with a rate of its own): linear between frames.
         let step = rate as f64 / orate as f64;
@@ -467,8 +523,17 @@ impl Engine {
                         _ => 0.0,
                     }
                 };
-                let v = (src(i) * (1.0 - t) + src(i + 1) * t) * gain;
-                levels[c.min(1)] = levels[c.min(1)].max(v.abs());
+                let raw = src(i) * (1.0 - t) + src(i + 1) * t;
+                let v = raw * gain;
+                // The level block, summed as mastered (before the gain).
+                if c == 0 {
+                    self.level.1 += raw * raw;
+                    if och == 1 {
+                        self.level.2 += raw * raw;
+                    }
+                } else if c == 1 {
+                    self.level.2 += raw * raw;
+                }
                 // TPDF dither: two uniform randoms of a half step each.
                 let mut r = || {
                     self.dither ^= self.dither << 13;
@@ -479,9 +544,13 @@ impl Engine {
                 let d = r() + r();
                 pcm.push((v * 32767.0 + d).round().clamp(-32768.0, 32767.0) as i16);
             }
-        }
-        if och == 1 {
-            levels[1] = levels[0];
+            self.level.3 += 1;
+            let block = ((self.written + f as u64 + 1) >> BLOCK_SHIFT) as i64;
+            if block != self.level.0 {
+                let n = self.level.3.max(1) as f32;
+                done_blocks.push((self.level.0, self.level.1 / n, self.level.2 / n));
+                self.level = (block, 0.0, 0.0, 0);
+            }
         }
         if let Err(e) = out.write(&pcm) {
             self.out = None;
@@ -490,7 +559,19 @@ impl Engine {
             return;
         }
         self.written += n_out as u64;
-        self.state.lock().unwrap_or_else(|e| e.into_inner()).levels = levels;
+        let latency = (out.latency().as_secs_f64() * orate as f64) as u64;
+        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let m = &mut st.meter;
+        for (b, l, r) in done_blocks {
+            if b >= 0 {
+                m.blocks[b as usize % BLOCKS] = (b, l, r);
+            }
+        }
+        m.written = self.written;
+        m.latency = latency;
+        m.rate = orate;
+        m.at = Some(std::time::Instant::now());
+        m.paused = self.paused;
     }
 
     /// What is being heard: the track whose start the output has reached, and how far in.
@@ -519,9 +600,12 @@ impl Engine {
                 }
             }
         }
+        let important;
         {
             let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
             let changed = s.now.as_ref().map(|n| (n.track, n.paused)) != now.as_ref().map(|n| (n.track, n.paused));
+            important = changed || problem.is_some() || s.ended.is_some() || now.is_none();
+            s.meter.paused = self.paused;
             s.now = now;
             if problem.is_some() {
                 s.problem = problem;
@@ -532,7 +616,13 @@ impl Engine {
                 s.ended = None;
             }
         }
-        (self.wake)();
+        // The window keeps its own time between: woken for a change at once,
+        // else at most 4 times a second (its clock and seek bar).
+        let now = std::time::Instant::now();
+        if important || self.woke.is_none_or(|t| now.saturating_duration_since(t) >= Duration::from_millis(250)) {
+            self.woke = Some(now);
+            (self.wake)();
+        }
     }
 }
 
@@ -678,6 +768,23 @@ mod tests {
         e.command(Command::Pause(false));
         e.piece();
         assert!(!kept.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_meter_reads_the_block_being_heard() {
+        let kept: Arc<Mutex<Vec<i16>>> = Arc::default();
+        // A level of 0.5 for 2 s: an RMS of -6 dBFS.
+        let mut e = engine(vec![(48000, 96000, 0.5)], kept.clone());
+        e.command(Command::Play { tracks: e.tracks.clone(), from: 0, tag: 0, loudness: Loudness::Off });
+        for _ in 0..10 {
+            e.piece();
+        }
+        let m = e.state.lock().unwrap().meter.clone();
+        let db = m.dbfs(std::time::Instant::now());
+        assert!((db[0] - -6.02).abs() < 0.1 && (db[1] - -6.02).abs() < 0.1, "{db:?}");
+        e.command(Command::Pause(true));
+        let m = e.state.lock().unwrap().meter.clone();
+        assert_eq!(m.dbfs(std::time::Instant::now())[0], f64::NEG_INFINITY, "paused: the needles fall");
     }
 
     #[test]

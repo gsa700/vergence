@@ -15,6 +15,7 @@
 mod panelview;
 mod playbar;
 mod reading;
+mod vumeter;
 mod wallview;
 
 use std::path::PathBuf;
@@ -53,6 +54,8 @@ mod timer {
     pub const POLL: u64 = 2;
     /// The status line's moment over.
     pub const SAID: u64 = 3;
+    /// The meters' needles stepped (30 a second, only while they move).
+    pub const METERS: u64 = 4;
 }
 
 #[derive(Debug, Clone)]
@@ -98,6 +101,8 @@ struct Folding {
 const UNFOLD_MS: u64 = 330;
 const CONTENTS_MS: u64 = 110;
 const TURN_MS: u64 = 400;
+/// The meters' tick: 30 a second (VuMeter.cs: half the frames, the same spring).
+const METER_TICK: Duration = Duration::from_millis(33);
 
 struct AlbumWall {
     libraries: Libraries,
@@ -146,8 +151,12 @@ struct AlbumWall {
     resume: Option<Session>,
     /// A word for the status line for a moment (the play mode just chosen).
     said: Option<(String, std::time::Instant)>,
-    /// The meters' needles and when they last moved (VU ballistics).
-    needles: std::cell::Cell<([f32; 2], std::time::Instant)>,
+    /// The meters' needles and when they last moved; the window in front
+    /// (the needles move only then: the battery).
+    needles: [vumeter::Needle; 2],
+    stepped: std::time::Instant,
+    front: bool,
+    meters_wanted: bool,
     /// The library on the wall cannot be reached, and why (and how many
     /// tracks it held last time).
     unreachable: Option<(Unreachable, usize)>,
@@ -199,7 +208,10 @@ impl AlbumWall {
             ending: playbar::Ending::Stop,
             played: std::collections::HashSet::new(),
             scrub: None,
-            needles: std::cell::Cell::new(([0.0; 2], std::time::Instant::now())),
+            needles: [vumeter::Needle::default(); 2],
+            stepped: std::time::Instant::now(),
+            front: true,
+            meters_wanted: false,
             said: None,
             resume: Session::load(),
         }
@@ -435,7 +447,7 @@ impl AlbumWall {
                         length: n.length,
                         paused: n.paused,
                         ending: self.ending,
-                        levels: self.needles(if n.paused { [0.0; 2] } else { state.levels }),
+                        needles: [self.needles[0].x as f32, self.needles[1].x as f32],
                         scrub: self.scrub,
                     };
                     playbar::bar(&shown, &self.palette_of(album), self.covers.as_ref(), self.scale)
@@ -682,17 +694,20 @@ impl AlbumWall {
             .then_some(now.track)
     }
 
-    /// The meters' needles: toward the levels heard, with a VU meter's
-    /// 300 ms ballistics.
-    fn needles(&self, target: [f32; 2]) -> [f32; 2] {
-        let (mut v, then) = self.needles.get();
+    /// The meters stepped on to now, toward the levels being heard; true
+    /// while a needle still moves (or music plays and the window is in front).
+    fn step_meters(&mut self) -> bool {
         let now = std::time::Instant::now();
-        let k = (now.saturating_duration_since(then).as_secs_f32() / 0.3).min(1.0);
-        for c in 0..2 {
-            v[c] += (target[c] - v[c]) * k;
+        let dt = now.saturating_duration_since(self.stepped).as_secs_f64();
+        self.stepped = now;
+        let state = self.player.as_ref().map(|p| p.state()).unwrap_or_default();
+        let playing = state.now.as_ref().is_some_and(|n| !n.paused);
+        let db = state.meter.dbfs(now);
+        for (n, d) in self.needles.iter_mut().zip(db) {
+            n.level(d);
+            n.step(dt);
         }
-        self.needles.set((v, now));
-        v
+        self.front && (playing || self.needles.iter().any(|n| !n.resting()))
     }
 
     fn reduced(&self) -> bool {
@@ -817,6 +832,10 @@ impl AlbumWall {
         }
         if std::mem::take(&mut self.poll_wanted) {
             window.wake_after(timer::POLL, vergence_albumwall::watch::POLL);
+        }
+        if std::mem::take(&mut self.meters_wanted) {
+            self.stepped = std::time::Instant::now();
+            window.wake_after(timer::METERS, METER_TICK);
         }
     }
 
@@ -970,6 +989,14 @@ impl Program for AlbumWall {
     /// share; any library on FreeBSD for now) is looked at again, at most
     /// once a minute (Dave, 2026-11-25: "the lean is fine").
     fn saw(&mut self, input: &vergence_widgets::Input) {
+        match input {
+            vergence_widgets::Input::Focus(true) => {
+                self.front = true;
+                self.meters_wanted = true;
+            }
+            vergence_widgets::Input::Focus(false) => self.front = false,
+            _ => {}
+        }
         let unwatched = self.watcher.as_ref().is_some_and(|(_, w)| w.is_none());
         if matches!(input, vergence_widgets::Input::Focus(true))
             && unwatched
@@ -1006,6 +1033,12 @@ impl Program for AlbumWall {
             self.resume();
         }
         self.album_ended();
+        // Music playing with the window in front: the needles move (the tick
+        // keeps itself going while they do).
+        let playing = self.player.as_ref().and_then(|p| p.state().now).is_some_and(|n| !n.paused);
+        if playing && self.front && self.needles.iter().all(|n| n.resting()) {
+            self.meters_wanted = true;
+        }
         if self.library_changed() {
             self.read(false);
         }
@@ -1017,6 +1050,12 @@ impl Program for AlbumWall {
     fn timer(&mut self, id: u64, window: &mut Window) -> bool {
         if id == timer::RETRY && self.unreachable.is_some() {
             self.read(false);
+        }
+        if id == timer::METERS {
+            if self.step_meters() {
+                window.wake_after(timer::METERS, METER_TICK);
+            }
+            return true;
         }
         if id == timer::POLL {
             self.read(false);
