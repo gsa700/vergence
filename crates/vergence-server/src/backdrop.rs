@@ -75,6 +75,10 @@ impl Backdrop {
             // native bar may have inverted (decor.rs).
             Uniform::new("invert", UniformValue::_1f(0.0)),
             Uniform::new("cap", UniformValue::_1f(if look.cap { 1.0 } else { 0.0 })),
+            // Set every time: a program keeps the last value given (a sidebar
+            // window's split or a glass strip's clear would carry over).
+            Uniform::new("split", UniformValue::_1f(0.0)),
+            Uniform::new("clear", UniformValue::_1f(0.0)),
         ];
         Backdrop { id, commit, dst, texture, program, uniforms }
     }

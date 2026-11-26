@@ -38,7 +38,12 @@ const GOLDEN_ANGLE: f32 = 2.399_963_2;
 /// does not reach over, so a sidebar's edge stays crisp in the bar above it,
 /// see docs/apps-roadmap.md; 0 for none) and `cap` (float: 1 keeps the frost
 /// from coming out lighter than the tint, channel by channel, so a white page
-/// under a light bar cannot wash out its tabs; what is darker still shows through).
+/// under a light bar cannot wash out its tabs; what is darker still shows through)
+/// and `clear` (float: 1 keeps the picture's own alpha and fills nothing in: the
+/// blur is moved toward `tint` (the window's own ground) by `tint.a` only where
+/// the picture is, so the text under the bar of a window whose glass is its own,
+/// as the frosted terminal's, is softened as under other bars and the glass
+/// stays see-through; no contrast floor; frost milestone 1).
 pub const FROST_SHADER: &str = r#"#version 100
 
 //_DEFINES_
@@ -66,6 +71,7 @@ uniform float bottom;
 uniform float invert;
 uniform float split;
 uniform float cap;
+uniform float clear;
 
 float lin(float c) {
     return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
@@ -142,7 +148,8 @@ void main() {
     if (cap > 0.5) {
         frosted = min(frosted, tint.rgb);
     }
-    gl_FragColor = vec4(frosted, 1.0) * (alpha * cover);
+    vec4 glass = vec4(mix(blurred.rgb, tint.rgb * blurred.a, tint.a), blurred.a);
+    gl_FragColor = clear > 0.5 ? glass * (alpha * cover) : vec4(frosted, 1.0) * (alpha * cover);
 }
 "#;
 
@@ -158,6 +165,10 @@ pub struct Frost {
     pub radius: f32,
     /// What is under shows inverted (a bar of the other style than its window).
     pub invert: bool,
+    /// Its alpha kept (alpha multiplied in): the blur moved toward the tint
+    /// (the window's own ground) by the strength where the picture is, no
+    /// contrast floor, nothing made opaque.
+    pub clear: bool,
     /// No lighter than the tint (a light bar's: a white page cannot wash it out).
     pub cap: bool,
 }
@@ -201,7 +212,8 @@ pub fn strength_over(under: [f32; 3], f: &Frost) -> f32 {
 }
 
 /// The frost of a picture's top `rows` (8-bit RGBA, alpha multiplied in,
-/// `width` pixels a row): opaque RGBA of `width` x `rows`, the CPU's
+/// `width` pixels a row): opaque RGBA of `width` x `rows` (with `clear`, as
+/// see-through as the picture, alpha multiplied in), the CPU's
 /// reference for [`FROST_SHADER`] (samples taken at the nearest pixel, the
 /// picture's edges repeated beyond it).
 pub fn frost(rgba: &[u8], width: usize, height: usize, rows: usize, f: &Frost) -> Vec<u8> {
@@ -233,6 +245,15 @@ pub fn frost(rgba: &[u8], width: usize, height: usize, rows: usize, f: &Frost) -
                     b[i] = b[3] - b[i];
                 }
             }
+            if f.clear {
+                let o = &mut out[(y * width + x) * 4..][..4];
+                for i in 0..3 {
+                    let v = b[i] + (tint[i] * b[3] - b[i]) * f.strength;
+                    o[i] = (v * 255.0).round().clamp(0.0, 255.0) as u8;
+                }
+                o[3] = (b[3] * 255.0).round().clamp(0.0, 255.0) as u8;
+                continue;
+            }
             let under = [b[0] + (1.0 - b[3]) * tint[0], b[1] + (1.0 - b[3]) * tint[1], b[2] + (1.0 - b[3]) * tint[2]];
             let mut c = mix(under, tint, strength_over(under, f));
             if f.cap {
@@ -259,6 +280,7 @@ mod tests {
         need: 7.0,
         radius: 14.0,
         invert: false,
+        clear: false,
         cap: false,
     };
     const LIGHT: Frost = Frost {
@@ -268,6 +290,7 @@ mod tests {
         need: 5.85,
         radius: 14.0,
         invert: false,
+        clear: false,
         cap: false,
     };
 
@@ -385,6 +408,7 @@ mod tests {
             need: 1.0,
             radius: 6.0,
             invert: false,
+            clear: false,
             cap: false,
         };
         let out = frost(&p, w, h, 10, &f);
@@ -416,9 +440,37 @@ mod tests {
         assert!(worst(&out, LIGHT.ink) >= LIGHT.need - 0.1, "the ink still reads");
     }
 
+    /// Text on a see-through ground (the frosted terminal's, under its glass
+    /// bar), clear: blurred, as see-through as it was, no tint filled in.
+    #[test]
+    fn a_clear_frost_keeps_the_pictures_alpha() {
+        let a = 230u8;
+        let pm = |c: u8| (c as u32 * a as u32 / 255) as u8;
+        let text =
+            picture(
+                32,
+                16,
+                |x, _| if x % 6 == 0 { [pm(235), pm(235), pm(235), a] } else { [pm(20), pm(22), pm(30), a] },
+            );
+        let ground = [20u8, 22, 30];
+        let spread = |out: &[u8]| {
+            let (lo, hi) = out.chunks(4).fold((255u8, 0u8), |(lo, hi), p| (lo.min(p[0]), hi.max(p[0])));
+            hi - lo
+        };
+        let blur = frost(&text, 32, 16, 16, &Frost { clear: true, strength: 0.0, ..DARK });
+        let out = frost(&text, 32, 16, 16, &Frost { clear: true, tint: ground, strength: 0.5, ..DARK });
+        assert!(out.chunks(4).all(|p| p[3].abs_diff(a) <= 1), "the alpha is the picture's");
+        assert!(spread(&blur) < pm(235) - pm(20), "the text is softened by the blur");
+        assert!(spread(&out) < spread(&blur), "and more toward the ground");
+        assert!(spread(&out) > 0, "but still shows");
+        assert!(out.chunks(4).all(|p| p[0] <= p[3]), "alpha stays multiplied in");
+    }
+
     #[test]
     fn the_shader_names_what_the_server_sets() {
-        for name in ["texel", "radius", "tint", "ink", "need", "corner", "cap", "//_DEFINES_", "v_coords", "alpha"] {
+        for name in
+            ["texel", "radius", "tint", "ink", "need", "corner", "cap", "clear", "//_DEFINES_", "v_coords", "alpha"]
+        {
             assert!(FROST_SHADER.contains(name), "{name}");
         }
         assert!(FROST_SHADER.contains(&format!("i < {TAPS}")));

@@ -566,11 +566,5 @@ to check what was built, and the agent interface to try it.
 - **The screenshot area's shade a little darker** (Vergence-wishlist-2,
   2026-11-24): "When selecting an area to screenshot with shift super 4,
   maybe we should shade it more?"
-- **Text scrolling up under a frosted terminal's bar, blurred** (parked
-  2026-11-24, Dave: "not a huge deal"). With frosted glass on (frost
-  milestone 1) the strip under the bar stays empty: the server's strip frost
-  paints opaque (blur.rs output alpha 1), which would make the glass bar
-  solid again, and the picture's own sharp strip would show through a
-  see-through blur. Needs: a shader switch keeping the texture's alpha, the
-  picture's strip left out for a window whose glass is its own, a suite
-  check (blurred under the bar, bar still see-through). About an hour.
+- ~~**Text scrolling up under a frosted terminal's bar, blurred**~~ Done
+  2026-11-25 (docs/frost-milestone-1.md, "Text under the glass bar").

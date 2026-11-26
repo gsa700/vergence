@@ -3,7 +3,9 @@
 # with Frosted glass on, the pattern seen through it is blurred (far less
 # sharp than with it off); while another window is in front, the terminal's
 # dark ground is more opaque (less of the bright pattern shows through) than
-# while it is the window in front, as macOS's Terminal.
+# while it is the window in front. Then its text, run up under the bar: the
+# strip under the glass bar changes with it (the server blurs it there and
+# keeps the bar see-through; the sharp lines are not drawn under the bar).
 scenario() {
     cfg=$HOME/.cache/vergence-headless/home/.config/vergence/desktop.toml
     # look <true|false> <name>: a fresh session; the pattern under the
@@ -30,6 +32,14 @@ scenario() {
         vctl focus "$(win_index Q)" >/dev/null
         sleep 1.5
         shot MEM-1 "$2-behind" >/dev/null
+        # Its output scrolled up under the bar: a screenful and more of lines.
+        t=$(vctl windows | grep '"vergence-term"' | head -1 | cut -d' ' -f1)
+        vctl focus "$t" >/dev/null
+        sleep 0.5
+        vctl type "seq 100000 100300" >/dev/null
+        vctl key Return >/dev/null
+        sleep 2
+        shot MEM-1 "$2-text" >/dev/null
         vctl windows > "$OUT/$2-windows.txt"
         printf '%s\n' "$kept" > "$cfg"
     }
@@ -58,6 +68,14 @@ scenario() {
     echo "  .. brightness through the frosted terminal: in front $front, behind $behind"
     check "$(yes_if "awk -v a=\"$front\" -v b=\"$behind\" 'BEGIN { exit !(a > b + 2) }'")" \
         "frosted: clearer while in front (less ground over what is behind)"
+    # The strip under the terminal's bar, left of its buttons and clear of the
+    # title: its lines show there, blurred (look at frosted-text.png).
+    set -- $(grep '"vergence-term"' "$OUT/frosted-windows.txt" | head -1 | sed -E 's/.*\{ x: (-?[0-9]+), y: (-?[0-9]+), width: ([0-9]+), height: ([0-9]+) \}.* bar-h=([0-9]+).*/\1 \2 \3 \4 \5/')
+    strip="$(($1 + 12)) $(($2 - $5 + 4)) 120 $(($5 - 8))"
+    sa=$("$HARNESS" colors "$OUT/frosted-front.png" $strip | awk '{print $6}')
+    sb=$("$HARNESS" colors "$OUT/frosted-text.png" $strip | awk '{print $6}')
+    echo "  .. the strip under the glass bar ($strip), before and with text: $sa, $sb"
+    check "$(yes_if "! near \"$sa\" \"$sb\" 1.0")" "frosted: the text runs up under the glass bar"
     cf=$("$HARNESS" colors "$OUT/clear-front.png" $region | awk '{print $6}')
     cb=$("$HARNESS" colors "$OUT/clear-behind.png" $region | awk '{print $6}')
     check "$(yes_if "awk -v a=\"$cf\" -v b=\"$cb\" 'BEGIN { d = a - b; if (d < 0) d = -d; exit !(d < 1.5) }'")" \

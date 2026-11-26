@@ -37,6 +37,20 @@ more frosted).
   scheme). Dave settled on 92% ("close to the macOS"). The Title bar row is
   shown locked while the glass applies. Text scrolling under the bar is
   parked (docs/apps-roadmap.md).
+- **Text under the glass bar** (2026-11-25, Dave: "it's different than all
+  the other windows now"; un-parked): the terminal's lines run up under the
+  bar again, as under every bar. The server draws the picture's top strip
+  through the frost shader's `clear` mode (blur.rs): the picture's own alpha
+  kept, the blur moved toward the window's page color by the desktop's frost
+  strength (as other bars soften the text under them), no contrast floor; in
+  front of the window's frost, behind the bar. The picture's own sharp strip
+  is cut (decor.rs `glass_cut`). The glass bar itself stays: a see-through
+  window's bar shows what is behind it, as every bar does (Terminal.app's
+  bar is solid gray; this is our rule, not the Mac's). Without the frost
+  (Reduce transparency, high contrast, software drawing, the session's CPU
+  scenes) the sharp strip is still cut and nothing is blurred in: the strip
+  stays empty, as before. Scenario 31 now also fills the terminal and checks
+  the strip under the bar changes.
 
 The design below was written before the answer: where it says every app or
 Appearance, read the terminal and its Settings.

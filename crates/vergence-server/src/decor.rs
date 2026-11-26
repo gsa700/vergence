@@ -724,6 +724,7 @@ impl Server {
                     UniformName::new("invert", UniformType::_1f),
                     UniformName::new("split", UniformType::_1f),
                     UniformName::new("cap", UniformType::_1f),
+                    UniformName::new("clear", UniformType::_1f),
                 ];
                 match renderer.compile_custom_texture_shader(vergence_render::blur::FROST_SHADER, &uniforms) {
                     Ok(p) => {
@@ -1017,6 +1018,9 @@ impl Server {
             // A frosted window's frost (its look, its bar's place in pixels, its
             // ground for when there is no frost), drawn behind its picture.
             let mut body_frost: Option<(crate::backdrop::Look, Rectangle<i32, Physical>, vergence_look::Rgb)> = None;
+            // A window whose glass is its own, under its bar: the picture's own sharp
+            // strip is left out (the glass strip shows it blurred where the frost can).
+            let mut glass_cut = false;
             // This window's own bar style (bar_light).
             let light = self.bar_light(&w, light);
             let shaded = vergence_look::bar_look_shaded(light, self.bar_shade());
@@ -1188,6 +1192,14 @@ impl Server {
                 let under = frost
                     .as_ref()
                     .filter(|_| !ground_frosted && w.native().is_some_and(|n| n.inset() > 0))
+                    .and_then(|_| native_texture(renderer, &w));
+                // A frosted window whose glass is its own (the terminal's, frost
+                // milestone 1), with its picture on the GPU: the strip at the picture's
+                // top blurred and kept as see-through as it is, so its text runs up
+                // under the glass bar as under every other bar.
+                let glass = frost
+                    .as_ref()
+                    .filter(|_| ground_frosted && w.native().is_some_and(|n| n.inset() > 0))
                     .and_then(|_| native_texture(renderer, &w));
                 // A Wayland or X11 window's bar: frosted over what is behind it.
                 let behind = frost.is_some() && w.native().is_none();
@@ -1470,6 +1482,7 @@ impl Server {
                             // A light bar is never washed out past its shade by a white
                             // page under it.
                             Uniform::new("cap", UniformValue::_1f(if light { 1.0 } else { 0.0 })),
+                            Uniform::new("clear", UniformValue::_1f(0.0)),
                         ];
                         elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(
                             &mut d.frost,
@@ -1481,6 +1494,66 @@ impl Server {
                             uniforms,
                         )));
                     }
+                    // The glass strip: in front of the window's frost (drawn behind its
+                    // picture) and behind the bar; the blur alone (the shader's `clear`),
+                    // so the text is softened and the glass stays see-through. It takes
+                    // the under-bar strip's slot: a window has one or the other.
+                    if let (Some(program), Some((_, texture, px, logical))) = (frost.as_ref(), glass.as_ref()) {
+                        use smithay::backend::renderer::gles::{Uniform, UniformValue};
+                        let per_point = px.w as f64 / logical.w.max(1) as f64;
+                        let rows = (f.title.size.h as f64 * per_point).round().min(px.h as f64);
+                        let cols = shown_px((px.w, px.h), bar_px.size).size.w;
+                        let strip = Rectangle::<f64, smithay::utils::Buffer>::from_size((cols, rows).into());
+                        let uniforms = vec![
+                            Uniform::new(
+                                "texel",
+                                UniformValue::_2f(1.0 / px.w.max(1) as f32, 1.0 / px.h.max(1) as f32),
+                            ),
+                            Uniform::new("radius", UniformValue::_1f(frost_r * per_point as f32)),
+                            // The text toward the window's own ground (its page color, or
+                            // its bar's), by the desktop's frost strength, as under other bars.
+                            Uniform::new("tint", {
+                                let (r, g, b) = match accent {
+                                    Some(c) => ((c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff),
+                                    None => {
+                                        let g = style.ground;
+                                        (g.0 as u32, g.1 as u32, g.2 as u32)
+                                    }
+                                };
+                                UniformValue::_4f(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, strength)
+                            }),
+                            Uniform::new("ink", UniformValue::_3f(0.0, 0.0, 0.0)),
+                            Uniform::new("need", UniformValue::_1f(0.0)),
+                            Uniform::new(
+                                "corner",
+                                UniformValue::_1f(if rounded { vergence_look::RADIUS * per_point as f32 } else { 0.0 }),
+                            ),
+                            Uniform::new("bottom", UniformValue::_1f(0.0)),
+                            Uniform::new("invert", UniformValue::_1f(0.0)),
+                            Uniform::new(
+                                "split",
+                                UniformValue::_1f(tools_of(&w).map_or(0.0, |(from, _)| {
+                                    ((from as f64 - 1.0) * per_point / px.w.max(1) as f64) as f32
+                                })),
+                            ),
+                            Uniform::new("cap", UniformValue::_1f(0.0)),
+                            Uniform::new("clear", UniformValue::_1f(1.0)),
+                        ];
+                        elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(
+                            &mut d.frost,
+                            bar_px,
+                            strip,
+                            texture.clone(),
+                            native_serial(&w),
+                            program.clone(),
+                            uniforms,
+                        )));
+                    }
+                    // Cut whether or not the strip could be blurred: without the frost
+                    // (Reduce transparency, high contrast, software drawing, the
+                    // session's CPU scenes) the bar is solid or clear, and sharp lines
+                    // behind the tabs are what the empty strip used to prevent.
+                    glass_cut = ground_frosted && w.native().is_some_and(|n| n.inset() > 0);
                 }
             }
             let Some(loc) = self.space.element_location(&w) else { continue };
@@ -1508,15 +1581,37 @@ impl Server {
                     } else {
                         shown_px((px.w, px.h), body_px.size)
                     };
+                    // A window whose glass is its own: the picture's own strip under the
+                    // bar left out (glass_cut), `cut` pixels from its top.
+                    let below = edges_px(loc - out.loc, (p.logical.w, (p.logical.h - n.inset()).max(1)).into(), scale);
+                    let cut = if glass_cut {
+                        ((below.loc.y - body_px.loc.y).max(0) as f64).min(whole.size.h - 1.0)
+                    } else {
+                        0.0
+                    };
+                    let src_cut = Rectangle::<f64, smithay::utils::Buffer>::new(
+                        (0.0, cut).into(),
+                        (whole.size.w, whole.size.h - cut).into(),
+                    );
+                    let at_cut = Point::<f64, Physical>::from((at_f.x, at_f.y + cut));
+                    let size_cut = if cut > 0.0 {
+                        smithay::utils::Size::<i32, Logical>::from((p.logical.w, (p.logical.h - n.inset()).max(1)))
+                    } else {
+                        p.logical
+                    };
+                    let src_logical = Rectangle::<f64, Logical>::new(
+                        (src_cut.loc.x, src_cut.loc.y).into(),
+                        (src_cut.size.w, src_cut.size.h).into(),
+                    );
                     match &p.content {
                         crate::native::Content::Memory(buffer) if alt.is_none() => {
                             match MemoryRenderBufferRenderElement::from_buffer(
                                 renderer,
-                                at_f,
+                                at_cut,
                                 buffer,
                                 None,
-                                Some(whole),
-                                Some(p.logical),
+                                Some(src_logical),
+                                Some(size_cut),
                                 Kind::Unspecified,
                             ) {
                                 Ok(e) => elements.push(SceneElement::Memory(e)),
@@ -1546,16 +1641,22 @@ impl Server {
                                                 "radius",
                                                 UniformValue::_1f(vergence_look::RADIUS * per_point),
                                             ),
-                                            // Drawn under its bar: its own top corners are there too.
+                                            // Drawn under its bar: its own top corners are there too
+                                            // (not with its strip cut: the glass strip has them).
                                             Uniform::new(
                                                 "top",
-                                                UniformValue::_1f(if n.inset() > 0 { 1.0 } else { 0.0 }),
+                                                UniformValue::_1f(if n.inset() > 0 && cut == 0.0 { 1.0 } else { 0.0 }),
                                             ),
                                         ];
-                                        let dst = body_px;
-                                        let src = Rectangle::<f64, smithay::utils::Buffer>::from_size(
-                                            (whole.size.w, whole.size.h).into(),
-                                        );
+                                        let dst = if cut > 0.0 {
+                                            Rectangle::from_extremities(
+                                                (body_px.loc.x, body_px.loc.y + cut as i32),
+                                                (body_px.loc.x + body_px.size.w, body_px.loc.y + body_px.size.h),
+                                            )
+                                        } else {
+                                            body_px
+                                        };
+                                        let src = src_cut;
                                         let slot = &mut self.decor.entry(w.clone()).or_insert_with(Decor::new).round;
                                         elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(
                                             slot,
@@ -1568,7 +1669,7 @@ impl Server {
                                         )));
                                     }
                                     None => {
-                                        let e = smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer(at_f, &t, None, Some(whole), Some(p.logical), Kind::Unspecified);
+                                        let e = smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer(at_cut, &t, None, Some(src_logical), Some(size_cut), Kind::Unspecified);
                                         elements.push(SceneElement::Texture(e));
                                     }
                                 }

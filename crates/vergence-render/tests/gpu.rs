@@ -490,6 +490,7 @@ fn the_frost_shader_on_the_gpu_matches_its_cpu_reference() {
             need: 7.0,
             radius: 10.0,
             invert: false,
+            clear: false,
             cap: false,
         },
         Frost {
@@ -499,6 +500,7 @@ fn the_frost_shader_on_the_gpu_matches_its_cpu_reference() {
             need: 5.85,
             radius: 6.0,
             invert: false,
+            clear: false,
             cap: false,
         },
         Frost {
@@ -508,6 +510,7 @@ fn the_frost_shader_on_the_gpu_matches_its_cpu_reference() {
             need: 14.0,
             radius: 6.0,
             invert: true,
+            clear: false,
             cap: false,
         },
         Frost {
@@ -517,9 +520,31 @@ fn the_frost_shader_on_the_gpu_matches_its_cpu_reference() {
             need: 5.85,
             radius: 6.0,
             invert: false,
+            clear: false,
             cap: true,
         },
+        // The blur alone over a see-through picture (the frosted terminal's text under its bar).
+        Frost {
+            tint: [30, 30, 46],
+            strength: 0.5,
+            ink: [235, 235, 235],
+            need: 0.0,
+            radius: 8.0,
+            invert: false,
+            clear: true,
+            cap: false,
+        },
     ] {
+        // The clear frost is over a see-through picture, alpha multiplied in.
+        let rgba: Vec<u8> = if f.clear {
+            rgba.chunks_exact(4)
+                .flat_map(|p| {
+                    [p[0] as u32, p[1] as u32, p[2] as u32].map(|c| (c * 230 / 255) as u8).into_iter().chain([230u8])
+                })
+                .collect()
+        } else {
+            rgba.clone()
+        };
         let cpu = frost(&rgba, w, h, h, &f);
         let unit = |c: [u8; 3]| [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0];
         let t = unit(f.tint);
@@ -537,6 +562,7 @@ fn the_frost_shader_on_the_gpu_matches_its_cpu_reference() {
                 ("corner", &[0.0]),
                 ("invert", &[if f.invert { 1.0 } else { 0.0 }]),
                 ("cap", &[if f.cap { 1.0 } else { 0.0 }]),
+                ("clear", &[if f.clear { 1.0 } else { 0.0 }]),
             ],
         ) {
             Ok(p) => p,
@@ -544,7 +570,7 @@ fn the_frost_shader_on_the_gpu_matches_its_cpu_reference() {
         };
         let (mut worst, mut far, mut total) = (0u8, 0usize, 0u64);
         for (p, q) in gpu.data.chunks_exact(4).zip(cpu.chunks_exact(4)) {
-            let d = p[..3].iter().zip(&q[..3]).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
+            let d = p.iter().zip(q).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
             worst = worst.max(d);
             far += (d > 3) as usize;
             total += d as u64;
