@@ -294,6 +294,11 @@ where any app can use it, not inside AlbumWall):
     app-declared title bar items (AlbumWall's own wordmark and buttons, the
     server drawing them); a system Now Playing Dockworker fed by MPRIS,
     with the media keys (AlbumWall publishes MPRIS in milestone 2).
+  - **The battery** (Dave, 2026-11-26; CONTRIBUTING.md "Mind the
+    battery"): playing wakes the window about 20 times a second for the
+    clock, the seek bar and the meters, even when it cannot be seen. To do:
+    keep playing, but redraw nothing while the window is hidden or
+    minimized, and update slower while it is not in front.
   - **The look's reference** (Dave, src:vergence-albumwall-look-reference):
     the Avalonia AlbumWall; at each step a side-by-side, every difference
     fixed or written down as a decision. Shots in techbench

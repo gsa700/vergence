@@ -204,6 +204,16 @@ A change is done when it builds and passes its tests on FreeBSD and on Void.
   decisions themselves, in the maintainer's words, live in the docs
   (milestone docs, docs/decisions.md), not in the code.
 - **American spelling** in code, comments, docs and the interface.
+- **Mind the battery** (Dave, 2026-11-26; docs/decisions.md): Vergence runs
+  on laptops, so every choice that keeps the machine awake is weighed.
+  Idle means idle: a window that is not in front, is hidden or minimized,
+  or has nothing changing draws nothing and asks for no timer (a caret
+  blinks only in the window with the keyboard; a player keeps playing but
+  stops redrawing its clock and meters when it cannot be seen). Prefer
+  being told (a waker, an event, inotify) to polling; when polling cannot
+  be helped, slowly (minutes, not seconds) and only while it matters.
+  Motion runs for its length and stops. A new timer, thread or wakeup in a
+  plan says what it costs at idle.
 - After adding a crate, a dependency or a version, commit the updated
   Cargo.lock.
 
