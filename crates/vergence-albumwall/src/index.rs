@@ -16,8 +16,10 @@ use std::path::{Path, PathBuf};
 use crate::library::TrackFacts;
 
 const MAGIC: &[u8; 4] = b"AWIX";
-/// Up when what a scan keeps of a file changes: every file is read again.
-pub const VERSION: u32 = 1;
+/// Up when what a scan keeps of a file changes, or what Hymie reads of one
+/// (a file refused before may be read now): every file is read again.
+/// 2: MP3s whose ID3 tag ended just inside the first 256 KB were refused.
+pub const VERSION: u32 = 2;
 
 /// A file's facts and the size and time they were read at.
 #[derive(Debug, Clone, PartialEq)]
