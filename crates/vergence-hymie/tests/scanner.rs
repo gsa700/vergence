@@ -33,6 +33,11 @@ fn a_library_is_scanned_by_one_helper() {
     assert!(s.facts(&dir.join("broken.flac")).is_err());
     let mp3 = s.facts(&dir.join("tone.mp3")).unwrap();
     assert!(mp3.rate > 0 && mp3.frames > 0);
+    // The tone's embedded picture, decoded in the helper.
+    let (w, h, rgba) = s.cover(&dir.join("big.flac"), 32).unwrap().expect("a cover");
+    assert_eq!(rgba.len(), (w * h * 4) as usize);
+    assert!(w >= 32 && h >= 32);
+    assert_eq!(s.cover(&dir.join("tone.mp3"), 32).unwrap(), None);
     let aac = s.facts(&dir.join("aac.m4a")).unwrap();
     assert_eq!(aac.rate, 44100);
     assert!(matches!(s.facts(&dir.join("gone.flac")), Err(vergence_hymie::Error::Io(_))));

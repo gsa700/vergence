@@ -13,6 +13,8 @@ description = "AlbumWall for Vergence: a wall of every album you own, played gap
 [dependencies]
 vergence-config.workspace = true
 vergence-hymie.workspace = true
+vergence-decode.workspace = true
+vergence-scene.workspace = true
 vergence-ui.workspace = true
 vergence-widgets.workspace = true
 

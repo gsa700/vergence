@@ -19,6 +19,10 @@
 //!   answer is the file's [`crate::facts::Facts`], or kind 3: how much of
 //!   each end is wanted (two u64), asked again with more. Nothing stays
 //!   open: one helper answers for a whole library ([`Scanner`]).
+//! - `C` a file's cover for a wall (AlbumWall): the file's size (u64), the
+//!   head's length (u64), the size wanted (u32, at least this on each
+//!   side), the head, the tail. The answer: width, height (two u32) and
+//!   straight RGBA, or nothing when the file keeps no cover; or kind 3.
 //! - `I` a picture's first bytes (a sidecar cover.jpg): its width and height
 //!   (two u32) from its header, so the program never reads the picture.
 //!
@@ -234,6 +238,22 @@ pub fn serve_with(
                         let mut b = w.head.to_le_bytes().to_vec();
                         b.extend_from_slice(&w.tail.to_le_bytes());
                         Ok(b)
+                    }
+                }
+            })(),
+            b'C' => (|| -> Result<Vec<u8>, String> {
+                let n = |r: std::ops::Range<usize>| body.get(r).ok_or("short");
+                let size = u64::from_le_bytes(n(0..8)?.try_into().map_err(|_| "short")?);
+                let head_len = u64::from_le_bytes(n(8..16)?.try_into().map_err(|_| "short")?) as usize;
+                let px = u32::from_le_bytes(n(16..20)?.try_into().map_err(|_| "short")?);
+                let rest = &body[20..];
+                let head = rest.get(..head_len).ok_or("short")?;
+                match crate::facts::cover(size, head, &rest[head_len..], px).map_err(|e| e.to_string())? {
+                    Ok(None) => Ok(Vec::new()),
+                    Ok(Some((w, h, rgba))) => Ok([&w.to_le_bytes()[..], &h.to_le_bytes(), &rgba].concat()),
+                    Err(w) => {
+                        answered = WANT;
+                        Ok([w.head.to_le_bytes(), w.tail.to_le_bytes()].concat())
                     }
                 }
             })(),
@@ -547,6 +567,34 @@ impl Scanner {
     /// The facts of the file at `path`. An error of kind Io means the file
     /// could not be read (gone, the share dropped): not a fact about it.
     pub fn facts(&mut self, path: &Path) -> Result<crate::facts::Facts, Error> {
+        let b = self.ends(path, b'F', &[])?;
+        crate::facts::Facts::decode(&b).ok_or_else(|| crate::damaged("a garbled answer"))
+    }
+
+    /// The cover kept in the file at `path`, decoded in the helper and
+    /// shrunk to at least `px` on each side: width, height, straight RGBA;
+    /// None if it keeps none.
+    #[allow(clippy::type_complexity)]
+    pub fn cover(&mut self, path: &Path, px: u32) -> Result<Option<(u32, u32, Vec<u8>)>, Error> {
+        let b = self.ends(path, b'C', &px.to_le_bytes())?;
+        if b.is_empty() {
+            return Ok(None);
+        }
+        let (w, h) = (
+            u32::from_le_bytes(b.get(..4).and_then(|s| s.try_into().ok()).unwrap_or([0; 4])),
+            u32::from_le_bytes(b.get(4..8).and_then(|s| s.try_into().ok()).unwrap_or([0; 4])),
+        );
+        let rgba = b.get(8..).unwrap_or(&[]).to_vec();
+        if rgba.len() != w as usize * h as usize * 4 {
+            return Err(crate::damaged("a garbled answer"));
+        }
+        Ok(Some((w, h, rgba)))
+    }
+
+    /// One request `op` about the file at `path`, sent its size, `extra`,
+    /// its head and its tail, and again with more of either while the
+    /// helper asks for more: the answer's body.
+    fn ends(&mut self, path: &Path, op: u8, extra: &[u8]) -> Result<Vec<u8>, Error> {
         use crate::facts::{HEAD, MOST, TAIL};
         use std::io::{Seek, SeekFrom};
         let mut file = std::fs::File::open(path).map_err(|e| Error::Io(e.to_string()))?;
@@ -559,9 +607,10 @@ impl Scanner {
             if head + tail >= size || head > MOST || tail > MOST {
                 (head, tail) = (size, 0);
             }
-            let mut body = Vec::with_capacity(16 + (head + tail) as usize);
+            let mut body = Vec::with_capacity(16 + extra.len() + (head + tail) as usize);
             body.extend_from_slice(&size.to_le_bytes());
             body.extend_from_slice(&head.to_le_bytes());
+            body.extend_from_slice(extra);
             let mut read = |at: u64, n: u64, body: &mut Vec<u8>| -> Result<(), Error> {
                 file.seek(SeekFrom::Start(at)).map_err(|e| Error::Io(e.to_string()))?;
                 let from = body.len();
@@ -571,8 +620,7 @@ impl Scanner {
             read(0, head, &mut body)?;
             read(size - tail, tail, &mut body)?;
             let r = self.start()?;
-            let answer = ask_child(&r.child, &mut r.to, &mut r.from, b'F', &body);
-            let (kind, b) = match answer {
+            let (kind, b) = match ask_child(&r.child, &mut r.to, &mut r.from, op, &body) {
                 Ok(a) => a,
                 Err(_) => {
                     // Stopped: by this file, or by its limits. Started afresh for the next.
@@ -581,7 +629,7 @@ impl Scanner {
                 }
             };
             match kind {
-                0 => return crate::facts::Facts::decode(&b).ok_or_else(|| crate::damaged("a garbled answer")),
+                0 => return Ok(b),
                 WANT if b.len() == 16 => {
                     let want = |i: usize| u64::from_le_bytes(b[i..i + 8].try_into().unwrap_or([0; 8]));
                     let (h, t) = (want(0).min(size), want(8).min(size));

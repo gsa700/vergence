@@ -228,3 +228,21 @@ where any app can use it, not inside AlbumWall):
     of reach; Library › Rescan the library.
   - Left: the folder watcher, and the library picker (it lives in the
     bottom bar, which comes with the wall).
+- **Step 3, covers and colors** (2026-11-25):
+  - Embedded covers are decoded by Hymie's helper (`C`: the file's ends as
+    for facts, the picture decoded there by vergence-decode's decoders at
+    the size asked for), so no bytes entry in vergence-decode was needed;
+    sidecars by vergence-decode's helper (decode_file, shrunk to the
+    bucket). helper::Scanner's request loop is shared by `F` and `C`.
+  - covers.rs: buckets 256/384/512, keys by source, size, time and bucket,
+    a 160 MB LRU, worker threads taking the newest request first, a cover
+    that cannot be decoded not asked for again; each cover measured for
+    its colors from a 16-pixel sample.
+  - colors.rs: the contrast floor, the album palette and the wall's ground
+    and bars (recede, lift, ink, warm) ported from Contrast.cs, Palette.cs
+    and Ground.cs, with tests that every album's panel and play-bar text
+    clears 4.5:1 at every hue and Light, and the wall's text and bars at
+    every Light and Chrome.
+  - `--colors FOLDER`: on techbench, 200 of Dave's covers each: FLAC
+    sidecars 15 ms a cover, the lossy library's embedded covers 7 ms; none
+    failed; library hue 11° and 22°.

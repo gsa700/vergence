@@ -502,6 +502,15 @@ fn main() {
         }
         return;
     }
+    // `--colors FOLDER`: the library's covers decoded (a spread of 200) and
+    // its ground's hue, and a few albums' palettes, with the time it took.
+    if let Some(i) = args.iter().position(|a| a == "--colors") {
+        let Some(folder) = args.get(i + 1) else {
+            eprintln!("vergence-albumwall: --colors needs a folder");
+            std::process::exit(2);
+        };
+        std::process::exit(colors_and_print(std::path::Path::new(folder)));
+    }
     if let Some(i) = args.iter().position(|a| a == "--scan") {
         let Some(folder) = args.get(i + 1) else {
             eprintln!("vergence-albumwall: --scan needs a folder");
@@ -567,4 +576,68 @@ fn scan_and_print(folder: &std::path::Path, rescan: bool) -> i32 {
             1
         }
     }
+}
+
+/// `--colors`: the library read (with its index), then 200 of its covers
+/// decoded at 256 px through the helpers, the ground's hue from them.
+fn colors_and_print(folder: &std::path::Path) -> i32 {
+    use vergence_albumwall::{colors, covers, index, scan};
+    let index_path = index::path_for(folder);
+    let mut idx = index_path.as_deref().map(index::Index::load).unwrap_or_default();
+    let Ok(mut scanner) = vergence_hymie::helper::Scanner::new() else {
+        eprintln!("vergence-albumwall: no sound helper");
+        return 1;
+    };
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let Ok(found) = scan::scan(folder, &mut idx, true, false, &mut scanner, &cancel, |_| {}) else {
+        eprintln!("vergence-albumwall: {folder:?} cannot be read");
+        return 1;
+    };
+    let decode = covers::helpers();
+    let started = std::time::Instant::now();
+    let (mut sums, mut failed, mut shown) = (Vec::new(), 0, 0);
+    for i in colors::spread(found.albums.len(), 200) {
+        let a = &found.albums[i];
+        let Some(art) = &a.front else { continue };
+        let key = covers::Key::of(art, 256);
+        match decode(&key) {
+            Some((w, h, rgba)) => {
+                let c = covers::cover_of(w, h, rgba);
+                sums.push(c.hue);
+                if shown < 6 {
+                    shown += 1;
+                    let p = colors::Palette::of(&c.colors, colors::DEFAULT_LIGHT);
+                    println!(
+                        "{} — {}: {}x{} {}, hue {:.0} sat {:.2}, panel {:?} text {:?} light {:?}",
+                        a.album_artist,
+                        a.title,
+                        w,
+                        h,
+                        if art.embedded { "embedded" } else { "sidecar" },
+                        c.colors.hue,
+                        c.colors.saturation,
+                        p.panel,
+                        p.text,
+                        p.light
+                    );
+                }
+            }
+            None => {
+                failed += 1;
+                println!("not decoded: {}", art.path.display());
+            }
+        }
+    }
+    let n = sums.len() + failed;
+    let elapsed = started.elapsed().as_secs_f64();
+    let (hue, agree) = colors::library_hue(&sums);
+    let g =
+        colors::Ground::new(hue, colors::DEFAULT_LIGHT, colors::DEFAULT_TINT, &colors::CHROMES[colors::DEFAULT_CHROME]);
+    println!(
+        "{n} covers decoded ({failed} failed) in {elapsed:.2} s ({:.0} ms each); library hue {hue:.0} (agreement {agree:.2}): ground {:?} bar {:?}",
+        elapsed * 1000.0 / n.max(1) as f64,
+        g.ground,
+        g.bar
+    );
+    0
 }

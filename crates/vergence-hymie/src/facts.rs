@@ -196,6 +196,36 @@ pub fn facts(size: u64, head: &[u8], tail: &[u8]) -> Result<Result<Facts, Want>,
     }))
 }
 
+/// A file's cover decoded and shrunk to at least `px` on each side (never
+/// enlarged), straight RGBA, from its two ends as [`facts`] reads them;
+/// Ok(Ok(None)) if it keeps none. The picture is decoded here, in the
+/// helper, by vergence-decode's decoders.
+#[allow(clippy::type_complexity)]
+pub fn cover(size: u64, head: &[u8], tail: &[u8], px: u32) -> Result<Result<Option<(u32, u32, Vec<u8>)>, Want>, Error> {
+    if size > crate::MAX_FILE {
+        return Err(Error::Unsupported("Larger than Hymie reads.".into()));
+    }
+    let whole = head.len() as u64 >= size;
+    if !whole && let Some(want) = wanted(size, head, tail)? {
+        return Ok(Err(want));
+    }
+    let tags = if whole {
+        crate::tags(&head[..size as usize])
+    } else {
+        let mut d = vec![0u8; size as usize];
+        d[..head.len()].copy_from_slice(head);
+        let from = size as usize - tail.len();
+        d[from..].copy_from_slice(tail);
+        crate::tags(&d)
+    };
+    let Some(picture) = tags.picture else { return Ok(Ok(None)) };
+    let px = px.clamp(1, 4096);
+    match vergence_decode::decode_bytes(&repair(&picture.data), Some((px, px))) {
+        Ok(p) => Ok(Ok(p.frames.into_iter().next().map(|f| (p.width, p.height, f.rgba)))),
+        Err(e) => Err(crate::damaged(format!("The cover could not be decoded: {e}"))),
+    }
+}
+
 /// The two ends together, as far as they reach: the byte at `at`, if sent.
 struct Ends<'a> {
     size: u64,
