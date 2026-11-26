@@ -1167,3 +1167,29 @@ fn a_window_without_the_keyboard_keeps_its_caret_steady() {
     assert!(ui.has_keyboard());
     assert!(ui.next_timer().is_some(), "blinking again, from now");
 }
+
+#[test]
+fn a_program_puts_the_keyboard_in_a_named_field_and_takes_it_out() {
+    let page = || {
+        column(vec![button(label("Go")).on_press(Msg::Text(String::new())), field("Bach", Msg::Text).name("search")])
+    };
+    let mut ui = laid(page(), 300.0, 100.0);
+    assert_eq!(ui.focused_name(), None);
+    ui.set_focus_place(Some("search"));
+    ui.layout(page(), 300.0, 100.0, &mut Fixed, 10.0);
+    assert_eq!(ui.focused_name().as_deref(), Some("search"));
+    // Its text chosen: typing replaces it.
+    ui.input(&Input::Key {
+        sym: 'x' as u32,
+        code: 0,
+        text: Some("x".into()),
+        pressed: true,
+        repeat: false,
+        composing: false,
+        modifiers: Default::default(),
+    });
+    assert_eq!(ui.field_text().map(|(t, _, _)| t).as_deref(), Some("x"));
+    ui.set_focus_place(None);
+    ui.layout(page(), 300.0, 100.0, &mut Fixed, 10.0);
+    assert_eq!(ui.focused_name(), None);
+}

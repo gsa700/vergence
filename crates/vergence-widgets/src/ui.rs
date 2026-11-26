@@ -241,6 +241,8 @@ pub struct Ui<M> {
     /// the next layout where it appears (session milestone 1: a page kept
     /// from the last run, or from a close a while ago).
     scroll_wanted: HashMap<String, f32>,
+    /// Where a program asked the keyboard to go at the next layout.
+    focus_wanted: Option<Option<String>>,
     /// The strip at the window's top under the server's bar (look milestone
     /// 1): scroll bars start below it, not under the title bar
     /// (see docs/app-settings-milestone-1.md).
@@ -302,6 +304,7 @@ impl<M> Default for Ui<M> {
             lazy: HashMap::new(),
             relayout: false,
             scroll_wanted: HashMap::new(),
+            focus_wanted: None,
             under_bar: 0.0,
             text_factor: 1.0,
             server_menus: false,
@@ -475,6 +478,20 @@ impl<M: Clone> Ui<M> {
             if matches!(n.what, What::Field { .. }) {
                 choose_all = Some(n.id);
             }
+        }
+        // Where the program asked the keyboard to go (Program::focus_to).
+        match self.focus_wanted.take() {
+            Some(Some(name)) => {
+                if let Some(n) = self.nodes.iter().find(|n| n.name.as_deref() == Some(&name) && n.focusable()) {
+                    self.focus = Some(n.id);
+                    if matches!(n.what, What::Field { .. }) {
+                        choose_all = Some(n.id);
+                        self.caret_moved();
+                    }
+                }
+            }
+            Some(None) => self.focus = None,
+            None => {}
         }
         if self.pressed.is_some_and(|(id, _)| alive(Some(id), &self.nodes).is_none()) {
             self.pressed = None;
@@ -674,6 +691,17 @@ impl<M: Clone> Ui<M> {
         if offset.is_finite() {
             self.scroll_wanted.insert(name.to_string(), offset.max(0.0));
         }
+    }
+
+    /// The keyboard to the element named `name` at the next layout, or to
+    /// nothing.
+    pub fn set_focus_place(&mut self, name: Option<&str>) {
+        self.focus_wanted = Some(name.map(str::to_string));
+    }
+
+    /// The name of the element with the keyboard ("" if it has none), if any.
+    pub fn focused_name(&self) -> Option<String> {
+        self.focus.and_then(|f| self.node(f)).map(|n| n.name.clone().unwrap_or_default())
     }
 
     /// Each named scrolling place and how far it is scrolled, in points.

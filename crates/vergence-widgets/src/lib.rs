@@ -214,6 +214,19 @@ pub trait Program {
         Vec::new()
     }
 
+    /// Where the keyboard should go, asked each time the tree is built:
+    /// Some(Some(name)) to the element so named (a field's text chosen, so
+    /// typing replaces it: AlbumWall's Ctrl+F), Some(None) to nothing.
+    fn focus_to(&mut self) -> Option<Option<String>> {
+        None
+    }
+
+    /// The keyboard moved: to the element named so (an empty name: one
+    /// without a name), or to nothing. A program whose own keys mean one
+    /// thing on its page and another while a field is typed in (Space) can
+    /// tell which.
+    fn focus_moved(&mut self, _name: Option<String>) {}
+
     /// A named scroll moved: how far down it is, in points. Told after the
     /// frame is laid out, once for each change.
     fn scrolled(&mut self, _name: &str, _offset: f32) {}
@@ -322,6 +335,8 @@ struct Host<P: Program> {
     waker: Option<Waker>,
     /// Each named scroll's place as last told to the program (Program::scrolled).
     scrolls_told: std::collections::HashMap<String, f32>,
+    /// Where the keyboard was as last told to the program (Program::focus_moved).
+    focus_told: Option<String>,
     /// The last frame was for the native road (a Vergence session), where
     /// the server frosts a frosted window's ground (preview milestone 1,
     /// step 6b): such a window then leaves its ground clear.
@@ -344,6 +359,15 @@ impl<P: Program> Host<P> {
         if title != self.title_sent {
             window.set_title(&title);
             self.title_sent = title;
+        }
+    }
+
+    /// The program told where the keyboard is, when that changed.
+    fn tell_focus(&mut self) {
+        let now = self.ui.focused_name();
+        if now != self.focus_told {
+            self.focus_told = now.clone();
+            self.program.focus_moved(now);
         }
     }
 
@@ -614,6 +638,7 @@ impl<P: Program> vergence_ui::App for Host<P> {
         if !used && self.program.input(input, window) {
             self.changed(window);
         }
+        self.tell_focus();
         self.rearm(window);
     }
 
@@ -720,9 +745,13 @@ impl<P: Program> Host<P> {
             for (name, offset) in self.program.scroll_to() {
                 self.ui.set_scroll_place(&name, offset);
             }
+            if let Some(to) = self.program.focus_to() {
+                self.ui.set_focus_place(to.as_deref());
+            }
             let root = self.program.view(&self.theme);
             let mut measure = FontsMeasure { fonts, family: &self.theme.font };
             self.ui.layout(root, frame.width, frame.height, &mut measure, self.theme.text_size);
+            self.tell_focus();
             self.ui.set_under_bar(self.theme.top);
             self.ui.set_reduced_motion(self.theme.reduced_motion);
             self.ui.set_double_click(self.theme.double_click);
@@ -790,6 +819,7 @@ pub fn window<P: Program + 'static>(program: P) -> Box<dyn vergence_ui::App> {
         fit: FitToContent::Wanted,
         waker: None,
         scrolls_told: Default::default(),
+        focus_told: None,
         native: false,
     })
 }
@@ -820,6 +850,7 @@ pub fn run<P: Program>(program: P, size: (u32, u32)) -> io::Result<()> {
         fit: FitToContent::Wanted,
         waker: None,
         scrolls_told: Default::default(),
+        focus_told: None,
         native: false,
     };
     vergence_ui::run(&mut host, size)
