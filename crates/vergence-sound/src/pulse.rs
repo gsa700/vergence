@@ -51,6 +51,8 @@ const GET_SINK_INFO: u32 = 21;
 const GET_SINK_INFO_LIST: u32 = 22;
 const SET_SINK_VOLUME: u32 = 36;
 const SET_SINK_MUTE: u32 = 39;
+const CORK_PLAYBACK_STREAM: u32 = 41;
+const FLUSH_PLAYBACK_STREAM: u32 = 42;
 const SET_DEFAULT_SINK: u32 = 44;
 const REQUEST: u32 = 61;
 
@@ -695,20 +697,31 @@ pub struct PulseStream {
     missing: usize,
     rate: u32,
     channels: u32,
+    /// What the server buffers (the target length asked for).
+    latency: Duration,
 }
 
 pub fn stream(rate: u32, channels: u32) -> io::Result<Box<dyn crate::Stream>> {
+    stream_as(rate, channels, "Preview", None)
+}
+
+/// A playback stream named `name`, buffering about `buffer` (the server's
+/// own default, about two seconds, when None).
+pub fn stream_as(rate: u32, channels: u32, name: &str, buffer: Option<Duration>) -> io::Result<Box<dyn crate::Stream>> {
     let mut p = Pulse::connect()?;
     let sink = p.sink("@DEFAULT_SINK@")?;
     let ch = channels.clamp(1, 8) as u8;
+    let frame = ch as u32 * 2;
+    // The target length, whole frames (tlength): how far ahead the server buffers.
+    let target = buffer.map_or(INVALID, |b| ((rate as f64 * b.as_secs_f64()) as u32).max(1) * frame);
     let r = p.ask(CREATE_PLAYBACK_STREAM, |t| {
         t.spec(ch, rate).map(ch).u32(sink.index).str(None);
-        t.u32(INVALID).bool(false).u32(INVALID).u32(INVALID).u32(INVALID).u32(0);
+        t.u32(INVALID).bool(false).u32(target).u32(INVALID).u32(INVALID).u32(0);
         t.cvolume(ch, NORM);
         for _ in 0..7 {
             t.bool(false);
         }
-        t.bool(false).bool(false).props(&[("media.name", "Preview"), ("media.role", "music")]);
+        t.bool(false).bool(false).props(&[("media.name", name), ("media.role", "music")]);
         for _ in 0..7 {
             t.bool(false);
         }
@@ -718,7 +731,28 @@ pub fn stream(rate: u32, channels: u32) -> io::Result<Box<dyn crate::Stream>> {
     let channel = g.u32()?;
     g.u32()?; // its sink input
     let missing = g.u32()? as usize;
-    Ok(Box::new(PulseStream { p, channel, missing, rate, channels: ch as u32 }))
+    let latency = buffer.unwrap_or(Duration::from_secs(2));
+    Ok(Box::new(PulseStream { p, channel, missing, rate, channels: ch as u32, latency }))
+}
+
+impl PulseStream {
+    /// A command about this stream; the server's requests for more that
+    /// come meanwhile are counted, not lost.
+    fn command(&mut self, command: u32, args: impl FnOnce(&mut Put)) -> io::Result<()> {
+        let channel = self.channel;
+        let mut more = 0usize;
+        self.p.ask_with(command, args, |_, cmd, rest| {
+            if cmd == REQUEST {
+                let mut g = Get::new(rest);
+                if g.u32()? == channel {
+                    more += g.u32()? as usize;
+                }
+            }
+            Ok(())
+        })?;
+        self.missing += more;
+        Ok(())
+    }
 }
 
 impl crate::Stream for PulseStream {
@@ -752,6 +786,25 @@ impl crate::Stream for PulseStream {
             self.missing = self.missing.saturating_sub(n);
         }
         Ok(())
+    }
+
+    /// Corked: the server holds the stream where it is.
+    fn pause(&mut self, on: bool) -> io::Result<()> {
+        let channel = self.channel;
+        self.command(CORK_PLAYBACK_STREAM, |t| {
+            t.u32(channel).bool(on);
+        })
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        let channel = self.channel;
+        self.command(FLUSH_PLAYBACK_STREAM, |t| {
+            t.u32(channel);
+        })
+    }
+
+    fn latency(&self) -> Duration {
+        self.latency
     }
 }
 

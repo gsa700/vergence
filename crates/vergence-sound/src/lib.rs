@@ -114,6 +114,40 @@ pub trait Stream: Send {
     /// Interleaved 16-bit samples, a whole number of frames; blocks while
     /// the output is full, so writing paces the playing.
     fn write(&mut self, samples: &[i16]) -> io::Result<()>;
+    /// Paused (held where it is, what is buffered kept) or going again. A
+    /// stream that cannot hold simply runs dry while nothing is written.
+    fn pause(&mut self, _on: bool) -> io::Result<()> {
+        Ok(())
+    }
+    /// What is buffered and not yet heard thrown away (a seek, a stop).
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+    /// About how long what has been written takes to be heard: what a
+    /// player takes off what it wrote to say where it is.
+    fn latency(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+}
+
+/// How much a named stream buffers ([`named_stream`]): enough not to run
+/// dry, little enough that a pause or a seek is heard at once.
+pub const BUFFER: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// A stream to the default output as [`stream`], under `name` (what the
+/// sound server lists it as: "AlbumWall"), buffering about [`BUFFER`].
+pub fn named_stream(rate: u32, channels: u32, name: &str) -> io::Result<Box<dyn Stream>> {
+    match std::env::var("VERGENCE_SOUND_OFF").as_deref() {
+        Ok("pace") => return Ok(Box::new(Paced { rate, channels: channels.max(1) })),
+        Ok(_) => return Err(io::Error::other("sound is off (VERGENCE_SOUND_OFF)")),
+        Err(_) => {}
+    }
+    #[cfg(target_os = "linux")]
+    if pipewire_running() {
+        return pulse::stream_as(rate, channels, name, Some(BUFFER));
+    }
+    let _ = name;
+    stream(rate, channels)
 }
 
 /// A stream to the default output, at `rate` and `channels` if it takes them.
