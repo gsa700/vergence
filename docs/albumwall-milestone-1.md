@@ -301,15 +301,18 @@ where any app can use it, not inside AlbumWall):
     minimized, and update slower while it is not in front.
     Part done 2026-11-26: the player wakes the window at most 4 times a
     second (a track, a pause or a problem at once), and the meters step at
-    30 Hz only while the window has the keyboard and a needle moves; still
-    to do: nothing at all while the window is hidden or minimized.
+    30 Hz only while music plays or a needle moves (in front or not: Dave,
+    2026-11-26, "they should work all the time"); still to do: nothing at
+    all while the window is hidden or minimized.
   - **The meters, ported** (2026-11-26; Dave: "port the meters properly"):
     vumeter.rs is VuMeter.cs: the yellowed face, the scale printed in volts
     (0 VU at 71%), RMS with 0 VU at -10 dBFS, a spring needle (99% in
     300 ms, a little overshoot), read at the block being heard (player.rs
     keeps RMS per 1,024 frames, before gain, and reads it at the heard
     frame), resting when still. The stream's name in the sound server is
-    "AlbumWall" (it was "Vergence": techbench, pw-top).
+    "AlbumWall" (it was "Vergence": techbench, pw-top). Verified in pre15 on
+    techbench: the stream named AlbumWall, and the card following 44.1 kHz
+    from the session's allowed rates (no resampling).
   - **The play controls, as in the Avalonia bar** (Dave, 2026-11-26: the
     remaining time "bouncing around ... taking the track slider length with
     it"; "style them as we did in avalonia"): the times in fixed places (46

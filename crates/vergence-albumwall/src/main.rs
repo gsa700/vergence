@@ -151,11 +151,11 @@ struct AlbumWall {
     resume: Option<Session>,
     /// A word for the status line for a moment (the play mode just chosen).
     said: Option<(String, std::time::Instant)>,
-    /// The meters' needles and when they last moved; the window in front
-    /// (the needles move only then: the battery).
+    /// The meters' needles and when they last moved. They move while music
+    /// plays, in front or not (Dave, 2026-11-26: "they should work all the
+    /// time"), and rest, asking for nothing, when it stops or pauses.
     needles: [vumeter::Needle; 2],
     stepped: std::time::Instant,
-    front: bool,
     meters_wanted: bool,
     /// The library on the wall cannot be reached, and why (and how many
     /// tracks it held last time).
@@ -210,7 +210,6 @@ impl AlbumWall {
             scrub: None,
             needles: [vumeter::Needle::default(); 2],
             stepped: std::time::Instant::now(),
-            front: true,
             meters_wanted: false,
             said: None,
             resume: Session::load(),
@@ -695,7 +694,7 @@ impl AlbumWall {
     }
 
     /// The meters stepped on to now, toward the levels being heard; true
-    /// while a needle still moves (or music plays and the window is in front).
+    /// while a needle still moves or music plays.
     fn step_meters(&mut self) -> bool {
         let now = std::time::Instant::now();
         let dt = now.saturating_duration_since(self.stepped).as_secs_f64();
@@ -707,7 +706,7 @@ impl AlbumWall {
             n.level(d);
             n.step(dt);
         }
-        self.front && (playing || self.needles.iter().any(|n| !n.resting()))
+        playing || self.needles.iter().any(|n| !n.resting())
     }
 
     fn reduced(&self) -> bool {
@@ -989,14 +988,6 @@ impl Program for AlbumWall {
     /// share; any library on FreeBSD for now) is looked at again, at most
     /// once a minute (Dave, 2026-11-25: "the lean is fine").
     fn saw(&mut self, input: &vergence_widgets::Input) {
-        match input {
-            vergence_widgets::Input::Focus(true) => {
-                self.front = true;
-                self.meters_wanted = true;
-            }
-            vergence_widgets::Input::Focus(false) => self.front = false,
-            _ => {}
-        }
         let unwatched = self.watcher.as_ref().is_some_and(|(_, w)| w.is_none());
         if matches!(input, vergence_widgets::Input::Focus(true))
             && unwatched
@@ -1033,10 +1024,10 @@ impl Program for AlbumWall {
             self.resume();
         }
         self.album_ended();
-        // Music playing with the window in front: the needles move (the tick
-        // keeps itself going while they do).
+        // Music playing: the needles move (the tick keeps itself going while
+        // they do).
         let playing = self.player.as_ref().and_then(|p| p.state().now).is_some_and(|n| !n.paused);
-        if playing && self.front && self.needles.iter().all(|n| n.resting()) {
+        if playing && self.needles.iter().all(|n| n.resting()) {
             self.meters_wanted = true;
         }
         if self.library_changed() {
