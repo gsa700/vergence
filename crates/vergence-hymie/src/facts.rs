@@ -240,11 +240,14 @@ impl Ends<'_> {
 fn wanted(size: u64, head: &[u8], tail: &[u8]) -> Result<Option<Want>, Error> {
     let e = Ends { size, head, tail };
     // ID3v2 tags in front of the stream (MP3's, and some FLACs').
-    // id3_size reads the tags' own lengths; a tag running past the head is
-    // asked for whole (with room for the next one's header).
+    // id3_size reads the tags' own lengths; the tags are asked for whole,
+    // with room after them for the next tag's header or the stream's first
+    // frames (an MP3 is told by its frames: a tag ending just inside the
+    // head left too little of them, and Rhythmeen's MP3s, with a 262 KB tag,
+    // were refused as "not a sound file").
     let id3 = crate::tags::id3_size(head) as u64;
-    if id3 > 0 && !e.has(0, id3 + 10) {
-        return Ok(Some(e.want(0, id3 + 10)));
+    if id3 > 0 && !e.has(0, (id3 + MARGIN).min(size)) {
+        return Ok(Some(e.want(0, id3 + MARGIN)));
     }
     match format_of(head) {
         Some(Format::Flac) => Ok(flac_wanted(&e, id3)),
@@ -425,6 +428,28 @@ mod tests {
             let (ends, _) = by_ends(d);
             assert_eq!(ends, whole, "{name}");
         }
+    }
+
+    #[test]
+    fn an_mp3_whose_tag_ends_just_inside_the_head_is_asked_for_more() {
+        // An ID3v2.4 tag padded to end 183 bytes before the head's end, as a
+        // big embedded cover makes it, then the MP3's frames.
+        let mp3 = include_bytes!("../fixtures/tone44.mp3");
+        let body = (HEAD - 183 - 10) as u32;
+        let mut d = b"ID3\x04\x00\x00".to_vec();
+        d.extend_from_slice(&[
+            (body >> 21 & 0x7F) as u8,
+            (body >> 14 & 0x7F) as u8,
+            (body >> 7 & 0x7F) as u8,
+            (body & 0x7F) as u8,
+        ]);
+        d.resize(d.len() + body as usize, 0);
+        let skip = crate::tags::id3_size(mp3);
+        d.extend_from_slice(&mp3[skip..]);
+        d.resize(d.len().max(HEAD as usize + TAIL as usize + 4096), 0);
+        let (f, rounds) = by_ends(&d);
+        assert_eq!(rounds, 1);
+        assert!(f.rate > 0 && f.frames > 0);
     }
 
     #[test]

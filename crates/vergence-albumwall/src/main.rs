@@ -489,6 +489,19 @@ fn main() {
     // `--scan FOLDER [--rescan]`: the library read without the window, its
     // albums printed with the time it took (measuring a scan; checking one).
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // `--facts FILE`: what Hymie's helper reads of one file, or why it refuses it.
+    if let Some(i) = args.iter().position(|a| a == "--facts") {
+        let Some(file) = args.get(i + 1) else {
+            eprintln!("vergence-albumwall: --facts needs a file");
+            std::process::exit(2);
+        };
+        let result = vergence_hymie::helper::Scanner::new().and_then(|mut s| s.facts(std::path::Path::new(file)));
+        match result {
+            Ok(f) => println!("{f:#?}"),
+            Err(e) => println!("refused: {e}"),
+        }
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--scan") {
         let Some(folder) = args.get(i + 1) else {
             eprintln!("vergence-albumwall: --scan needs a folder");
@@ -528,6 +541,12 @@ fn scan_and_print(folder: &std::path::Path, rescan: bool) -> i32 {
                     None => "no art".into(),
                 };
                 println!("{} — {} ({}) · {} tracks · {art}", a.album_artist, a.title, a.year, a.tracks.len());
+            }
+            let mut unplayed: Vec<&std::path::PathBuf> =
+                idx.tracks.iter().filter(|(p, k)| p.starts_with(folder) && !k.facts.readable).map(|(p, _)| p).collect();
+            unplayed.sort();
+            for p in unplayed {
+                println!("not played: {}", p.display());
             }
             println!(
                 "{} albums, {} files, {} opened, {:.2} s",
