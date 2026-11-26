@@ -261,6 +261,10 @@ pub struct Ui<M> {
     open: Option<Open>,
     /// When the caret was last shown at once (it blinks from there).
     blink: Instant,
+    /// The window has the keyboard (Input::Focus). Without it a field's
+    /// caret stays, steady and gray, and nothing blinks (the terminal's way:
+    /// its block goes hollow); the selection turns gray (Dave, 2026-11-25).
+    keyboard: bool,
     /// Where the focused field's caret was drawn last (window points), for
     /// the window's meaning: the magnifier follows it.
     caret_at: std::cell::Cell<Option<Rect>>,
@@ -307,6 +311,7 @@ impl<M> Default for Ui<M> {
             drag: None,
             open: None,
             blink: Instant::now(),
+            keyboard: true,
             caret_at: std::cell::Cell::new(None),
             steady: false,
             double: Duration::from_millis(400),
@@ -811,7 +816,9 @@ impl<M: Clone> Ui<M> {
 
     /// When the toolkit wants to be woken next (the caret's blink).
     pub fn next_timer(&self) -> Option<Instant> {
-        if self.steady {
+        // Steady, or the window without the keyboard: nothing blinks, and a
+        // window in the background is not woken twice a second.
+        if self.steady || !self.keyboard {
             return None;
         }
         let focused_field = self
@@ -829,7 +836,13 @@ impl<M: Clone> Ui<M> {
     /// The caret is drawn now.
     fn caret_on(&self) -> bool {
         self.steady
+            || !self.keyboard
             || (Instant::now().saturating_duration_since(self.blink).as_millis() / BLINK.as_millis()).is_multiple_of(2)
+    }
+
+    /// Whether the window has the keyboard, as last told.
+    pub fn has_keyboard(&self) -> bool {
+        self.keyboard
     }
 
     fn caret_moved(&mut self) {
@@ -1703,7 +1716,14 @@ impl<M: Clone> Ui<M> {
                     }
                 }
             }
+            Input::Focus(true) => {
+                // The keyboard back: the caret solid at once, blinking from here.
+                self.keyboard = true;
+                self.caret_moved();
+                r.redraw = true;
+            }
             Input::Focus(false) => {
+                self.keyboard = false;
                 self.pressed = None;
                 self.fingers.clear();
                 match self.drag.take() {
@@ -2421,10 +2441,8 @@ impl<M: Clone> Ui<M> {
                         scene.push_clip(inner, 0.0);
                         if focused && caret != anchor {
                             let (a, b) = (at(caret.min(anchor)), at(caret.max(anchor)));
-                            scene.fill(
-                                Rect::new(inner.x + a - shift, r.y + 4.0, b - a, r.h - 8.0),
-                                alpha(theme.accent, 90),
-                            );
+                            let sel = if self.keyboard { alpha(theme.accent, 90) } else { alpha(theme.dim, 70) };
+                            scene.fill(Rect::new(inner.x + a - shift, r.y + 4.0, b - a, r.h - 8.0), sel);
                         }
                         if now_text.is_empty() {
                             text(scene, fonts, f, *size, theme.dim, Point::new(inner.x, r.y + baseline), placeholder);
@@ -2467,7 +2485,7 @@ impl<M: Clone> Ui<M> {
                         if focused && caret == anchor && self.caret_on() {
                             scene.fill(
                                 Rect::new((inner.x + cx - shift).round() - 0.5, r.y + 4.0, 1.5, r.h - 8.0),
-                                theme.text,
+                                if self.keyboard { theme.text } else { theme.dim },
                             );
                         }
                         scene.pop_clip();
@@ -2525,7 +2543,7 @@ impl<M: Clone> Ui<M> {
                     let focused = self.focus == Some(n.id);
                     // The part of it under the window's bar (look milestone 1).
                     let inset = (self.under_bar - r.y).max(0.0);
-                    doc.borrow_mut().draw(scene, fonts, r, inset, theme, focused, self.caret_on());
+                    doc.borrow_mut().draw(scene, fonts, r, inset, theme, focused, self.caret_on(), self.keyboard);
                     if focused {
                         self.caret_at.set(doc.borrow().caret_drawn);
                     }

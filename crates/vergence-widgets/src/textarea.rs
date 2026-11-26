@@ -2104,6 +2104,7 @@ impl Doc {
 
     /// Draws the area in `r`; its top `inset` points are under the window's
     /// bar: the text starts below them and scrolls up beneath them.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw(
         &mut self,
         scene: &mut Scene,
@@ -2113,6 +2114,7 @@ impl Doc {
         theme: &Theme,
         focused: bool,
         caret_on: bool,
+        keyboard: bool,
     ) {
         let inset = inset.clamp(0.0, (r.h - 40.0).max(0.0));
         let v = Rect::new(r.x, r.y + inset, r.w, r.h - inset);
@@ -2176,7 +2178,12 @@ impl Doc {
         scene.push_clip(r, 0.0);
         let (sa, sb) = self.selection();
         let selected = sa != sb;
-        let sel_c = if focused { alpha(theme.accent, 90) } else { alpha(theme.accent, 60) };
+        // The window without the keyboard: the selection gray (the caret too, below).
+        let sel_c = match (focused, keyboard) {
+            (_, false) => alpha(theme.dim, 70),
+            (true, true) => alpha(theme.accent, 90),
+            (false, true) => alpha(theme.accent, 60),
+        };
         let shade = alpha(theme.text, if theme.dark { 16 } else { 10 });
         let wave_c = if theme.dark { Color::rgb(255, 99, 92) } else { Color::rgb(214, 40, 40) };
         let mark_c = if theme.dark { Color::rgba(255, 200, 60, 70) } else { Color::rgba(255, 196, 0, 110) };
@@ -2352,7 +2359,8 @@ impl Doc {
                 scene.pop_clip();
             }
             if caret_on {
-                scene.fill(Rect::new(cx.round() - 0.5, cy + 1.0, 1.5, line_h - 2.0), text_c);
+                let c = if keyboard { text_c } else { theme.dim };
+                scene.fill(Rect::new(cx.round() - 0.5, cy + 1.0, 1.5, line_h - 2.0), c);
             }
         }
         if focused

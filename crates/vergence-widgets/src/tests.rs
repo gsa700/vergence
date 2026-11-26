@@ -1153,3 +1153,17 @@ fn an_element_after_a_row_moves_the_rows_below_down() {
     assert_eq!(bounds(&opened, "panel").y, 130.0);
     assert_eq!(bounds(&opened, "cell 4").y, 130.0 + 310.0);
 }
+
+#[test]
+fn a_window_without_the_keyboard_keeps_its_caret_steady() {
+    let mut ui = laid(field("hello", Msg::Text).autofocus(), 300.0, 100.0);
+    assert!(ui.focused().is_some(), "the field has the focus");
+    assert!(ui.next_timer().is_some(), "its caret blinks");
+    ui.input(&Input::Focus(false));
+    assert!(!ui.has_keyboard());
+    assert_eq!(ui.next_timer(), None, "nothing blinks in the background, nothing wakes it");
+    assert!(ui.focused().is_some(), "the field keeps the focus inside the window");
+    ui.input(&Input::Focus(true));
+    assert!(ui.has_keyboard());
+    assert!(ui.next_timer().is_some(), "blinking again, from now");
+}
