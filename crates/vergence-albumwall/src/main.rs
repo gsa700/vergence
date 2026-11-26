@@ -13,12 +13,16 @@
 //! (question 3: the covers are the point); its bar is the server's, dark.
 
 mod reading;
+mod wallview;
 
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use reading::{Outcome, Reader};
+use vergence_albumwall::colors::{self, Ground};
+use vergence_albumwall::covers::{self, Covers};
 use vergence_albumwall::libraries::{self, Libraries};
 use vergence_albumwall::library::Album;
 use vergence_albumwall::scan::Unreachable;
@@ -46,9 +50,13 @@ mod timer {
 }
 
 #[derive(Debug, Clone)]
-enum Msg {
+pub enum Msg {
     ChooseFolder,
     TryAgain,
+    /// A tile pressed (the album unfolds in step 5).
+    Open(usize),
+    /// A library chosen in the bottom bar's picker.
+    Library(usize),
 }
 
 struct AlbumWall {
@@ -66,7 +74,15 @@ struct AlbumWall {
     /// The folder the reader is reading (or last read).
     reading: Option<PathBuf>,
     /// The library on the wall: its folder, albums and files.
-    shown: Option<(PathBuf, Vec<Album>, usize)>,
+    shown: Option<(PathBuf, Rc<Vec<Album>>, usize)>,
+    /// Decoded covers (started with the window's waker).
+    covers: Option<Arc<Covers>>,
+    /// Device pixels per point (covers are decoded for it).
+    scale: f32,
+    /// The library's hue (its folder and the hue), measured from its covers.
+    hue: Arc<Mutex<Option<(PathBuf, f64)>>>,
+    /// The album pressed last (step 5 unfolds it).
+    opened: Option<usize>,
     /// The library on the wall cannot be reached, and why (and how many
     /// tracks it held last time).
     unreachable: Option<(Unreachable, usize)>,
@@ -103,6 +119,10 @@ impl AlbumWall {
             watcher: None,
             poll_wanted: false,
             looked: None,
+            covers: None,
+            scale: 1.0,
+            hue: Arc::default(),
+            opened: None,
         }
     }
 
@@ -169,7 +189,11 @@ impl AlbumWall {
         match outcome {
             Outcome::Albums { albums, files } => {
                 self.watch(&root);
-                self.shown = Some((root, albums, files));
+                self.measure_hue(&root, &albums);
+                if self.shown.as_ref().is_none_or(|s| s.0 != root) {
+                    self.opened = None;
+                }
+                self.shown = Some((root, Rc::new(albums), files));
                 self.unreachable = None;
             }
             Outcome::Unreachable { why, held } => {
@@ -285,22 +309,83 @@ impl AlbumWall {
         )
     }
 
-    /// The library read: until the wall (step 4), what it holds.
-    fn library_view(&self, albums: &[Album], files: usize) -> Element<Msg> {
+    /// The library read: its wall over its ground, and the bottom bar.
+    fn library_view(&self, albums: &Rc<Vec<Album>>, files: usize, t: &Theme) -> Element<Msg> {
+        let g = self.ground();
         let tracks: usize = albums.iter().map(|a| a.tracks.len()).sum();
-        let mut status = format!("{} albums · {} tracks", albums.len(), tracks);
+        let mut counts = format!("{} albums · {} tracks", group(albums.len()), group(tracks));
         if files > tracks {
-            status.push_str(&format!(" · {} files not played", files - tracks));
+            counts.push_str(&format!(" · {} not played", group(files - tracks)));
         }
-        if self.reader.running() {
-            status.push_str(" · rescanning");
-        }
-        if self.unreachable.is_some() {
+        let status = if self.unreachable.is_some() {
             let name = self.libraries.current().map(|l| l.name.clone()).unwrap_or_default();
-            status = format!("{name} cannot be reached · showing it as it was");
-        }
-        centered(label(status).size(15.0).align(Align::Center).width(Length::FILL))
+            format!("{name} cannot be reached · showing it as it was")
+        } else if self.reader.running() {
+            match self.reader.progress() {
+                Some(p) if p.opened > 0 => format!("rescanning · {}", group(p.opened)),
+                _ => "rescanning".into(),
+            }
+        } else {
+            String::new()
+        };
+        let names: Vec<String> = self.libraries.list.iter().map(|l| l.name.clone()).collect();
+        column(vec![
+            wallview::wall(albums.clone(), self.covers.clone(), self.scale, t, g).height(Length::FILL),
+            wallview::bar(status, counts, names, self.libraries.current, &g),
+        ])
+        .width(Length::FILL)
+        .height(Length::FILL)
     }
+
+    /// The wall's colors: the library's hue (the fallback until it is
+    /// measured) at Light 21, Tint 2 and the ink bars (Preferences, step 8).
+    fn ground(&self) -> Ground {
+        let root = self.libraries.current().map(|l| l.folder.clone());
+        let hue = self
+            .hue
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .filter(|(r, _)| Some(r) == root.as_ref())
+            .map_or(colors::FALLBACK_HUE, |(_, h)| *h);
+        Ground::new(hue, colors::DEFAULT_LIGHT, colors::DEFAULT_TINT, &colors::CHROMES[colors::DEFAULT_CHROME])
+    }
+
+    /// The library's hue from 200 of its covers, spread across it, measured
+    /// on a thread of its own (Ground.HueOf); the window woken when known.
+    fn measure_hue(&self, root: &std::path::Path, albums: &[Album]) {
+        let arts: Vec<_> =
+            colors::spread(albums.len(), 200).into_iter().filter_map(|i| albums[i].front.clone()).collect();
+        let (hue, waker, root) = (self.hue.clone(), self.waker.clone(), root.to_path_buf());
+        let _ = std::thread::Builder::new().name("hue".into()).spawn(move || {
+            let decode = covers::helpers();
+            let sums: Vec<_> = arts
+                .iter()
+                .filter_map(|art| {
+                    let (w, h, rgba) = decode(&covers::Key::of(art, covers::BUCKETS[0]))?;
+                    Some(covers::cover_of(w, h, rgba).hue)
+                })
+                .collect();
+            let (h, _) = colors::library_hue(&sums);
+            *hue.lock().unwrap_or_else(|e| e.into_inner()) = Some((root, h));
+            if let Some(w) = &waker {
+                w.wake();
+            }
+        });
+    }
+}
+
+/// 4581 as "4,581".
+fn group(n: usize) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 impl AlbumWall {
@@ -339,11 +424,16 @@ impl AlbumWall {
 
 /// `child` in the middle of the window.
 fn centered(child: Element<Msg>) -> Element<Msg> {
-    column(vec![space().height(Length::FILL), child, space().height(Length::FILL)])
-        .align(Align::Center)
-        .padding(26.0)
-        .width(Length::FILL)
-        .height(Length::FILL)
+    panel(
+        column(vec![space().height(Length::FILL), child, space().height(Length::FILL)])
+            .align(Align::Center)
+            .width(Length::FILL)
+            .height(Length::FILL),
+    )
+    .padding(26.0)
+    .radius(0.0)
+    .width(Length::FILL)
+    .height(Length::FILL)
 }
 
 impl Program for AlbumWall {
@@ -360,22 +450,29 @@ impl Program for AlbumWall {
     /// AlbumWall's dark window whatever the desktop's scheme; the desktop's
     /// fonts, text size, accent, contrast and motion kept.
     fn theme(&self) -> Theme {
-        let t = Theme::from_desktop(&self.desktop, true, SECTION);
-        if t.dark {
-            return t;
+        let mut t = Theme::from_desktop(&self.desktop, true, SECTION);
+        if !t.dark {
+            let d = Theme::new(true, t.accent, t.high_contrast);
+            t = Theme {
+                dark: true,
+                sidebar: d.sidebar,
+                page: d.page,
+                card: d.card,
+                line: d.line,
+                dim: d.dim,
+                text: d.text,
+                hover: d.hover,
+                ..t
+            };
         }
-        let d = Theme::new(true, t.accent, t.high_contrast);
-        Theme {
-            dark: true,
-            sidebar: d.sidebar,
-            page: d.page,
-            card: d.card,
-            line: d.line,
-            dim: d.dim,
-            text: d.text,
-            hover: d.hover,
-            ..t
+        // The library on the wall: its ground and text are the window's.
+        if self.shown.is_some() {
+            let g = self.ground();
+            t.page = wallview::color(g.ground);
+            t.text = wallview::color(g.text);
+            t.dim = wallview::color(g.text_dim);
         }
+        t
     }
 
     fn bar_style(&self) -> Option<BarStyle> {
@@ -387,7 +484,7 @@ impl Program for AlbumWall {
         if let Some((root, albums, files)) = &self.shown
             && *root == lib.folder
         {
-            return self.library_view(albums, *files);
+            return self.library_view(albums, *files, t);
         }
         match &self.unreachable {
             Some((why, held)) if !self.reader.running() => self.unreachable_view(why, *held),
@@ -399,6 +496,16 @@ impl Program for AlbumWall {
         match message {
             Msg::ChooseFolder => self.choose_folder(window),
             Msg::TryAgain => self.read(false),
+            Msg::Open(i) => self.opened = Some(i),
+            Msg::Library(i) => {
+                if i < self.libraries.list.len() && i != self.libraries.current {
+                    self.libraries.current = i;
+                    if let Some(p) = &self.list_path {
+                        let _ = self.libraries.save(p);
+                    }
+                    self.read(false);
+                }
+            }
         }
         self.ask_retry(window);
     }
@@ -417,7 +524,16 @@ impl Program for AlbumWall {
         }
     }
 
+    fn scale(&mut self, scale: f32) -> bool {
+        let changed = (scale - self.scale).abs() > 0.001;
+        self.scale = scale.max(0.25);
+        changed
+    }
+
     fn waker(&mut self, waker: Waker) {
+        // Covers decoded on two workers; each one ready wakes the window.
+        let w = waker.clone();
+        self.covers = Some(Arc::new(Covers::new(2, covers::helpers(), move || w.wake())));
         self.waker = Some(waker);
         // The library on the wall last time, read as the window opens.
         self.read(false);
@@ -430,8 +546,8 @@ impl Program for AlbumWall {
             self.read(false);
         }
         self.ask_retry(window);
-        // Progress: drawn again while a read is under way.
-        chosen || read || self.reader.running()
+        // Progress while a read is under way; covers and the hue as they come.
+        chosen || read || self.reader.running() || self.shown.is_some()
     }
 
     fn timer(&mut self, id: u64, window: &mut Window) -> bool {

@@ -246,3 +246,15 @@ where any app can use it, not inside AlbumWall):
   - `--colors FOLDER`: on techbench, 200 of Dave's covers each: FLAC
     sidecars 15 ms a cover, the lossy library's embedded covers 7 ms; none
     failed; library hue 11° and 22°.
+- **Step 4, the wall** (2026-11-25): the toolkit's grid (only rows in view
+  built); wall.rs: the columns nearest a 185-point cover filling the row
+  exactly (132 to 268), the tile's height, each album's placeholder color
+  (AlbumVm's FNV over the names); wallview.rs: tiles (cover from the cache,
+  never cropped, on its placeholder; a tile with no art its own sleeve),
+  title and artist under it in the ground's text colors, the margins
+  (26/20/26), the ground and bars from the library's hue (measured from
+  200 covers spread across it, on a thread of its own), the bottom bar
+  with the status line, the counts and the library picker. Seen on
+  techbench with Dave's FLAC library (372 albums): covers load, scrolling
+  to the end builds the rows there. Moved to step 5 with the transitions:
+  the covers' 220 ms fade-in; the scrolling measurement on kepler.
