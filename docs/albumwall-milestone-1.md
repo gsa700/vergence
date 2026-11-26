@@ -201,3 +201,30 @@ where any app can use it, not inside AlbumWall):
   work, brought under Vergence's license as its author, as Hymie's decoders
   were (Dave, 2026-11-25: "bring the port under the vergence dual license,
   we'll leave the original as is"; the Avalonia AlbumWall stays GPL-3.0). Tests: Hubble 1,101, kepler 1,090, techbench 1,101.
+- **Step 2, the library** (2026-11-25, all but the folder watcher):
+  - Hymie (f5dae74, d50dae5): a file's facts from its two ends
+    (crates/vergence-hymie/src/facts.rs): the program sends 256 KB of head,
+    128 KB of tail and the size; the helper answers the facts or how much
+    more of each end it wants (a FLAC's metadata chain, an MP3's ID3 tags,
+    an MP4's moov, a WAV's chunks). The walk that decides runs in the
+    helper. AAC measured from its container. ID3 and MP4 now give the
+    album artist, track, disc and date. `helper::Scanner`: one helper for a
+    whole scan; `I` measures sidecar pictures there.
+  - AlbumWall: the library rules with the Avalonia app's tests (library.rs,
+    f9327b7/7a21f13); the index, our own file per library in
+    ~/.cache/vergence/albumwall (index.rs); the scan (scan.rs): listed
+    first, read second; missing, emptied and failed libraries told apart;
+    `--scan FOLDER [--rescan]` for measuring.
+  - **Measured** on a synthetic library on Hubble (1,000 albums, 12,000
+    FLACs of 30 MB, sparse; tools in ~/.cache/vergence-lab/scratch): first
+    scan 13.1 s, unchanged 0.07 s, Rescan 11.5 s. A first scan of a real
+    library over the network reads about 384 KB a file (4.6 GB for 12,000
+    tracks, ~40 s over gigabit) instead of every byte. Not yet measured on
+    Dave's own library (on NASBOX; not mounted on the lab machines).
+  - The window (reading.rs): the read in the background with a true
+    progress bar, then the counts until the wall (step 4); "cannot be
+    reached" in the Avalonia app's words, Try again, looked for again
+    every 30 seconds; a wall already shown stays while its library is out
+    of reach; Library › Rescan the library.
+  - Left: the folder watcher, and the library picker (it lives in the
+    bottom bar, which comes with the wall).
