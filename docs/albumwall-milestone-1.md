@@ -199,4 +199,5 @@ where any app can use it, not inside AlbumWall):
   Music) and AlbumWall's own icon, in install.sh's lists. AlbumWall is
   GPL-3.0; what is ported from it (its rules, colors, icon) is Dave's own
   work, brought under Vergence's license as its author, as Hymie's decoders
-  were. Tests: Hubble 1,101, kepler 1,090, techbench 1,101.
+  were (Dave, 2026-11-25: "bring the port under the vergence dual license,
+  we'll leave the original as is"; the Avalonia AlbumWall stays GPL-3.0). Tests: Hubble 1,101, kepler 1,090, techbench 1,101.
