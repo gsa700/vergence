@@ -5,3 +5,4 @@ pub mod index;
 pub mod libraries;
 pub mod library;
 pub mod scan;
+pub mod watch;

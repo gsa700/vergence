@@ -41,6 +41,8 @@ mod cmd {
 
 mod timer {
     pub const RETRY: u64 = 1;
+    /// A library no watcher covers (a share), looked at again.
+    pub const POLL: u64 = 2;
 }
 
 #[derive(Debug, Clone)]
@@ -70,6 +72,13 @@ struct AlbumWall {
     unreachable: Option<(Unreachable, usize)>,
     /// Ask for the retry timer (set where no window is at hand).
     retry_wanted: bool,
+    /// The library on the wall watched for changes (None: a share, looked
+    /// at again every 15 minutes instead).
+    watcher: Option<(PathBuf, Option<vergence_albumwall::watch::Watcher>)>,
+    poll_wanted: bool,
+    /// When an unwatched library was last looked at again on the window
+    /// coming to the front (at most once a minute).
+    looked: Option<std::time::Instant>,
 }
 
 impl AlbumWall {
@@ -91,6 +100,9 @@ impl AlbumWall {
             shown: None,
             unreachable: None,
             retry_wanted: false,
+            watcher: None,
+            poll_wanted: false,
+            looked: None,
         }
     }
 
@@ -156,6 +168,7 @@ impl AlbumWall {
         }
         match outcome {
             Outcome::Albums { albums, files } => {
+                self.watch(&root);
                 self.shown = Some((root, albums, files));
                 self.unreachable = None;
             }
@@ -291,11 +304,36 @@ impl AlbumWall {
 }
 
 impl AlbumWall {
-    /// The retry timer asked for when a read found the library out of reach.
+    /// The retry timer asked for when a read found the library out of reach;
+    /// the 15-minute look for a library no watcher covers.
     fn ask_retry(&mut self, window: &mut Window) {
         if std::mem::take(&mut self.retry_wanted) {
             window.wake_after(timer::RETRY, RETRY);
         }
+        if std::mem::take(&mut self.poll_wanted) {
+            window.wake_after(timer::POLL, vergence_albumwall::watch::POLL);
+        }
+    }
+
+    /// `root` watched (once per library on the wall): changes read after
+    /// they settle; a share, looked at again every 15 minutes.
+    fn watch(&mut self, root: &std::path::Path) {
+        if self.watcher.as_ref().is_some_and(|(r, _)| r == root) {
+            return;
+        }
+        let waker = self.waker.clone();
+        let w = vergence_albumwall::watch::Watcher::start(root, move || {
+            if let Some(w) = &waker {
+                w.wake();
+            }
+        });
+        self.poll_wanted = w.is_none();
+        self.watcher = Some((root.to_path_buf(), w));
+    }
+
+    /// Whether the watched library changed (taken once).
+    fn library_changed(&self) -> bool {
+        self.watcher.as_ref().and_then(|(_, w)| w.as_ref()).is_some_and(|w| w.take_changed())
     }
 }
 
@@ -365,6 +403,20 @@ impl Program for AlbumWall {
         self.ask_retry(window);
     }
 
+    /// The window coming to the front: a library no watcher covers (a
+    /// share; any library on FreeBSD for now) is looked at again, at most
+    /// once a minute (Dave, 2026-11-25: "the lean is fine").
+    fn saw(&mut self, input: &vergence_widgets::Input) {
+        let unwatched = self.watcher.as_ref().is_some_and(|(_, w)| w.is_none());
+        if matches!(input, vergence_widgets::Input::Focus(true))
+            && unwatched
+            && self.looked.is_none_or(|t| t.elapsed() >= Duration::from_secs(60))
+        {
+            self.looked = Some(std::time::Instant::now());
+            self.read(false);
+        }
+    }
+
     fn waker(&mut self, waker: Waker) {
         self.waker = Some(waker);
         // The library on the wall last time, read as the window opens.
@@ -374,6 +426,9 @@ impl Program for AlbumWall {
     fn woken(&mut self, window: &mut Window) -> bool {
         let chosen = self.take_chosen();
         let read = self.take_outcome();
+        if self.library_changed() {
+            self.read(false);
+        }
         self.ask_retry(window);
         // Progress: drawn again while a read is under way.
         chosen || read || self.reader.running()
@@ -382,6 +437,10 @@ impl Program for AlbumWall {
     fn timer(&mut self, id: u64, window: &mut Window) -> bool {
         if id == timer::RETRY && self.unreachable.is_some() {
             self.read(false);
+        }
+        if id == timer::POLL {
+            self.read(false);
+            self.poll_wanted = true;
         }
         self.ask_retry(window);
         true
