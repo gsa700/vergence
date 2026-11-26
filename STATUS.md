@@ -1,6 +1,6 @@
 # Where Vergence stands
 
-The one status page (updated 2026-11-22). Each milestone's plan and progress
+The one status page (updated 2026-11-25). Each milestone's plan and progress
 is in docs/<area>-milestone-N.md; the order of work and its reasons are in
 the whitepaper's §9 (docs/Vergence-Whitepaper.md); wishes and what comes
 after are in docs/apps-roadmap.md.
@@ -12,8 +12,25 @@ sync.
 
 ## In progress
 
-Nothing: **v0.3.0 released 2026-11-23**, closing two milestones the same
-day after Dave's hands-on passes on techbench:
+- **AlbumWall milestone 1** (docs/albumwall-milestone-1.md, answered
+  2026-11-25: "all leans, go ahead"): AlbumWall for Vergence,
+  `vergence-albumwall`, on a folder library: the wall, albums unfolding in
+  place, gapless playback with ReplayGain, the play bar, colors from the
+  covers, search, the keyboard, Preferences. Navidrome, lyrics, MPRIS and
+  the rest in milestone 2. Building, step 1.
+- **Vergence Remote** (docs/remote-milestone-1.md): steps 1 to 5 and the
+  first part of step 6 built (2026-11-23); paused for AlbumWall. Left: the
+  desk login taking the monitorless session onto the monitors, and full
+  screen for every app (proposed, waiting for Dave's word).
+- **Edit syntax milestone 1** (docs/edit-syntax-milestone-1.md): built
+  2026-11-24, in the techbench package; closes on Dave's word.
+
+Closed since v0.3.0: **frost milestone 1** (docs/frost-milestone-1.md,
+2026-11-25): frosted glass behind a see-through terminal, its bar the
+window's glass, its text running up under the bar blurred.
+
+**v0.3.0 released 2026-11-23**, closing two milestones the same day after
+Dave's hands-on passes on techbench:
 
 - **Archive milestone 1** (docs/archive-milestone-1.md): FileView extracts
   archives (a double click, Extract Here, Extract To…) and Compress makes a
@@ -38,7 +55,7 @@ releases were added late).
 
 ## Next
 
-1. **Vergence Remote** (docs/remote-milestone-1.md, redrafted 2026-11-23
+1. **Vergence Remote**, the rest of it (docs/remote-milestone-1.md, redrafted 2026-11-23
    with Dave): an app to use a Vergence machine from another as if at it
    (a KVM for use, not hardware), over SSH (WireGuard as the path), our own
    protocol only: display lists and compressed pixels, input, clipboard,
@@ -46,9 +63,9 @@ releases were added late).
    prompt for the same user. The Vergence viewer first, then the Mac through
    the toolkit's portable build. Sound and video later, with the recording
    milestone's encoder. Answered (all leans); building.
-2. **AlbumWall for Vergence** (generic name Music): AlbumWall's wall of
-   covers and player rebuilt in Rust on the toolkit and Hymie
-   (crates/vergence-hymie), for Vergence (docs/apps-roadmap.md).
+2. **AlbumWall milestone 2**: Navidrome (the TLS borrowing question),
+   lyrics, MPRIS and the media keys, compact mode, the other meters, the
+   equalizer (docs/albumwall-milestone-1.md, "Later").
 3. **The web component**: WebKit (WPE) as a component any app can embed,
    likely a service the server composites; then Mail and a browser on it.
 4. **The Vergence system** (release pathway §4): our installer and ISO on a

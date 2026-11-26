@@ -1,5 +1,10 @@
 # Frost milestone 1: frosted glass behind see-through windows
 
+**Closed 2026-11-25** (Dave, on techbench with vergence-0.4.0pre12: "The
+terminal looks great"; at 90% "a great balance", the light schemes bright
+as expected). Built for the terminal alone: frosted glass, the bar as the
+window's glass in its colors, its text running up under the bar blurred.
+
 **Drafted 2026-11-24**, from Dave's wish (docs/apps-roadmap.md, "Frosted
 see-through windows, as a setting"): "add frosted blur to the wish list, as
 a setting", then "Let's get blurry! the macOS actually has two different
