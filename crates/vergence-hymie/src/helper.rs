@@ -19,6 +19,8 @@
 //!   answer is the file's [`crate::facts::Facts`], or kind 3: how much of
 //!   each end is wanted (two u64), asked again with more. Nothing stays
 //!   open: one helper answers for a whole library ([`Scanner`]).
+//! - `I` a picture's first bytes (a sidecar cover.jpg): its width and height
+//!   (two u32) from its header, so the program never reads the picture.
 //!
 //! An answer of kind 0 is the answer; kind 1 a refusal, its body why; kind 2
 //! (to `D` only) "AAC: ask the AAC helper", which [`Sound`] answers by
@@ -235,6 +237,9 @@ pub fn serve_with(
                     }
                 }
             })(),
+            b'I' => crate::facts::image_size(&crate::facts::repair(&body))
+                .map(|(w, h)| [w.to_le_bytes(), h.to_le_bytes()].concat())
+                .ok_or_else(|| "not a picture whose size can be read".to_string()),
             b'P' => (|| {
                 let o = open.as_mut().ok_or("no file")?;
                 let slices = u32::from_le_bytes(body.get(..4).ok_or("short")?.try_into().map_err(|_| "short")?)
@@ -589,6 +594,26 @@ impl Scanner {
             }
         }
         Err(crate::damaged("Its tags could not be found in its ends."))
+    }
+
+    /// A picture file's size in pixels from its header (its first 256 KB:
+    /// past a JPEG's EXIF block, well inside the frame header), measured in
+    /// the helper. None if it cannot be read or measured.
+    pub fn image_size(&mut self, path: &Path) -> Option<(u32, u32)> {
+        let mut head = Vec::new();
+        std::fs::File::open(path).ok()?.take(256 << 10).read_to_end(&mut head).ok()?;
+        let r = self.start().ok()?;
+        match ask_child(&r.child, &mut r.to, &mut r.from, b'I', &head) {
+            Ok((0, b)) if b.len() == 8 => Some((
+                u32::from_le_bytes(b[..4].try_into().unwrap_or([0; 4])),
+                u32::from_le_bytes(b[4..].try_into().unwrap_or([0; 4])),
+            )),
+            Ok(_) => None,
+            Err(_) => {
+                self.running = None;
+                None
+            }
+        }
     }
 }
 

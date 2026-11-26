@@ -36,5 +36,14 @@ fn a_library_is_scanned_by_one_helper() {
     let aac = s.facts(&dir.join("aac.m4a")).unwrap();
     assert_eq!(aac.rate, 44100);
     assert!(matches!(s.facts(&dir.join("gone.flac")), Err(vergence_hymie::Error::Io(_))));
+    // A sidecar measured by the helper: a PNG header of 640 x 480.
+    let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, b'I', b'H', b'D', b'R'];
+    png.extend_from_slice(&640u32.to_be_bytes());
+    png.extend_from_slice(&480u32.to_be_bytes());
+    png.extend_from_slice(&[8, 2, 0, 0, 0, 0, 0, 0, 0]);
+    std::fs::write(dir.join("cover.png"), &png).unwrap();
+    assert_eq!(s.image_size(&dir.join("cover.png")), Some((640, 480)));
+    std::fs::write(dir.join("notes.txt"), b"not a picture").unwrap();
+    assert_eq!(s.image_size(&dir.join("notes.txt")), None);
     std::fs::remove_dir_all(&dir).unwrap();
 }

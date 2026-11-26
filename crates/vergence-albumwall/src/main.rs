@@ -230,9 +230,66 @@ fn main() {
         println!("vergence-albumwall {}", env!("CARGO_PKG_VERSION"));
         return;
     }
+    // `--scan FOLDER [--rescan]`: the library read without the window, its
+    // albums printed with the time it took (measuring a scan; checking one).
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(i) = args.iter().position(|a| a == "--scan") {
+        let Some(folder) = args.get(i + 1) else {
+            eprintln!("vergence-albumwall: --scan needs a folder");
+            std::process::exit(2);
+        };
+        std::process::exit(scan_and_print(std::path::Path::new(folder), args.iter().any(|a| a == "--rescan")));
+    }
     // The Avalonia app's default size.
     if let Err(e) = vergence_widgets::run(AlbumWall::new(), (1444, 1080)) {
         eprintln!("vergence-albumwall: {e}");
         std::process::exit(1);
+    }
+}
+
+/// `--scan`: the albums of `folder`, one a line, then the counts and the time.
+fn scan_and_print(folder: &std::path::Path, rescan: bool) -> i32 {
+    use vergence_albumwall::{index, scan};
+    let index_path = index::path_for(folder);
+    let mut idx = index_path.as_deref().map(index::Index::load).unwrap_or_default();
+    let mut scanner = match vergence_hymie::helper::Scanner::new() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("vergence-albumwall: {e}");
+            return 1;
+        }
+    };
+    let started = std::time::Instant::now();
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    match scan::scan(folder, &mut idx, !rescan, false, &mut scanner, &cancel, |_| {}) {
+        Ok(found) => {
+            for a in &found.albums {
+                let art = match &a.front {
+                    Some(f) if f.embedded => format!("embedded {}x{}", f.width, f.height),
+                    Some(f) => {
+                        format!("{} {}x{}", f.path.file_name().unwrap_or_default().to_string_lossy(), f.width, f.height)
+                    }
+                    None => "no art".into(),
+                };
+                println!("{} — {} ({}) · {} tracks · {art}", a.album_artist, a.title, a.year, a.tracks.len());
+            }
+            println!(
+                "{} albums, {} files, {} opened, {:.2} s",
+                found.albums.len(),
+                found.files,
+                found.opened,
+                started.elapsed().as_secs_f64()
+            );
+            if let Some(p) = &index_path
+                && let Err(e) = idx.save(p)
+            {
+                eprintln!("vergence-albumwall: the index could not be kept: {e}");
+            }
+            0
+        }
+        Err(why) => {
+            eprintln!("vergence-albumwall: {folder:?} cannot be read: {why:?}");
+            1
+        }
     }
 }

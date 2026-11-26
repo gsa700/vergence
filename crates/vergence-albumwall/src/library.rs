@@ -106,7 +106,7 @@ impl TrackFacts {
             millis,
             rate: f.rate,
             bits: f.bits,
-            bitrate: if millis > 0 { (size.saturating_mul(8) / millis) as u32 } else { 0 },
+            bitrate: size.saturating_mul(8).checked_div(millis).unwrap_or(0) as u32,
             cover: f.cover,
         }
     }
