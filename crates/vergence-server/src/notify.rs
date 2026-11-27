@@ -7,10 +7,14 @@
 // can replace or close it, and only it hears that it closed or that an action
 // was chosen (unicast, never broadcast).
 //
-// Cards stack down from the top-right corner of the monitor the pointer was on
-// when the first of them appeared, sized in points like the menu and title
-// bars, so they are the same physical size on every monitor; text is
-// rasterized at each monitor's own pixels. Light or dark follows the
+// Cards stack down from the top-right corner (or the place chosen) of the
+// monitor the pointer was on when the first of them appeared, sized in points
+// like the menu and title bars, so they are the same physical size on every
+// monitor. Each is drawn as a scene (as a Dockworker's card): the app's name
+// small, the title semibold, the body, its buttons; an accent stripe down its
+// left edge (the alarm red for a critical one) on the cards' frost, so they
+// are seen (Dave, 2026-11-27: "I have had notifications go unseen for a while
+// because it just gets lost in the desktop"). Light or dark follows the
 // color-scheme setting. A click on a card runs its "default" action (if it has
 // one) and closes it; other actions are buttons under the text. Cards expire
 // after their timeout (when the app leaves it to the server: 5 s, 10 s for a
@@ -24,8 +28,9 @@
 //                            the server's own, the volume level, still are)
 //   seconds = 5              how long a card stays when the app leaves it to the
 //                            desktop (a card with buttons at least 10 s)
-//   corner = "top-right"     top-right, top-left, bottom-right or bottom-left;
-//                            at the bottom the newest card is nearest the corner
+//   corner = "top-right"     top-right, top-left, top-center (as GNOME's),
+//                            bottom-right or bottom-left; at the bottom the
+//                            newest card is nearest the corner
 //   off = ["Firefox"]        apps whose cards are never shown, critical ones too
 //                            (the name an app gives, any case)
 //
@@ -35,6 +40,7 @@
 // last written down more than an hour ago, so a chatty app costs nothing.
 
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
 use smithay::{
@@ -42,27 +48,37 @@ use smithay::{
         allocator::Fourcc,
         renderer::{
             element::{
-                Id, Kind,
+                Kind,
                 memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
-                solid::SolidColorRenderElement,
             },
             gles::GlesRenderer,
-            utils::CommitCounter,
         },
     },
     reexports::calloop::timer::{TimeoutAction, Timer},
     utils::{Logical, Point, Rectangle, Transform},
 };
 
+use vergence_scene::{Color, Point as ScenePoint, Rect as SceneRect, Scene};
+
 use crate::{Server, decor::SceneElement};
 
-const WIDTH: i32 = 340;
-const PAD: i32 = 10;
-const GAP: i32 = 8;
+/// A card: wider and roomier than it was (340 and 10), to be seen.
+const WIDTH: i32 = 400;
+const PAD: i32 = 14;
+/// The accent stripe down the card's left edge.
+const STRIPE: i32 = 4;
+const GAP: i32 = 10;
 const MARGIN: i32 = 12;
 const MAX_BODY_LINES: usize = 4;
 const MAX_SHOWN: usize = 5;
-const BUTTON_H: i32 = 24;
+const BUTTON_H: i32 = 28;
+/// The app's name, the title and the body: sizes and line heights, in points.
+const APP_SIZE: f32 = 11.0;
+const APP_H: i32 = 17;
+const TITLE_SIZE: f32 = 15.0;
+const TITLE_H: i32 = 21;
+const BODY_SIZE: f32 = 13.0;
+const BODY_H: i32 = 18;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 /// For cards with buttons: time to read them and reach for one.
 const BUTTONS_TIMEOUT: Duration = Duration::from_secs(10);
@@ -111,11 +127,29 @@ struct Note {
     left: Option<Duration>,
     /// Laid out: the card, its text lines and its buttons (logical).
     rect: Rectangle<i32, Logical>,
-    lines: Vec<(String, Rectangle<i32, Logical>, bool)>,
+    lines: Vec<(String, Rectangle<i32, Logical>, Line)>,
     buttons: Vec<(String, Rectangle<i32, Logical>)>,
-    ids: Vec<Id>,
-    commit: CommitCounter,
-    rasters: HashMap<(usize, u64), MemoryRenderBuffer>,
+    /// Its picture as last drawn (by what it was drawn from), and its frost.
+    picture: Option<(u64, MemoryRenderBuffer)>,
+    frost: crate::backdrop::Slot,
+}
+
+/// What a line of a card is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Line {
+    App,
+    Title,
+    Body,
+}
+
+/// Where the cards stack: a corner of the work area, or the middle of its top.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Place {
+    TopRight,
+    TopLeft,
+    TopCenter,
+    BottomRight,
+    BottomLeft,
 }
 
 #[derive(Default)]
@@ -138,15 +172,14 @@ pub struct Notifications {
 pub struct Config {
     pub do_not_disturb: bool,
     pub timeout: Duration,
-    /// (right, bottom).
-    pub corner: (bool, bool),
+    pub corner: Place,
     /// Apps switched off, in lower case.
     pub off: Vec<String>,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { do_not_disturb: false, timeout: DEFAULT_TIMEOUT, corner: (true, false), off: Vec::new() }
+        Config { do_not_disturb: false, timeout: DEFAULT_TIMEOUT, corner: Place::TopRight, off: Vec::new() }
     }
 }
 
@@ -165,10 +198,11 @@ pub fn parse(text: &str) -> Config {
             .map(|s| Duration::from_secs(s.clamp(2, 600) as u64))
             .unwrap_or(d.timeout),
         corner: match t.get("corner").and_then(|v| v.as_str()).unwrap_or("") {
-            "top-left" => (false, false),
-            "bottom-right" => (true, true),
-            "bottom-left" => (false, true),
-            _ => (true, false),
+            "top-left" => Place::TopLeft,
+            "top-center" => Place::TopCenter,
+            "bottom-right" => Place::BottomRight,
+            "bottom-left" => Place::BottomLeft,
+            _ => Place::TopRight,
         },
         off: t
             .get("off")
@@ -227,33 +261,6 @@ fn write_apps(apps: &HashMap<String, u64>) -> std::io::Result<()> {
 pub fn load() -> Config {
     Some(crate::wallpaper::desktop_text()).map(|t| parse(&t)).unwrap_or_default()
 }
-
-struct Palette {
-    bg: [f32; 4],
-    edge: [f32; 4],
-    critical: [f32; 4],
-    button: [f32; 4],
-    title: [f32; 3],
-    text: [f32; 3],
-}
-
-const DARK: Palette = Palette {
-    bg: [0.13, 0.14, 0.17, 0.97],
-    edge: [0.30, 0.32, 0.37, 1.0],
-    critical: [0.80, 0.25, 0.22, 1.0],
-    button: [0.22, 0.24, 0.29, 1.0],
-    title: [0.95, 0.95, 0.95],
-    text: [0.78, 0.79, 0.82],
-};
-
-const LIGHT: Palette = Palette {
-    bg: [0.97, 0.97, 0.98, 0.98],
-    edge: [0.72, 0.74, 0.78, 1.0],
-    critical: [0.80, 0.25, 0.22, 1.0],
-    button: [0.88, 0.89, 0.91, 1.0],
-    title: [0.08, 0.08, 0.10],
-    text: [0.25, 0.26, 0.29],
-};
 
 /// Words into lines no wider than `max` (by `width`), at most `max_lines`, the
 /// last cut with an ellipsis if text is left over. Newlines in the text are kept.
@@ -352,9 +359,8 @@ impl Server {
             rect: Rectangle::default(),
             lines: Vec::new(),
             buttons: Vec::new(),
-            ids: Vec::new(),
-            commit: CommitCounter::default(),
-            rasters: HashMap::new(),
+            picture: None,
+            frost: None,
         };
         tracing::info!("notify: #{id} from {} ({origin:?}): {:?}", note.app, note.summary);
         match replacing {
@@ -419,12 +425,30 @@ impl Server {
         self.notes.anchor = Some(anchor);
         // Beside the shelf's strip, not under it (shelf.rs).
         let area = self.work_area(anchor);
-        let font = self.title_font.as_ref();
-        let line_h = font.map(|f| (f.points * 96.0 / 72.0 * 1.45).round() as i32).unwrap_or(18);
-        let width = |s: &str| font.map(|f| f.width(s)).unwrap_or(s.chars().count() as f32 * 7.0);
-        let text_w = (WIDTH - 2 * PAD) as f32;
-        let (right, bottom) = self.notes.config.corner;
-        let x = if right { area.loc.x + area.size.w - WIDTH - MARGIN } else { area.loc.x + MARGIN };
+        let mut fonts = self.shelf.fonts.take().unwrap_or_else(vergence_text::Fonts::system);
+        let (regular, semibold) = (
+            fonts.face("sans-serif", 400, false),
+            fonts.face("sans-serif", 600, false).or_else(|| fonts.face("sans-serif", 700, false)),
+        );
+        // Measured through a cell: wrapping takes a plain Fn, measuring borrows the fonts.
+        let cell = std::cell::RefCell::new(fonts);
+        let width = |s: &str, line: Line| -> f32 {
+            let (face, size) = match line {
+                Line::App => (regular, APP_SIZE),
+                Line::Title => (semibold, TITLE_SIZE),
+                Line::Body => (regular, BODY_SIZE),
+            };
+            face.map_or(s.chars().count() as f32 * size * 0.55, |f| cell.borrow_mut().layout(f, size, s).1)
+        };
+        let text_x = PAD + STRIPE;
+        let text_w = (WIDTH - text_x - PAD) as f32;
+        let place = self.notes.config.corner;
+        let bottom = matches!(place, Place::BottomRight | Place::BottomLeft);
+        let x = match place {
+            Place::TopRight | Place::BottomRight => area.loc.x + area.size.w - WIDTH - MARGIN,
+            Place::TopLeft | Place::BottomLeft => area.loc.x + MARGIN,
+            Place::TopCenter => area.loc.x + (area.size.w - WIDTH) / 2,
+        };
         // At the bottom: laid out from the top, oldest first, then moved down
         // so the newest ends nearest the corner.
         let top = area.loc.y + MARGIN;
@@ -434,28 +458,46 @@ impl Server {
         for i in order {
             let n = &mut self.notes.notes[i];
             let mut lines = Vec::new();
-            let mut ty = y + PAD;
+            let mut ty = y + PAD - 2;
+            // The app's name small above (unless the title is the app's own name).
             let title = if n.summary.is_empty() { n.app.clone() } else { n.summary.clone() };
-            for t in wrap(&title, text_w, 2, &width) {
-                lines.push((t, Rectangle::new((x + PAD, ty).into(), (WIDTH - 2 * PAD, line_h).into()), true));
-                ty += line_h;
+            if !n.app.is_empty() && n.app != title {
+                let app = wrap(&n.app, text_w, 1, &|s| width(s, Line::App)).into_iter().next().unwrap_or_default();
+                lines.push((
+                    app,
+                    Rectangle::new((x + text_x, ty).into(), (WIDTH - text_x - PAD, APP_H).into()),
+                    Line::App,
+                ));
+                ty += APP_H;
             }
-            for t in wrap(&n.body, text_w, MAX_BODY_LINES, &width) {
-                lines.push((t, Rectangle::new((x + PAD, ty).into(), (WIDTH - 2 * PAD, line_h).into()), false));
-                ty += line_h;
+            for t in wrap(&title, text_w, 2, &|s| width(s, Line::Title)) {
+                lines.push((
+                    t,
+                    Rectangle::new((x + text_x, ty).into(), (WIDTH - text_x - PAD, TITLE_H).into()),
+                    Line::Title,
+                ));
+                ty += TITLE_H;
+            }
+            for t in wrap(&n.body, text_w, MAX_BODY_LINES, &|s| width(s, Line::Body)) {
+                lines.push((
+                    t,
+                    Rectangle::new((x + text_x, ty).into(), (WIDTH - text_x - PAD, BODY_H).into()),
+                    Line::Body,
+                ));
+                ty += BODY_H;
             }
             let mut buttons = Vec::new();
             let shown: Vec<&(String, String)> = n.actions.iter().filter(|(k, _)| k != "default").collect();
             if !shown.is_empty() {
-                ty += 4;
-                let mut bx = x + PAD;
+                ty += 8;
+                let mut bx = x + text_x;
                 for (key, label) in shown {
-                    let w = (width(label).ceil() as i32 + 20).min(WIDTH - 2 * PAD);
+                    let w = (width(label, Line::Body).ceil() as i32 + 24).min(WIDTH - text_x - PAD);
                     if bx + w > x + WIDTH - PAD {
                         break;
                     }
                     buttons.push((key.clone(), Rectangle::new((bx, ty).into(), (w, BUTTON_H).into())));
-                    bx += w + 6;
+                    bx += w + 8;
                 }
                 ty += BUTTON_H;
             }
@@ -463,11 +505,10 @@ impl Server {
             n.rect = Rectangle::new((x, y).into(), (WIDTH, h).into());
             n.lines = lines;
             n.buttons = buttons;
-            n.ids = (0..3 + n.buttons.len()).map(|_| Id::new()).collect();
-            n.rasters.clear();
-            n.commit.increment();
+            n.picture = None;
             y += h + GAP;
         }
+        self.shelf.fonts = Some(cell.into_inner());
         if bottom {
             let dy = (area.loc.y + area.size.h - MARGIN) - (y - GAP);
             for n in self.notes.notes.iter_mut() {
@@ -607,82 +648,135 @@ impl Server {
             return Vec::new();
         }
         let light = self.light_style();
-        let pal = if light { &LIGHT } else { &DARK };
-        let phys = |r: Rectangle<i32, Logical>| {
-            let a = (r.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
-            let b = (r.loc + r.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
-            Rectangle::new(a, (b.x - a.x, b.y - a.y).into())
+        let look = vergence_look::shelf_look(light);
+        let ink = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
+        let accent = self.accent();
+        let alarm = vergence_look::bar_look(light).alert;
+        let frost = self.frost_program(renderer);
+        let frost_look = self.panel_frost(scale);
+        let solid = if frost.is_some() || self.reduce_transparency() {
+            255
+        } else {
+            (self.shelf_opacity() * 255.0).round() as u8
         };
-        let font = self.title_font.as_ref();
+        let mut fonts = self.shelf.fonts.take().unwrap_or_else(vergence_text::Fonts::system);
+        let (regular, semibold) = (
+            fonts.face("sans-serif", 400, false),
+            fonts.face("sans-serif", 600, false).or_else(|| fonts.face("sans-serif", 700, false)),
+        );
         let mut els = Vec::new();
         for n in self.notes.notes.iter_mut() {
             if !n.rect.overlaps(out) {
                 continue;
             }
-            // Text and button labels (front).
-            let mut texts: Vec<(String, Rectangle<i32, Logical>, [f32; 3])> = n
-                .lines
-                .iter()
-                .map(|(t, r, title)| (t.clone(), *r, if *title { pal.title } else { pal.text }))
-                .collect();
-            for (key, r) in &n.buttons {
-                let label = n.actions.iter().find(|(k, _)| k == key).map(|(_, l)| l.clone()).unwrap_or_default();
-                let inner = Rectangle::new((r.loc.x + 10, r.loc.y).into(), (r.size.w - 20, r.size.h).into());
-                texts.push((label, inner, pal.title));
+            let r = n.rect;
+            // Drawn again only when what it shows changed.
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            let rect = |r: &Rectangle<i32, Logical>| (r.loc.x, r.loc.y, r.size.w, r.size.h);
+            for (t, lr, line) in &n.lines {
+                (t, rect(lr), line).hash(&mut hasher);
             }
-            if let Some(font) = font {
-                for (i, (t, r, color)) in texts.iter().enumerate() {
-                    let (pw, ph) = ((r.size.w as f64 * scale).round() as i32, (r.size.h as f64 * scale).round() as i32);
-                    if pw <= 0 || ph <= 0 {
-                        continue;
+            for (k, br) in &n.buttons {
+                (k, rect(br)).hash(&mut hasher);
+            }
+            (&n.actions, n.urgency, rect(&r), light, frost.is_some(), solid).hash(&mut hasher);
+            (scale.to_bits(), accent.r, accent.g, accent.b).hash(&mut hasher);
+            let key = hasher.finish();
+            if n.picture.as_ref().map(|(k, _)| *k) != Some(key) {
+                let (w, h) = (r.size.w as f32, r.size.h as f32);
+                let mut scene = Scene::new(w, h);
+                let card = SceneRect::new(0.0, 0.0, w, h);
+                if frost.is_none() {
+                    scene.fill_rounded(
+                        card,
+                        vergence_look::RADIUS,
+                        Color::rgba(look.menu.0, look.menu.1, look.menu.2, solid),
+                    );
+                }
+                // The stripe down the left edge, inside the card's rounded corners.
+                scene.push_clip(card, vergence_look::RADIUS);
+                let stripe = if n.urgency >= 2 { Color::rgb(alarm.0, alarm.1, alarm.2) } else { accent };
+                scene.fill(SceneRect::new(0.0, 0.0, STRIPE as f32, h), stripe);
+                scene.pop_clip();
+                scene.stroke(card, vergence_look::RADIUS, vergence_look::EDGE, ink(look.edge));
+                for (t, lr, line) in &n.lines {
+                    let (face, size, color) = match line {
+                        Line::App => (regular, APP_SIZE, ink(look.menu_ink_off)),
+                        Line::Title => (semibold, TITLE_SIZE, ink(look.menu_ink)),
+                        Line::Body => (regular, BODY_SIZE, ink(look.menu_ink)),
+                    };
+                    let Some(face) = face else { continue };
+                    let m = fonts.metrics(face, size);
+                    let (lx, ly) = ((lr.loc.x - r.loc.x) as f32, (lr.loc.y - r.loc.y) as f32);
+                    let base = (ly + (lr.size.h as f32 - (m.ascent + m.descent)) / 2.0 + m.ascent).round();
+                    vergence_render::text(&mut scene, &mut fonts, face, size, color, ScenePoint::new(lx, base), t);
+                }
+                for (k, br) in &n.buttons {
+                    let label = n.actions.iter().find(|(key, _)| key == k).map(|(_, l)| l.clone()).unwrap_or_default();
+                    let b = SceneRect::new(
+                        (br.loc.x - r.loc.x) as f32,
+                        (br.loc.y - r.loc.y) as f32,
+                        br.size.w as f32,
+                        br.size.h as f32,
+                    );
+                    scene.fill_rounded(b, vergence_look::RADIUS, ink(look.hover));
+                    if let Some(face) = regular {
+                        let m = fonts.metrics(face, BODY_SIZE);
+                        let lw = fonts.layout(face, BODY_SIZE, &label).1;
+                        let base = (b.y + (b.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round();
+                        vergence_render::text(
+                            &mut scene,
+                            &mut fonts,
+                            face,
+                            BODY_SIZE,
+                            ink(look.menu_ink),
+                            ScenePoint::new(b.x + (b.w - lw) / 2.0, base),
+                            &label,
+                        );
                     }
-                    let buf = n.rasters.entry((i, scale.to_bits())).or_insert_with(|| {
-                        let rgba = font.render(t, pw as usize, ph as usize, scale, *color);
-                        MemoryRenderBuffer::from_slice(&rgba, Fourcc::Abgr8888, (pw, ph), 1, Transform::Normal, None)
-                    });
-                    let at = (r.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>().to_f64();
-                    let src = Rectangle::<f64, Logical>::from_size((pw as f64, ph as f64).into());
-                    if let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(
-                        renderer,
-                        at,
-                        buf,
-                        None,
-                        Some(src),
-                        Some(r.size),
-                        Kind::Unspecified,
-                    ) {
-                        els.push(SceneElement::Memory(el));
+                }
+                match vergence_render::Cpu::new().render(&scene, &mut fonts, scale as f32, Color::rgba(0, 0, 0, 0)) {
+                    Ok(p) => {
+                        let buffer = MemoryRenderBuffer::from_slice(
+                            &p.data,
+                            Fourcc::Abgr8888,
+                            (p.width as i32, p.height as i32),
+                            1,
+                            Transform::Normal,
+                            None,
+                        );
+                        n.picture = Some((key, buffer));
+                    }
+                    Err(e) => {
+                        tracing::warn!("notify: a card could not be drawn: {e}");
+                        continue;
                     }
                 }
             }
-            // Buttons, background, edge (back).
-            for (i, (_, r)) in n.buttons.iter().enumerate() {
-                els.push(SceneElement::Solid(SolidColorRenderElement::new(
-                    n.ids[3 + i].clone(),
-                    phys(*r),
-                    n.commit,
-                    pal.button,
-                    Kind::Unspecified,
-                )));
+            let Some((_, buffer)) = n.picture.as_ref() else { continue };
+            let a = (r.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+            let b = (r.loc + r.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+            let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
+            if let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                a.to_f64(),
+                buffer,
+                None,
+                Some(src),
+                Some(r.size),
+                Kind::Unspecified,
+            ) {
+                els.push(SceneElement::Memory(el));
             }
-            let r = n.rect;
-            let edge = if n.urgency >= 2 { pal.critical } else { pal.edge };
-            let inner = Rectangle::new((r.loc.x + 1, r.loc.y + 1).into(), (r.size.w - 2, r.size.h - 2).into());
-            els.push(SceneElement::Solid(SolidColorRenderElement::new(
-                n.ids[0].clone(),
-                phys(inner),
-                n.commit,
-                pal.bg,
-                Kind::Unspecified,
-            )));
-            els.push(SceneElement::Solid(SolidColorRenderElement::new(
-                n.ids[1].clone(),
-                phys(r),
-                n.commit,
-                edge,
-                Kind::Unspecified,
-            )));
+            // Behind it, the frost (as under a Dockworker's card).
+            if let Some(program) = frost.clone() {
+                let dst = Rectangle::<i32, smithay::utils::Physical>::new(a, (b.x - a.x, b.y - a.y).into());
+                if let Some(e) = crate::backdrop::element(renderer, &mut n.frost, dst, program, &frost_look) {
+                    els.push(SceneElement::Backdrop(e));
+                }
+            }
         }
+        self.shelf.fonts = Some(fonts);
         els
     }
 
@@ -729,9 +823,10 @@ mod tests {
         let c = parse("[notifications]\ndo-not-disturb = true\nseconds = 20\ncorner = \"bottom-left\"\n");
         assert!(c.do_not_disturb);
         assert_eq!(c.timeout, Duration::from_secs(20));
-        assert_eq!(c.corner, (false, true));
+        assert_eq!(c.corner, super::Place::BottomLeft);
+        assert_eq!(parse("[notifications]\ncorner = \"top-center\"\n").corner, super::Place::TopCenter);
         assert_eq!(parse("[notifications]\nseconds = 0\ncorner = \"middle\"\n").timeout, Duration::from_secs(2));
-        assert_eq!(parse("[notifications]\ncorner = \"middle\"\n").corner, (true, false));
+        assert_eq!(parse("[notifications]\ncorner = \"middle\"\n").corner, super::Place::TopRight);
         assert_eq!(
             parse("[notifications]\noff = [\" Firefox \", \"notify-send\"]\n").off,
             vec!["firefox", "notify-send"]

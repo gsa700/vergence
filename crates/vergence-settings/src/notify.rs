@@ -7,8 +7,9 @@ use super::*;
 
 pub const SECONDS: [(&str, i64); 5] =
     [("5 seconds", 5), ("10 seconds", 10), ("20 seconds", 20), ("30 seconds", 30), ("1 minute", 60)];
-pub const CORNERS: [(&str, &str); 4] = [
+pub const CORNERS: [(&str, &str); 5] = [
     ("Top right", "top-right"),
+    ("Top center", "top-center"),
     ("Top left", "top-left"),
     ("Bottom right", "bottom-right"),
     ("Bottom left", "bottom-left"),
