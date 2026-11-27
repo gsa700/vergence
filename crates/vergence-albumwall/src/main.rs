@@ -238,6 +238,9 @@ struct AlbumWall {
     jump: Option<f32>,
     /// The menu's Paste, waiting for the search box to have the keyboard.
     paste_wanted: bool,
+    /// The window can be seen (bus v42): while not, the music goes on and
+    /// what happens is kept, but nothing is drawn and the meters' tick stops.
+    seen: bool,
 }
 
 impl AlbumWall {
@@ -297,6 +300,7 @@ impl AlbumWall {
             fullscreen: false,
             jump: None,
             paste_wanted: false,
+            seen: true,
         }
     }
 
@@ -1745,7 +1749,7 @@ impl Program for AlbumWall {
         // Music playing: the needles move (the tick keeps itself going while
         // they do).
         let playing = self.player.as_ref().and_then(|p| p.state().now).is_some_and(|n| !n.paused);
-        if playing && self.needles.iter().all(|n| n.resting()) {
+        if playing && self.seen && self.needles.iter().all(|n| n.resting()) {
             self.meters_wanted = true;
         }
         if self.library_changed() {
@@ -1753,7 +1757,8 @@ impl Program for AlbumWall {
         }
         self.ask_retry(window);
         // Progress while a read is under way; covers and the hue as they come.
-        asked || reread || chosen || read || self.reader.running() || self.shown.is_some()
+        // Unseen: nothing drawn (it is drawn whole when seen again).
+        self.seen && (asked || reread || chosen || read || self.reader.running() || self.shown.is_some())
     }
 
     fn timer(&mut self, id: u64, window: &mut Window) -> bool {
@@ -1767,6 +1772,10 @@ impl Program for AlbumWall {
             self.read(false);
         }
         if id == timer::METERS {
+            // Unseen: the tick stops (seen again starts it).
+            if !self.seen {
+                return false;
+            }
             if self.step_meters() {
                 window.wake_after(timer::METERS, METER_TICK);
             }
@@ -1886,6 +1895,22 @@ impl Program for AlbumWall {
 
     fn closed(&mut self) {
         self.keep_session();
+    }
+
+    /// Minimized or the session locked (bus v42, Mind the battery): the
+    /// music plays on, nothing is drawn; seen again, the needles start from
+    /// where the music is and the window is drawn whole.
+    fn seen(&mut self, seen: bool, window: &mut Window) {
+        self.seen = seen;
+        if seen {
+            self.stepped = std::time::Instant::now();
+            let playing = self.player.as_ref().and_then(|p| p.state().now).is_some_and(|n| !n.paused);
+            self.meters_wanted = playing;
+            self.ask_retry(window);
+            window.redraw();
+        } else {
+            window.cancel_timer(timer::METERS);
+        }
     }
 
     fn session_ending(&mut self) {

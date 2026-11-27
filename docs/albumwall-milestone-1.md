@@ -457,3 +457,19 @@ where any app can use it, not inside AlbumWall):
   (Settings › Accessibility), as in every Vergence app. The Avalonia app
   had its own because other desktops gave it nothing to read. Its "Always
   on" paragraph moved to About.
+- **The battery, done** (Dave, 2026-11-26: "go ahead, do it in the
+  toolkit"): what moves while music plays is the seek bar and its times,
+  the meters and the playing track's ▶; nothing else redraws but on an
+  event. The server now tells each of our windows when it cannot be seen,
+  minimized or the session locked (not under the remote curtain, which is
+  watched from elsewhere; screens off is not counted, since the
+  monitorless remote view shows windows with them off): bus v42,
+  `WinEvent::Seen`, vergence-ui's `App::seen`, the toolkit's
+  `Program::seen`, and the toolkit asks for no frames for a window that
+  cannot be seen. AlbumWall plays on, keeps what happens (the next album,
+  the shuffle's albums), draws nothing and stops the meters' tick; seen
+  again it draws whole and the needles start from where the music is.
+  The ▶ now holds still with motion reduced. `vctl restore` (the window
+  minimized last, back as the dock brings it) for the tests. Scenario
+  32-albumwall measures it: 2.3 s minimized while playing, 1 scene (the
+  redraw on the way back); locked, 3; in view, about 35 a second.

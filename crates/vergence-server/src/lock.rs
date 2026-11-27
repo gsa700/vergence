@@ -559,6 +559,8 @@ impl Server {
         self.lock_now_keeping(true);
         self.lock.curtain = true;
         self.curtain_mute();
+        // Watched from elsewhere: still seen (told only if that changed).
+        self.tell_seen();
         true
     }
 
@@ -615,6 +617,8 @@ impl Server {
 
     fn lock_now(&mut self) {
         self.lock_now_keeping(false);
+        // Nothing of the session can be seen now (bus v42).
+        self.tell_seen();
     }
 
     fn lock_now_keeping(&mut self, keep_keyboard: bool) {
@@ -690,6 +694,8 @@ impl Server {
         if let Some(w) = self.lock.before.take().filter(smithay::utils::IsAlive::alive) {
             self.focus_window(&w, SERIAL_COUNTER.next_serial());
         }
+        // The session's windows can be seen again (bus v42).
+        self.tell_seen();
         self.redraw_all();
     }
 

@@ -144,6 +144,13 @@ pub trait Program {
     /// next session (session milestone 1).
     fn session_ending(&mut self) {}
 
+    /// Whether the window can be seen (bus v42, Mind the battery): `false`
+    /// while it is minimized or the session is locked, `true` again after (the
+    /// window is drawn again then). A program that keeps time of its own (a
+    /// clock, meters, graphs) stops its timers while it cannot be seen; the
+    /// toolkit already draws no motion then. Native road only.
+    fn seen(&mut self, _seen: bool, _window: &mut Window) {}
+
     /// The toolkit's number for this window, as tab events name another
     /// window of the program (`TabEvent::Join`'s `into`).
     fn opened(&mut self, _id: u32) {}
@@ -312,6 +319,8 @@ struct Host<P: Program> {
     /// The meaning last handed to the server (Contract 3): sent again only
     /// when it differs.
     meaning_sent: Option<vergence_ui::MeaningTree>,
+    /// The window can be seen (bus v42): no frames are asked for while not.
+    seen: bool,
     /// The bar last handed to the server: sent again only when it differs.
     bar_sent: Option<vergence_ui::Bar>,
     /// The app menu and bar style last handed to the server.
@@ -543,8 +552,19 @@ impl<P: Program> vergence_ui::App for Host<P> {
         scene
     }
 
+    /// Nothing moves in a window that cannot be seen (Mind the battery).
     fn animating(&self) -> bool {
-        self.ui.animating() || self.program.animating()
+        self.seen && (self.ui.animating() || self.program.animating())
+    }
+
+    fn seen(&mut self, seen: bool, window: &mut Window) {
+        self.seen = seen;
+        self.program.seen(seen, window);
+        if seen {
+            // What changed meanwhile, drawn now.
+            self.stale = true;
+            window.redraw();
+        }
     }
 
     /// The tree's meaning for the server (native road), when it has changed
@@ -809,6 +829,7 @@ pub fn window<P: Program + 'static>(program: P) -> Box<dyn vergence_ui::App> {
         print_frames: false,
         scene_ms: 0.0,
         meaning_sent: None,
+        seen: true,
         bar_sent: None,
         commands_sent: None,
         bar_style_sent: None,
@@ -840,6 +861,7 @@ pub fn run<P: Program>(program: P, size: (u32, u32)) -> io::Result<()> {
         print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"),
         scene_ms: 0.0,
         meaning_sent: None,
+        seen: true,
         bar_sent: None,
         commands_sent: None,
         bar_style_sent: None,

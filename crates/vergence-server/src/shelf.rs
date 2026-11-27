@@ -468,6 +468,8 @@ pub struct Shelf {
     /// screen (the server's space does not hold them); their application's icon
     /// on the shelf is where they are.
     pub minimized: Vec<(Win, Point<i32, Logical>)>,
+    /// Our own windows last told they cannot be seen (bus v42, tell_seen).
+    unseen: Vec<Win>,
     /// Minimized windows shown on their way into their icon, or out of it.
     motions: Vec<Motion>,
     /// Applications started from the dock that have shown no window yet
@@ -1026,7 +1028,39 @@ impl Server {
             Some(front) => self.focus_window(&front, serial),
             None => self.unfocus_all(),
         }
+        self.tell_seen();
         self.redraw_all();
+    }
+
+    /// Each of our own windows told whether it can be seen (bus v42, Mind
+    /// the battery): not while it is minimized or the session is locked (the
+    /// remote curtain is not a lock: the session is watched from elsewhere).
+    /// Only changes are sent, and a window starts seen. Screens off is not
+    /// counted: the monitorless remote view shows windows with them off.
+    pub fn tell_seen(&mut self) {
+        let locked = self.session_locked();
+        self.shelf.unseen.retain(|w| w.alive());
+        let all: Vec<Win> =
+            self.space.elements().cloned().chain(self.shelf.minimized.iter().map(|(w, _)| w.clone())).collect();
+        for w in all {
+            let Some((client, window)) = w.native().map(|n| (n.client, n.id)) else { continue };
+            let unseen = locked || self.is_minimized(&w);
+            if unseen == self.shelf.unseen.contains(&w) {
+                continue;
+            }
+            if unseen {
+                self.shelf.unseen.push(w.clone());
+            } else {
+                self.shelf.unseen.retain(|x| *x != w);
+            }
+            self.bus_send(
+                client,
+                vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::Seen {
+                    window,
+                    seen: !unseen,
+                }),
+            );
+        }
     }
 
     pub fn is_minimized(&self, w: &Win) -> bool {
@@ -1161,6 +1195,7 @@ impl Server {
         tracing::info!("shelf: back {:?}", self.window_title(&w));
         self.put(w.clone(), at, true);
         self.focus_window(&w, smithay::utils::SERIAL_COUNTER.next_serial());
+        self.tell_seen();
         self.redraw_all();
     }
 

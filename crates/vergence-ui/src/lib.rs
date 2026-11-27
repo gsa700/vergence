@@ -904,6 +904,11 @@ pub trait App {
     /// [`Window::capture_keys`], or `false` when Ctrl+Alt gave it back.
     fn keys_captured(&mut self, _on: bool, _window: &mut Window) {}
 
+    /// Whether the window can be seen (bus v42, Mind the battery): `false`
+    /// while it is minimized or the session is locked, `true` again after.
+    /// A window starts seen. On the native road only.
+    fn seen(&mut self, _seen: bool, _window: &mut Window) {}
+
     /// A drag is over the window at (x, y) with these kinds: what a drop
     /// would do ([`DROP_NONE`], [`DROP_COPY`], [`DROP_MOVE`]).
     fn drag_over(&mut self, _x: f32, _y: f32, _kinds: &[String], _ctrl: bool) -> u8 {

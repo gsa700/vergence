@@ -475,6 +475,12 @@ impl Server {
                 self.minimize(&w);
                 format!("minimized {i}")
             }
+            // The window minimized last, back as the dock brings it (tests).
+            "restore" => {
+                let Some(w) = self.shelf.minimized.last().map(|(w, _)| w.clone()) else { return "nothing minimized".into() };
+                self.unminimize(&w);
+                "restored".into()
+            }
             // A window's picture as the dock's picker and Alt+Tab show it
             // (thumbs.rs), fitted into a square `side` pixels wide.
             "thumb" => {

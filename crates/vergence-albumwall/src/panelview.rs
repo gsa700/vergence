@@ -77,21 +77,26 @@ fn line(
             let number = if t.number > 0 { t.number.to_string() } else { String::new() };
             let num_w = (panel::NUMBER * text).ceil() - 10.0;
             // The track coming out of the speakers: a ▶ where its number was,
-            // pulsing slowly, and its title in semibold.
+            // pulsing slowly, and its title in semibold. With motion reduced
+            // it holds still ("the marker holds still", the Avalonia app's
+            // Accessibility page).
             let here = playing == Some(*i);
             let mark: Element<Msg> = if here {
-                let pulse = 0.55
-                    + 0.45
-                        * (std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map_or(0.0, |d| d.as_secs_f32())
-                            * std::f32::consts::PI)
-                            .sin()
-                            .abs();
                 let c = color(p.accent);
                 row(vec![
                     space().width(Length::FILL),
-                    drawing(move |scene, _, r: Rect, _| {
+                    drawing(move |scene, _, r: Rect, theme| {
+                        let pulse = if theme.reduced_motion {
+                            1.0
+                        } else {
+                            0.55 + 0.45
+                                * (std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map_or(0.0, |d| d.as_secs_f32())
+                                    * std::f32::consts::PI)
+                                    .sin()
+                                    .abs()
+                        };
                         let (h, w) = (9.0, 8.0);
                         let cy = r.y + r.h / 2.0;
                         for k in 0..18 {

@@ -84,11 +84,13 @@
 //! and `window::WinEvent::KeysCaptured`, a window that takes every key while it has the keyboard.
 //! Version 41 (AlbumWall milestone 1, step 7): `window::WinRequest::Fullscreen`, a native window
 //! asking for the whole screen (F11) and back.
+//! Version 42 (Mind the battery): `window::WinEvent::Seen`, a window told when it cannot be
+//! seen (minimized, or the session locked) and when it can again, so it can stop drawing.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 41;
+pub const VERSION: u32 = 42;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

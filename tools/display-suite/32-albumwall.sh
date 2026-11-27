@@ -10,6 +10,7 @@
 # then goes on to "random album" and writes that. Search:
 # "cobalt", art:missing, art:small. Settings (Ctrl+,): the Library page's
 # numbers, a check box written to desktop.toml and the play bar following.
+# Mind the battery: minimized or locked, it draws nothing while it plays.
 scenario() {
     music=$OUT/music
     rm -rf "$music"
@@ -103,6 +104,30 @@ PY
     # The play mode's button: on to a random album, written as Settings writes it.
     vctl act "$w" "$(node "$w" 'button "When this album ends: play the next album"')" press >/dev/null; sleep 0.8
     check "$(yes_if "grep -q 'after-album = \"random\"' '$cfg'")" "the play mode's button: a random album, in desktop.toml"
+    # Mind the battery (bus v42): playing, the window draws (the meters, the
+    # seek bar); minimized or behind the lock it draws nothing while the music
+    # goes on; seen again, it draws again. Frames counted by the scenes the
+    # server has from it (vctl cannot list a window while it is minimized or
+    # the session locked: the count before is set against the count just
+    # after; drawing, 2.3 s would add some 80).
+    scenes() { win_line AlbumWall | sed -nE 's/.*\[scenes ([0-9]+),.*/\1/p'; }
+    grows() { a=$(scenes); sleep 1.5; b=$(scenes); echo "  .. $1: scenes ${a:-?} then ${b:-?}" >&2; [ -n "$a" ] && [ -n "$b" ] && [ "$b" -gt "$a" ]; }
+    # away <what> <hide command> <back command>: the scenes drawn while away.
+    away() {
+        before=$(scenes); $2 >/dev/null; sleep 2.3; $3 >/dev/null
+        # Back out of its icon: listed again once it is on the screen.
+        i=0; after=$(scenes); while [ -z "$after" ] && [ $i -lt 30 ]; do sleep 0.05; i=$((i + 1)); after=$(scenes); done
+        echo "  .. $1: scenes ${before:-?} before, ${after:-?} just after" >&2
+        [ -n "$before" ] && [ -n "$after" ] && [ $((after - before)) -lt 12 ]
+    }
+    check "$(yes_if "grows 'in view, playing'")" "playing in view: the window draws"
+    check "$(yes_if "away minimized 'vctl minimize $(win_index AlbumWall)' 'vctl restore'")" "minimized: it draws nothing"
+    sleep 0.5
+    check "$(yes_if "grows restored")" "back from the dock: it draws again"
+    check "$(yes_if "away locked 'vctl lock now' 'vctl lock test-unlock'")" "the session locked: it draws nothing"
+    sleep 0.5
+    check "$(yes_if "grows unlocked")" "unlocked: it draws again"
+    w=$(win_index AlbumWall)
     vctl act "$w" "$(node "$w" 'button "Pause"')" press >/dev/null; sleep 0.5
     # Search.
     for pair in 'cobalt:2 of 5 albums' 'art:missing:1 of 5 albums' 'art:small:1 of 5 albums'; do

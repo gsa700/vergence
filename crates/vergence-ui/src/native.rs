@@ -863,6 +863,10 @@ impl<'a> Native<'a> {
             WinEvent::KeysCaptured { window, on } => {
                 self.with_window(window, |app, w| app.keys_captured(on, w))?;
             }
+            // Whether the window can be seen (bus v42).
+            WinEvent::Seen { window, seen } => {
+                self.with_window(window, |app, w| app.seen(seen, w))?;
+            }
             // The tabs agents hold a grant for (bus v39).
             WinEvent::AgentTabs { window, tabs } => {
                 let tabs: Vec<(u64, String, bool)> = tabs.into_iter().map(|t| (t.node, t.agent, t.typing)).collect();

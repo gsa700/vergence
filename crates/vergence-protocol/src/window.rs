@@ -987,6 +987,15 @@ pub enum WinEvent {
         window: u32,
         on: bool,
     },
+    /// Whether the window can be seen (bus v42, Mind the battery): `false`
+    /// while it is minimized or the session is locked (not under the remote
+    /// curtain, which is watched from elsewhere), `true` when it can be seen
+    /// again. Sent only when it changes; a new window can be seen. A window
+    /// that cannot be seen draws nothing and wakes for nothing it would show.
+    Seen {
+        window: u32,
+        seen: bool,
+    },
     /// Send the text of meaning node `node` (its value, else its name) from
     /// character `offset`, at most `len` characters (bus v37, paged reading:
     /// the tree cuts every text at [`MEANING_TEXT_MAX`] characters). Answered
@@ -1094,6 +1103,7 @@ pub(crate) mod op {
     pub const AGENT_ACTING: u16 = 138;
     pub const AGENT_TABS: u16 = 139;
     pub const KEYS_CAPTURED: u16 = 140;
+    pub const SEEN: u16 = 141;
 
     /// Whether an opcode is a window message's (either way).
     pub fn is_window(opcode: u16) -> bool {
@@ -1981,6 +1991,11 @@ impl WinEvent {
                 e.u32(*window).bool(*on);
                 e
             }
+            WinEvent::Seen { window, seen } => {
+                let mut e = Encoder::frame(op::SEEN);
+                e.u32(*window).bool(*seen);
+                e
+            }
             WinEvent::AgentTabs { window, tabs } => {
                 let mut e = Encoder::frame(op::AGENT_TABS);
                 e.u32(*window).count(tabs.len());
@@ -2144,6 +2159,7 @@ impl WinEvent {
             op::SESSION_ENDING => WinEvent::SessionEnding { window: d.u32()? },
             op::AGENT_ACTING => WinEvent::AgentActing { window: d.u32()?, node: d.u64()?, agent: d.str()? },
             op::KEYS_CAPTURED => WinEvent::KeysCaptured { window: d.u32()?, on: d.bool()? },
+            op::SEEN => WinEvent::Seen { window: d.u32()?, seen: d.bool()? },
             op::AGENT_TABS => {
                 let window = d.u32()?;
                 let n = d.count(13)?;
@@ -2588,6 +2604,7 @@ mod tests {
             WinEvent::AgentActing { window: 1, node: 1 << 60 | 3, agent: "Claude".into() },
             WinEvent::AgentTabs { window: 1, tabs: vec![] },
             WinEvent::KeysCaptured { window: 1, on: false },
+            WinEvent::Seen { window: 1, seen: false },
             WinEvent::AgentTabs {
                 window: 1,
                 tabs: vec![

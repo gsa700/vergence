@@ -213,7 +213,10 @@ A change is done when it builds and passes its tests on FreeBSD and on Void.
   being told (a waker, an event, inotify) to polling; when polling cannot
   be helped, slowly (minutes, not seconds) and only while it matters.
   Motion runs for its length and stops. A new timer, thread or wakeup in a
-  plan says what it costs at idle.
+  plan says what it costs at idle. The server tells each window when it
+  cannot be seen (minimized, or the session locked: bus v42,
+  `WinEvent::Seen`); the toolkit then draws no motion, and a program that
+  keeps time of its own stops its timers in `Program::seen`.
 - After adding a crate, a dependency or a version, commit the updated
   Cargo.lock.
 
