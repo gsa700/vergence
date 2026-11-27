@@ -606,9 +606,15 @@ pub struct Look<'a> {
     pub brand: Option<FaceId>,
 }
 
-/// A brand title's size: the Avalonia AlbumWall's 21 points in its 44-point
-/// bar, in proportion to this bar's height.
+/// A brand title's size in a bar of the standard height or less; a taller bar
+/// (a program's own, `BrandLook::height`) has it in the Avalonia AlbumWall's
+/// proportion, 21 points in its 44-point bar.
 pub const BRAND_SIZE: f32 = 18.0;
+
+/// The brand title's size in a bar this tall.
+pub fn brand_size(bar_h: f32) -> f32 {
+    BRAND_SIZE.max((bar_h * 21.0 / 44.0).round())
+}
 
 /// Draws the bar across the top of the scene.
 pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) {
@@ -833,7 +839,7 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
             0.0,
         );
         let (face, size, title_ink) = match look.brand {
-            Some(b) if !look.root => (b, BRAND_SIZE, color(l.ink)),
+            Some(b) if !look.root => (b, brand_size(layout.sizes.bar_h), color(l.ink)),
             _ => (face, look.font_size, title_ink),
         };
         let m = fonts.metrics(face, size);

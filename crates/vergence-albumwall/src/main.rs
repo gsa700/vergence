@@ -2245,9 +2245,15 @@ impl Program for AlbumWall {
         Some(BarStyle::Dark)
     }
 
-    /// Its name in its bar, bold, as the Avalonia app's (Dave, 2026-11-27).
+    /// Its name in its bar, bold, on the Avalonia app's bar: its warm
+    /// near-black, the rule under it, its ink and its 44 points (MainWindow.axaml
+    /// TopBar); the window's buttons and app menu stay the desktop's (Dave,
+    /// 2026-11-27: "a merger").
     fn bar(&self) -> Option<vergence_ui::Bar> {
-        Some(vergence_ui::Bar::Brand { buttons: Vec::new() })
+        Some(vergence_ui::Bar::Brand {
+            buttons: Vec::new(),
+            look: Some(vergence_ui::BrandLook { ground: 0x1c1915, rule: 0x2b2620, ink: 0xf3eee6, height: 44 }),
+        })
     }
 
     fn view(&self, t: &Theme) -> Element<Msg> {

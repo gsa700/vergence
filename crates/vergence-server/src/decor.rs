@@ -513,6 +513,13 @@ impl Server {
             None => self.pointer_location().to_i32_round(),
         };
         let z = self.bar_sizes_at(at);
+        // A program's own bar height (Bar::Brand's look), given at the Standard
+        // size of controls and scaled with the setting; never shorter than the
+        // desktop's, so the buttons keep their room.
+        if brand_look(w).is_some_and(|l| l.height > 0) {
+            let bar_h = self.branded_bar_h(w, z.bar_h as i32, at) as f32;
+            return vergence_bar::Sizes { bar_h, ..z };
+        }
         // A dialog's bar is slim, a palette's thin (window styles milestone 1):
         // the screen's proportions, scaled to 28 and 22 of the standard 36.
         let k = match self.window_style(w).kind {
@@ -529,6 +536,30 @@ impl Server {
             side: z.side,
             gap: z.gap,
         }
+    }
+
+    /// A bar `screen_h` tall on its screen, as a program's own height (Bar::Brand's
+    /// look) makes it: that height, given at the Standard size of controls,
+    /// scaled with the setting and never shorter than the desktop's.
+    fn branded_bar_h(&self, w: &Win, screen_h: i32, at: Point<i32, Logical>) -> i32 {
+        match brand_look(w).map(|l| l.height).filter(|h| *h > 0) {
+            Some(h) => {
+                let want = (h as f32 * screen_h as f32 / vergence_bar::STANDARD.bar_h).round() as i32;
+                crate::grid::snap_len(want.max(screen_h), self.grid_step_at(at))
+            }
+            None => screen_h,
+        }
+    }
+
+    /// The height of a window's bar on the screen that holds `area`, 0 for a
+    /// window without one: where it is placed, maximized or snapped there, so a
+    /// taller bar of its own (Bar::Brand) is not pushed off the screen's top.
+    pub fn title_h_in(&self, w: &Win, area: Rectangle<i32, Logical>) -> i32 {
+        if !self.has_title(w) {
+            return 0;
+        }
+        let mid = (area.loc.x + area.size.w / 2, area.loc.y + area.size.h / 2).into();
+        self.branded_bar_h(w, self.bar_h_in(area), mid)
     }
 
     /// A window's bar height in points.
@@ -1042,7 +1073,10 @@ impl Server {
             // This window's own bar style (bar_light).
             let light = self.bar_light(&w, light);
             let shaded = vergence_look::bar_look_shaded(light, self.bar_shade());
-            let style = &shaded;
+            // A program's own bar (Bar::Brand's look): its ground and ink.
+            let brand = brand_look(&w);
+            let branded = brand.map(|l| brand_style(&shaded, &l));
+            let style = branded.as_ref().unwrap_or(&shaded);
             // A parent a modal dialog blocks is dimmed, in front of its own bar
             // and content and behind the dialog (dialogs.rs).
             if self.modal_of(&w).is_some()
@@ -1222,7 +1256,8 @@ impl Server {
                 // A Wayland or X11 window's bar: frosted over what is behind it.
                 let behind = frost.is_some() && w.native().is_none();
                 if let Some(f) = frame {
-                    let frosted = under.is_some() || behind || (ground_frosted && frost.is_some());
+                    // A program's own ground is solid, as its own bar was.
+                    let frosted = brand.is_none() && (under.is_some() || behind || (ground_frosted && frost.is_some()));
                     // The bar, vergence-bar's, drawn once per scale and again when what it shows changes.
                     let hover = hovered.as_ref().filter(|(hw, _)| *hw == w).map(|(_, p)| *p);
                     let width = f.title.size.w;
@@ -1250,7 +1285,7 @@ impl Server {
                         active,
                         hover,
                         format!(
-                            "{layout_text}{tools:?}{tool_names:?}{menu_open}{} h{}{grants:?}{}",
+                            "{layout_text}{tools:?}{tool_names:?}{menu_open}{} h{}{grants:?}{}{brand:?}",
                             app_icon.is_some(),
                             f.title.size.h,
                             brand_of(&w)
@@ -1347,6 +1382,15 @@ impl Server {
                             );
                         }
                         vergence_bar::draw(&mut scene, fonts, &f.layout, &look);
+                        // A program's own bar keeps its rule along the bottom (not
+                        // on a superuser's red).
+                        if let Some(l) = brand.filter(|_| !root) {
+                            let c = l.rule;
+                            scene.fill(
+                                vergence_scene::Rect::new(0.0, f.title.size.h as f32 - 1.0, width as f32, 1.0),
+                                vergence_scene::Color::rgb((c >> 16) as u8, (c >> 8) as u8, c as u8),
+                            );
+                        }
                         if rounded {
                             scene.pop_clip();
                         }
@@ -1909,7 +1953,7 @@ impl Server {
         let Some(out) = out else { return };
         // A screen with the shelf is filled as far as the strip (shelf.rs).
         let out = self.work_area(out);
-        let top = if self.has_title(w) { self.bar_h_in(out) } else { 0 };
+        let top = self.title_h_in(w, out);
         let rect = Rectangle::new((out.loc.x, out.loc.y + top).into(), (out.size.w, out.size.h - top).into());
         self.restore.insert(w.clone(), geo);
         self.set_window_rect(w, rect, true);
@@ -1987,7 +2031,7 @@ fn tools_of(w: &Win) -> Option<(f32, Vec<(vergence_bar::ToolIcon, bool, u32, Str
     match w.native()?.bar()? {
         vergence_protocol::window::Bar::Tools { buttons, from } => Some((from as f32, own(&buttons))),
         // A brand bar's title starts after the window's buttons, its own buttons as Tools'.
-        vergence_protocol::window::Bar::Brand { buttons } => Some((0.0, own(&buttons))),
+        vergence_protocol::window::Bar::Brand { buttons, .. } => Some((0.0, own(&buttons))),
         _ => None,
     }
 }
@@ -1995,6 +2039,33 @@ fn tools_of(w: &Win) -> Option<(f32, Vec<(vergence_bar::ToolIcon, bool, u32, Str
 /// The window names itself in its bar (Bar::Brand): its title bold and larger.
 fn brand_of(w: &Win) -> bool {
     matches!(w.native().and_then(|n| n.bar()), Some(vergence_protocol::window::Bar::Brand { .. }))
+}
+
+/// The program's own bar under its name (Bar::Brand's look), if it asked for one.
+pub(crate) fn brand_look(w: &Win) -> Option<vergence_protocol::window::BrandLook> {
+    match w.native()?.bar()? {
+        vergence_protocol::window::Bar::Brand { look, .. } => look,
+        _ => None,
+    }
+}
+
+/// A bar style on a program's own ground: the dark style's shapes (its
+/// grounds are dark, AlbumWall's), the program's ground focused or not, its
+/// ink, dimmed while the window is not the one with the keyboard. The alarm
+/// colors stay the desktop's: no program chooses how a superuser's bar looks.
+fn brand_style(base: &vergence_look::BarLook, l: &vergence_protocol::window::BrandLook) -> vergence_look::BarLook {
+    let rgb = |c: u32| vergence_look::Rgb((c >> 16) as u8, (c >> 8) as u8, c as u8);
+    let (ground, ink) = (rgb(l.ground), rgb(l.ink));
+    let mix = |a: u8, b: u8| ((a as u16 * 3 + b as u16 * 2) / 5) as u8;
+    let mut s = *vergence_look::bar_look(vergence_look::ink_on(ground) == vergence_look::BAR_LIGHT.ink);
+    s.ground = ground;
+    s.ground_off = ground;
+    s.ink = ink;
+    s.ink_off = vergence_look::Rgb(mix(ink.0, ground.0), mix(ink.1, ground.1), mix(ink.2, ground.2));
+    s.alert = base.alert;
+    s.alert_ground = base.alert_ground;
+    s.alert_ground_off = base.alert_ground_off;
+    s
 }
 
 /// Where the title starts and each own button's width for the layout: None

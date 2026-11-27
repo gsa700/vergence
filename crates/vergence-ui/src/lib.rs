@@ -156,7 +156,7 @@ pub struct Frame {
 /// What the bar's description is made of ([`App::bar`]): the native
 /// protocol's own types.
 pub use vergence_protocol::window::{
-    Bar, BarButton, BarIcon, DROP_COPY, DROP_MOVE, DROP_NONE, MenuEntry as BarMenuEntry, Place as BarPlace,
+    Bar, BarButton, BarIcon, BrandLook, DROP_COPY, DROP_MOVE, DROP_NONE, MenuEntry as BarMenuEntry, Place as BarPlace,
     Tab as BarTab,
 };
 

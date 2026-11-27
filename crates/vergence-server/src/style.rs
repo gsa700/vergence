@@ -161,7 +161,7 @@ impl Server {
             .max_by_key(|g| g.intersection(geo).map_or(0, |i| i.size.w as i64 * i.size.h as i64));
         let Some(screen) = screen else { return true };
         let area = self.work_area(screen);
-        let top = if self.has_title(w) { self.bar_h_in(screen) } else { 0 };
+        let top = self.title_h_in(w, screen);
         max.w >= area.size.w && max.h >= area.size.h - top
     }
 

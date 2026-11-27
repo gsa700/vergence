@@ -672,10 +672,7 @@ impl Server {
                     Some(r) => r,
                     None => {
                         let out = self.output_at_pointer().unwrap_or_default();
-                        let area = crate::place::content_area(
-                            self.work_area(out),
-                            if self.has_title(&w) { self.bar_h_in(out) } else { 0 },
-                        );
+                        let area = crate::place::content_area(self.work_area(out), self.title_h_in(&w, out));
                         let size = crate::place::fit(asked, area.size, Some((MIN_SIDE, MIN_SIDE).into()));
                         // Not exactly on another window of its program.
                         (self.clear_of_siblings(&w, Rectangle::new(crate::place::center(area, size), size), out), false)
@@ -940,6 +937,8 @@ impl Server {
             WinRequest::Bar { window, bar } => {
                 if let Some(Win::Native(n)) = self.natives.get(&(client, window)).cloned() {
                     n.state.lock().unwrap().bar = Some(bar);
+                    // A bar of its own may be taller than the one it was placed under.
+                    self.keep_bar_on_screen(&Win::Native(n));
                     self.redraw_all();
                 }
             }

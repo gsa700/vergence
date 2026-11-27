@@ -54,12 +54,13 @@ def region(pic, x, y, w, h):
     return out
 
 
-a = read(sys.argv[1])
-x, y, w, h = (int(v) for v in sys.argv[3:7])
-ra = region(a, x, y, w, h)
-if sys.argv[2] == "-":
-    print(round(sum((p[0] + p[1] + p[2]) / 3 * p[3] / 255 for p in ra) / max(1, len(ra)), 1))
-else:
-    rb = region(read(sys.argv[2]), x, y, w, h)
-    d = sum(abs(p - q) for pa, pb in zip(ra, rb) for p, q in zip(pa, pb)) / max(1, len(ra) * 4)
-    print(round(d, 2))
+if __name__ == "__main__":
+    a = read(sys.argv[1])
+    x, y, w, h = (int(v) for v in sys.argv[3:7])
+    ra = region(a, x, y, w, h)
+    if sys.argv[2] == "-":
+        print(round(sum((p[0] + p[1] + p[2]) / 3 * p[3] / 255 for p in ra) / max(1, len(ra)), 1))
+    else:
+        rb = region(read(sys.argv[2]), x, y, w, h)
+        d = sum(abs(p - q) for pa, pb in zip(ra, rb) for p, q in zip(pa, pb)) / max(1, len(ra) * 4)
+        print(round(d, 2))

@@ -96,11 +96,13 @@
 //! icon from the theme (`Tile::icon`) with a glyph over its corner (`Tile::badge`).
 //! Version 46 (AlbumWall's bar as its Avalonia app's, Dave): `window::Bar::Brand`, the title
 //! as the program's name, bold and larger, beside the window's buttons.
+//! Version 47 (AlbumWall's bar, its old look with our controls, Dave): `Bar::Brand` may
+//! carry a `window::BrandLook`, the program's own ground, rule, ink and bar height.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 46;
+pub const VERSION: u32 = 47;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

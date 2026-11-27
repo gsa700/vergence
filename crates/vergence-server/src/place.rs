@@ -91,7 +91,7 @@ impl Server {
             })
             .max_by_key(|(a, _)| *a)
             .map(|(_, g)| g)?;
-        Some(content_area(self.work_area(out), if self.has_title(w) { self.bar_h_in(out) } else { 0 }).size)
+        Some(content_area(self.work_area(out), self.title_h_in(w, out)).size)
     }
 
     /// Fit and center a Wayland window once it has a size (its first commit).
@@ -116,7 +116,7 @@ impl Server {
             return;
         }
         let Some(out) = self.output_at_pointer() else { return };
-        let area = content_area(self.work_area(out), if self.has_title(w) { self.bar_h_in(out) } else { 0 });
+        let area = content_area(self.work_area(out), self.title_h_in(w, out));
         let fitted = fit(size, area.size, None);
         if fitted != size {
             t.with_pending_state(|s| s.size = Some(fitted));
@@ -205,7 +205,7 @@ impl Server {
                 self.set_rect(&w, before);
             }
             let size = self.space.element_geometry(&w).map(|g| g.size).unwrap_or(geo.size);
-            let area = content_area(self.work_area(out), if self.has_title(&w) { self.bar_h_in(out) } else { 0 });
+            let area = content_area(self.work_area(out), self.title_h_in(&w, out));
             let fitted = fit(size, area.size, w.x11_surface().and_then(|x| x.min_size()));
             let r = Rectangle::new(center_of(area, fitted), fitted);
             tracing::info!("hotplug: window rescued onto {:?}", r);
@@ -222,6 +222,40 @@ impl Server {
                 self.pointer_to(c.into(), smithay::backend::input::InputTime::now());
             }
         }
+    }
+
+    /// A window's bar wholly on its screen's work area, after the bar changed
+    /// height (Bar::Brand's own height arrives after the window was placed
+    /// under the desktop's: AlbumWall's 44-point bar was cut off at the
+    /// screen's top). Maximized: fitted under the new bar. Else moved down,
+    /// giving up as much height if its bottom was on the screen and would leave it.
+    pub fn keep_bar_on_screen(&mut self, w: &Win) {
+        let Some(geo) = self.space.element_geometry(w) else { return };
+        let mid = geo.loc + Point::from((geo.size.w / 2, geo.size.h / 2));
+        let Some(screen) = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).find(|g| g.contains(mid))
+        else {
+            return;
+        };
+        let area = self.work_area(screen);
+        let top = self.title_h_in(w, area);
+        if self.restore.contains_key(w) {
+            let r = Rectangle::new((area.loc.x, area.loc.y + top).into(), (area.size.w, area.size.h - top).into());
+            if r != geo {
+                self.set_rect(w, r);
+            }
+            return;
+        }
+        let d = area.loc.y + top - geo.loc.y;
+        if d <= 0 {
+            return;
+        }
+        let bottom = area.loc.y + area.size.h;
+        let h = if geo.loc.y + geo.size.h <= bottom && geo.loc.y + d + geo.size.h > bottom {
+            (geo.size.h - d).max(1)
+        } else {
+            geo.size.h
+        };
+        self.set_rect(w, Rectangle::new((geo.loc.x, geo.loc.y + d).into(), (geo.size.w, h).into()));
     }
 
     /// Put a window's content at `r` (X11: configured; Wayland and native:

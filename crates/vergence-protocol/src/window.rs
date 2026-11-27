@@ -107,8 +107,29 @@ pub enum Bar {
     /// The window's title as the program's name, beside the window's buttons:
     /// bold and larger, the way an app that draws its own bar names itself
     /// (AlbumWall: its Avalonia app's bar, Dave 2026-11-27); its own buttons,
-    /// if any, as `Tools`' (a Label at the far end).
-    Brand { buttons: Vec<BarButton> },
+    /// if any, as `Tools`' (a Label at the far end). `look`: the program's
+    /// own bar (bus v47; Dave, 2026-11-27: "match the appearance color height
+    /// of the old version ... but integrate our window controls and menu"),
+    /// else the desktop's.
+    Brand { buttons: Vec<BarButton>, look: Option<BrandLook> },
+}
+
+/// A program's own bar under its name (`Bar::Brand`): its ground, the rule
+/// along its bottom and its ink (0xRRGGBB), and its height in points at the
+/// Standard size of controls (scaled with that setting; 0: the desktop's).
+/// The server still draws the window's buttons and app menu on it, and a
+/// superuser's window keeps the alarm red whatever the program asks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BrandLook {
+    pub ground: u32,
+    pub rule: u32,
+    pub ink: u32,
+    pub height: u8,
+}
+
+impl BrandLook {
+    /// The tallest bar a program may ask for, in points: a bar, not a toolbar.
+    pub const MAX_HEIGHT: u8 = 56;
 }
 
 /// A program's own button in its bar: an id it chose (unique, not 0), what
@@ -1279,9 +1300,17 @@ fn put_bar(e: &mut Encoder, bar: &Bar) {
             put_buttons(e, buttons);
             e.f64(*from);
         }
-        Bar::Brand { buttons } => {
+        Bar::Brand { buttons, look } => {
             e.u8(3);
             put_buttons(e, buttons);
+            match look {
+                Some(l) => {
+                    e.bool(true).u32(l.ground).u32(l.rule).u32(l.ink).u8(l.height);
+                }
+                None => {
+                    e.bool(false);
+                }
+            }
         }
     }
 }
@@ -1349,7 +1378,20 @@ fn get_bar(d: &mut Decoder) -> Result<Bar, WireError> {
             }
             Bar::Tools { buttons, from }
         }
-        3 => Bar::Brand { buttons: get_buttons(d)? },
+        3 => {
+            let buttons = get_buttons(d)?;
+            let look = if d.bool()? {
+                let (ground, rule, ink) = (d.u32()? & 0xff_ffff, d.u32()? & 0xff_ffff, d.u32()? & 0xff_ffff);
+                let height = d.u8()?;
+                if height > BrandLook::MAX_HEIGHT {
+                    return Err(WireError::BadValue("bar height"));
+                }
+                Some(BrandLook { ground, rule, ink, height })
+            } else {
+                None
+            };
+            Bar::Brand { buttons, look }
+        }
         _ => return Err(WireError::BadValue("bar")),
     })
 }
@@ -2350,6 +2392,16 @@ mod tests {
             },
         };
         assert!(decode(long).is_err(), "title too long");
+        let brand = |height: u8| WinRequest::Bar {
+            window: 1,
+            bar: Bar::Brand {
+                buttons: vec![],
+                look: Some(BrandLook { ground: 0x1c1915, rule: 0x2b2620, ink: 0xf3eee6, height }),
+            },
+        };
+        assert!(decode(brand(44)).is_ok());
+        assert!(decode(brand(BrandLook::MAX_HEIGHT)).is_ok());
+        assert!(decode(brand(BrandLook::MAX_HEIGHT + 1)).is_err(), "a bar taller than a bar");
     }
 
     #[test]
@@ -2421,7 +2473,14 @@ mod tests {
             WinRequest::Copy { input_serial: 5, kinds: vec!["text/plain;charset=utf-8".into()] },
             WinRequest::Paste { serial: 8, kind: "text/plain".into() },
             WinRequest::Bar { window: 1, bar: Bar::Plain },
-            WinRequest::Bar { window: 1, bar: Bar::Brand { buttons: vec![] } },
+            WinRequest::Bar { window: 1, bar: Bar::Brand { buttons: vec![], look: None } },
+            WinRequest::Bar {
+                window: 1,
+                bar: Bar::Brand {
+                    buttons: vec![],
+                    look: Some(BrandLook { ground: 0x1c1915, rule: 0x2b2620, ink: 0xf3eee6, height: 44 }),
+                },
+            },
             WinRequest::Bar {
                 window: 1,
                 bar: Bar::Tools {

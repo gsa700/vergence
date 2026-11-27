@@ -348,7 +348,7 @@ impl Server {
             .or_else(|| self.space.element_geometry(w));
         let Some(before) = before else { return };
         let r = rectangle(r);
-        let top = if self.has_title(w) { self.bar_h_in(screen) } else { 0 };
+        let top = self.title_h_in(w, screen);
         let mut content = Rectangle::new((r.loc.x, r.loc.y + top).into(), (r.size.w, r.size.h - top).into());
         // A window with a largest size smaller than its part stays at that size,
         // against the part's side (style.rs, window styles milestone 1).
