@@ -174,17 +174,18 @@ impl Disks {
                     .cloned()
                     .collect::<Vec<_>>()
                     .join(", ");
+                // On the chosen row's accent the dim text and the pale tint vanished (seen on
+                // techbench): there the text takes the button's own color and the tint is solid.
+                let tint = fs_color(&p.fs, t);
+                let swatch = if chosen { Color::rgba(tint.r, tint.g, tint.b, 255) } else { tint };
+                let soft = |l: Element<Msg>| if chosen { l } else { l.dim() };
                 button(
                     row(vec![
-                        panel(space())
-                            .color(fs_color(&p.fs, t))
-                            .radius(3.0)
-                            .width(Length::Fixed(12.0))
-                            .height(Length::Fixed(12.0)),
-                        column(vec![label(name.clone()), label(p.ptype.clone()).size(11.0).dim()])
+                        panel(space()).color(swatch).radius(3.0).width(Length::Fixed(12.0)).height(Length::Fixed(12.0)),
+                        column(vec![label(name.clone()), soft(label(p.ptype.clone()).size(11.0))])
                             .spacing(1.0)
                             .width(Length::FILL),
-                        label(right).dim().align(Align::End),
+                        soft(label(right).align(Align::End)),
                     ])
                     .spacing(10.0)
                     .align(Align::Center)
