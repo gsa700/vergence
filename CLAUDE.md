@@ -64,6 +64,11 @@ an AI collaborator must know to work here safely.
   on kepler, hence `~/.cargo/env`; Void's package on Hubble and, since its
   reinstall on 2026-11-22, techbench). Test builds always go to target-check: a
   rebuilt target/release under a running session broke techbench once.
+- **Iterate on techbench** (Dave, 2026-11-27: "radically faster hardware than
+  the other two", even while he is testing on it): checks, clippy, one
+  crate's tests, release builds and packages go there by default, in
+  target-check or another separate target dir. The full run above still
+  covers all three machines, and kepler builds its own FreeBSD binaries.
 - **Formatting:** run `cargo fmt` on a box and copy the files back
   (`rsync -a --include='*/' --include='*.rs' --exclude='*'
   <host>:src/vergence/crates/ crates/`); `cargo fmt --all -- --check` clean.
