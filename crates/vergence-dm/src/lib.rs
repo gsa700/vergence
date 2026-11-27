@@ -20,6 +20,7 @@
 //! password lives only in a [`secret`] buffer (locked memory, wiped, no Debug or Display) and is
 //! never logged; a frame is checked against its maximum length before it is read.
 
+pub mod brightness;
 pub mod elevate;
 pub mod encryption;
 pub mod keyboard;

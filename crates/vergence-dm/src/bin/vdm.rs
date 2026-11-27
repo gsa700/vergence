@@ -2177,6 +2177,30 @@ fn main() {
                         }
                     )
                 }
+                // A screen's brightness (brightness milestone 1): for root and
+                // anyone with a session here, as Sleep; the screen named by its
+                // connector, its control found again here.
+                words if words.starts_with("brightness ") => {
+                    let parts: Vec<&str> = words.split_whitespace().collect();
+                    match (uid, parts.as_slice()) {
+                        (Some(u), ["brightness", connector, percent])
+                            if u == 0 || (u >= paths::MIN_UID && has_session(u)) =>
+                        {
+                            match vergence_dm::brightness::set_named(connector, percent) {
+                                Ok(()) => "ok".to_string(),
+                                Err(why) => {
+                                    log(&format!("brightness: {connector} {percent} for {who}: {why}"));
+                                    format!("no: {why}")
+                                }
+                            }
+                        }
+                        (Some(_), ["brightness", _, _]) => {
+                            log(&format!("brightness for {who}: refused (no session here)"));
+                            "no: only someone logged in at this machine can do that".to_string()
+                        }
+                        _ => "no: not understood".to_string(),
+                    }
+                }
                 word => match (vergence_dm::power::Power::from_word(word), uid) {
                     (None, _) | (_, None) => "no: not understood".to_string(),
                     (Some(p), Some(u)) => {

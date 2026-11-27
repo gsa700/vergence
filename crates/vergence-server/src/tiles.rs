@@ -279,6 +279,7 @@ impl Server {
                     (Owner::Desktop, "network") => 1,
                     (Owner::Desktop, "power") => 2,
                     (Owner::Desktop, "nowplaying") => 3,
+                    (Owner::Desktop, "display") => 3,
                     (Owner::Desktop, "clock") => 9,
                     (Owner::Desktop, _) => 3,
                     (Owner::Client(_), _) => 5,
@@ -359,7 +360,7 @@ impl Server {
             .iter()
             .map(|p| {
                 format!(
-                    "{} {:?} {:?} {:?} {:?} group {:?} page {:?} rows {} chart {} controls {} picture {} icon {:?} badge {:?} title {:?}",
+                    "{} {:?} {:?} {:?} {:?} group {:?} page {:?} rows {} chart {} controls {} picture {} icon {:?} badge {:?} title {:?} named {:?}",
                     p.key(),
                     p.owner,
                     p.tile.value,
@@ -373,7 +374,8 @@ impl Server {
                     p.tile.card.picture.as_ref().map_or("none".to_string(), |x| format!("{}x{}", x.width, x.height)),
                     p.tile.icon,
                     p.tile.badge,
-                    p.tile.card.title
+                    p.tile.card.title,
+                    p.tile.card.controls.iter().map(|c| c.label.as_str()).collect::<Vec<_>>()
                 )
             })
             .collect();
@@ -397,6 +399,7 @@ impl Server {
             (Owner::Desktop, "network") => "Network".to_string(),
             (Owner::Desktop, "power") => "Battery".to_string(),
             (Owner::Desktop, "nowplaying") => "Now Playing".to_string(),
+            (Owner::Desktop, "display") => "Display".to_string(),
             _ if !tile.card.title.is_empty() => tile.card.title.clone(),
             _ => tile.label.clone(),
         };

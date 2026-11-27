@@ -147,6 +147,8 @@ impl Server {
             }
             // Now Playing's card (nowplaying.rs).
             (crate::nowplaying::TILE, _) => self.nowplaying_action(control, value),
+            // The Display card: a screen's slider, by its connector (brightness.rs).
+            (crate::brightness::TILE, connector) => self.brightness_set(connector, value.round().max(0.0) as u32),
             // An agent's timed grant, one more span (agents.rs).
             ("agent", "extend") => self.agent_extend(),
             // Vergence Remote: whoever is at the desk ends it (remote milestone 1).

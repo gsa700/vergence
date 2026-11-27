@@ -165,6 +165,8 @@ pub struct Server {
     pub dbus: crate::dbus::DBus,
     /// MPRIS players on the session bus, and the one Now Playing (nowplaying.rs).
     pub nowplaying: crate::nowplaying::NowPlaying,
+    /// The screens' brightness (brightness.rs).
+    pub brightness: crate::brightness::Brightness,
     /// The desktop settings (settings.rs).
     pub settings: crate::settings::SettingsState,
     /// Notifications on screen (notify.rs).
@@ -381,6 +383,7 @@ impl Server {
             remote: Default::default(),
             dbus: Default::default(),
             nowplaying: Default::default(),
+            brightness: Default::default(),
             settings: Default::default(),
             notes: Default::default(),
             tiles: Default::default(),

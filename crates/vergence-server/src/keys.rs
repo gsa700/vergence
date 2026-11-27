@@ -107,6 +107,8 @@ pub fn seat_key(sym: u32, code: u32) -> vergence_seat::keyboard::Key {
         k::KEY_XF86AudioRaiseVolume => Key::VolumeUp,
         k::KEY_XF86AudioLowerVolume => Key::VolumeDown,
         k::KEY_XF86AudioMute => Key::Mute,
+        k::KEY_XF86MonBrightnessUp => Key::BrightnessUp,
+        k::KEY_XF86MonBrightnessDown => Key::BrightnessDown,
         k::KEY_XF86AudioPlay => Key::Media(vergence_seat::keyboard::Media::PlayPause),
         k::KEY_XF86AudioPause => Key::Media(vergence_seat::keyboard::Media::Pause),
         k::KEY_XF86AudioNext => Key::Media(vergence_seat::keyboard::Media::Next),

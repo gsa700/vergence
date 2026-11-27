@@ -45,6 +45,7 @@ mod appmenu;
 mod aside;
 mod backdrop;
 mod battery;
+mod brightness;
 mod bus;
 mod control;
 mod cursor;
@@ -143,6 +144,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !greeter() {
         state.start_network();
         state.start_applets();
+        state.start_brightness();
         state.nowplaying_start();
         state.start_lock();
         state.start_battery_history();

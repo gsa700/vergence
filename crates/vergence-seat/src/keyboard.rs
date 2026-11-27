@@ -46,6 +46,9 @@ pub enum Key {
     VolumeUp,
     VolumeDown,
     Mute,
+    /// The screen brightness keys: XF86MonBrightnessUp and Down.
+    BrightnessUp,
+    BrightnessDown,
     /// The media keys: XF86AudioPlay (play or pause), Pause, Next, Prev, Stop.
     Media(Media),
     /// The key for console n (1 to 12): XF86Switch_VT_n.
@@ -162,6 +165,9 @@ pub enum KeyOut {
     OpenAppMenu(WinId),
     /// The default output's volume: +5, -5, or 0 to mute or unmute.
     Volume(i8),
+    /// The screens' brightness, in percent: 5 a press, 1 with Shift
+    /// (brightness milestone 1, question 4); passes while locked, as the volume does.
+    Brightness(i8),
     /// A media key, for the player Now Playing (passes while locked, as the volume does).
     Media(Media),
     /// Alt+Tab's switching.
@@ -302,6 +308,8 @@ impl Seat {
                 Key::VolumeUp if pressed => KeyOut::Volume(5),
                 Key::VolumeDown if pressed => KeyOut::Volume(-5),
                 Key::Mute if pressed => KeyOut::Volume(0),
+                Key::BrightnessUp if pressed => KeyOut::Brightness(if mods.shift { 1 } else { 5 }),
+                Key::BrightnessDown if pressed => KeyOut::Brightness(if mods.shift { -1 } else { -5 }),
                 Key::Media(m) if pressed => KeyOut::Media(m),
                 Key::Vt(n) if pressed && (1..=12).contains(&n) => KeyOut::Vt(n),
                 _ => KeyOut::Locked,
@@ -395,6 +403,8 @@ impl Seat {
                 Key::VolumeUp => return KeyOut::Volume(5),
                 Key::VolumeDown => return KeyOut::Volume(-5),
                 Key::Mute => return KeyOut::Volume(0),
+                Key::BrightnessUp => return KeyOut::Brightness(if mods.shift { 1 } else { 5 }),
+                Key::BrightnessDown => return KeyOut::Brightness(if mods.shift { -1 } else { -5 }),
                 Key::Media(m) => return KeyOut::Media(m),
                 Key::Vt(n) if (1..=12).contains(&n) => return KeyOut::Vt(n),
                 _ => {}
@@ -612,6 +622,7 @@ mod tests {
         assert_eq!(seat.key(Key::Super, false, none()), KeyOut::Locked, "no launcher on Super's tap");
         assert_eq!(seat.key(Key::Other, true, none()), KeyOut::Locked);
         assert_eq!(seat.key(Key::VolumeUp, true, none()), KeyOut::Volume(5));
+        assert_eq!(seat.key(Key::BrightnessDown, true, none()), KeyOut::Brightness(-5), "brightness too");
         assert_eq!(seat.key(Key::Vt(2), true, ctrl_alt), KeyOut::Vt(2), "consoles still switch (Dave: 2 a)");
         seat.unlock();
         assert_eq!(seat.key(Key::Other, true, none()), KeyOut::Forward(None));
@@ -864,6 +875,18 @@ mod tests {
         seat.menu_opened(Menu::Popup);
         assert_eq!(seat.key(Key::Tab, true, alt()), KeyOut::Popup);
         assert!(!seat.switching());
+    }
+
+    #[test]
+    fn the_brightness_keys_step_five_or_one_with_shift() {
+        let mut seat = Seat::new();
+        seat.focus(Some(W1));
+        let shift = Mods { shift: true, ..none() };
+        assert_eq!(seat.key(Key::BrightnessUp, true, none()), KeyOut::Brightness(5));
+        assert_eq!(seat.key(Key::BrightnessDown, true, none()), KeyOut::Brightness(-5));
+        assert_eq!(seat.key(Key::BrightnessUp, true, shift), KeyOut::Brightness(1));
+        assert_eq!(seat.key(Key::BrightnessDown, true, shift), KeyOut::Brightness(-1));
+        assert_eq!(seat.key(Key::BrightnessUp, false, none()), KeyOut::Forward(Some(W1)), "going up is the window's");
     }
 
     #[test]

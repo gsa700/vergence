@@ -145,6 +145,7 @@ fn fuzz_the_seat() {
         Key::Super,
         Key::VolumeUp,
         Key::Mute,
+        Key::BrightnessDown,
         Key::Vt(2),
         Key::Vt(0),
         Key::Tab,

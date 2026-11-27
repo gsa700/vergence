@@ -445,10 +445,13 @@ impl Server {
                         "Mute" => vec![113],
                         "VolumeDown" => vec![114],
                         "VolumeUp" => vec![115],
+                        // The brightness keys (KEY_BRIGHTNESSDOWN, KEY_BRIGHTNESSUP).
+                        "BrightnessDown" => vec![224],
+                        "BrightnessUp" => vec![225],
                         other => match other.chars().collect::<Vec<_>>().as_slice() {
                             // One letter or digit, for chords ("ctrl+v").
                             [c] if letter(*c).is_some() => vec![letter(*c).unwrap()],
-                            _ => return format!("key: no key {other} (Escape, Return, BackSpace, Tab, grave, space, Up, Down, Left, Right, Super, Control, Shift, Alt, Mute, VolumeDown, VolumeUp, a letter; chords like ctrl+v, alt+Tab+Tab)"),
+                            _ => return format!("key: no key {other} (Escape, Return, BackSpace, Tab, grave, space, Up, Down, Left, Right, Super, Control, Shift, Alt, Mute, VolumeDown, VolumeUp, BrightnessDown, BrightnessUp, a letter; chords like ctrl+v, alt+Tab+Tab)"),
                         },
                     });
                     }

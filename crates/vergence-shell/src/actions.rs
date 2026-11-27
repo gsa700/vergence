@@ -31,7 +31,7 @@ pub const PAGES: [(&str, &str, &str); 14] = [
     ("notifications", "Notifications", "cards do not disturb"),
     ("keyboard", "Keyboard", "keys repeat layout spelling"),
     ("mouse", "Mouse", "pointer speed scroll"),
-    ("screens", "Screens", "display monitor resolution scale"),
+    ("screens", "Screens", "display monitor resolution scale brightness"),
     ("energy", "Energy", "power sleep screens off idle"),
     ("date & time", "Date & Time", "clock time zone 24 hour"),
     ("about", "About", "version license"),

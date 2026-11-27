@@ -3,8 +3,14 @@
 *Drafted 2026-11-27 on Control from Dave's wish (the wish list, 11-27):
 "There is no brightness control on the laptop, it needs one. Maybe a
 Display dockworker? Could be a quick way to adjust a screen say when a
-projector is connected for a presentation?" Nothing is built yet; the
-questions below wait for his answers.*
+projector is connected for a presentation?"*
+
+**Decisions (Dave, 2026-11-27, "go with your leans"):** 1 a, a Display
+tile (docked by default only when a screen has a control), Settings >
+Displays' slider, and the keys; 2 a, vdm sets it, a named action with no
+prompt for a console session; 3 a, external screens over DDC/CI in
+milestone 1, Linux first; 4 a, 5% steps, Shift for 1%; 5 a, each screen's
+level kept and set again at login; 6 a, now, Hubble's panel first.
 
 ## Why
 
