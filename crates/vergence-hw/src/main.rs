@@ -226,45 +226,34 @@ impl Hardware {
         Topology { sections: vec![vergence_sysinfo::Section { kind: CoreKind::Plain, clusters }] }
     }
 
-    /// The cores and threads, with whether the chip runs two threads on a
-    /// core (Intel's Hyper-Threading, AMD's SMT) and on which cores:
-    /// "8 Performance + 16 Efficiency, 32 threads (Hyper-Threading on the
-    /// Performance cores)"; "4, 8 threads (Hyper-Threading)"; "6, 6 threads
-    /// (no Hyper-Threading)".
+    /// The cores and threads, each kind marked where it runs two threads
+    /// on a core (Dave's wording, 2026-11-26): "8 Performance
+    /// (Hyper-Threaded) + 16 Efficiency, 32 Threads"; one kind: "4 Cores
+    /// (Hyper-Threaded), 8 Threads", "6 Cores, 6 Threads". AMD's word for
+    /// it is SMT.
     fn cores_text(&self) -> String {
         let shape = self.shape();
-        let cores_of = |k: CoreKind| {
-            shape.sections.iter().filter(move |s| s.kind == k).flat_map(|s| &s.clusters).flat_map(|c| &c.cores)
-        };
-        let count = |k: CoreKind| cores_of(k).count();
-        let doubled = |k: CoreKind| cores_of(k).any(|c| c.threads.len() > 1);
-        let (p, e, plain) = (count(CoreKind::Performance), count(CoreKind::Efficiency), count(CoreKind::Plain));
-        let mut parts = Vec::new();
-        if p > 0 {
-            parts.push(format!("{p} Performance"));
-        }
-        if e > 0 {
-            parts.push(format!("{e} Efficiency"));
-        }
-        if plain > 0 {
-            parts.push(plain.to_string());
-        }
-        let ht = if self.model.contains("AMD") { "SMT" } else { "Hyper-Threading" };
-        let kinds: Vec<&str> =
-            [(CoreKind::Performance, "Performance"), (CoreKind::Efficiency, "Efficiency"), (CoreKind::Plain, "")]
+        let ht = if self.model.contains("AMD") { "SMT" } else { "Hyper-Threaded" };
+        let parts: Vec<String> =
+            [(CoreKind::Performance, "Performance"), (CoreKind::Efficiency, "Efficiency"), (CoreKind::Plain, "Cores")]
                 .into_iter()
-                .filter(|(k, _)| count(*k) > 0)
-                .map(|(k, n)| if doubled(k) { n } else { "-" })
+                .filter_map(|(k, word)| {
+                    let cores: Vec<&vergence_sysinfo::Core> = shape
+                        .sections
+                        .iter()
+                        .filter(|s| s.kind == k)
+                        .flat_map(|s| &s.clusters)
+                        .flat_map(|c| &c.cores)
+                        .collect();
+                    if cores.is_empty() {
+                        return None;
+                    }
+                    let mark =
+                        if cores.iter().any(|c| c.threads.len() > 1) { format!(" ({ht})") } else { String::new() };
+                    Some(format!("{} {word}{mark}", cores.len()))
+                })
                 .collect();
-        let note = if kinds.iter().all(|n| *n == "-") {
-            format!("no {ht}")
-        } else if kinds.iter().all(|n| *n != "-") || kinds.len() == 1 {
-            ht.to_string()
-        } else {
-            let on: Vec<&str> = kinds.iter().copied().filter(|n| *n != "-" && !n.is_empty()).collect();
-            format!("{ht} on the {} cores", on.join(" and "))
-        };
-        format!("{}, {} threads ({note})", parts.join(" + "), shape.threads())
+        format!("{}, {} Threads", parts.join(" + "), shape.threads())
     }
 
     /// A core's own temperature and the sensor's name: Linux's coretemp
