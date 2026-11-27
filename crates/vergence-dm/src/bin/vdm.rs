@@ -40,6 +40,12 @@ use vergence_dm::proto::{self, FromVdm, ProtoError, ToVdm};
 use vergence_dm::secret::Secret;
 use vergence_dm::{paths, sys};
 
+/// A session's PATH where PAM gave none, and the PATH of the power commands: the system's
+/// sbin directories too, as a FreeBSD login gets them from login.conf (Dave, 2026-11-27: a
+/// session from the login screen had no /sbin, so `zpool`, `ifconfig` and `sysctl` were
+/// missing in Terminal and Disks found no disks on kepler).
+const SYSTEM_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
 /// How long one check may take, PAM's waits included.
 const TIME_LIMIT: c_uint = 120;
 /// How long the client has for each message.
@@ -505,7 +511,7 @@ fn run_session(h: &pam::Handle, plan: &LoginPlan) -> c_int {
             set(&mut env, "XDG_SESSION_TYPE", "wayland".into());
             set(&mut env, "XDG_SESSION_CLASS", "user".into());
             if !has(&env, "PATH") {
-                set(&mut env, "PATH", "/usr/local/bin:/usr/bin:/bin".into());
+                set(&mut env, "PATH", SYSTEM_PATH.into());
             }
             // The system's locale where PAM gave none: /etc/locale.conf (Void and
             // systemd systems keep it there, and only a login shell's profile
@@ -2188,7 +2194,7 @@ fn main() {
                             let started = std::process::Command::new(cmd)
                                 .args(args)
                                 .env_clear()
-                                .env("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+                                .env("PATH", SYSTEM_PATH)
                                 .stdin(std::process::Stdio::null())
                                 .stdout(std::process::Stdio::null())
                                 .stderr(std::process::Stdio::null())
