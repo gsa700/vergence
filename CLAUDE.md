@@ -26,8 +26,8 @@ an AI collaborator must know to work here safely.
 - **Hubble** (Void Linux, glibc): a project machine; breaking its session for
   the project is fine, Dave's accounts and data still need care. Its disk
   runs in the ASUS TUF F15 (Intel UHD panel at 1080p 144 Hz, GTX 1650 on the
-  external outputs through Mesa NVK; dual boot with Windows). No display
-  manager: log in on the text console, then `vergence`. Passwordless sudo.
+  external outputs through Mesa NVK; dual boot with Windows). vdm runs
+  there as on the others (seen 2026-11-27). Passwordless sudo.
   Its session may be restarted freely (Dave, 2026-11-22).
 - **techbench** (Void Linux, glibc, since 2026-11-22: i9-13900K, UHD 770,
   the LG 27" 4K at 133⅓%; Btrfs root, not encrypted for now: encryption
