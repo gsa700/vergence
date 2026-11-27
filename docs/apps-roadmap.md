@@ -614,3 +614,45 @@ to check what was built, and the agent interface to try it.
   submitted instead).* **The kitty keyboard protocol**, as a wish: a program
   that asks (CSI > flags u, popped with CSI < u, queried with CSI ? u) gets
   every modified key unambiguously; Claude Code uses it when offered.
+
+## From Dave, 2026-11-27 (wish list)
+
+- **A process monitor that shows which kind of core each process runs on**
+  (Performance or Efficiency), modeled on macOS's Activity Monitor, or folded
+  into Hardware as Windows 11's Task Manager is. Raised while planning the
+  Hardware app; the readings exist (the per-core grid's topology,
+  vergence-sysinfo's `topology()`), the per-process side does not: on Linux
+  each thread's last CPU (`/proc/<pid>/task/*/stat`, field 39) mapped to its
+  core's kind; on FreeBSD `ps -o lastcpu` or `procstat`. Sorting by CPU,
+  memory, disk and network as Activity Monitor does; ending a process stays
+  Force Quit's.
+- **Three apps aligned, perhaps consolidated**: Settings › About, Hardware,
+  and the process monitor above, which could take in Force Quit (Running
+  Applications). Today About's "This computer" summary hands over to Hardware
+  ("More in Hardware…"), and Force Quit stands apart. A short plan first
+  (who shows what, where each opens from, one look for the shared readings),
+  for Dave's decisions, before anything moves.
+- **Notifications that are seen**: larger, perhaps a brighter color ("I have
+  had notifications go unseen for a while because it just gets lost in the
+  desktop"), and **Top Centered** as an optional place, as GNOME's.
+  (Dockworkers principle: trouble already brings one notification beside the
+  dock; this is the notifications' own look and place, in Settings ›
+  Notifications.)
+- **Brightness: a Display Dockworker.** The laptop has no brightness control.
+  A tile and card with a slider per screen: the built-in panel's backlight
+  (Linux `/sys/class/backlight`, which needs a udev rule or the video group
+  for a person to write; FreeBSD `backlight(8)`), and external monitors and
+  projectors over DDC/CI (i2c, also a permission question) where they answer;
+  the brightness keys too. "A quick way to adjust a screen, say when a
+  projector is connected for a presentation."
+- **A system log viewer app**: the window behind the 2026-11-24 Dockworker
+  idea (system log and monitoring), the system's log (socklog on Void,
+  /var/log/messages on FreeBSD, the journal on systemd) with filters, search
+  and follow, read as the person where the system allows, the rest asked for
+  through the elevation prompt as hardware readings milestone 1's Advanced
+  part is.
+- *Done 2026-11-27*: AlbumWall's place when its window comes back (off by the
+  play bar's height), the open album centered (the Avalonia app's
+  TargetOffset), the cover in the play bar taking you back to the playing
+  album, the wall returning after a minute away, and oblong covers on the bare
+  wall (AlbumWall milestone 2's progress).
