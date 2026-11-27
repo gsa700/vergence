@@ -6,6 +6,14 @@ elevation prompt under the 'advanced' model used elsewhere in vergence".
 Follows the Hardware app's Details (branch hw-core-grid, 6fa0bbb), which
 show what any user may read. Nothing here is built yet.*
 
+**Decisions (Dave, 2026-11-26, "go with your leans, build step 1"):** 1 a,
+the lease ends when the window closes, the program ends or the screen
+locks; 2, one prompt covers every Advanced part of the window; 3 a, power
+as a 1 s average to 0.1 W; 4 a, FreeBSD's readings later, after Linux; 5,
+the exception to elevation's question 3 agreed as worded (a yes may cover a
+read-only view while it stays open, never a change); 6, step 1 built now on
+hw-core-grid.
+
 ## Why
 
 The Hardware app shows the processor, its caches and clocks, the board and
