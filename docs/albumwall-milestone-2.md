@@ -398,3 +398,19 @@ program can use it):
   ⏮ ⏯ ⏭ (cards stack every button full width today; a new piece of the
   vocabulary); players on another bus when DBUS_SESSION_BUS_ADDRESS named
   one at start.
+- **Step 7, the checks** (2026-11-27): the suite's own stand-in server,
+  `tools/display-suite/subsonic-standin.py` (Subsonic as Navidrome answers
+  it: salted-token sign-in, two music folders, album lists, song search,
+  covers wide, nearly square and square, timed and plain lyrics, WAV streams
+  that answer half a second late; a "garbage" mode answering every call with
+  a web server's HTML page). Display suite 37: a wrong password refused in
+  the server's words; a server answering garbage an error and AlbumWall
+  still there; signed in, the music folders to tick and a ticked one on the
+  wall (24 albums · 72 tracks); the libraries file 0600 with a salted token
+  and never the password; an album played from the server is Playing, its
+  song asked for whole (format=raw) and the next fetched ahead; the server's
+  lyrics; the server gone, AlbumWall started again says it cannot be
+  reached. Passing on techbench and Hubble. Scenarios 35 and 36 cover MPRIS
+  and Now Playing. Packages on techbench through 0.4.2pre14 carry every step.
+  Left for the milestone to close: Dave's own pass against his MusicServer
+  (signed in 2026-11-26: "Navidrome · Music Library" and "Navidrome · FLAC").
