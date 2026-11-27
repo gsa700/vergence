@@ -1,23 +1,28 @@
-# Hardware readings milestone 1: what only root may read
+# Hardware readings milestone 1: what only root may read, behind Advanced
 
-*Drafted 2026-11-26 on techbench (Dave: "write up the plan for the root
-helper, should we use the elevation prompt for that?"). Follows the
-Hardware app's Details (branch hw-core-grid, 6fa0bbb), which show what any
-user may read; this plan covers the rest of CPU-Z's pages. Nothing here is
-built yet.*
+*Drafted 2026-11-26 on techbench; rewritten the same evening around Dave's
+model: "put the user readable data into the Hardware app, and use an
+elevation prompt under the 'advanced' model used elsewhere in vergence".
+Follows the Hardware app's Details (branch hw-core-grid, 6fa0bbb), which
+show what any user may read. Nothing here is built yet.*
 
 ## Why
 
-The Hardware app now shows the processor, its caches and clocks, the board
-and firmware, and the graphics card, all without root. Three things people
-look for are still missing:
+The Hardware app shows the processor, its caches and clocks, the board and
+firmware, and the graphics card, all without root. What people still look
+for, and CPU-Z and GPU-Z show:
 
 1. **The memory as it runs:** its speed now (which may be the modules'
    XMP/EXPO profile, not their rated speed), the slots in use, each
    module's maker, part number and size.
 2. **The memory's rated speed and timings** (CL-tRCD-tRP-tRAS).
-3. **The processor's power now** in watts (package power), as Task
-   Manager and Activity Monitor show it.
+3. **Power now** in watts: the processor's package, and the graphics' where
+   the card or the chip reports it.
+
+CPU-Z gets all of it on Windows by loading its own kernel driver, which
+needs administrator rights: one UAC prompt, and the whole program sees more
+for as long as it runs. Linux already gives any user most of it; what is
+left needs root, and that part goes behind a prompt the person asks for.
 
 ## What this machine says, and who may read it (techbench, 2026-11-26)
 
@@ -26,109 +31,146 @@ look for are still missing:
 | Rated speed and timings (2) | each module's SPD chip: `/sys/bus/i2c/devices/*/eeprom` (the kernel's `spd5118` driver for DDR5, `ee1004` for DDR4) | **any user** (0444) |
 | Module maker, part number (1) | the SPD chip's second half | any user, **but** techbench's board blocks the chip's page switch, so the second half reads back as a copy of the first |
 | Speed now, slots, maker, part number, size (1) | the firmware's memory table (SMBIOS type 17): `/sys/firmware/dmi/tables/DMI` | root only (0400) |
-| Package power (3) | `/sys/class/powercap/intel-rapl:0/energy_uj` | root only (0400) since PLATYPUS (CVE-2020-8694) |
+| Processor package power (3) | `/sys/class/powercap/intel-rapl:0/energy_uj` | root only (0400) since PLATYPUS (CVE-2020-8694) |
+| Integrated graphics power (3) | the same counter's "uncore" part, `intel-rapl:0:1` (the UHD 770 has no sensor of its own) | root only (0400) |
+| Graphics clock | `/sys/class/drm/card0/gt_act_freq_mhz` (i915) | any user (shown today) |
 
 techbench's modules decode as DDR5, rated 4800 MT/s (tCKAVGmin 416 ps),
 tAA/tRCD/tRP 16.0 ns, tRAS 32.0 ns: JEDEC 40-39-39-77 at 4800.
 
-Why each is root's: the firmware table holds serial numbers, asset tags and
-the machine's UUID (fingerprints; the kernel already gives any user the
-rest of the same table in `/sys/class/dmi/id`, board and firmware but not
-the serials). The power counter was closed because sampling it every few
+Other graphics cards, from their drivers (to check on the hardware when
+the lab has it): AMD's amdgpu gives any user power, temperature, fan, busy
+percent, memory used and its firmware's version (`device/hwmon/*`,
+`gpu_busy_percent`, `mem_info_*`, `vbios_version`): nothing needs root.
+Intel Arc reports its own energy through hwmon (who may read it: to
+check). NVIDIA's own driver reports only through NVIDIA's library (NVML):
+borrowing, Dave's call, parked. nouveau reports little either way.
+
+Why each root-only reading is root's: the firmware table holds serial
+numbers, asset tags and the machine's UUID (fingerprints; the kernel
+already gives any user the rest of the same table in `/sys/class/dmi/id`).
+The power counters were closed because sampling them every few
 microseconds to milliseconds lets a program recover secrets (keys) from
 how much power the processor draws.
 
-## Should the elevation prompt be used? Lean: no, not for these
+## The model: Advanced, opened on purpose, asks
 
-The elevation prompt (docs/elevation-milestone-1.md) is for **changes** a
-person approves: vdm carries out one named action, the yes is spent, and
-"a yes is never remembered, every action asks" (Dave, 2026-11-16,
-question 3 a). For these readings it fits badly:
+As the settings app does (settings milestone 1): each page opens on what
+anyone may read, with a collapsed **Advanced** part at its end.
 
-- **Live power cannot work with it**: every sample (or every time Hardware
-  opens) would ask for the password again, or a yes would have to be
-  remembered, which question 3 rules out.
-- **Asking for the password to look at the memory's speed teaches people to
-  type it without thinking**, which is what makes a real prompt worth
-  less (prompt fatigue).
-- **None of it needs to be secret once filtered**: without the serials, the
-  memory table says what the kernel already says of the board; power
-  averaged over a second is what every other desktop shows, and is far
-  too coarse for PLATYPUS, which needs thousands of samples a second.
+- **Every page shows what any user may read, without a prompt**: all of
+  today's Details, plus Memory > "Rated" (speed and timings from the
+  modules' own chips), plus everything an AMD card gives.
+- **Memory, Processors and Graphics each get an Advanced part** holding
+  the root-only readings: Memory > Advanced: each slot, the speed now,
+  each module's maker, part number and size; Processors > Advanced:
+  package power now and its minute's chart; Graphics > Advanced: the
+  integrated graphics' power (uncore) and its chart, where the card has no
+  sensor anyone may read.
+- **Opening an Advanced part is what asks**, with the elevation prompt
+  (docs/elevation-milestone-1.md): drawn by the server, the administrator's
+  own password, checked by vdm through PAM. Inside the part, before the
+  yes: one line, "These readings need an administrator's password", and a
+  **Show** button; the prompt comes only from that click.
+- **The yes is a read lease for that window**: it covers every Advanced
+  part of that Hardware window (open one, the others need no new prompt)
+  until the window closes, the program ends, or the screen locks. The next
+  look asks again.
+- **Never a prompt by itself**: an Advanced part starts closed each time
+  Hardware opens (the settings app remembers its open parts; this one must
+  not, or opening Hardware would bring up a prompt). Only a click asks.
 
-So the lean is a narrow **read service in vdm** that answers without a
-prompt, gives only filtered readings, and only to a person at the machine.
+Someone who never opens Advanced never sees a prompt; someone who wants to
+see more asks for it, as with CPU-Z.
 
-## How it would work (the lean)
+## How it works
 
-1. **vdm reads, the app asks.** vdm already runs as root on every Vergence
-   machine and already checks who is asking (uid and pid from the kernel,
-   a session at one of the machine's consoles: elevate's rule). It gains
-   two named reads on its own socket (not elevate's, not the lock's):
-   - `memory.modules`: vdm parses SMBIOS type 17 itself (our own parser;
-     FreeBSD: the table found through `kenv hint.smbios.0.mem` and read by
-     vdm, as root) and returns, per slot: locator ("DIMM_A2"), size, type,
-     speed now and rated, maker, part number. **Never** serial numbers,
-     asset tags, or the system UUID.
-   - `power.package`: vdm reads the energy counter itself, **at most once a
-     second**, and returns the average watts over the last second, rounded
-     to 0.1 W. Many askers share the one reading; vdm never reads faster
-     however many ask. FreeBSD: MSR_PKG_ENERGY_STATUS through cpuctl, the
-     same rules (later; see question 4).
-2. **The Hardware app shows them** where they belong: Memory > "Modules"
-   (each slot) and "Speed now"; Processors > "Power now" with the minute's
-   chart. With no vdm (another desktop, an older system), the rows say
-   "needs Vergence's login service" instead of failing silently.
-3. **The SPD readings need nothing new**: vergence-sysinfo reads the SPD
-   chips directly (any user), decodes DDR4 and DDR5 rated speed and
-   timings, and fills Memory > "Rated" now, prompt or no prompt.
-4. **Logged** like vdm's other requests, but **once per asking program**,
-   not once a second.
+1. **The lease.** A new elevate action, `hardware.readings`: the prompt says
+   "Let Hardware read the memory's slots and the power counters" and who
+   asks (as every prompt does, from the program's file). On a yes vdm
+   gives the asking program a lease: 128 random bits only vdm and that
+   program know, tied to its pid. vdm ends it when the program goes away,
+   when the program says it is done (its window closed), or when the
+   person's screen locks.
+2. **The reads**, on vdm's elevate socket, each with the lease:
+   - `memory.modules`: vdm parses SMBIOS type 17 itself (our own parser, in
+     its forked worker, fuzzed; FreeBSD: the table found through `kenv
+     hint.smbios.0.mem`, later) and returns, per slot: locator ("DIMM_A2"),
+     size, type, speed now and rated, maker, part number. **Never** serial
+     numbers, asset tags or the system UUID, lease or not.
+   - `power.package` and `power.graphics`: vdm reads the counters itself,
+     **at most once a second**, and returns the average watts over the last
+     second, rounded to 0.1 W; every lease holder shares the one reading,
+     and vdm reads only while some lease holder asks (nothing while no
+     Advanced part is open: mind the battery).
+3. **vdm still does the reading and the filtering**: the Hardware app never
+   runs as root and never sees a raw table or a raw counter. A yes grants
+   a view, not a hole.
+4. **Logged** as every elevate request is: the lease (who, which program,
+   yes or no) and its end; not each one-second read.
 
-What it never does: hand out raw tables, read a counter faster than once a
-second, answer anyone not at the machine, or take a path or argument from
-the asker (both reads take none).
+What it never does: hand out raw tables or serials, read a counter faster
+than once a second, give a lease to anyone not at the machine (elevate's
+rule), outlive the window, the program or the unlocked screen, or let a
+lease change anything.
+
+## A change to a decision
+
+Elevation milestone 1, question 3 (Dave, 2026-11-16): "a yes is never
+remembered, every action asks". This plan needs a written exception:
+**a yes may cover a read-only view for as long as it stays open; it never
+covers a change.** Every action that changes something still asks each
+time.
 
 ## Threats, and what answers each
 
 - **PLATYPUS through vdm**: one reading a second, averaged and rounded,
-  shared by all askers; no way to ask for a faster or finer one.
+  shared by all; no way to ask for a faster or finer one, lease or not.
 - **Fingerprinting through the memory table**: serials, asset tags and the
-  UUID never leave vdm; what does is what a shop's spec sheet says.
+  UUID never leave vdm.
+- **A lease stolen or reused**: 128 random bits, tied to the pid that asked;
+  a read from any other process with it is refused and logged; it dies
+  with the program, its window, or the lock.
+- **A program asking to wear the person down**: elevate's existing pause
+  (10 s, doubling to 5 minutes after a decline) and one request at a time.
 - **A parser bug in root** (a hostile or broken firmware table): vdm's
   SMBIOS parser is small, bounds-checked, fuzzed, and runs in vdm's forked
-  worker (as PAM checks do), never in vdm's main loop.
+  worker, never in its main loop.
 - **Someone over ssh, or another account**: elevate's rule; only a person
-  with a session at a console gets an answer.
-- **Wear**: none; nothing is written, and the energy counter is a register.
+  with a session at a console can get a lease.
 
 ## Steps
 
 1. vergence-sysinfo: SPD decoding (DDR4 `ee1004`, DDR5 `spd5118`) for rated
-   speed and timings; Memory > "Rated" in Hardware. **No root; can be built
-   now.**
-2. vergence-dm: the read socket, `memory.modules` (the SMBIOS type 17
-   parser, fuzzed, in the worker) and `power.package` (1 s, shared,
-   rounded), the console check, the log line.
-3. Hardware: Memory > "Modules", Processors > "Power now" and its chart;
-   the "needs Vergence's login service" fallback.
-4. Tests on all three machines, then an independent review of the vdm part
+   speed and timings; Memory > "Rated" in Hardware; amdgpu's power,
+   temperature, fan, busy and memory where present. **No root, no decision
+   pending: can be built now.**
+2. The toolkit: the settings app's Advanced part (`disclosure` in
+   vergence-settings' look.rs) moves into vergence-widgets, so Hardware and
+   any app can use it (the settings app keeps its look; control's call on
+   where it sits).
+3. vergence-dm: `hardware.readings` (the prompt's words, the lease and its
+   ends), `memory.modules` (the SMBIOS type 17 parser, fuzzed, in the
+   worker), `power.package` and `power.graphics` (1 s, shared, rounded,
+   only while asked), the log lines.
+4. Hardware: the Advanced parts on Memory, Processors and Graphics (the
+   line and Show, then the readings and charts); the lease given back when
+   the window closes; with no vdm (another desktop), the part says
+   "needs Vergence's login service".
+5. Tests on all three machines, then an independent review of the vdm part
    (Dave's code security policy: a new root interface is a review trigger).
 
 ## Questions
 
-1. **The elevation prompt for these readings:** (a) no prompt: vdm's
-   filtered read service, as above (lean); (b) the prompt once each time
-   Hardware opens, the yes good for that window's life (bends the
-   2026-11-16 decision 3); (c) the prompt for the memory table only, power
-   left out.
-2. **Where the root code lives:** (a) in vdm, which is root already and
-   already checks who asks (lean); (b) a small helper of its own, set-uid
-   root, group vergence, mode 4750, like `sound-default` (a process per
-   reading, and live power would mean one a second).
+1. **When the lease ends:** (a) the window closes, the program ends, or the
+   screen locks (lean); (b) also after a set time (an hour?); (c) only when
+   the window closes or the program ends.
+2. **One prompt for all Advanced parts of a window** (lean), or one per
+   page (Memory's yes not covering power)?
 3. **Power's resolution:** (a) 1 s average, 0.1 W (lean; what other
-   desktops show); (b) 1 s, whole watts; (c) power left to root's tools.
+   desktops show); (b) 1 s, whole watts.
 4. **FreeBSD:** (a) the same readings later, after Linux (lean); (b) Linux
-   only, FreeBSD's rows say "not available on this system".
-5. **Step 1 now?** The SPD readings need no root and no decision above;
-   build them on hw-core-grid while the rest waits for the answers.
+   only, FreeBSD's Advanced parts say "not available on this system".
+5. **The exception to elevation's question 3** as worded above: agreed?
+6. **Step 1 now?** It needs no root and no answer above; build it on
+   hw-core-grid while the rest waits.
