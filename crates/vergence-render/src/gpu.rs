@@ -362,6 +362,14 @@ impl Gpu {
     /// A renderer on this machine's GPU (or its software GL). An error if
     /// there is neither; draw with [`crate::Cpu`] then.
     pub fn new() -> Result<Gpu, GpuError> {
+        // VERGENCE_NO_GPU=1: as on a machine with no GPU (everything drawn on
+        // the CPU, GPU tests skipped). Kepler's test runs set it: the tests'
+        // GPU work hung its UHD 630 under FreeBSD's drm-kmod, resetting the
+        // live session's contexts with it (2026-11-26); Hubble and techbench
+        // keep testing the GPU.
+        if std::env::var_os("VERGENCE_NO_GPU").is_some_and(|v| v == "1") {
+            return Err(GpuError::NoDisplay);
+        }
         let egl = Egl::load().ok_or(GpuError::NoLibrary)?;
         let gl = Gles::load().ok_or(GpuError::NoLibrary)?;
         let (display, gbm) = open_display(&egl).ok_or(GpuError::NoDisplay)?;

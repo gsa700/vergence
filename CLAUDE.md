@@ -137,10 +137,13 @@ an AI collaborator must know to work here safely.
 
 ## GPU hangs: keep the evidence
 
-On kepler run tests as `tools/test-guard.sh 480 -- cargo test -q
---workspace`; on any hang run `tools/gpu-report.sh [pid...]` before killing
-or rebooting, then `tools/lab/fetch-gpu-reports.sh` to copy the reports to
-Control (`~/vergence-gpu-reports/`). A vergence-render GPU test once hung on
+On kepler run tests as `VERGENCE_NO_GPU=1 tools/test-guard.sh 480 -- cargo
+test -q --workspace` (the GPU tests skip and the server draws on the CPU:
+their GPU work kept resetting kepler's GPU, the live session's contexts with
+it, 2026-11-26; the GPU is tested on Hubble and techbench); on any hang run
+`tools/gpu-report.sh [pid...]` before killing or rebooting, then
+`tools/lab/fetch-gpu-reports.sh` to copy the reports to Control
+(`~/vergence-gpu-reports/`). A vergence-render GPU test once hung on
 kepler in the kernel (a page fault on a mapped GPU buffer in drm-kmod's
 linuxkpi path, during glReadPixels), unkillable until reboot.
 
