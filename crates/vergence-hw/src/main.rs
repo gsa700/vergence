@@ -17,7 +17,9 @@ use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
 use vergence_scene::{Color, Point, Rect};
-use vergence_sysinfo::{CoreKind, DiskIo, FileSystem, Memory, Temp, Ticks, Topology, bytes_text};
+use vergence_sysinfo::{
+    CoreKind, CpuDetails, DiskIo, FileSystem, GpuDetails, Machine, Memory, Temp, Ticks, Topology, bytes_text,
+};
 use vergence_ui::{AppCommand as C, BarStyle, Role};
 use vergence_widgets::chart::{chart, meter};
 use vergence_widgets::{
@@ -82,6 +84,11 @@ struct Hardware {
     thread_hist: Vec<VecDeque<f64>>,
     /// The chip's shape (read once: cores do not move).
     topo: Topology,
+    /// What the processor and the machine are (read once) and each GPU's
+    /// details (read only while the Graphics page shows: mind the battery).
+    details: CpuDetails,
+    machine: Machine,
+    gpu_info: Vec<GpuDetails>,
     temps: Vec<Temp>,
     mem: Memory,
     mem_hist: VecDeque<f64>,
@@ -113,6 +120,9 @@ impl Hardware {
             cpu_hist: VecDeque::new(),
             thread_hist: Vec::new(),
             topo: vergence_sysinfo::topology(),
+            details: CpuDetails::default(),
+            machine: vergence_sysinfo::machine(),
+            gpu_info: Vec::new(),
             temps: Vec::new(),
             mem: Memory::default(),
             mem_hist: VecDeque::new(),
@@ -127,6 +137,7 @@ impl Hardware {
             tick: 0,
             desktop,
         };
+        h.details = vergence_sysinfo::cpu_details(&h.topo);
         h.sample();
         h
     }
@@ -172,6 +183,9 @@ impl Hardware {
                     f.kind != vergence_net::ifaces::Kind::Loopback && !vergence_net::ifaces::is_virtual(&f.name)
                 })
                 .collect();
+        }
+        if self.page == Page::Graphics {
+            self.gpu_info = self.gpus.iter().map(|g| vergence_sysinfo::gpu_details(&g.slot)).collect();
         }
         // The slower ones every five seconds.
         if self.tick % 5 == 0 {
@@ -224,6 +238,91 @@ impl Hardware {
             .map(|i| vergence_sysinfo::Cluster { cores: vec![vergence_sysinfo::Core { threads: vec![i], id: None }] })
             .collect();
         Topology { sections: vec![vergence_sysinfo::Section { kind: CoreKind::Plain, clusters }] }
+    }
+
+    fn board_text(&self) -> String {
+        let m = &self.machine;
+        let t = format!("{} {}", m.board_maker, m.board);
+        if t.trim().is_empty() { "—".into() } else { t.trim().to_string() }
+    }
+
+    /// "American Megatrends Inc. 4301, 2025-04-29" (the firmware's date
+    /// comes as MM/DD/YYYY).
+    fn firmware_text(&self) -> String {
+        let m = &self.machine;
+        let date = match m.bios_date.split('/').collect::<Vec<_>>()[..] {
+            [mm, dd, yyyy] if yyyy.len() == 4 => format!("{yyyy}-{mm}-{dd}"),
+            _ => m.bios_date.clone(),
+        };
+        let mut t = format!("{} {}", m.bios_vendor, m.bios).trim().to_string();
+        if !date.is_empty() {
+            t = format!("{t}, {date}");
+        }
+        if t.is_empty() { "—".into() } else { t }
+    }
+
+    /// CPU-Z's first page, as far as any user may read it.
+    fn cpu_detail_rows(&self) -> Vec<Element<Msg>> {
+        let d = &self.details;
+        let none = || "not available on this system".to_string();
+        let mut rows = Vec::new();
+        if let (Some(f), Some(m)) = (d.family, d.model) {
+            let st = d.stepping.unwrap_or(0);
+            if let Some(name) = vergence_sysinfo::codename(&d.vendor, f, m, st) {
+                rows.push(Hardware::line("Design", name.to_string()));
+            }
+            rows.push(Hardware::line(
+                "Family, model, stepping",
+                format!("{f}, {m} ({m:X}h), {}", d.stepping.map_or("—".into(), |s| s.to_string())),
+            ));
+        } else {
+            rows.push(Hardware::line("Family, model, stepping", none()));
+        }
+        if !d.microcode.is_empty() {
+            rows.push(Hardware::line("Microcode", d.microcode.clone()));
+        }
+        let shape = self.shape();
+        let many = d.kinds.len() > 1;
+        for k in &d.kinds {
+            let who = match k.kind {
+                CoreKind::Performance => "Performance cores",
+                CoreKind::Efficiency => "Efficiency cores",
+                CoreKind::Plain => "",
+            };
+            let ghz = |mhz: u32| format!("{:.1} GHz", mhz as f64 / 1000.0);
+            let clock = match (k.base_mhz, k.max_mhz) {
+                (Some(b), Some(m)) => format!("{} base, up to {}", ghz(b), ghz(m)),
+                (None, Some(m)) => format!("up to {}", ghz(m)),
+                (Some(b), None) => format!("{} base", ghz(b)),
+                _ => none(),
+            };
+            rows.push(Hardware::line(&if many { format!("Clock, {who}") } else { "Clock".into() }, clock));
+            if !k.caches.is_empty() {
+                let per_core = shape
+                    .sections
+                    .iter()
+                    .find(|s| s.kind == k.kind)
+                    .and_then(|s| s.clusters.first()?.cores.first())
+                    .map_or(1, |c| c.threads.len().max(1));
+                let all = shape.threads();
+                let caches = cache_text(&k.caches, per_core, all);
+                rows.push(Hardware::line(&if many { format!("Caches, {who}") } else { "Caches".into() }, caches));
+            }
+        }
+        let sets = vergence_sysinfo::instruction_sets(&d.flags);
+        rows.push(Hardware::wide(
+            column(vec![
+                label("Instruction sets"),
+                label(if sets.is_empty() { none() } else { sets.join(", ") }).dim().wrap().width(Length::FILL),
+            ])
+            .spacing(4.0)
+            .width(Length::FILL),
+        ));
+        if !d.driver.is_empty() {
+            let how = if d.governor.is_empty() { d.driver.clone() } else { format!("{}, {}", d.driver, d.governor) };
+            rows.push(Hardware::line("Clock control", how));
+        }
+        rows
     }
 
     fn ht_word(&self) -> &'static str {
@@ -390,6 +489,9 @@ impl Hardware {
                             ),
                             Hardware::line("Cores", self.cores_text()),
                             Hardware::line("Memory", bytes_text(self.mem.total)),
+                            Hardware::line("Computer", self.machine.name()),
+                            Hardware::line("Board", self.board_text()),
+                            Hardware::line("Firmware", self.firmware_text()),
                             Hardware::line(
                                 "Graphics",
                                 self.gpus
@@ -424,6 +526,7 @@ impl Hardware {
                         ],
                 )];
                 v.extend(self.core_grid(t));
+                v.push(self.group(t, Some("Details"), self.cpu_detail_rows()));
                 let tiled = self.tiled_temps();
                 let mut left: Vec<&Temp> = self.temps.iter().filter(|tp| !tiled.contains(&tp.what)).collect();
                 // The processor's own first: the number most people look for.
@@ -561,22 +664,36 @@ impl Hardware {
                 let mut v: Vec<Element<Msg>> = self
                     .gpus
                     .iter()
-                    .map(|g| {
+                    .enumerate()
+                    .map(|(i, g)| {
+                        let d = self.gpu_info.get(i).cloned().unwrap_or_default();
+                        let mut rows =
+                            vec![Hardware::line("Driver", g.driver.clone()), Hardware::line("Slot", g.slot.clone())];
+                        if !d.pci_id.is_empty() && d.pci_id != ":" {
+                            rows.push(Hardware::line("PCI ID", d.pci_id.clone()));
+                        }
+                        match (d.clock_mhz, d.max_mhz) {
+                            (Some(c), Some(m)) => rows.push(Hardware::line("Clock", format!("{c} MHz, up to {m} MHz"))),
+                            (Some(c), None) => rows.push(Hardware::line("Clock", format!("{c} MHz"))),
+                            (None, Some(m)) => rows.push(Hardware::line("Clock", format!("up to {m} MHz"))),
+                            _ => {}
+                        }
+                        if let Some(b) = d.vram {
+                            rows.push(Hardware::line("Its own memory", bytes_text(b)));
+                        }
                         self.group(
                             t,
                             Some(&g.vendor),
-                            vec![
-                                Hardware::line("Driver", g.driver.clone()),
-                                Hardware::line("Slot", g.slot.clone()),
-                                Hardware::line(
+                            rows.into_iter()
+                                .chain([Hardware::line(
                                     "Awake",
                                     match g.awake {
                                         Some(true) => "Yes".into(),
                                         Some(false) => "Asleep".into(),
                                         None => "—".into(),
                                     },
-                                ),
-                            ],
+                                )])
+                                .collect(),
                         )
                     })
                     .collect();
@@ -636,6 +753,42 @@ impl Hardware {
             }
         }
     }
+}
+
+/// A kind of core's caches in words: "L1 48 KB data + 32 KB instruction per
+/// core · L2 2 MB per core · L3 36 MB shared". A cache shared by a core's
+/// threads is "per core", by all of them "shared", else "per N cores".
+fn cache_text(caches: &[vergence_sysinfo::Cache], per_core: usize, all: usize) -> String {
+    let size = |b: u64| {
+        if b >= 1 << 20 { format!("{} MB", b >> 20) } else { format!("{} KB", b >> 10) }
+    };
+    let whose = |shared: usize| {
+        if shared >= all && all > per_core {
+            "shared".to_string()
+        } else if shared <= per_core {
+            "per core".to_string()
+        } else {
+            format!("per {} cores", shared / per_core)
+        }
+    };
+    let mut levels: Vec<u32> = caches.iter().map(|c| c.level).collect();
+    levels.dedup();
+    levels
+        .iter()
+        .map(|&l| {
+            let at: Vec<&vergence_sysinfo::Cache> = caches.iter().filter(|c| c.level == l).collect();
+            let parts: Vec<String> = at
+                .iter()
+                .map(|c| match c.kind.as_str() {
+                    "Data" => format!("{} data", size(c.bytes)),
+                    "Instruction" => format!("{} instruction", size(c.bytes)),
+                    _ => size(c.bytes),
+                })
+                .collect();
+            format!("L{l} {} {}", parts.join(" + "), whose(at[0].shared_by))
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 /// A sensor's name in words, from its driver's ("spd5118" is a memory
@@ -856,6 +1009,23 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn caches_in_words() {
+        use vergence_sysinfo::Cache;
+        let c = |level, kind: &str, kb: u64, shared_by| Cache { level, kind: kind.into(), bytes: kb * 1024, shared_by };
+        // techbench's Performance and Efficiency cores.
+        let p = [c(1, "Data", 48, 2), c(1, "Instruction", 32, 2), c(2, "Unified", 2048, 2), c(3, "Unified", 36864, 32)];
+        assert_eq!(
+            cache_text(&p, 2, 32),
+            "L1 48 KB data + 32 KB instruction per core · L2 2 MB per core · L3 36 MB shared"
+        );
+        let e = [c(1, "Data", 32, 1), c(1, "Instruction", 64, 1), c(2, "Unified", 4096, 4), c(3, "Unified", 36864, 32)];
+        assert_eq!(
+            cache_text(&e, 1, 32),
+            "L1 32 KB data + 64 KB instruction per core · L2 4 MB per 4 cores · L3 36 MB shared"
+        );
+    }
 
     #[test]
     fn sensors_in_words_and_repeats_numbered() {

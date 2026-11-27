@@ -435,6 +435,10 @@ pub struct Machine {
     pub board_maker: String,
     pub board: String,
     pub bios: String,
+    /// The firmware's maker and date as it gives it ("American Megatrends
+    /// Inc.", "04/29/2025").
+    pub bios_vendor: String,
+    pub bios_date: String,
 }
 
 impl Machine {
@@ -481,6 +485,196 @@ pub fn uptime_text(secs: u64) -> String {
         (0, _) => format!("{}, {}", unit(h, "hour"), unit(m, "minute")),
         _ => format!("{}, {}", unit(d, "day"), unit(h, "hour")),
     }
+}
+
+/// One cache: its level, "Data", "Instruction" or "Unified", its size, and
+/// how many logical processors share it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cache {
+    pub level: u32,
+    pub kind: String,
+    pub bytes: u64,
+    pub shared_by: usize,
+}
+
+/// A kind of core's clocks and caches (on a plain chip, one entry).
+#[derive(Debug, Clone, PartialEq)]
+pub struct KindDetails {
+    pub kind: CoreKind,
+    pub base_mhz: Option<u32>,
+    pub max_mhz: Option<u32>,
+    pub caches: Vec<Cache>,
+}
+
+/// What the processor is, beyond its name (CPU-Z's first page): read once.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CpuDetails {
+    /// "GenuineIntel", "AuthenticAMD".
+    pub vendor: String,
+    pub family: Option<u32>,
+    pub model: Option<u32>,
+    pub stepping: Option<u32>,
+    pub microcode: String,
+    /// Feature flags in Linux's spelling ("avx2", "sha_ni"), whatever the
+    /// system.
+    pub flags: Vec<String>,
+    pub kinds: Vec<KindDetails>,
+    /// How the clock is run: driver and policy ("intel_pstate", "powersave").
+    pub driver: String,
+    pub governor: String,
+}
+
+/// The design's name from its family and model (our own table of the
+/// common ones; None where we do not know it rather than a guess).
+pub fn codename(vendor: &str, family: u32, model: u32, stepping: u32) -> Option<&'static str> {
+    if vendor.contains("Intel") && family == 6 {
+        return Some(match model {
+            0x2A | 0x2D => "Sandy Bridge",
+            0x3A | 0x3E => "Ivy Bridge",
+            0x3C | 0x3F | 0x45 | 0x46 => "Haswell",
+            0x3D | 0x47 | 0x4F | 0x56 => "Broadwell",
+            0x4E | 0x5E => "Skylake",
+            0x55 => "Skylake-SP / Cascade Lake",
+            0x9E if stepping <= 9 => "Kaby Lake",
+            0x9E => "Coffee Lake",
+            0x66 => "Cannon Lake",
+            0xA5 | 0xA6 => "Comet Lake",
+            0x7D | 0x7E => "Ice Lake",
+            0x6A | 0x6C => "Ice Lake-SP",
+            0x8C | 0x8D => "Tiger Lake",
+            0xA7 => "Rocket Lake",
+            0x97 | 0x9A => "Alder Lake",
+            0xBE => "Alder Lake-N",
+            0xB7 | 0xBA | 0xBF => "Raptor Lake",
+            0xAA | 0xAC => "Meteor Lake",
+            0xBD => "Lunar Lake",
+            0xC5 | 0xC6 => "Arrow Lake",
+            0x8F => "Sapphire Rapids",
+            0xCF => "Emerald Rapids",
+            0x5C => "Apollo Lake",
+            0x7A => "Gemini Lake",
+            0x9C => "Jasper Lake",
+            _ => return None,
+        });
+    }
+    if vendor.contains("AMD") {
+        return Some(match (family, model) {
+            (0x17, 0x00..=0x2F) => "Zen / Zen+",
+            (0x17, _) => "Zen 2",
+            (0x19, 0x00..=0x0F) | (0x19, 0x20..=0x5F) => "Zen 3",
+            (0x19, 0xA0..=0xAF) => "Zen 4c",
+            (0x19, _) => "Zen 4",
+            (0x1A, _) => "Zen 5",
+            _ => return None,
+        });
+    }
+    None
+}
+
+/// The instruction sets and features worth naming, in their makers'
+/// words, from Linux-spelled flags, in a fixed order.
+pub fn instruction_sets(flags: &[String]) -> Vec<&'static str> {
+    const NAMES: [(&str, &str); 22] = [
+        ("sse4_2", "SSE4.2"),
+        ("avx", "AVX"),
+        ("avx2", "AVX2"),
+        ("fma", "FMA3"),
+        ("avx512f", "AVX-512"),
+        ("avx512_vnni", "AVX-512 VNNI"),
+        ("avx512_bf16", "AVX-512 BF16"),
+        ("avx_vnni", "AVX-VNNI"),
+        ("amx_tile", "AMX"),
+        ("f16c", "F16C"),
+        ("bmi2", "BMI2"),
+        ("aes", "AES-NI"),
+        ("vaes", "VAES"),
+        ("sha_ni", "SHA"),
+        ("gfni", "GFNI"),
+        ("rdrand", "RDRAND"),
+        ("vmx", "VT-x"),
+        ("svm", "AMD-V"),
+        ("ept", "EPT"),
+        ("npt", "NPT"),
+        ("lm", "x86-64"),
+        ("nx", "NX"),
+    ];
+    NAMES.iter().filter(|(f, _)| flags.iter().any(|g| g == f)).map(|(_, n)| *n).collect()
+}
+
+/// Linux /proc/cpuinfo's first processor: vendor, family, model, stepping,
+/// microcode, flags (the caches and clocks come from sysfs).
+pub fn parse_cpuinfo_details(text: &str) -> CpuDetails {
+    let first = text.split("\n\n").next().unwrap_or("");
+    let get = |k: &str| {
+        first.lines().find_map(|l| {
+            let (key, v) = l.split_once(':')?;
+            (key.trim() == k).then(|| v.trim().to_string())
+        })
+    };
+    CpuDetails {
+        vendor: get("vendor_id").unwrap_or_default(),
+        family: get("cpu family").and_then(|v| v.parse().ok()),
+        model: get("model").and_then(|v| v.parse().ok()),
+        stepping: get("stepping").and_then(|v| v.parse().ok()),
+        microcode: get("microcode").unwrap_or_default(),
+        flags: get("flags").map(|f| f.split_whitespace().map(String::from).collect()).unwrap_or_default(),
+        ..Default::default()
+    }
+}
+
+/// FreeBSD's boot messages (/var/run/dmesg.boot, readable by any user):
+/// the CPU's Origin, Family, Model and Stepping, and its Features lines'
+/// names, spelled as Linux spells them.
+pub fn parse_dmesg_cpu(text: &str) -> CpuDetails {
+    let mut d = CpuDetails::default();
+    let num = |v: &str| {
+        let v = v.trim_matches(|c: char| c == '"' || c.is_whitespace());
+        match v.strip_prefix("0x") {
+            Some(h) => u32::from_str_radix(h, 16).ok(),
+            None => v.parse().ok(),
+        }
+    };
+    let mut flags: Vec<String> = Vec::new();
+    for l in text.lines() {
+        let l = l.trim();
+        if l.starts_with("Origin=") && d.vendor.is_empty() {
+            for part in l.split_whitespace() {
+                match part.split_once('=') {
+                    Some(("Origin", v)) => d.vendor = v.trim_matches('"').to_string(),
+                    Some(("Family", v)) => d.family = num(v),
+                    Some(("Model", v)) => d.model = num(v),
+                    Some(("Stepping", v)) => d.stepping = num(v),
+                    _ => {}
+                }
+            }
+        } else if l.contains("Features") && l.contains('<') && d.family.is_some() {
+            let inner = l.split_once('<').map(|(_, r)| r.trim_end_matches('>')).unwrap_or("");
+            for name in inner.split(',') {
+                let f = match name.trim() {
+                    "SSE4.2" => "sse4_2",
+                    "AESNI" => "aes",
+                    "SHA" => "sha_ni",
+                    "AVXVNNI" | "AVX-VNNI" => "avx_vnni",
+                    "AVX512F" => "avx512f",
+                    "AVX512VNNI" => "avx512_vnni",
+                    "VMX" => "vmx",
+                    "SVM" => "svm",
+                    "LM" => "lm",
+                    "NX" => "nx",
+                    "RDRAND" => "rdrand",
+                    other => {
+                        flags.push(other.to_ascii_lowercase());
+                        continue;
+                    }
+                };
+                flags.push(f.to_string());
+            }
+        }
+    }
+    flags.sort();
+    flags.dedup();
+    d.flags = flags;
+    d
 }
 
 /// Bytes in words: "7.6 GB", "512 MB".
@@ -545,6 +739,43 @@ mod os {
         parse_meminfo(&read("/proc/meminfo"))
     }
 
+    /// The processor's details: /proc/cpuinfo, then for each kind of core
+    /// its first processor's caches and the highest clocks among its own.
+    pub fn cpu_details(t: &Topology) -> CpuDetails {
+        let mut d = parse_cpuinfo_details(&read("/proc/cpuinfo"));
+        let base = "/sys/devices/system/cpu";
+        let khz = |cpu: usize, f: &str| read(format!("{base}/cpu{cpu}/cpufreq/{f}")).trim().parse::<u32>().ok();
+        for sec in &t.sections {
+            let cpus: Vec<usize> =
+                sec.clusters.iter().flat_map(|c| &c.cores).flat_map(|c| c.threads.iter().copied()).collect();
+            let Some(&first) = cpus.first() else { continue };
+            let mut caches = Vec::new();
+            for i in 0..8 {
+                let dir = format!("{base}/cpu{first}/cache/index{i}");
+                let Ok(level) = read(format!("{dir}/level")).trim().parse::<u32>() else { break };
+                let size = read(format!("{dir}/size"));
+                let size = size.trim();
+                let bytes = size
+                    .strip_suffix('K')
+                    .and_then(|n| n.parse::<u64>().ok())
+                    .map(|n| n * 1024)
+                    .or_else(|| size.strip_suffix('M').and_then(|n| n.parse::<u64>().ok()).map(|n| n << 20))
+                    .unwrap_or(0);
+                let shared_by = parse_cpu_list(read(format!("{dir}/shared_cpu_list")).trim()).len().max(1);
+                caches.push(Cache { level, kind: read(format!("{dir}/type")).trim().to_string(), bytes, shared_by });
+            }
+            d.kinds.push(KindDetails {
+                kind: sec.kind,
+                base_mhz: khz(first, "base_frequency").map(|k| k / 1000),
+                max_mhz: cpus.iter().filter_map(|&c| khz(c, "cpuinfo_max_freq")).max().map(|k| k / 1000),
+                caches,
+            });
+        }
+        d.driver = read(format!("{base}/cpu0/cpufreq/scaling_driver")).trim().to_string();
+        d.governor = read(format!("{base}/cpu0/cpufreq/scaling_governor")).trim().to_string();
+        d
+    }
+
     pub fn machine() -> Machine {
         let id = |f: &str| read(format!("/sys/class/dmi/id/{f}")).trim().to_string();
         Machine {
@@ -554,6 +785,8 @@ mod os {
             board_maker: id("board_vendor"),
             board: id("board_name"),
             bios: id("bios_version"),
+            bios_vendor: id("bios_vendor"),
+            bios_date: id("bios_date"),
         }
     }
 
@@ -715,6 +948,21 @@ mod os {
         Vec::new()
     }
 
+    /// The boot messages for what the processor is; the top clock from
+    /// dev.cpu.0.freq_levels ("4300/65000 3900/..."). Caches FreeBSD does not
+    /// offer a user.
+    pub fn cpu_details(t: &Topology) -> CpuDetails {
+        let mut d = parse_dmesg_cpu(&read("/var/run/dmesg.boot"));
+        let max = sysctl_text("dev.cpu.0.freq_levels")
+            .split_whitespace()
+            .filter_map(|l| l.split('/').next()?.parse::<u32>().ok())
+            .max();
+        let kind = t.sections.first().map_or(CoreKind::Plain, |s| s.kind);
+        d.kinds.push(KindDetails { kind, base_mhz: None, max_mhz: max, caches: Vec::new() });
+        d.driver = sysctl_text("dev.cpufreq.0.freq_driver");
+        d
+    }
+
     /// kenv's smbios.* (the loader's copy of the firmware's tables; any
     /// user may read them).
     pub fn machine() -> Machine {
@@ -733,6 +981,8 @@ mod os {
             board_maker: kenv("smbios.planar.maker"),
             board: kenv("smbios.planar.product"),
             bios: kenv("smbios.bios.version"),
+            bios_vendor: kenv("smbios.bios.vendor"),
+            bios_date: kenv("smbios.bios.reldate"),
         }
     }
 
@@ -792,9 +1042,63 @@ mod os {
     pub fn uptime() -> Option<u64> {
         None
     }
+    pub fn cpu_details(_: &Topology) -> CpuDetails {
+        CpuDetails::default()
+    }
 }
 
-pub use os::{cpu, disk_io, machine, memory, os_name, temps, topology, uptime};
+pub use os::{cpu, cpu_details, disk_io, machine, memory, os_name, temps, topology, uptime};
+
+/// A graphics card's details: its PCI ids, and its clock now and at most in
+/// MHz where the driver says (Intel i915's gt_*_freq_mhz; amdgpu's
+/// pp_dpm_sclk), and its own memory (amdgpu's mem_info_vram_total).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct GpuDetails {
+    pub pci_id: String,
+    pub clock_mhz: Option<u32>,
+    pub max_mhz: Option<u32>,
+    pub vram: Option<u64>,
+}
+
+/// amdgpu's pp_dpm_sclk: "0: 500Mhz\n1: 2400Mhz *": (now, most).
+pub fn parse_dpm(text: &str) -> (Option<u32>, Option<u32>) {
+    let levels: Vec<(u32, bool)> = text
+        .lines()
+        .filter_map(|l| {
+            let mhz = l.split_once(':')?.1.trim().split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()?;
+            Some((mhz, l.trim_end().ends_with('*')))
+        })
+        .collect();
+    (levels.iter().find(|l| l.1).map(|l| l.0), levels.iter().map(|l| l.0).max())
+}
+
+/// The card in PCI slot `slot` ("0000:00:02.0"), from sysfs (Linux; other
+/// systems: nothing).
+pub fn gpu_details(slot: &str) -> GpuDetails {
+    if !cfg!(target_os = "linux") {
+        return GpuDetails::default();
+    }
+    let dev = format!("/sys/bus/pci/devices/{slot}");
+    let hex = |f: &str| read(format!("{dev}/{f}")).trim().trim_start_matches("0x").to_string();
+    let mut d = GpuDetails { pci_id: format!("{}:{}", hex("vendor"), hex("device")), ..Default::default() };
+    let card = std::fs::read_dir(format!("{dev}/drm")).ok().and_then(|r| {
+        r.flatten()
+            .map(|e| e.path())
+            .find(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("card") && !n.contains('-')))
+    });
+    if let Some(card) = card {
+        let mhz = |f: &str| read(card.join(f)).trim().parse::<u32>().ok();
+        d.clock_mhz = mhz("gt_act_freq_mhz");
+        d.max_mhz = mhz("gt_RP0_freq_mhz").or_else(|| mhz("gt_max_freq_mhz"));
+    }
+    if d.clock_mhz.is_none() {
+        let (now, most) = parse_dpm(&read(format!("{dev}/pp_dpm_sclk")));
+        d.clock_mhz = now;
+        d.max_mhz = d.max_mhz.or(most);
+    }
+    d.vram = read(format!("{dev}/mem_info_vram_total")).trim().parse().ok();
+    d
+}
 
 /// The effective user of process `pid`, if it can be read (the terminal's
 /// red tab and the server's mark on a superuser's windows): Linux's
@@ -1055,6 +1359,56 @@ mod tests {
         assert_eq!(uptime_text(249_672), "2 days, 21 hours");
         assert_eq!(uptime_text(3600 + 5 * 60), "1 hour, 5 minutes");
         assert_eq!(uptime_text(90), "1 minute");
+    }
+
+    #[test]
+    fn codenames_from_our_table() {
+        assert_eq!(codename("GenuineIntel", 6, 183, 1), Some("Raptor Lake"));
+        assert_eq!(codename("GenuineIntel", 6, 0xA5, 2), Some("Comet Lake"));
+        assert_eq!(codename("GenuineIntel", 6, 0x9E, 10), Some("Coffee Lake"));
+        assert_eq!(codename("GenuineIntel", 6, 0x9E, 9), Some("Kaby Lake"));
+        assert_eq!(codename("GenuineIntel", 6, 0x3C, 3), Some("Haswell"));
+        assert_eq!(codename("AuthenticAMD", 0x19, 0x21, 0), Some("Zen 3"));
+        assert_eq!(codename("AuthenticAMD", 0x19, 0x61, 2), Some("Zen 4"));
+        assert_eq!(codename("GenuineIntel", 6, 0x8E, 10), None, "ambiguous: no guess");
+    }
+
+    #[test]
+    fn cpuinfo_details_and_named_instruction_sets() {
+        let d = parse_cpuinfo_details(
+            "processor\t: 0\nvendor_id\t: GenuineIntel\ncpu family\t: 6\nmodel\t\t: 183\nmodel name\t: 13th Gen\nstepping\t: 1\nmicrocode\t: 0x12f\nflags\t\t: fpu vmx lm nx sse4_2 avx avx2 fma sha_ni avx_vnni\n\nprocessor\t: 1\nmodel\t\t: 999\n",
+        );
+        assert_eq!((d.family, d.model, d.stepping), (Some(6), Some(183), Some(1)));
+        assert_eq!(d.microcode, "0x12f");
+        assert_eq!(
+            instruction_sets(&d.flags),
+            ["SSE4.2", "AVX", "AVX2", "FMA3", "AVX-VNNI", "SHA", "VT-x", "x86-64", "NX"]
+        );
+    }
+
+    #[test]
+    fn freebsd_boot_messages_name_the_cpu() {
+        let t = r#"CPU: Intel(R) Core(TM) i5-8500T CPU @ 2.10GHz (2112.00-MHz K8-class CPU)
+  Origin="GenuineIntel"  Id=0x906ea  Family=0x6  Model=0x9e  Stepping=10
+  Features=0xbfebfbff<FPU,VME,DE,PSE,TSC,MSR,PAE,MCE,CX8,APIC,SEP,MTRR,PGE,MCA,CMOV,PAT,PSE36,CLFLUSH,DTS,ACPI,MMX,FXSR,SSE,SSE2,SS,HTT,TM,PBE>
+  Features2=0x7ffafbbf<SSE3,PCLMULQDQ,DTES64,MON,DS_CPL,VMX,SMX,EST,TM2,SSSE3,SDBG,FMA,CX16,xTPR,PDCM,PCID,SSE4.1,SSE4.2,x2APIC,MOVBE,POPCNT,TSCDLT,AESNI,XSAVE,OSXSAVE,AVX,F16C,RDRAND>
+  AMD Features=0x2c100800<SYSCALL,NX,Page1GB,RDTSCP,LM>
+  Structured Extended Features=0x29c6fbf<FSGSBASE,TSCADJ,SGX,BMI1,HLE,AVX2,SMEP,BMI2,ERMS,INVPCID,RTM,NFPM,MPX,RDSEED,ADX,SMAP,CLFLUSHOPT,PROCTRACE>
+"#;
+        let d = parse_dmesg_cpu(t);
+        assert_eq!(d.vendor, "GenuineIntel");
+        assert_eq!((d.family, d.model, d.stepping), (Some(6), Some(0x9e), Some(10)));
+        assert_eq!(codename(&d.vendor, 6, 0x9e, 10), Some("Coffee Lake"));
+        assert_eq!(
+            instruction_sets(&d.flags),
+            ["SSE4.2", "AVX", "AVX2", "FMA3", "F16C", "BMI2", "AES-NI", "RDRAND", "VT-x", "x86-64", "NX"]
+        );
+    }
+
+    #[test]
+    fn amdgpu_clock_levels() {
+        assert_eq!(parse_dpm("0: 500Mhz\n1: 1800Mhz *\n2: 2400Mhz\n"), (Some(1800), Some(2400)));
+        assert_eq!(parse_dpm(""), (None, None));
     }
 
     #[test]
