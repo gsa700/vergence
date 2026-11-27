@@ -570,8 +570,13 @@ impl AlbumWall {
             .height(Length::FILL),
             wallview::bar(status, &self.query, counts, names, self.libraries.current, &g),
         ]);
-        let Some(bar) = bar else { return page.width(Length::FILL).height(Length::FILL) };
         // The play bar floats over the wall's foot, just above the bottom bar.
+        // The tree keeps one shape whether or not it is there: the toolkit
+        // knows an element by its place, and the wall moved into or out of a
+        // stack was a new scroll, rebuilt from somewhere else (Dave,
+        // 2026-11-26: an album started, the wall went to the top; one ended,
+        // it "scrolled itself to the F section").
+        let bar = bar.unwrap_or_else(space);
         stack(vec![
             page.width(Length::FILL).height(Length::FILL),
             column(vec![space().height(Length::FILL), bar, space().height(Length::Fixed(wallview::BAR))])

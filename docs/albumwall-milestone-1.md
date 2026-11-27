@@ -473,3 +473,12 @@ where any app can use it, not inside AlbumWall):
   minimized last, back as the dock brings it) for the tests. Scenario
   32-albumwall measures it: 2.3 s minimized while playing, 1 scene (the
   redraw on the way back); locked, 3; in view, about 35 a second.
+- **Fixed** (Dave, 2026-11-26, on his library: an album ended, the play
+  bar folded and "the wall scrolled itself to the F section"; starting
+  one had trouble too): the window's tree had two shapes, the wall alone
+  or the wall in a stack under the play bar, and the toolkit knows an
+  element by its place, so the bar coming or going made the wall a new
+  scroll (to the top when music started; back to an old place when it
+  ended). One shape now, the bar's place empty when nothing plays.
+  Scenario 33-albumwall-scroll: 300 albums, paged halfway, the wall's top
+  album the same as music starts and after it ends (it failed before).
