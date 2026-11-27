@@ -414,3 +414,11 @@ program can use it):
   and Now Playing. Packages on techbench through 0.4.2pre14 carry every step.
   Left for the milestone to close: Dave's own pass against his MusicServer
   (signed in 2026-11-26: "Navidrome · Music Library" and "Navidrome · FLAC").
+- **Milestone 2 closed, 2026-11-27** (Dave: "all test in the green"): his pass
+  on techbench with 0.4.2pre14 against his own MusicServer, both libraries
+  ("Navidrome · Music Library", 1034 albums and 15529 tracks; "Navidrome ·
+  FLAC", 372 albums): albums played through, timed lyrics followed (Thriller),
+  the Now Playing tile and card following each track, the media keys, a second
+  start, the command line. Next for AlbumWall: milestone 3 (compact mode, the
+  front panel view, the analyzer and LED bars, the equalizer), and the wishes
+  in Dave's list (its own title bar; the current track's mark pulsing).
