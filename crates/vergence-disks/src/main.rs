@@ -132,17 +132,22 @@ impl Disks {
                         ("Free".to_string(), *size, Color::rgba(t.dim.r, t.dim.g, t.dim.b, 25), None, false)
                     }
                 };
-                let weight = ((size as f64 / total * 1000.0).round() as u16).max(60);
+                let share = size as f64 / total;
+                let weight = ((share * 1000.0).round() as u16).max(40);
                 let edge = chosen.then_some((t.accent, 2.0));
-                let mut b = button(
-                    column(vec![label(title).size(11.0).weight(600), label(size_text(size)).size(10.0).dim()])
-                        .spacing(2.0)
-                        .width(Length::FILL),
-                )
-                .look(ButtonLook::Custom { fill: Some(fill), edge, radius: 6.0 })
-                .padding(Padding::hv(6.0, 8.0))
-                .width(Length::Fill(weight))
-                .height(Length::Fixed(54.0));
+                // Words only where there is room for them (seen on kepler: EFI, boot and swap
+                // side by side wrote over each other); the list under the bar names every one.
+                let words: Vec<Element<Msg>> = if share >= 0.12 {
+                    vec![label(title.clone()).size(11.0).weight(600), label(size_text(size)).size(10.0).dim()]
+                } else {
+                    Vec::new()
+                };
+                let mut b = button(column(words).spacing(2.0).width(Length::FILL))
+                    .name(title)
+                    .look(ButtonLook::Custom { fill: Some(fill), edge, radius: 6.0 })
+                    .padding(Padding::hv(6.0, 8.0))
+                    .width(Length::Fill(weight))
+                    .height(Length::Fixed(54.0));
                 if let Some(m) = msg {
                     b = b.on_press(m);
                 }
@@ -150,6 +155,49 @@ impl Disks {
             })
             .collect();
         row(cells).spacing(3.0).width(Length::FILL)
+    }
+
+    /// Every partition by name under the bar, each a row to choose it by: its tint, its label
+    /// or name and type, its file system and size.
+    fn part_list(&self, t: &Theme, d: &Disk) -> Element<Msg> {
+        let mut order: Vec<usize> = (0..d.parts.len()).collect();
+        order.sort_by_key(|&i| d.parts[i].start);
+        let rows: Vec<Element<Msg>> = order
+            .into_iter()
+            .map(|i| {
+                let p = &d.parts[i];
+                let chosen = self.part.as_deref() == Some(p.name.as_str());
+                let name = if p.label.is_empty() { p.name.clone() } else { format!("{} ({})", p.label, p.name) };
+                let right = [p.fs.as_str(), &size_text(p.size)]
+                    .iter()
+                    .filter(|s| !s.is_empty())
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                button(
+                    row(vec![
+                        panel(space())
+                            .color(fs_color(&p.fs, t))
+                            .radius(3.0)
+                            .width(Length::Fixed(12.0))
+                            .height(Length::Fixed(12.0)),
+                        column(vec![label(name.clone()), label(p.ptype.clone()).size(11.0).dim()])
+                            .spacing(1.0)
+                            .width(Length::FILL),
+                        label(right).dim().align(Align::End),
+                    ])
+                    .spacing(10.0)
+                    .align(Align::Center)
+                    .width(Length::FILL),
+                )
+                .look(if chosen { ButtonLook::Chosen } else { ButtonLook::Plain })
+                .padding(Padding::hv(7.0, 12.0))
+                .on_press(Msg::Part(i))
+                .width(Length::FILL)
+                .name(name)
+            })
+            .collect();
+        self.group(t, Some("Partitions"), rows)
     }
 
     fn part_rows(p: &Part, external: bool) -> Vec<Element<Msg>> {
@@ -214,6 +262,7 @@ impl Disks {
         v.push(label(format!("{} {} {}, {}", size_text(d.size), d.bus, what, d.name).replace("  ", " ")).dim());
         if !d.parts.is_empty() {
             v.push(self.bar(t, d));
+            v.push(self.part_list(t, d));
             let chosen = self.part.as_ref().and_then(|n| d.parts.iter().find(|p| &p.name == n));
             match chosen {
                 Some(p) => v.push(self.group(
@@ -221,7 +270,7 @@ impl Disks {
                     Some(&format!("Partition {}", p.index)),
                     Disks::part_rows(p, d.kind == Some(Kind::External)),
                 )),
-                None => v.push(label("Choose a partition above to see its details.").dim()),
+                None => v.push(label("Choose a partition to see its details.").dim()),
             }
         } else if let Some(w) = &d.whole {
             v.push(self.group(t, Some("The whole disk"), Disks::part_rows(w, d.kind == Some(Kind::External))));
