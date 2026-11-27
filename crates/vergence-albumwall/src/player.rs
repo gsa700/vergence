@@ -63,8 +63,24 @@ pub type OpenOutput = dyn Fn(u32, u32) -> std::io::Result<Box<dyn vergence_sound
 
 /// The installed decoders and output.
 pub fn system() -> (Arc<OpenTrack>, Arc<OpenOutput>) {
-    let track: Arc<OpenTrack> = Arc::new(|p: &std::path::Path| {
-        vergence_hymie::helper::Sound::open(p).map(|s| Box::new(s) as Box<dyn Source>).map_err(|e| e.to_string())
+    system_with(Arc::new(|_| None))
+}
+
+/// The sound bytes of a track that is not a file (a music server's song),
+/// or None for a file.
+pub type Remote = dyn Fn(&std::path::Path) -> Option<Result<Arc<Vec<u8>>, String>> + Send + Sync;
+
+/// As [`system`], a track `remote` knows played from its bytes (a server's
+/// song, fetched whole: milestone 2, step 3), any other from its file.
+pub fn system_with(remote: Arc<Remote>) -> (Arc<OpenTrack>, Arc<OpenOutput>) {
+    let track: Arc<OpenTrack> = Arc::new(move |p: &std::path::Path| match remote(p) {
+        Some(Ok(bytes)) => vergence_hymie::helper::Sound::open_bytes(&bytes)
+            .map(|s| Box::new(s) as Box<dyn Source>)
+            .map_err(|e| e.to_string()),
+        Some(Err(why)) => Err(why),
+        None => {
+            vergence_hymie::helper::Sound::open(p).map(|s| Box::new(s) as Box<dyn Source>).map_err(|e| e.to_string())
+        }
     });
     let output: Arc<OpenOutput> = Arc::new(|rate, ch| vergence_sound::named_stream(rate, ch, "AlbumWall"));
     (track, output)
@@ -224,6 +240,18 @@ struct Open {
     source: Box<dyn Source>,
 }
 
+/// A track being opened on a thread of its own: its place in the queue,
+/// what the thread hands back, and whether it already failed (then not
+/// tried again until the track itself starts, which says why).
+/// Where an opening thread leaves the track, or why it could not.
+type Slot = Arc<Mutex<Option<Result<Box<dyn Source>, String>>>>;
+
+struct Ahead {
+    index: usize,
+    slot: Slot,
+    failed: bool,
+}
+
 /// A point in the output's timeline where a track starts: frames written
 /// before it, the track, and the frame of the track it starts at (a seek).
 #[derive(Clone, Copy)]
@@ -248,6 +276,13 @@ struct Engine {
     volume: f32,
     current: Option<Open>,
     next: Option<Open>,
+    /// The next track being opened on a thread of its own (a server's song
+    /// is fetched first; a sleeping drive takes its time): taken at the seam.
+    ahead: Option<Ahead>,
+    /// A track being opened to play (a server's song is fetched first): its
+    /// index and the second to start at. The album has not ended; commands
+    /// are still taken while it waits.
+    waiting: Option<(usize, f64)>,
     out: Option<Box<dyn vergence_sound::Stream>>,
     /// Frames written to the output since it opened, and where tracks start in that.
     written: u64,
@@ -281,6 +316,8 @@ impl Engine {
             volume: 1.0,
             current: None,
             next: None,
+            ahead: None,
+            waiting: None,
             out: None,
             written: 0,
             marks: VecDeque::new(),
@@ -294,7 +331,7 @@ impl Engine {
     fn run(mut self, rx: Receiver<Command>) {
         loop {
             // Idle or paused: wait for a command. Playing: take what came, then play a piece.
-            let idle = self.current.is_none() || self.paused;
+            let idle = self.waiting.is_none() && (self.current.is_none() || self.paused);
             let c = if idle {
                 match rx.recv() {
                     Ok(c) => Some(c),
@@ -324,8 +361,10 @@ impl Engine {
                 self.loudness = loudness;
                 self.paused = false;
                 self.next = None;
+                self.ahead = None;
+                self.waiting = None;
                 self.flush();
-                self.start(from, 0);
+                self.start(from, 0.0);
             }
             Command::Load { tracks, from, tag, loudness, seconds } => {
                 self.tracks = tracks;
@@ -333,14 +372,18 @@ impl Engine {
                 self.map.clear();
                 self.loudness = loudness;
                 self.next = None;
+                self.ahead = None;
+                self.waiting = None;
                 self.flush();
-                let at =
-                    self.tracks.get(from).and_then(|p| (self.open_track)(p).ok()).map(|s| s.rate()).unwrap_or(44100);
-                self.start(from, (seconds.max(0.0) * at as f64) as u64);
-                self.paused = self.current.is_some();
+                // Paused before it opens, so it is never heard until Pause(false).
+                self.paused = true;
+                self.start(from, seconds.max(0.0));
+                if self.current.is_none() && self.waiting.is_none() {
+                    self.paused = false;
+                }
             }
             Command::Pause(on) => {
-                if self.current.is_some() && on != self.paused {
+                if (self.current.is_some() || self.waiting.is_some()) && on != self.paused {
                     self.paused = on;
                     if let Some(o) = self.out.as_mut() {
                         let _ = o.pause(on);
@@ -348,31 +391,33 @@ impl Engine {
                 }
             }
             Command::Next => {
-                if let Some(c) = &self.current {
-                    let i = c.index + 1;
+                if let Some(i) = self.place().map(|i| i + 1) {
                     self.flush();
-                    if i < self.tracks.len() { self.start(i, 0) } else { self.finish() }
+                    if i < self.tracks.len() { self.start(i, 0.0) } else { self.finish() }
                 }
             }
             Command::Previous => {
-                if let Some(c) = &self.current {
-                    let i = c.index;
+                if let Some(i) = self.place() {
                     let back = if self.heard().map_or(0.0, |n| n.seconds) > 3.0 { i } else { i.saturating_sub(1) };
                     self.flush();
-                    self.start(back, 0);
+                    self.start(back, 0.0);
                 }
             }
             Command::Seek(seconds) => {
-                if let Some(c) = &self.current {
-                    let (i, rate) = (c.index, c.source.rate());
+                if let Some((_, at)) = self.waiting.as_mut() {
+                    // Not open yet: it starts there when it is.
+                    *at = seconds.max(0.0);
+                } else if let Some(i) = self.place() {
                     self.flush();
-                    self.start(i, (seconds.max(0.0) * rate as f64) as u64);
+                    self.start(i, seconds.max(0.0));
                 }
             }
             Command::Stop => {
                 self.flush();
                 self.current = None;
                 self.next = None;
+                self.ahead = None;
+                self.waiting = None;
                 self.out = None;
                 self.publish(None);
             }
@@ -383,8 +428,10 @@ impl Engine {
                 self.loudness = loudness;
                 self.paused = false;
                 self.next = None;
+                self.ahead = None;
+                self.waiting = None;
                 self.flush();
-                self.start(0, 0);
+                self.start(0, 0.0);
             }
             Command::MetersAfterGain(on) => self.after_gain = on,
         }
@@ -407,22 +454,111 @@ impl Engine {
         // A stream that cannot flush still holds what it has; counted afresh from here.
     }
 
-    /// Track `i` started at its frame `from` (the queue's next one opened ahead).
-    fn start(&mut self, i: usize, from: u64) {
-        let source = match self.next.take() {
-            Some(n) if n.index == i && from == 0 => Ok(n.source),
-            _ => match self.tracks.get(i) {
+    /// Track `i` opened ahead: started on a thread if it is not under way,
+    /// taken into `next` once it is ready.
+    fn open_ahead(&mut self, i: usize) {
+        match &mut self.ahead {
+            Some(a) if a.index == i => {
+                if a.failed {
+                    return;
+                }
+                let ready = a.slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+                match ready {
+                    Some(Ok(src)) => {
+                        self.ahead = None;
+                        self.waiting = None;
+                        self.next = Some(Open { index: i, source: src });
+                    }
+                    Some(Err(_)) => a.failed = true,
+                    None => {}
+                }
+            }
+            _ => {
+                let slot: Slot = Arc::default();
+                let (open, path, out) = (self.open_track.clone(), self.tracks[i].clone(), slot.clone());
+                let spawned = std::thread::Builder::new().name("open-ahead".into()).spawn(move || {
+                    let r = open(&path);
+                    *out.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
+                });
+                self.ahead = Some(Ahead { index: i, slot, failed: spawned.is_err() });
+            }
+        }
+    }
+
+    /// The track playing, or being opened to play.
+    fn place(&self) -> Option<usize> {
+        self.current.as_ref().map(|c| c.index).or(self.waiting.map(|(i, _)| i))
+    }
+
+    /// Track `i` started at its second `at`: opened on a thread of its own
+    /// (or taken from its opening ahead), waited for briefly here (a file is
+    /// open by then, as before), else on later pieces while commands are
+    /// still taken (a server's song being fetched).
+    fn start(&mut self, i: usize, at: f64) {
+        if let Some(n) = self.next.take()
+            && n.index == i
+        {
+            self.install(i, at, Ok(n.source));
+            return;
+        }
+        if self.ahead.as_ref().is_none_or(|a| a.index != i || a.failed) {
+            self.ahead = None;
+            self.open_ahead(i);
+        }
+        self.current = None;
+        self.waiting = Some((i, at));
+        let until = std::time::Instant::now() + Duration::from_millis(150);
+        while !self.poll_waiting(i, at) && std::time::Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    /// The track being waited for taken if its opening is done: true when
+    /// the wait is over (played, or said why not).
+    fn poll_waiting(&mut self, i: usize, at: f64) -> bool {
+        let ready = match &mut self.ahead {
+            Some(a) if a.index == i => {
+                let r = a.slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+                if r.is_none() && a.failed { Some(Err("it could not be opened".to_string())) } else { r }
+            }
+            // Nothing opening it (a thread could not be started): opened here.
+            _ => Some(match self.tracks.get(i) {
                 Some(p) => (self.open_track)(p),
                 None => Err("no such track".into()),
-            },
+            }),
         };
-        match source {
-            Ok(mut s) => {
+        let Some(r) = ready else { return false };
+        self.install(i, at, r);
+        true
+    }
+
+    /// Track `i`, opened, played from its second `at`: after what is
+    /// already written when the output suits it (a seam stays gapless), else
+    /// in a new output.
+    fn install(&mut self, i: usize, at: f64, r: Result<Box<dyn Source>, String>) {
+        self.ahead = None;
+        self.waiting = None;
+        match r {
+            Ok(mut src) => {
+                let from = (at.max(0.0) * src.rate() as f64) as u64;
                 if from > 0 {
-                    let _ = s.seek(from);
+                    let _ = src.seek(from);
+                }
+                let suits =
+                    self.out.as_ref().is_none_or(|o| o.rate() == src.rate() && o.channels() == src.channels() as u32);
+                if !suits {
+                    self.out = None;
+                    self.written = 0;
+                    self.marks.clear();
                 }
                 self.marks.push_back(Mark { at: self.written, track: i, from });
-                self.current = Some(Open { index: i, source: s });
+                self.current = Some(Open { index: i, source: src });
+                if self.paused
+                    && let Some(o) = self.out.as_mut()
+                {
+                    let _ = o.pause(true);
+                }
+                self.publish(None);
             }
             Err(e) => {
                 self.current = None;
@@ -435,6 +571,8 @@ impl Engine {
     fn finish(&mut self) {
         self.current = None;
         self.next = None;
+        self.ahead = None;
+        self.waiting = None;
         let tag = self.tag;
         self.state.lock().unwrap_or_else(|e| e.into_inner()).ended = Some(tag);
         self.publish(None);
@@ -442,6 +580,12 @@ impl Engine {
 
     /// One piece decoded, made louder or softer, and written.
     fn piece(&mut self) {
+        if let Some((i, at)) = self.waiting {
+            if !self.poll_waiting(i, at) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            return;
+        }
         let Some(cur) = self.current.as_mut() else { return };
         let (rate, ch) = (cur.source.rate(), cur.source.channels().max(1) as u32);
         let want = ((rate as f64 * PIECE.as_secs_f64()) as u32).max(1);
@@ -461,12 +605,9 @@ impl Engine {
         };
         let mut gain = gain;
         let mut short = samples.len() < (want * ch) as usize;
-        // The next track opened ahead, ready for the seam.
-        if self.next.is_none()
-            && index + 1 < self.tracks.len()
-            && let Ok(s) = (self.open_track)(&self.tracks[index + 1])
-        {
-            self.next = Some(Open { index: index + 1, source: s });
+        // The next track opened ahead, on a thread of its own, ready for the seam.
+        if self.next.is_none() && index + 1 < self.tracks.len() {
+            self.open_ahead(index + 1);
         }
         // At the end: the next track's first frames go in the same write
         // when it is the same rate and channels (gapless), else after a new output.
@@ -498,6 +639,15 @@ impl Engine {
                     self.marks.clear();
                     self.marks.push_back(Mark { at: 0, track: n.index, from: 0 });
                     self.current = Some(n);
+                    self.publish(None);
+                    return;
+                }
+                // The next track not open yet (still being fetched): waited
+                // for, then on as at any seam; the album has not ended.
+                None if index + 1 < self.tracks.len() => {
+                    self.write(&samples, gain, ch, rate);
+                    self.current = None;
+                    self.start(index + 1, 0.0);
                     self.publish(None);
                     return;
                 }
@@ -609,6 +759,11 @@ impl Engine {
 
     /// What is being heard: the track whose start the output has reached, and how far in.
     fn heard(&self) -> Option<Now> {
+        if let Some((i, at)) = self.waiting {
+            // The track being fetched: shown at its start, its length not known yet.
+            let rate = self.out.as_ref().map_or(44100, |o| o.rate());
+            return Some(Now { tag: self.tag, track: i, seconds: at, length: 0.0, paused: self.paused, rate });
+        }
         let cur = self.current.as_ref()?;
         let rate = self.out.as_ref().map_or(cur.source.rate(), |o| o.rate()).max(1);
         let latency = self.out.as_ref().map_or(0, |o| (o.latency().as_secs_f64() * rate as f64) as u64);
@@ -723,10 +878,19 @@ mod tests {
     }
 
     fn engine(tracks: Vec<(u32, u64, f32)>, kept: Arc<Mutex<Vec<i16>>>) -> Engine {
+        slow_engine(tracks, kept, Duration::ZERO)
+    }
+
+    /// As [`engine`], every track but the first taking `slow` to open (a
+    /// server's song being fetched).
+    fn slow_engine(tracks: Vec<(u32, u64, f32)>, kept: Arc<Mutex<Vec<i16>>>, slow: Duration) -> Engine {
         let tracks = Arc::new(tracks);
         let t2 = tracks.clone();
         let open: Arc<OpenTrack> = Arc::new(move |p: &std::path::Path| {
             let i: usize = p.to_string_lossy().parse().map_err(|_| "?".to_string())?;
+            if i > 0 {
+                std::thread::sleep(slow);
+            }
             let (rate, frames, level) = t2[i];
             Ok(Box::new(Ramp { rate, ch: 2, frames, at: 0, level }) as Box<dyn Source>)
         });
@@ -740,12 +904,35 @@ mod tests {
 
     fn play_out(e: &mut Engine) {
         for _ in 0..10_000 {
-            if e.current.is_none() {
+            if e.current.is_none() && e.waiting.is_none() {
                 return;
             }
             e.piece();
         }
         panic!("never ended");
+    }
+
+    #[test]
+    fn a_next_track_slow_to_open_is_waited_for_and_commands_still_taken() {
+        let kept: Arc<Mutex<Vec<i16>>> = Arc::default();
+        let tracks = vec![(44100, 3001, 0.25), (44100, 2999, 0.5), (44100, 1000, 0.75)];
+        let mut e = slow_engine(tracks.clone(), kept.clone(), Duration::from_millis(400));
+        e.command(Command::Play { tracks: e.tracks.clone(), from: 0, tag: 3, loudness: Loudness::Off });
+        play_out(&mut e);
+        // Every frame of all three, in order: the album did not end at the first wait.
+        assert_eq!(kept.lock().unwrap().len(), (3001 + 2999 + 1000) * 2);
+        assert_eq!(e.state.lock().unwrap().ended, Some(3));
+        // While the next one is being fetched the window is told its place,
+        // and Stop is taken at once rather than after the fetch.
+        let kept: Arc<Mutex<Vec<i16>>> = Arc::default();
+        let mut e = slow_engine(tracks, kept, Duration::from_millis(800));
+        e.command(Command::Play { tracks: e.tracks.clone(), from: 1, tag: 4, loudness: Loudness::Off });
+        assert_eq!(e.waiting.map(|(i, _)| i), Some(1));
+        assert_eq!(e.state.lock().unwrap().now.as_ref().map(|n| n.track), Some(1));
+        let t = std::time::Instant::now();
+        e.command(Command::Stop);
+        assert!(t.elapsed() < Duration::from_millis(100));
+        assert!(e.waiting.is_none() && e.current.is_none());
     }
 
     #[test]

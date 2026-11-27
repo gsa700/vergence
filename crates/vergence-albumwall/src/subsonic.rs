@@ -463,6 +463,89 @@ pub fn song_id(path: &Path) -> Option<String> {
     Some(file.rsplit_once('.').map_or(file, |(id, _)| id).to_string())
 }
 
+// Songs played from a server (step 3): fetched whole as they are wanted
+// (Hymie's helper decodes a song from its bytes, as it does a file's), the
+// last two kept so the player's opening ahead and its start share one
+// fetch, and a song being fetched waited for rather than fetched twice.
+
+static LOGINS: std::sync::Mutex<Vec<Login>> = std::sync::Mutex::new(Vec::new());
+type Kept = Vec<(PathBuf, Arc<Vec<u8>>)>;
+static SONGS: std::sync::Mutex<Kept> = std::sync::Mutex::new(Vec::new());
+static FETCHING: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+static FETCHED: std::sync::Condvar = std::sync::Condvar::new();
+
+/// The servers signed in to, for finding a song's server by its path.
+pub fn register(logins: Vec<Login>) {
+    *LOGINS.lock().unwrap_or_else(|e| e.into_inner()) = logins;
+}
+
+/// A song's bytes, if `path` is a server's song: kept, being fetched (then
+/// waited for), or fetched now. A song is at most Hymie's largest file; it
+/// may take as long as a slow line needs.
+pub fn song_bytes(path: &Path, tls: Option<Arc<dyn vergence_http::Connector>>) -> Option<Result<Arc<Vec<u8>>, String>> {
+    let id = song_id(path)?;
+    let p = path.to_string_lossy().to_string();
+    let login = LOGINS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .find(|l| {
+            let k = l.key().to_string_lossy().to_string();
+            p.starts_with(&format!("{k}/song/"))
+        })
+        .cloned();
+    let Some(login) = login else { return Some(Err("its server is not signed in to".into())) };
+    {
+        let mut fetching = FETCHING.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            if let Some((_, b)) = SONGS.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|(k, _)| k == path) {
+                return Some(Ok(b.clone()));
+            }
+            if !fetching.iter().any(|k| k == path) {
+                break;
+            }
+            fetching = FETCHED.wait(fetching).unwrap_or_else(|e| e.into_inner());
+        }
+        fetching.push(path.to_path_buf());
+    }
+    let got = fetch_song(&login, &id, tls);
+    let mut fetching = FETCHING.lock().unwrap_or_else(|e| e.into_inner());
+    fetching.retain(|k| k != path);
+    let out = got.map(Arc::new);
+    if let Ok(b) = &out {
+        let mut kept = SONGS.lock().unwrap_or_else(|e| e.into_inner());
+        kept.retain(|(k, _)| k != path);
+        kept.push((path.to_path_buf(), b.clone()));
+        while kept.len() > 2 {
+            kept.remove(0);
+        }
+    }
+    FETCHED.notify_all();
+    Some(out)
+}
+
+fn fetch_song(login: &Login, id: &str, tls: Option<Arc<dyn vergence_http::Connector>>) -> Result<Vec<u8>, String> {
+    let server = Server::new(login.clone(), tls).map_err(|e| e.to_string())?;
+    let opts =
+        Options { max_body: vergence_hymie::MAX_FILE, answer: Duration::from_secs(30 * 60), ..server.opts.clone() };
+    let r = vergence_http::get(&server.stream_url(id), &opts).map_err(|e| e.to_string())?;
+    let json = r.head.header("content-type").is_some_and(|t| t.to_ascii_lowercase().contains("json"));
+    let status = r.status();
+    let body = r.bytes().map_err(|e| e.to_string())?;
+    if json {
+        // An error in place of the song: the server's own words.
+        let why = vergence_http::json::parse(&body)
+            .ok()
+            .and_then(|v| v.get("subsonic-response")?.get("error")?.get("message")?.text())
+            .unwrap_or_else(|| "it sent no song".into());
+        return Err(format!("the server would not play it: {why}"));
+    }
+    if status != 200 {
+        return Err(format!("the server answered {status}"));
+    }
+    Ok(body)
+}
+
 // The kept listing: our own text, one record a line, fields by tabs (a tab
 // or a newline in a name is a space).
 

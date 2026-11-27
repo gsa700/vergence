@@ -237,3 +237,21 @@ program can use it):
   session tickets could keep it in SSL_read while the program's request
   waited (now and then, on techbench); auto-retry is off. Playing from a
   server is step 3.
+- **Step 3, playing from the server** (2026-11-26): a server's song is
+  fetched whole (`stream`, format=raw: the file as it is) and played from
+  its bytes by Hymie's helper (`Sound::open_bytes`), so seeking is the same
+  as for a file and costs nothing more. The last two songs are kept, and a
+  song already on its way is waited for, not fetched twice (the player's
+  opening ahead and its start share one fetch). The player opens every
+  track on a thread of its own: a file is open within the 150 ms it waits
+  for, as before; a song still being fetched leaves the player taking
+  commands (Stop, Next, Pause, Seek all work while it waits) and the
+  window showing the track at its start. The next track is fetched while
+  this one plays, so the seam stays gapless; if it is not there in time the
+  album waits for it instead of ending. Not done, against the plan: range
+  requests and a range cache. Whole songs are simpler and seek freely; on
+  the local network a 40 MB FLAC arrives in well under a second. Ranges
+  can come later if a server far away makes the first play slow. Checked
+  headless on Hubble against the stand-in server serving WAVs half a second
+  late: Play heard at 0.75 s, track 2 on time at the seam, each song asked
+  for once.

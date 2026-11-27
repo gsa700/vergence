@@ -412,6 +412,14 @@ impl Sound {
         Sound::with_bytes(&program, crate::read_file(path)?)
     }
 
+    /// A sound's bytes already in hand (a song fetched from a music server:
+    /// AlbumWall milestone 2) in a new helper, as a file's are.
+    pub fn open_bytes(data: &[u8]) -> Result<Sound, Error> {
+        let program = helper_path()
+            .ok_or_else(|| Error::Io("the sound helper (libexec/vergence/vergence-hymie) is not installed".into()))?;
+        Sound::with_bytes(&program, data.to_vec())
+    }
+
     /// A file's bytes in the helper at `program` (tests use the one cargo
     /// built). An AAC file that helper sends on goes to the AAC helper,
     /// beside it or installed; the app never parses the file itself.

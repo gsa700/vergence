@@ -1052,6 +1052,8 @@ impl AlbumWall {
 
     /// What the settings windows show of the wall, brought up to date.
     fn tell_link(&self) {
+        // The servers signed in to, for the player to find a song's server by its path.
+        vergence_albumwall::subsonic::register(self.libraries.list.iter().filter_map(|l| l.server.clone()).collect());
         let hue = self.hue.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let root = self.libraries.current().map(|l| l.folder.clone());
         let mut l = self.link.borrow_mut();
@@ -1946,7 +1948,10 @@ impl Program for AlbumWall {
         let w = waker.clone();
         self.covers = Some(Arc::new(Covers::new(2, covers::helpers(), move || w.wake())));
         // The player on a thread of its own; it wakes the window as it plays.
-        let (track, output) = vergence_albumwall::player::system();
+        // A server's song is fetched whole and played from its bytes.
+        let remote: Arc<vergence_albumwall::player::Remote> =
+            Arc::new(|p: &std::path::Path| vergence_albumwall::subsonic::song_bytes(p, tls()));
+        let (track, output) = vergence_albumwall::player::system_with(remote);
         let w = waker.clone();
         self.player = Some(vergence_albumwall::player::Player::new(track, output, move || w.wake()));
         self.link.borrow_mut().wall = Some(waker.clone());

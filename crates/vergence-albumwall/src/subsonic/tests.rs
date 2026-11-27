@@ -1,6 +1,15 @@
 use super::*;
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::sync::atomic::AtomicUsize;
+
+/// Songs the mock server has sent (the song tests count their fetches).
+static STREAMS: AtomicUsize = AtomicUsize::new(0);
+
+/// The mock server's song "so-0": 300 kB, not all one byte.
+fn song() -> Vec<u8> {
+    (0..300_000u32).map(|i| (i * 7 % 251) as u8).collect()
+}
 
 /// A small Subsonic server on a local port: user "dave", password "sesame";
 /// `albums` and `songs` in pages of 500; a cover for "c1" only.
@@ -76,6 +85,21 @@ fn server(albums: usize, songs_per: usize) -> String {
                         .into_bytes();
                 r.extend_from_slice(png);
                 r
+            } else if path.starts_with("/rest/stream") && q("id") == "so-0" && q("format") == "raw" {
+                STREAMS.fetch_add(1, Ordering::SeqCst);
+                // Slow enough that a second ask comes while it is on its way.
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                let body = song();
+                let mut r =
+                    format!("HTTP/1.1 200 OK\r\nContent-Type: audio/flac\r\nContent-Length: {}\r\n\r\n", body.len())
+                        .into_bytes();
+                r.extend_from_slice(&body);
+                r
+            } else if path.starts_with("/rest/stream") {
+                json(
+                    r#"{"subsonic-response":{"status":"failed","error":{"code":70,"message":"Song not found"}}}"#
+                        .into(),
+                )
             } else if path.starts_with("/rest/getCoverArt") {
                 json(r#"{"subsonic-response":{"status":"failed","error":{"code":70,"message":"not found"}}}"#.into())
             } else {
@@ -143,4 +167,31 @@ fn a_streams_address_is_made_when_needed() {
     assert!(u.path.starts_with("/rest/stream?id=so-0&format=raw&u=dave&t="), "{}", u.path);
     let r = vergence_http::get(&s.address("ping", ""), &Options::default()).unwrap();
     assert_eq!(r.status(), 200);
+}
+
+#[test]
+fn a_song_is_fetched_once_for_two_asks_and_kept() {
+    let a = server(1, 1);
+    let s = Server::sign_in(&a, "dave", "sesame", None).unwrap();
+    let key = s.login.key().to_string_lossy().to_string();
+    register(vec![s.login.clone()]);
+    let path = PathBuf::from(format!("{key}/song/so-0.flac"));
+    // The player's opening ahead and its start, at once: one fetch.
+    let p2 = path.clone();
+    let other = std::thread::spawn(move || song_bytes(&p2, None));
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    let mine = song_bytes(&path, None).unwrap().unwrap();
+    let theirs = other.join().unwrap().unwrap().unwrap();
+    assert_eq!(*mine, song());
+    assert!(Arc::ptr_eq(&mine, &theirs));
+    // Asked again (a seek opens the track again): kept, not fetched.
+    let _ = song_bytes(&path, None).unwrap().unwrap();
+    assert_eq!(STREAMS.load(Ordering::SeqCst), 1);
+    // The server's own words when it will not play one.
+    let gone = song_bytes(&PathBuf::from(format!("{key}/song/so-9.flac")), None).unwrap().unwrap_err();
+    assert!(gone.contains("Song not found"), "{gone}");
+    // A file is not a server's song; a server not signed in to says so.
+    assert!(song_bytes(Path::new("/music/a.flac"), None).is_none());
+    let stranger = song_bytes(Path::new("navidrome://eve@10.9.9.9:4533/song/x.flac"), None).unwrap().unwrap_err();
+    assert!(stranger.contains("not signed in"), "{stranger}");
 }
