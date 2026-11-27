@@ -167,6 +167,8 @@ pub(crate) enum Kind<M> {
         radius: f32,
         align_x: Align,
         align_y: Align,
+        /// What its child draws outside it is cut off ([`Element::clip`]).
+        clip: bool,
     },
     Button {
         child: Box<Element<M>>,
@@ -423,6 +425,16 @@ impl<M> Element<M> {
         self
     }
 
+    /// A panel cuts off what its child draws outside it, and nothing there
+    /// can be pressed: a bar that slides in from behind another (AlbumWall's
+    /// play bar), a panel shown growing from nothing.
+    pub fn clip(mut self) -> Self {
+        if let Kind::Panel { clip, .. } = &mut self.kind {
+            *clip = true;
+        }
+        self
+    }
+
     /// A panel's child across, leaving it as it was up and down.
     pub fn align_x(mut self, align: Align) -> Self {
         if let Kind::Panel { align_x, .. } = &mut self.kind {
@@ -634,6 +646,7 @@ pub fn panel<M>(child: Element<M>) -> Element<M> {
             radius: vergence_look::RADIUS,
             align_x: Align::Start,
             align_y: Align::Start,
+            clip: false,
         },
         Length::Shrink,
         Length::Shrink,

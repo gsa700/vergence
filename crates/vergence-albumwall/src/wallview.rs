@@ -101,27 +101,44 @@ fn tile(
     let ph = color(wall::placeholder(&album.album_artist, &album.title));
     let px = (w * scale).ceil();
     // The open album's tile turns over to its back (back.jpg) and stays so
-    // while it is open: a turn about its upright axis, shown as its width
-    // narrowing to nothing and widening again with the other face.
+    // while it is open: a turn about its upright axis, the whole card (its
+    // color and its picture) narrowing to nothing and widening again with
+    // the other face, a little darker as it goes edge-on (the Avalonia
+    // tile's 3D turn, drawn flat).
     let turn = open.filter(|o| o.index == i && album.back.is_some()).map_or(0.0, |o| o.turn);
     let art = if turn >= 0.5 { album.back.as_ref() } else { album.front.as_ref() };
-    let face_w = (w * (std::f32::consts::PI * turn).cos().abs()).max(1.0);
+    let squeeze = (std::f32::consts::PI * turn).cos().abs();
+    let face_w = (w * squeeze).max(1.0);
     let key = art.map(|a| covers::Key::of(a, covers::bucket(px)));
     let cover = key.as_ref().and_then(|k| covers?.get(k));
-    let ground = panel(space()).color(ph).radius(2.0).width(Length::Fixed(w)).height(Length::Fixed(w));
+    let centered = |e: Element<Msg>| {
+        row(vec![space().width(Length::FILL), e, space().width(Length::FILL)]).width(Length::Fixed(w))
+    };
+    let ground = centered(panel(space()).color(ph).radius(2.0).width(Length::Fixed(face_w)).height(Length::Fixed(w)));
     let mut face = match cover {
         // The whole cover, never cropped: a small or oblong one sits centered
         // on its color; it fades in when it first comes.
         Some(c) => {
             let o = key.as_ref().map_or(1.0, |k| fades.opacity(k, now));
+            // Fitted whole, then squeezed across by the turn (a small or
+            // oblong cover keeps its place on its color as it turns).
+            let (iw, ih) = (c.image.width.max(1) as f32, c.image.height.max(1) as f32);
+            let k = (w / iw).min(w / ih);
+            let (fw, fh) = ((iw * k * squeeze).max(1.0), ih * k);
             stack(vec![
                 ground,
-                row(vec![
-                    space().width(Length::FILL),
-                    picture(c.image).radius(2.0).opacity(o).width(Length::Fixed(face_w)).height(Length::Fixed(w)),
-                    space().width(Length::FILL),
-                ])
-                .width(Length::Fixed(w)),
+                panel(
+                    picture(c.image)
+                        .fit(vergence_widgets::Fit::Stretch)
+                        .radius(2.0)
+                        .opacity(o)
+                        .width(Length::Fixed(fw))
+                        .height(Length::Fixed(fh)),
+                )
+                .align(Align::Center)
+                .radius(0.0)
+                .width(Length::Fixed(w))
+                .height(Length::Fixed(w)),
             ])
         }
         // No art at all: the tile is its own sleeve; until a cover comes, its color alone.
@@ -143,15 +160,32 @@ fn tile(
         ]),
         None => ground,
     };
-    // The open album's tile wears a ring in the album's own accent.
+    // Turning: darker as it goes edge-on.
+    if squeeze < 0.999 {
+        let shade = ((1.0 - squeeze) * 110.0).round() as u8;
+        face = stack(vec![
+            face,
+            centered(
+                panel(space())
+                    .color(Color::rgba(0, 0, 0, shade))
+                    .radius(2.0)
+                    .width(Length::Fixed(face_w))
+                    .height(Length::Fixed(w)),
+            ),
+        ]);
+    }
+    // The open album's tile wears a ring in the album's own accent (turning
+    // with it).
     if let Some(o) = open.filter(|o| o.index == i) {
         face = stack(vec![
             face,
-            panel(space())
-                .edge(color(o.palette.accent), 3.0)
-                .radius(2.0)
-                .width(Length::Fixed(w))
-                .height(Length::Fixed(w)),
+            centered(
+                panel(space())
+                    .edge(color(o.palette.accent), 3.0)
+                    .radius(2.0)
+                    .width(Length::Fixed(face_w))
+                    .height(Length::Fixed(w)),
+            ),
         ]);
     }
     // The keyboard's album: a light ring with a dark rim inside it, so it

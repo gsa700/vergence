@@ -53,6 +53,7 @@ pub(crate) enum What<M> {
         fill: Option<Color>,
         edge: Option<(Color, f32)>,
         radius: f32,
+        clip: bool,
     },
     Button {
         on_press: Option<M>,
@@ -531,8 +532,8 @@ impl Layout<'_> {
                 let size = l.size.map_or(self.text_size, |s| vergence_look::text_size(s, self.factor));
                 push(out, What::Label { lines, size, weight: l.weight, color: l.color, dim: l.dim });
             }
-            Kind::Panel { child, padding, fill, edge, radius, align_x, align_y } => {
-                push(out, What::Panel { fill, edge, radius });
+            Kind::Panel { child, padding, fill, edge, radius, align_x, align_y, clip } => {
+                push(out, What::Panel { fill, edge, radius, clip });
                 let inner = Rect::new(
                     rect.x + padding.left,
                     rect.y + padding.top,

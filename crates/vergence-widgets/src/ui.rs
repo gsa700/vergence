@@ -630,7 +630,7 @@ impl<M: Clone> Ui<M> {
         let mut c = Rect::new(0.0, 0.0, self.size.0, self.size.1);
         let mut p = self.nodes[i].parent;
         while let Some(q) = p {
-            if let What::Scroll { .. } = self.nodes[q].what {
+            if let What::Scroll { .. } | What::Panel { clip: true, .. } = self.nodes[q].what {
                 c = meet(c, self.shown(q));
             }
             p = self.nodes[q].parent;
@@ -2328,6 +2328,20 @@ impl<M: Clone> Ui<M> {
                     scene.push_clip(r, 0.0);
                     open.push(i);
                 }
+                // A panel that clips: its clip even when it cannot be seen (a
+                // bar growing from nothing must not draw its child whole).
+                What::Panel { fill, edge, radius, clip: true } => {
+                    if seen {
+                        if let Some(f) = fill {
+                            scene.fill_rounded(r, *radius, *f);
+                        }
+                        if let Some((c, w)) = edge {
+                            scene.stroke(r, *radius, *w, *c);
+                        }
+                    }
+                    scene.push_clip(r, *radius);
+                    open.push(i);
+                }
                 // Out of sight in a scrolling place: not drawn.
                 _ if !seen => {}
                 What::Rule { color } => {
@@ -2341,7 +2355,7 @@ impl<M: Clone> Ui<M> {
                         }
                     }
                 }
-                What::Panel { fill, edge, radius } => {
+                What::Panel { fill, edge, radius, .. } => {
                     if let Some(f) = fill {
                         scene.fill_rounded(r, *radius, *f);
                     }

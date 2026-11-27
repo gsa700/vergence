@@ -503,3 +503,17 @@ where any app can use it, not inside AlbumWall):
     Dave's idea of 2026-10-08), the arrow at its foot and its fade at its
     head; nothing above it moves, and the wall scrolls only if the album's
     row would end below the view. Scenario 33-albumwall-scroll checks it.
+  - **The motion, as the Avalonia app's** (Dave, 2026-11-26: "when the
+    albums flip and the play controls show or hide, it's nearly instant.
+    let's slow it down so we can see it happen like avalonia albumwall
+    does"). The tile's turn was there (400 ms) but read as instant: only
+    its picture narrowed while its color stayed whole, and the back's
+    picture, not yet decoded at edge-on, popped in at the end. Now the
+    whole card turns (its color, its picture squeezed, its ring), a little
+    darker toward edge-on, 200 ms to edge-on, held there until the back's
+    picture has come ("edge-on until the bitmap lands", AlbumVm.Flip),
+    200 ms back; a back that cannot be decoded turns the front back. The
+    play bar had no slide at all: it now rises from behind the bottom bar
+    and sinks back, 620 ms eased out (TransportSlide), the wall's foot
+    following. For it the toolkit's panels can clip (`Element::clip`:
+    what the child draws outside is cut off and cannot be pressed).

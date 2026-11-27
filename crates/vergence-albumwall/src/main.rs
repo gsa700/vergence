@@ -120,6 +120,9 @@ struct Opened {
     /// Its panel sits above its row, pointing down at it: it took over the
     /// panel of the album above it in place (WallRows.PointsDown).
     down: bool,
+    /// When its tile's second half of the turn began (its back's picture
+    /// arrived), or the turn back began (that picture cannot be decoded).
+    back_at: std::cell::Cell<Option<std::time::Instant>>,
 }
 
 /// The album folding away: its index, its height when open, the fold (330 ms).
@@ -131,6 +134,10 @@ struct Folding {
 }
 
 const UNFOLD_MS: u64 = 330;
+/// What the play bar shows: the album, its track, seconds in, its length, paused.
+type BarShown = (usize, usize, f64, f64, bool);
+/// The play bar sliding in or out (the Avalonia bar's TransportSlide).
+const BAR_SLIDE: Duration = Duration::from_millis(620);
 const CONTENTS_MS: u64 = 110;
 const TURN_MS: u64 = 400;
 /// The wall's albums for a search, as indexes in wall order.
@@ -242,6 +249,11 @@ struct AlbumWall {
     jump: Option<f32>,
     /// The menu's Paste, waiting for the search box to have the keyboard.
     paste_wanted: bool,
+    /// The play bar's slide: whether it is coming or going, and since when;
+    /// and what it showed last (album, track, seconds, length, paused), for
+    /// its way out.
+    bar_motion: std::cell::Cell<Option<(bool, std::time::Instant)>>,
+    bar_last: std::cell::Cell<Option<BarShown>>,
     /// The window can be seen (bus v42): while not, the music goes on and
     /// what happens is kept, but nothing is drawn and the meters' tick stops.
     seen: bool,
@@ -304,6 +316,8 @@ impl AlbumWall {
             fullscreen: false,
             jump: None,
             paste_wanted: false,
+            bar_motion: std::cell::Cell::new(None),
+            bar_last: std::cell::Cell::new(None),
             seen: true,
         }
     }
@@ -537,16 +551,27 @@ impl AlbumWall {
             _ => status,
         };
         let names: Vec<String> = self.libraries.list.iter().map(|l| l.name.clone()).collect();
-        // The play bar while an album of this library is playing (or paused).
-        let bar = match (&state.now, &self.playing) {
+        // The play bar while an album of this library is playing (or paused),
+        // and as it slides away: what it showed last.
+        let now_bar = match (&state.now, &self.playing) {
             (Some(n), Some((root, a))) if Some(root) == self.libraries.current().map(|l| &l.folder) && n.tag == *a => {
-                albums.get(*a).map(|album| {
+                Some((*a, n.track, n.seconds, n.length, n.paused))
+            }
+            _ => None,
+        };
+        if now_bar.is_some() {
+            self.bar_last.set(now_bar);
+        }
+        let shown_bar = self.bar_slide(now_bar.is_some(), t.reduced_motion);
+        let bar = (shown_bar > 0.0).then(|| now_bar.or(self.bar_last.get())).flatten().and_then(
+            |(a, track, seconds, length, paused)| {
+                albums.get(a).map(|album| {
                     let shown = playbar::Shown {
                         album,
-                        track: n.track,
-                        seconds: n.seconds,
-                        length: n.length,
-                        paused: n.paused,
+                        track,
+                        seconds,
+                        length,
+                        paused,
                         ending: self.settings.after,
                         needles: [self.needles[0].x as f32, self.needles[1].x as f32],
                         meters: self.settings.meters,
@@ -554,10 +579,9 @@ impl AlbumWall {
                     };
                     playbar::bar(&shown, &self.palette_of(album), self.covers.as_ref(), self.scale)
                 })
-            }
-            _ => None,
-        };
-        let foot = if bar.is_some() { playbar::HEIGHT } else { 0.0 };
+            },
+        );
+        let foot = playbar::HEIGHT * shown_bar;
         let page = column(vec![
             wallview::wall(
                 albums.clone(),
@@ -580,7 +604,14 @@ impl AlbumWall {
         // stack was a new scroll, rebuilt from somewhere else (Dave,
         // 2026-11-26: an album started, the wall went to the top; one ended,
         // it "scrolled itself to the F section").
-        let bar = bar.unwrap_or_else(space);
+        // It slides up from behind the bottom bar and back down (620 ms, as
+        // the Avalonia bar's TransportSlide): a clipping panel as tall as
+        // the part of it out so far, the bar's top in it.
+        let bar = panel(bar.unwrap_or_else(space))
+            .clip()
+            .radius(0.0)
+            .width(Length::FILL)
+            .height(Length::Fixed((playbar::HEIGHT * shown_bar).round()));
         stack(vec![
             page.width(Length::FILL).height(Length::FILL),
             column(vec![space().height(Length::FILL), bar, space().height(Length::Fixed(wallview::BAR))])
@@ -1118,7 +1149,7 @@ impl AlbumWall {
                 height: full * unfold,
                 shown,
                 palette: self.palette_of(album),
-                turn: o.turn.in_out(now),
+                turn: self.turn_of(o, album, now),
                 playing: self.playing_track(o.index),
                 cursor: self.track.filter(|_| self.keyed == Some(o.index)),
                 down: o.down,
@@ -1139,6 +1170,58 @@ impl AlbumWall {
             down: f.down,
             after: self.after_place(f.index, f.down),
         })
+    }
+
+    /// How far out the play bar is, 0 to 1, as it slides toward `wanted`
+    /// (eased out; at once with motion reduced).
+    fn bar_slide(&self, wanted: bool, reduced: bool) -> f32 {
+        let now = std::time::Instant::now();
+        match self.bar_motion.get() {
+            Some((w, _)) if w == wanted => {}
+            None if !wanted => return 0.0,
+            _ => self.bar_motion.set(Some((wanted, now))),
+        }
+        let Some((w, at)) = self.bar_motion.get() else { return 0.0 };
+        let f = if reduced {
+            1.0
+        } else {
+            (now.saturating_duration_since(at).as_secs_f32() / BAR_SLIDE.as_secs_f32()).min(1.0)
+        };
+        let e = vergence_widgets::motion::ease_out(f);
+        if w { e } else { 1.0 - e }
+    }
+
+    /// How far album `o`'s tile has turned toward its back, 0 to 1: the
+    /// first half to edge-on, held there until the back's picture has
+    /// come (the Avalonia app: "edge-on until the bitmap lands"), then the
+    /// second half; a back that cannot be decoded turns the front back.
+    fn turn_of(&self, o: &Opened, album: &Album, now: std::time::Instant) -> f32 {
+        let first = o.turn.in_out(now);
+        if first < 1.0 {
+            return 0.5 * first;
+        }
+        let Some(back) = &album.back else { return 0.0 };
+        let (_, cover) = wall::columns(self.wall_width());
+        let key = covers::Key::of(back, covers::bucket((cover * self.scale).ceil()));
+        let half = Duration::from_millis(TURN_MS / 2);
+        let ease = |since: std::time::Instant| {
+            let f = if self.reduced() {
+                1.0
+            } else {
+                now.saturating_duration_since(since).as_secs_f32() / half.as_secs_f32()
+            };
+            vergence_widgets::motion::ease_in_out(f.min(1.0))
+        };
+        let Some(c) = self.covers.as_ref() else { return 0.5 };
+        if c.failed(&key) {
+            let since = o.back_at.get().unwrap_or(now);
+            o.back_at.set(Some(since));
+            return 0.5 * (1.0 - ease(since));
+        }
+        if o.back_at.get().is_none() && c.get(&key).is_some() {
+            o.back_at.set(Some(now));
+        }
+        o.back_at.get().map_or(0.5, |since| 0.5 + 0.5 * ease(since))
     }
 
     /// For a panel pointing down: a place in the row above album `i`'s, the
@@ -1202,8 +1285,9 @@ impl AlbumWall {
                         index: i,
                         unfold: o.unfold,
                         swap: Some(tween(CONTENTS_MS * 2)),
-                        turn: tween(TURN_MS),
+                        turn: tween(TURN_MS / 2),
                         down,
+                        back_at: std::cell::Cell::new(None),
                     });
                     // Nothing above the panel moves; pointing down, the wall
                     // scrolls only if the album's row would end below the view.
@@ -1217,8 +1301,14 @@ impl AlbumWall {
             }
         }
         self.folding = None;
-        self.opened =
-            Some(Opened { index: i, unfold: tween(UNFOLD_MS), swap: None, turn: tween(TURN_MS), down: false });
+        self.opened = Some(Opened {
+            index: i,
+            unfold: tween(UNFOLD_MS),
+            swap: None,
+            turn: tween(TURN_MS / 2),
+            down: false,
+            back_at: std::cell::Cell::new(None),
+        });
         // The album and its panel centered in the wall, as far as they fit.
         let row_top = wall::PAD_TOP + (at / cols) as f32 * (tile_h + wall::GAP);
         let view_h = (self.size.1 - wallview::BAR).max(1.0);
@@ -2016,8 +2106,10 @@ impl Program for AlbumWall {
         // finished one (not one from just before it: a folded tile kept its ring).
         let past = std::time::Duration::from_millis(60);
         let busy = |t: &vergence_widgets::motion::Tween| now.saturating_duration_since(t.start) < t.duration + past;
+        let half = std::time::Duration::from_millis(TURN_MS / 2);
         let opening = self.opened.as_ref().is_some_and(|o| {
             busy(&o.turn)
+                || o.back_at.get().is_some_and(|s| now.saturating_duration_since(s) < half + past)
                 || o.swap.as_ref().is_some_and(busy)
                 || now.saturating_duration_since(o.unfold.start)
                     < o.unfold.duration
@@ -2028,6 +2120,7 @@ impl Program for AlbumWall {
             || self.folding.as_ref().is_some_and(|f| busy(&f.fold))
             || self.glide.is_some()
             || self.fades.fading(now)
+            || self.bar_motion.get().is_some_and(|(_, at)| now.saturating_duration_since(at) < BAR_SLIDE + past)
     }
 
     fn style(&self) -> vergence_ui::Style {
