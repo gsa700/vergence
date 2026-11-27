@@ -167,6 +167,40 @@ pub fn line_at(lines: &[Line], y: f32) -> Option<usize> {
     None
 }
 
+/// What a drop at `y` (the sidebar list's own coordinates) does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Drop {
+    /// Onto the place on line `.0`: what is dropped goes into it (the
+    /// middle half of a favorite's row, anywhere on another place's).
+    Into(usize),
+    /// Between favorites: a shortcut put at this place among them.
+    Between(usize),
+    Nothing,
+}
+
+/// A drop's meaning by where it lands (Dave, 2026-11-26: a file dropped on
+/// "Downloads" made a shortcut instead of moving the file there). On a
+/// folder's row it goes into the folder; at the top or bottom quarter of a
+/// favorite's row, or on the Favorites heading, it is a new shortcut there.
+pub fn drop_at(lines: &[Line], y: f32) -> Drop {
+    let Some(i) = line_at(lines, y) else { return Drop::Nothing };
+    let height = |l: &Line| if matches!(l, Line::Head(_)) { HEAD_H } else { ROW_H };
+    let top: f32 = PAD + lines[..i].iter().map(height).sum::<f32>();
+    let share = (y - top) / height(&lines[i]);
+    match &lines[i] {
+        Line::Item(sec, item) if item.path.is_some() && !item.file => {
+            if *sec == Section::Favorites && !(0.25..0.75).contains(&share) {
+                // Line 0 is the heading: favorite k is on line k + 1.
+                Drop::Between(if share < 0.25 { i - 1 } else { i })
+            } else {
+                Drop::Into(i)
+            }
+        }
+        Line::Item(Section::Favorites, _) => Drop::Between(if share < 0.5 { i - 1 } else { i }),
+        _ => drop_index(lines, Some(i)).map_or(Drop::Nothing, Drop::Between),
+    }
+}
+
 /// Where in the favorites a drop at row `at` puts what is dropped: before
 /// the favorite there, after the last if below them (on the Favorites
 /// heading: first); None outside the Favorites section.

@@ -169,7 +169,11 @@ impl Viewer {
                     }
                     let line = row(cells).spacing(8.0).align(Align::Center).width(Length::FILL);
                     let mut b = button(line)
-                        .look(if chosen { ButtonLook::Chosen } else { ButtonLook::Plain })
+                        .look(if chosen || self.side_drop_on == Some(i) {
+                            ButtonLook::Chosen
+                        } else {
+                            ButtonLook::Plain
+                        })
                         .padding(Padding::hv(0.0, 8.0))
                         .height(Length::Fixed(sidebar::ROW_H))
                         .width(Length::FILL)

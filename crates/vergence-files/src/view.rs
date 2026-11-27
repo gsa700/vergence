@@ -368,6 +368,7 @@ impl Viewer {
             if tab.chosen.contains(&e.path) { tools } else { tools.shown_on_hover() }
         };
         let v = files::View {
+            drop_on: self.drop_on,
             entries: &visible,
             chosen: &chosen,
             in_view,

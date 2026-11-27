@@ -585,6 +585,7 @@ impl Program for FileDialog {
         let chosen = |k: usize, e: &Entry| self.selected == Some(k) || self.marked.contains(&e.path);
         let click = |k: usize| FileMsg::Click(k);
         let view = crate::files::View {
+            drop_on: None,
             entries: &visible,
             chosen: &chosen,
             in_view: self.selected.map(|k| (k, self.turn.get() << 32 | k as u64)),

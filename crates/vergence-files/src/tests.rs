@@ -223,3 +223,58 @@ fn the_arrows_and_clicks_choose() {
     assert_eq!(v.front_tab().unwrap().chosen.len(), 3, "Ctrl+click adds");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn a_drop_on_a_sidebar_place_goes_into_it_and_between_rows_is_a_shortcut() {
+    use crate::sidebar::{Drop, HEAD_H, Item, Line, PAD, ROW_H, Section, drop_at};
+    let item = |name: &str, path: &str, file: bool| Item {
+        name: name.into(),
+        path: Some(PathBuf::from(path)),
+        file,
+        place: None,
+    };
+    let lines = vec![
+        Line::Head(Section::Favorites),
+        Line::Item(Section::Favorites, item("Home", "/home/dave", false)),
+        Line::Item(Section::Favorites, item("Downloads", "/home/dave/Downloads", false)),
+        Line::Item(Section::Favorites, item("notes.txt", "/home/dave/notes.txt", true)),
+        Line::Head(Section::Locations),
+        Line::Item(Section::Locations, item("Trash", "/home/dave/.local/share/Trash/files", false)),
+    ];
+    let row = |i: usize, share: f32| {
+        let top: f32 =
+            PAD + lines[..i].iter().map(|l| if matches!(l, Line::Head(_)) { HEAD_H } else { ROW_H }).sum::<f32>();
+        let h = if matches!(lines[i], Line::Head(_)) { HEAD_H } else { ROW_H };
+        top + h * share
+    };
+    // The middle of "Downloads": into it (Dave: it made a shortcut).
+    assert_eq!(drop_at(&lines, row(2, 0.5)), Drop::Into(2));
+    // Its top and bottom quarters: a shortcut before it, or after it.
+    assert_eq!(drop_at(&lines, row(2, 0.1)), Drop::Between(1));
+    assert_eq!(drop_at(&lines, row(2, 0.9)), Drop::Between(2));
+    // The heading: first; a file's row: before or after it, never into it.
+    assert_eq!(drop_at(&lines, row(0, 0.5)), Drop::Between(0));
+    assert_eq!(drop_at(&lines, row(3, 0.4)), Drop::Between(2));
+    // A place under Locations: into it wherever on its row.
+    assert_eq!(drop_at(&lines, row(5, 0.1)), Drop::Into(5));
+    assert_eq!(drop_at(&lines, row(5, 0.9)), Drop::Into(5));
+    assert_eq!(drop_at(&lines, 10_000.0), Drop::Nothing);
+}
+
+#[test]
+fn a_drop_that_would_do_nothing_or_harm_is_refused_before_it_lands() {
+    use crate::dnd::pointless;
+    let p = |s: &str| PathBuf::from(s);
+    let picked = [p("/m/Pictures/a.jpg"), p("/m/Pictures/b.jpg")];
+    // Into the folder they are in: nothing would happen.
+    assert!(pointless(&picked, Path::new("/m/Pictures")));
+    // Into a folder beside them: a move.
+    assert!(!pointless(&picked, Path::new("/m/Pictures/Old")));
+    // A folder onto itself, or into a folder inside it.
+    let folder = [p("/m/Pictures")];
+    assert!(pointless(&folder, Path::new("/m/Pictures")));
+    assert!(pointless(&folder, Path::new("/m/Pictures/Old")));
+    assert!(!pointless(&folder, Path::new("/m/Downloads")));
+    // A drag from elsewhere, not known before it lands: not refused.
+    assert!(!pointless(&[], Path::new("/m/Pictures")));
+}

@@ -220,6 +220,11 @@ struct Viewer {
     /// The sidebar's place in the window (drawn there, for drops on it), how
     /// far its list is scrolled, and the row its menu was opened on.
     side_rect: Rc<Cell<Rect>>,
+    /// What this window is dragging away (a drop of it here is checked before it lands).
+    dragging: Vec<PathBuf>,
+    /// The list row and sidebar line a drag is over that a drop would go into.
+    drop_on: Option<usize>,
+    side_drop_on: Option<usize>,
     side_scroll: f32,
     /// The sidebar's width (`[files] sidebar-width`), the divider's place as
     /// drawn, and a pull on it: where it began (window points) and the width then.
@@ -449,6 +454,9 @@ impl Viewer {
             ending: None,
             path_edit: None,
             side_rect: Rc::new(Cell::new(Rect::new(0.0, 0.0, 0.0, 0.0))),
+            dragging: Vec::new(),
+            drop_on: None,
+            side_drop_on: None,
             side_scroll: 0.0,
             side_w: vergence_ui::table_value(&desktop_now, SECTION, "sidebar-width")
                 .and_then(|v| v.trim().parse::<f32>().ok())
@@ -941,16 +949,30 @@ impl Program for Viewer {
         self.on_key_first(input, window)
     }
 
-    fn drag_over(&mut self, x: f32, y: f32, kinds: &[String], ctrl: bool) -> u8 {
-        self.on_drag_over(x, y, kinds, ctrl)
+    fn drag_over_on(&mut self, x: f32, y: f32, kinds: &[String], ctrl: bool, on: Option<Msg>) -> u8 {
+        self.on_drag_over(x, y, kinds, ctrl, on)
     }
 
-    fn dropped(&mut self, x: f32, y: f32, action: u8, items: &[(String, Vec<u8>)], window: &mut Window) {
-        self.on_dropped(x, y, action, items, window)
+    fn drag_left(&mut self) {
+        self.on_drag_left();
+    }
+
+    fn dropped_on(
+        &mut self,
+        x: f32,
+        y: f32,
+        action: u8,
+        items: &[(String, Vec<u8>)],
+        on: Option<Msg>,
+        window: &mut Window,
+    ) {
+        self.on_dropped(x, y, action, items, on, window)
     }
 
     /// A drag from here ended: what moved away is read again.
     fn drag_ended(&mut self, _action: u8, window: &mut Window) {
+        self.dragging.clear();
+        self.on_drag_left();
         self.read_all();
         window.redraw();
     }

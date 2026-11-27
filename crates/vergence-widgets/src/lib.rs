@@ -198,6 +198,25 @@ pub trait Program {
     }
     fn drag_left(&mut self) {}
     fn dropped(&mut self, _x: f32, _y: f32, _action: u8, _items: &[(String, Vec<u8>)], _window: &mut Window) {}
+    /// As [`Program::drag_over`], told also the menu message of what is under
+    /// the point (a list row's [`crate::Element::on_menu`]): the row a drop
+    /// would go into (FileView's folder rows). By default, drag_over.
+    fn drag_over_on(&mut self, x: f32, y: f32, kinds: &[String], ctrl: bool, _on: Option<Self::Message>) -> u8 {
+        self.drag_over(x, y, kinds, ctrl)
+    }
+    /// As [`Program::dropped`], told also the menu message of what is under
+    /// the point. By default, dropped.
+    fn dropped_on(
+        &mut self,
+        x: f32,
+        y: f32,
+        action: u8,
+        items: &[(String, Vec<u8>)],
+        _on: Option<Self::Message>,
+        window: &mut Window,
+    ) {
+        self.dropped(x, y, action, items, window)
+    }
     fn drag_ended(&mut self, _action: u8, _window: &mut Window) {}
 
     /// The style its bar is to be drawn in (app settings milestone 1).
@@ -460,7 +479,8 @@ impl<P: Program> vergence_ui::App for Host<P> {
     }
 
     fn drag_over(&mut self, x: f32, y: f32, kinds: &[String], ctrl: bool) -> u8 {
-        self.program.drag_over(x, y, kinds, ctrl)
+        let on = self.ui.menu_at(x, y);
+        self.program.drag_over_on(x, y, kinds, ctrl, on)
     }
 
     fn drag_left(&mut self) {
@@ -468,7 +488,8 @@ impl<P: Program> vergence_ui::App for Host<P> {
     }
 
     fn dropped(&mut self, x: f32, y: f32, action: u8, items: &[(String, Vec<u8>)], window: &mut Window) {
-        self.program.dropped(x, y, action, items, window);
+        let on = self.ui.menu_at(x, y);
+        self.program.dropped_on(x, y, action, items, on, window);
         self.changed(window);
     }
 

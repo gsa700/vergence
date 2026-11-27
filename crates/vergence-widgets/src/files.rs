@@ -522,6 +522,9 @@ pub struct View<'a, M> {
     pub trailing: Option<(Trailing<'a, M>, f32)>,
     /// A name being changed in its row (rename in place, files milestone 3).
     pub rename: Option<Rename<M>>,
+    /// The row a drag is over that a drop would go into (a folder): shown
+    /// chosen while the drag is there, as Finder's and Dolphin's.
+    pub drop_on: Option<usize>,
 }
 
 /// A name being changed in place: the row, the text so far, what typing
@@ -663,7 +666,7 @@ pub fn list<M: Clone + 'static>(
             cells.push(space().width(Length::Fixed(GAP)));
             cells.push(f(k, e).width(Length::Fixed(w)));
         }
-        let chosen = (v.chosen)(k, e);
+        let chosen = (v.chosen)(k, e) || v.drop_on == Some(k);
         let ground = if chosen {
             ButtonLook::Chosen
         } else if look.stripes && odd {
@@ -716,7 +719,7 @@ pub fn icons<M: Clone + 'static>(v: &View<M>) -> Element<M> {
                 _ => label(e.name.clone()).size(11.0).align(Align::Center).elide().width(Length::Fixed(88.0)),
             };
             let mut b = button(column(vec![mark, name_el]).spacing(4.0).align(Align::Center))
-                .look(if (v.chosen)(k, e) { ButtonLook::Chosen } else { ButtonLook::Plain })
+                .look(if (v.chosen)(k, e) || v.drop_on == Some(k) { ButtonLook::Chosen } else { ButtonLook::Plain })
                 .padding(Padding::hv(6.0, 4.0))
                 .on_press((v.click)(k))
                 .width(Length::Fixed(100.0))
