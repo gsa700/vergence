@@ -411,7 +411,7 @@ impl Program for Disks {
         let entry = |title: String, sub: String, sel: Sel| -> Element<Msg> {
             let here = cur == Some(sel);
             button(
-                column(vec![label(title.clone()).width(Length::FILL), label(sub).size(11.0).dim()])
+                column(vec![label(title.clone()).wrap().width(Length::FILL), label(sub).size(11.0).dim()])
                     .spacing(1.0)
                     .width(Length::FILL),
             )
