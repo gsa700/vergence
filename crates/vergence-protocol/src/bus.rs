@@ -92,7 +92,8 @@
 //! Version 44 (AlbumWall milestone 2, step 6: Now Playing): a tile's card may carry a
 //! `tile::Picture` (the cover art; a camera snapshot, a radar image), drawn by the server.
 //! Version 45 (Now Playing, Dave: AlbumWall's buttons): `tile::ControlKind::Icon`, a round
-//! button with a transport glyph; a run of them stands in one row.
+//! button with a transport glyph; a run of them stands in one row. A tile may show an
+//! icon from the theme (`Tile::icon`) with a glyph over its corner (`Tile::badge`).
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
@@ -1423,6 +1424,8 @@ mod tests {
             state: TileState::Warning,
             group: "Lab".into(),
             page: String::new(),
+            icon: "battery".into(),
+            badge: Some(crate::tile::Icon::Play),
             card: Card {
                 title: "UPS (rack)".into(),
                 big: String::new(),
@@ -1470,6 +1473,9 @@ mod tests {
         let mut t = sample_tile();
         t.id = "a\nb".into();
         assert!(t.check().is_err());
+        let mut t = sample_tile();
+        t.icon = "/etc/passwd".into();
+        assert!(t.check().is_err(), "an icon is a theme's name, never a path");
         // A picture whose bytes do not fill it, or larger than a card's, is never made.
         assert!(crate::tile::Picture::new(2, 2, vec![0; 8], String::new()).is_none());
         assert!(crate::tile::Picture::new(257, 1, vec![0; 257 * 4], String::new()).is_none());

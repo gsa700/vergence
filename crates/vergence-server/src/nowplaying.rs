@@ -50,6 +50,9 @@ pub struct Player {
     pub name: String,
     pub owner: u32,
     pub identity: String,
+    /// Its application's icon in the theme (from its MPRIS DesktopEntry: the
+    /// desktop entry's Icon, else the entry's own name, as icons usually are).
+    pub icon: String,
     /// Playing, Paused or Stopped.
     pub status: String,
     pub title: String,
@@ -205,6 +208,10 @@ pub fn tile(players: &[Player], art: Option<&Picture>, now: Instant) -> Option<T
         state: TileState::Fine,
         group: "System".into(),
         page: String::new(),
+        // On the dock, the player's own icon with play or pause over its
+        // corner: a title cannot be read at that size (Dave, 2026-11-27).
+        icon: p.icon.clone(),
+        badge: Some(if p.playing() { Icon::Play } else { Icon::Pause }),
         card: Card {
             title: short(&title, 200),
             rows,
@@ -220,6 +227,7 @@ pub fn tile(players: &[Player], art: Option<&Picture>, now: Instant) -> Option<T
 pub enum Asked {
     All(String),
     Identity(String),
+    DesktopEntry(String),
     Position(String),
 }
 
@@ -307,6 +315,13 @@ impl Server {
                 &[Value::Str(ROOT.into()), Value::Str("Identity".into())],
                 Asked::Identity(name.into()),
             );
+            self.nowplaying_ask(
+                name,
+                PROPERTIES,
+                "Get",
+                &[Value::Str(ROOT.into()), Value::Str("DesktopEntry".into())],
+                Asked::DesktopEntry(name.into()),
+            );
         }
         self.nowplaying_show();
     }
@@ -341,6 +356,22 @@ impl Server {
                 if let (Some(p), Some(v)) = (self.nowplaying.players.iter_mut().find(|p| p.name == name), first(&args))
                 {
                     p.identity = text(&v);
+                }
+            }
+            Asked::DesktopEntry(name) => {
+                let entry = first(&args).map(|v| text(&v)).unwrap_or_default();
+                // Its entry's icon (the dock knows the machine's applications),
+                // else the entry's name; only a name in the theme, never a path.
+                let icon = self
+                    .shelf
+                    .apps
+                    .iter()
+                    .find(|e| e.id == entry)
+                    .map(|e| e.icon.clone())
+                    .unwrap_or_else(|| entry.clone());
+                if let Some(p) = self.nowplaying.players.iter_mut().find(|p| p.name == name) {
+                    p.icon =
+                        if icon.contains('/') || icon.chars().any(char::is_control) { String::new() } else { icon };
                 }
             }
             Asked::Position(name) => {
@@ -570,6 +601,7 @@ mod tests {
         assert_eq!(t.card.controls[1].label, "Pause");
         assert_eq!(t.card.controls[3].label, "0:00 of 6:53");
         assert_eq!(t.card.note, "Also: Firefox (paused)");
+        assert_eq!(t.badge, Some(Icon::Play));
         // A long title fits the dock.
         p.title = "A very long title that will not fit on the dock at all".into();
         let t = tile(&[p], None, t0).unwrap();

@@ -272,6 +272,7 @@ pub fn power(p: &vergence_power::Power) -> Option<Tile> {
         group: "System".into(),
         card: Card { title: "Battery".into(), rows, ..Card::default() },
         page: "battery".into(),
+        ..Tile::default()
     })
 }
 

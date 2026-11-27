@@ -2554,6 +2554,8 @@ pub fn remote_tile(state: &mut Server) {
             label: "viewing".into(),
             state: TileState::Warning,
             group: "System".into(),
+            icon: String::new(),
+            badge: None,
             card: Card {
                 title,
                 big: String::new(),

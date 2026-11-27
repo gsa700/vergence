@@ -29,6 +29,12 @@ pub struct Tile {
     /// The settings app's page a click opens ("sound", "date & time");
     /// empty: the owner is told of the click instead.
     pub page: String,
+    /// An icon's name in the icon theme: the tile shows it in place of its
+    /// value and label, which still name it (the card, the drawer, the
+    /// screen reader). Never a file's path. Empty: the words.
+    pub icon: String,
+    /// A small glyph over the icon's corner (Now Playing's play or pause).
+    pub badge: Option<Icon>,
 }
 
 /// A tile's card: a title, rows of name and value, an optional chart of
@@ -181,6 +187,10 @@ impl Tile {
         long("label", &self.label, MAX_SHORT)?;
         long("group", &self.group, MAX_SHORT)?;
         long("page", &self.page, MAX_SHORT)?;
+        long("icon", &self.icon, MAX_ID)?;
+        if self.icon.chars().any(|c| c == '/' || c.is_control()) {
+            return Err("an icon is a name in the icon theme, not a path".into());
+        }
         let c = &self.card;
         long("title", &c.title, MAX_TEXT)?;
         long("big", &c.big, MAX_SHORT)?;
@@ -216,7 +226,11 @@ impl Tile {
             TileState::Warning => 1,
             TileState::Problem => 2,
         });
-        e.str(&self.group).str(&self.page);
+        e.str(&self.group).str(&self.page).str(&self.icon);
+        match self.badge {
+            None => e.u8(0),
+            Some(i) => e.u8(1).u8(i as u8),
+        };
         let c = &self.card;
         e.str(&c.title).str(&c.big).str(&c.note).count(c.rows.len());
         for (k, v) in &c.rows {
@@ -255,6 +269,12 @@ impl Tile {
         };
         let group = d.str()?;
         let page = d.str()?;
+        let icon = d.str()?;
+        let badge = match d.u8()? {
+            0 => None,
+            1 => Some(icon_of(d.u8()?)?),
+            _ => return Err(WireError::BadValue("badge")),
+        };
         let (title, big, note) = (d.str()?, d.str()?, d.str()?);
         let n = d.count(8)?;
         let mut rows = Vec::with_capacity(n.min(MAX_ROWS));
@@ -274,14 +294,7 @@ impl Tile {
                 0 => ControlKind::Button,
                 1 => ControlKind::Switch(d.bool()?),
                 2 => ControlKind::Slider { value: d.f64()?, min: d.f64()?, max: d.f64()?, step: d.f64()? },
-                3 => ControlKind::Icon(match d.u8()? {
-                    0 => Icon::Previous,
-                    1 => Icon::Play,
-                    2 => Icon::Pause,
-                    3 => Icon::Next,
-                    4 => Icon::Stop,
-                    _ => return Err(WireError::BadValue("icon")),
-                }),
+                3 => ControlKind::Icon(icon_of(d.u8()?)?),
                 _ => return Err(WireError::BadValue("control kind")),
             };
             controls.push(Control { id, label, kind });
@@ -302,7 +315,21 @@ impl Tile {
             state,
             group,
             page,
+            icon,
+            badge,
             card: Card { title, big, rows, chart, controls, note, picture },
         })
     }
+}
+
+/// An icon's number on the wire (its place in [`Icon`]).
+fn icon_of(n: u8) -> Result<Icon, crate::wire::WireError> {
+    Ok(match n {
+        0 => Icon::Previous,
+        1 => Icon::Play,
+        2 => Icon::Pause,
+        3 => Icon::Next,
+        4 => Icon::Stop,
+        _ => return Err(crate::wire::WireError::BadValue("icon")),
+    })
 }

@@ -1825,6 +1825,19 @@ impl Server {
         // The live tiles after the applications (tiles.rs).
         let tiles = self.tiles_on_dock();
         tiles.hash(&mut hasher);
+        // A tile that shows an icon (Now Playing: its player's), smaller than an
+        // application's, and whether it has come.
+        let tile_pixels = (pixels as f32 * 0.7).round() as u32;
+        let tile_icons: Vec<Option<Arc<Icon>>> = tiles
+            .iter()
+            .map(|t| match t {
+                crate::tiles::Shown::Tile(t) if !t.icon.is_empty() => self.shelf_icon(&t.icon, tile_pixels),
+                _ => None,
+            })
+            .collect();
+        for i in &tile_icons {
+            i.is_some().hash(&mut hasher);
+        }
         // The frost behind the dock (look milestone 1, step 5): its ground is then
         // the frost, drawn under the picture; Reduce transparency (or no frost
         // on this renderer) leaves the dock as its own setting says, solid if that.
@@ -2040,6 +2053,41 @@ impl Server {
                         continue;
                     }
                 };
+                // Its icon, with the badge over its lower right corner (Now
+                // Playing: the player, playing or paused); the words when the
+                // icon cannot be found.
+                if let Some(icon) = tile_icons.get(j).cloned().flatten() {
+                    let (iw, ih) = (icon.width as f32 / scale as f32, icon.height as f32 / scale as f32);
+                    let (cx, cy) = (slot.x as f32 + slot.w as f32 / 2.0, slot.y as f32 + slot.h as f32 / 2.0);
+                    let r = SceneRect::new((cx - iw / 2.0).round(), (cy - ih / 2.0).round(), iw, ih);
+                    let picture =
+                        scene.image(Image { width: icon.width, height: icon.height, rgba: icon.rgba.clone() });
+                    scene.draw_image(picture, r, 1.0);
+                    if let Some(b) = tile.badge {
+                        use vergence_render::transport::Glyph;
+                        let d = 16.0 * k;
+                        let disc = SceneRect::new(r.x + r.w - d * 0.7, r.y + r.h - d * 0.7, d, d);
+                        // A ring of the dock's own color sets it off the icon.
+                        let ring = SceneRect::new(disc.x - 1.5 * k, disc.y - 1.5 * k, d + 3.0 * k, d + 3.0 * k);
+                        scene.fill_rounded(ring, ring.w / 2.0, color(s.dock));
+                        scene.fill_rounded(disc, d / 2.0, accent);
+                        let g = match b {
+                            vergence_protocol::tile::Icon::Previous => Glyph::Previous,
+                            vergence_protocol::tile::Icon::Play => Glyph::Play,
+                            vergence_protocol::tile::Icon::Pause => Glyph::Pause,
+                            vergence_protocol::tile::Icon::Next => Glyph::Next,
+                            vergence_protocol::tile::Icon::Stop => Glyph::Stop,
+                        };
+                        vergence_render::transport::draw_at(
+                            &mut scene,
+                            g,
+                            disc,
+                            Color::rgb(0xff, 0xff, 0xff),
+                            0.55 * k,
+                        );
+                    }
+                    continue;
+                }
                 let ink = crate::tiles::state_ink(tile.state, light, s.tile_ink);
                 let room = slot.w as f32 - 4.0 * k;
                 // A value a little too wide (an agent's name) is set smaller,

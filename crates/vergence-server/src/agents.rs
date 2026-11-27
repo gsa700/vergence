@@ -1254,6 +1254,8 @@ impl Server {
             label,
             state,
             group: "System".into(),
+            icon: String::new(),
+            badge: None,
             card: vergence_protocol::tile::Card {
                 title,
                 big: String::new(),

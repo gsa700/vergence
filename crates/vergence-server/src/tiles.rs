@@ -359,7 +359,7 @@ impl Server {
             .iter()
             .map(|p| {
                 format!(
-                    "{} {:?} {:?} {:?} {:?} group {:?} page {:?} rows {} chart {} controls {} picture {} title {:?}",
+                    "{} {:?} {:?} {:?} {:?} group {:?} page {:?} rows {} chart {} controls {} picture {} icon {:?} badge {:?} title {:?}",
                     p.key(),
                     p.owner,
                     p.tile.value,
@@ -371,6 +371,8 @@ impl Server {
                     p.tile.card.chart.len(),
                     p.tile.card.controls.len(),
                     p.tile.card.picture.as_ref().map_or("none".to_string(), |x| format!("{}x{}", x.width, x.height)),
+                    p.tile.icon,
+                    p.tile.badge,
                     p.tile.card.title
                 )
             })

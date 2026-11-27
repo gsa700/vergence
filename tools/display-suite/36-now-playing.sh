@@ -84,12 +84,15 @@ PY
     echo "  .. $t" >&2
     check "$(yes_if "echo \"\$t\" | grep -q 'Desktop \"Track 1\" \"Playing\"'")" "playing: the Now Playing tile, its track"
     check "$(yes_if "echo \"\$t\" | grep -q 'controls 4'")" "previous, play or pause, next and the seek bar"
+    i=0; while ! np | grep -q 'icon "vergence-albumwall" badge Some(Play)'; do sleep 0.2; i=$((i + 1)); [ $i -gt 15 ] && break; done
+    check "$(yes_if "np | grep -q 'icon \"vergence-albumwall\" badge Some(Play)'")" "on the dock, AlbumWall's icon with the play badge"
+    shot MEM-1 dock-playing >/dev/null
     i=0; while ! np | grep -q 'picture 40x40'; do sleep 0.2; i=$((i + 1)); [ $i -gt 25 ] && break; done
     check "$(yes_if "np | grep -q 'picture 40x40'")" "the album's cover on its card"
 
     vctl action media.play-pause >/dev/null; sleep 0.4
     s=$(status)
-    check "$(yes_if "[ '$s' = Paused ] && np | grep -q '\"Paused\"'")" "media.play-pause pauses AlbumWall ($s), the tile says so"
+    check "$(yes_if "[ '$s' = Paused ] && np | grep -q '\"Paused\"' && np | grep -q 'badge Some(Pause)'")" "media.play-pause pauses AlbumWall ($s), the tile says so (the pause badge)"
     # The card (paused: the short track holds still), opened as a person opens it: the pointer resting on the tile.
     set -- $(vctl shelf | sed -nE 's/^tile nowplaying at (-?[0-9]+),(-?[0-9]+) ([0-9]+)x([0-9]+)$/\1 \2 \3 \4/p') 0 0 0 0
     vctl pointer $(($1 + $3 / 2)) $(($2 + $4 / 2)) >/dev/null
