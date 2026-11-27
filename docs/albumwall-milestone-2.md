@@ -7,6 +7,16 @@ Mpris.cs, SingleInstance.cs, CommandLine.cs), and techbench's handoffs of
 2026-11-25 (src:vergence-now-playing). Questions at the end, with leans;
 nothing is built before Dave's answers.
 
+**Answered 2026-11-26** (Dave: "all leans, go ahead"): milestone 2 as below,
+the extras in milestone 3; HTTPS through the system's OpenSSL in a confined
+helper (HTTP allowed with a warning, HTTPS supported, never required); the
+password checked once and forgotten, the user, salt and token kept; the
+album list and covers kept, a track only while it plays; lyrics shown in the
+open album behind the kept row's button; Now Playing Vergence's for every
+player, with the media keys and the picture primitive; one instance and the
+command line over MPRIS; a Subsonic server of our own in the suite, then
+Dave's MusicServer read-only. Building, step 1.
+
 ## What milestone 2 does
 
 - **A music server as a library: Navidrome.** The welcome's second half ("On
