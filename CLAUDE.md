@@ -142,8 +142,10 @@ an AI collaborator must know to work here safely.
 
 ## GPU hangs: keep the evidence
 
-On kepler run tests as `VERGENCE_NO_GPU=1 tools/test-guard.sh 480 -- cargo
-test -q --workspace` (the GPU tests skip and the server draws on the CPU:
+On kepler run tests as `VERGENCE_NO_GPU=1 nice -n 20 tools/test-guard.sh 480 --
+cargo test -q --workspace -j 3`, and build there with `nice -n 20 ... -j 3` too
+(2026-11-27: a full-speed build or test run starved the live session and hung
+its GPU twice in an afternoon, once for good; the GPU tests skip and the server draws on the CPU:
 their GPU work kept resetting kepler's GPU, the live session's contexts with
 it, 2026-11-26; the GPU is tested on Hubble and techbench); on any hang run
 `tools/gpu-report.sh [pid...]` before killing or rebooting, then

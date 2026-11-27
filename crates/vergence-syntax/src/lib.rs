@@ -290,6 +290,28 @@ pub fn detect(path: Option<&Path>, first_line: &str) -> Option<LangId> {
 /// file's one enormous line would cost every keystroke otherwise).
 pub const MAX_LINE: usize = 10_000;
 
+/// A ground a line stands on, by what it says of itself: a Markdown list
+/// item marked done (✅, a ticked task box) or partly done (🚧), with its
+/// indented lines (Edit draws it behind the words: Dave's wish list,
+/// 2026-11-27).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ground {
+    Done,
+    Part,
+}
+
+/// The ground of the line that left `state` (read after [`highlight`]).
+pub fn ground(lang: LangId, state: &State) -> Option<Ground> {
+    if language(lang).name != "Markdown" || state.0.first() != Some(&1) {
+        return None;
+    }
+    match state.0.get(1) {
+        Some(&markdown::DONE) => Some(Ground::Done),
+        Some(&markdown::PART) => Some(Ground::Part),
+        _ => None,
+    }
+}
+
 /// Line `line`'s spans in `lang`, from `state` (the state the line before
 /// ended in), which is left as this line ends.
 pub fn highlight(lang: LangId, state: &mut State, line: &str) -> Vec<Span> {

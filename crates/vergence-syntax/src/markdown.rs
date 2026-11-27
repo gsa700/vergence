@@ -59,6 +59,37 @@ fn info_language(info: &str) -> Option<LangId> {
     by_name(word.split(',').next().unwrap_or(word))
 }
 
+/// The ground a line stands on: a list item's by its status mark (✅ or a
+/// ticked task box: DONE; 🚧: PART), an indented line its item's, a blank
+/// line or anything else none.
+pub(crate) const DONE: u32 = 1;
+pub(crate) const PART: u32 = 2;
+fn item_ground(line: &str, held: u32) -> u32 {
+    let t = line.trim_start();
+    let indent = line.len() - t.len();
+    if t.trim_end().is_empty() {
+        return 0;
+    }
+    let after_marker = ["- ", "* ", "+ "].iter().find_map(|m| t.strip_prefix(m)).or_else(|| {
+        let d = t.bytes().take_while(u8::is_ascii_digit).count();
+        (d > 0).then(|| t[d..].strip_prefix(". ").or_else(|| t[d..].strip_prefix(") "))).flatten()
+    });
+    match after_marker {
+        Some(rest) if indent <= 3 => {
+            let r = rest.trim_start();
+            if r.starts_with('\u{2705}') || r.starts_with("[x]") || r.starts_with("[X]") {
+                DONE
+            } else if r.starts_with('\u{1f6a7}') {
+                PART
+            } else {
+                0
+            }
+        }
+        _ if indent >= 2 => held,
+        _ => 0,
+    }
+}
+
 /// A thematic break (`---`, `* * *`, `___`).
 fn is_rule(line: &str) -> bool {
     let Some(at) = block_start(line) else { return false };
@@ -118,7 +149,11 @@ impl Highlight for Markdown {
             }
             _ => {}
         }
-        *state = State(vec![NORMAL]);
+        // A list item's status, carried through its indented lines (a done
+        // wish's notes): Edit draws the item on a ground of its own (lib.rs
+        // `ground`; Dave's wish list, 2026-11-27).
+        let held = if state.0.first() == Some(&NORMAL) { state.0.get(1).copied().unwrap_or(0) } else { 0 };
+        *state = State(vec![NORMAL, item_ground(line, held)]);
         if at_start && line.trim_end() == "---" {
             push(out, 0, line.len(), Kind::Meta);
             *state = State(vec![FRONT]);
@@ -474,6 +509,35 @@ mod tests {
         v.iter().any(|(t, k)| t == text && *k == kind)
     }
 
+    /// Items by their status mark, their indented notes with them (Dave's wish list).
+    #[test]
+    fn grounds_by_status() {
+        use crate::Ground;
+        let md = by_name("markdown").unwrap();
+        let lines = [
+            ("- \u{2705} **Done 11-27** \u{b7} a wish", Some(Ground::Done)),
+            ("  > what was done", Some(Ground::Done)),
+            ("", None),
+            ("- \u{1f6a7} **Partly done** \u{b7} another", Some(Ground::Part)),
+            ("  > what is left", Some(Ground::Part)),
+            ("- \u{1f4a1} not started", None),
+            ("  > a note", None),
+            ("- [x] a ticked task", Some(Ground::Done)),
+            ("Plain text after it", None),
+            ("## A heading", None),
+        ];
+        let mut state = State::default();
+        for (line, want) in lines {
+            highlight(md, &mut state, line);
+            assert_eq!(crate::ground(md, &state), want, "{line:?}");
+        }
+        // Another language has none.
+        let py = by_name("python").unwrap();
+        let mut s = State::default();
+        highlight(py, &mut s, "- \u{2705} x");
+        assert_eq!(crate::ground(py, &s), None);
+    }
+
     #[test]
     fn headings_rules_quotes_and_lists() {
         assert!(has(&mid("## Where things stand"), "## Where things stand", Kind::Heading));
@@ -545,7 +609,8 @@ mod tests {
         assert!(has(&spans(&mut st, "# Body"), "# Body", Kind::Heading));
         // Later, --- is a rule.
         assert!(has(&spans(&mut st, "---"), "---", Kind::Meta));
-        assert_eq!(st, State(vec![super::NORMAL]));
+        // Plain again, standing on no ground (the second number: an item's status).
+        assert_eq!(st, State(vec![super::NORMAL, 0]));
         let mut st = State(vec![super::NORMAL]);
         spans(&mut st, "text <!-- a note");
         assert!(has(&spans(&mut st, "still noted --> *after*"), "*after*", Kind::Emphasis));

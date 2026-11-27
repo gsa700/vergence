@@ -2228,6 +2228,19 @@ impl Doc {
                 if self.options.current_line && i == self.caret.line && !selected {
                     scene.fill(Rect::new(r.x, y, r.w, h), shade);
                 }
+                // A line that says how far it has come (a Markdown item marked
+                // done or partly done, its notes with it): a soft ground behind
+                // its words, green for done, amber for partly (Dave's wish list).
+                if let (Some(lang), Some(said)) = (self.options.syntax, hl.as_ref())
+                    && let Some(g) = syntax::ground(lang, &said.end)
+                {
+                    let a = if theme.dark { 46 } else { 34 };
+                    let c = match g {
+                        syntax::Ground::Done => vergence_scene::Color::rgba(46, 160, 67, a),
+                        syntax::Ground::Part => vergence_scene::Color::rgba(214, 150, 26, a),
+                    };
+                    scene.fill(Rect::new(text_x - 4.0, y, r.x + r.w - text_x - BAR_W - 2.0, h), c);
+                }
                 scene.push_clip(text_clip, 0.0);
                 for (k, &(rs, rx)) in s.rows.iter().enumerate() {
                     let ry = y + k as f32 * line_h;
