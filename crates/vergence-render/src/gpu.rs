@@ -1457,7 +1457,15 @@ fn reaches_corner(c: &RRect, b: [f32; 4]) -> bool {
 /// A chain the GPU draws with two clips: the clips that cover pixels `bounds`
 /// whole are left out (their coverage there is 1, as the reference renderer's
 /// product has it), and if at most two are left, those two; with more, the
-/// rest as one where that is exact (one_clip). None if neither.
+/// rest as one where that is exact (one_clip), else the clips whose rounded
+/// corners those pixels reach kept as they are and every other one, acting
+/// as a plain rectangle there, met into one rectangle: exact while at most
+/// two clips remain. None only when three clips with corners matter, or two
+/// and a rectangle that cuts them.
+///
+/// AlbumWall's play bar sliding in (a clipping panel) inside the wall's
+/// rounded area, around a rounded cover: three, and before this every
+/// window's scenes went to the CPU (techbench, 2026-11-26).
 pub(crate) fn two_clips(chain: &[RRect], bounds: [i32; 4]) -> Option<(Option<RRect>, Option<RRect>)> {
     let b = float_bounds(bounds);
     let matter: Vec<RRect> =
@@ -1466,7 +1474,29 @@ pub(crate) fn two_clips(chain: &[RRect], bounds: [i32; 4]) -> Option<(Option<RRe
         [] => Some((None, None)),
         [one] => Some((Some(*one), None)),
         [a, b] => Some((Some(*a), Some(*b))),
-        many => one_clip(many, bounds).map(|one| (Some(one), None)),
+        many => {
+            if let Some(one) = one_clip(many, bounds) {
+                return Some((Some(one), None));
+            }
+            let mut square = [f32::NEG_INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::INFINITY];
+            let mut rounded: Vec<RRect> = Vec::new();
+            for c in many {
+                if reaches_corner(c, b) {
+                    rounded.push(*c);
+                } else {
+                    square = [square[0].max(c.x0), square[1].max(c.y0), square[2].min(c.x1), square[3].min(c.y1)];
+                }
+            }
+            let rect = RRect { x0: square[0], y0: square[1], x1: square[2], y1: square[3], radius: 0.0 };
+            // The rectangle no clip at all when it leaves the pixels whole.
+            let cuts = !inside(b, square);
+            match (rounded.as_slice(), cuts) {
+                ([r], true) => Some((Some(*r), Some(rect))),
+                ([r], false) => Some((Some(*r), None)),
+                ([r1, r2], false) => Some((Some(*r1), Some(*r2))),
+                _ => None,
+            }
+        }
     }
 }
 
@@ -1476,6 +1506,28 @@ mod clip_tests {
 
     fn rr(x0: f32, y0: f32, x1: f32, y1: f32, radius: f32) -> RRect {
         RRect { x0, y0, x1, y1, radius }
+    }
+
+    #[test]
+    fn a_rounded_clip_cut_by_rectangles_is_two() {
+        // AlbumWall: a cover (rounded) at the edge of the play bar sliding in
+        // (a square clip cutting it) inside the wall's rounded area, far
+        // from its corners, and a square scroll: the cover kept rounded, the
+        // three square ones met in one rectangle.
+        let wall = rr(0.0, 0.0, 1400.0, 1000.0, 10.0);
+        let bar = rr(0.0, 900.0, 1400.0, 1000.0, 0.0);
+        let cover = rr(100.0, 880.0, 300.0, 1080.0, 4.0);
+        let scroll = rr(0.0, 40.0, 1400.0, 990.0, 0.0);
+        let bounds = [100, 880, 300, 1000];
+        assert!(one_clip(&[wall, bar, cover, scroll], bounds).is_none(), "the case one clip cannot be");
+        let (a, b) = two_clips(&[wall, bar, cover, scroll], bounds).expect("two clips");
+        let k = |c: Option<RRect>| c.map(|c| (c.x0, c.y0, c.x1, c.y1, c.radius));
+        assert_eq!(k(a), k(Some(cover)));
+        assert_eq!(k(b), k(Some(rr(0.0, 900.0, 1400.0, 990.0, 0.0))));
+        // Three with corners reached: not two.
+        let other = rr(90.0, 870.0, 310.0, 1090.0, 6.0);
+        let third = rr(80.0, 860.0, 320.0, 1100.0, 8.0);
+        assert!(two_clips(&[cover, other, third], [79, 859, 321, 1101]).is_none());
     }
 
     #[test]

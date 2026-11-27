@@ -235,6 +235,22 @@ fn simple_shapes_agree_with_the_reference() {
     s.pop_clip();
     s.pop_clip();
     scenes.push(("two clips", s));
+    // A rounded clip cut by two square ones (top and bottom) inside a
+    // rounded area, far from its corners (AlbumWall, 2026-11-26: a cover at the edge of the play bar
+    // sliding in switched every window's scenes to the CPU): the cover kept
+    // rounded, the square ones met into one rectangle.
+    let mut s = Scene::new(60.0, 60.0);
+    s.push_clip(Rect::new(0.0, 0.0, 60.0, 60.0), 10.0);
+    s.push_clip(Rect::new(0.0, 4.0, 60.0, 48.5), 0.0);
+    s.push_clip(Rect::new(0.0, 30.25, 60.0, 29.75), 0.0);
+    s.push_clip(Rect::new(12.0, 24.0, 30.0, 30.0), 6.0);
+    s.fill(Rect::new(12.0, 24.0, 30.0, 30.0), white);
+    s.line(Point::new(15.0, 27.0), Point::new(39.0, 51.0), 2.5, Color::rgb(255, 0, 0));
+    s.pop_clip();
+    s.pop_clip();
+    s.pop_clip();
+    s.pop_clip();
+    scenes.push(("a rounded clip cut by rectangles", s));
     let mut s = Scene::new(16.0, 8.0);
     let two = s.image(Image { width: 2, height: 1, rgba: vec![255, 0, 0, 255, 0, 0, 255, 255] });
     let half =
