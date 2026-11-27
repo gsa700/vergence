@@ -42,10 +42,11 @@ scenario() {
     i=0; while ! vctl tree "$s" | grep -q 'checkbox "Lossy"'; do sleep 0.2; i=$((i + 1)); [ $i -gt 25 ] && break; done
     press "$s" 'checkbox "Lossy"'; sleep 0.3
     press "$s" 'button "Add'
-    i=0; while ! vctl tree "$w" | grep -q 'button "Server Album 00, Artist 0"'; do sleep 0.3; i=$((i + 1)); [ $i -gt 40 ] && break; done
-    press "$w" 'button "Server Album 00, Artist 0"'
-    i=0; while ! vctl tree "$w" | grep -q 'button "Play Server Album 00"'; do sleep 0.2; i=$((i + 1)); [ $i -gt 25 ] && break; done
-    press "$w" 'button "Play Server Album 00"'
+    # Album 10, mid-wall: room above and below for its panel to be centered.
+    i=0; while ! vctl tree "$w" | grep -q 'button "Server Album 10, Artist 2"'; do sleep 0.3; i=$((i + 1)); [ $i -gt 40 ] && break; done
+    press "$w" 'button "Server Album 10, Artist 2"'
+    i=0; while ! vctl tree "$w" | grep -q 'button "Play Server Album 10"'; do sleep 0.2; i=$((i + 1)); [ $i -gt 25 ] && break; done
+    press "$w" 'button "Play Server Album 10"'
     i=0; while ! vctl tree "$w" | grep -q 'button "Pause"'; do sleep 0.2; i=$((i + 1)); [ $i -gt 30 ] && break; done
     sleep 1.0
 
@@ -75,6 +76,25 @@ scenario() {
     vctl pointer $((wx + sx + sw - 4)) $((wy + sy + sh / 2)) >/dev/null; sleep 0.5; pic "$w" wall-near
     d=$(region "$OUT/wall-away.png" "$OUT/wall-near.png" $((sx + sw - 16)) "$sy" 16 "$sh")
     check "$(yes_if "more '$d' 0.5")" "the wall's scroll bar widens as the pointer comes ($d)"
+
+    # The play bar's cover, the wall scrolled away: the playing album's panel
+    # back in the middle of what can be seen (the wall less the play bar),
+    # not the album and its panel averaged (Dave, 2026-11-27).
+    vctl focus "$w" >/dev/null; vctl key Home >/dev/null; sleep 1.0
+    press "$w" 'button "Go to Server Album 10"'
+    sleep 1.2
+    t=$(vctl tree "$w")
+    set -- $(echo "$t" | grep -E 'button "Play Server Album 10"' | head -1 | sed -nE 's/.* at -?[0-9]+,(-?[0-9]+) [0-9]+x([0-9]+).*/\1 \2/p') 0 0
+    mid=$(($1 + $2 / 2)); seen=$(( (sh - 82) / 2 ))
+    echo "  .. after the cover click: the sleeve's middle at $mid, what can be seen's middle at $seen" >&2
+    check "$(yes_if "[ '$2' != 0 ] && near $mid $seen 60")" "the play bar's cover brings the panel back to the middle"
+    # A press on the play bar's bare part stays on the bar: nothing on the wall opens or closes.
+    before=$(echo "$t" | grep -c 'button "Play Server Album 10"')
+    set -- $(win_geo AlbumWall)
+    # Between the track's words and the transport buttons: nothing there to press.
+    vctl pointer $(($1 + $3 * 22 / 100)) $(($2 + sy + sh - 40)) >/dev/null; vctl press left >/dev/null; vctl release left >/dev/null; sleep 0.8
+    after=$(vctl tree "$w" | grep -c 'button "Play Server Album 10"')
+    check "$(yes_if "[ '$before' = 1 ] && [ '$after' = 1 ]")" "a click on the play bar's bare part does not reach the wall"
     press "$w" 'button "Pause"'
     kill $SRV 2>/dev/null; wait $SRV 2>/dev/null
 

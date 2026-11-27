@@ -783,6 +783,18 @@ impl AlbumWall {
         // It slides up from behind the bottom bar and back down (620 ms, as
         // the Avalonia bar's TransportSlide): a clipping panel as tall as
         // the part of it out so far, the bar's top in it.
+        // A press on the bar's bare parts stays on the bar: under it, a blank
+        // drawing that takes the pointer and does nothing with it, so the click
+        // does not fall through to the tile under the bar (Dave, 2026-11-27: it
+        // selected whatever was under it). Its buttons are above it.
+        let bar = bar.map(|b| {
+            stack(vec![
+                vergence_widgets::drawing(|_, _, _, _| {}).on_touch(|_| None).width(Length::FILL).height(Length::FILL),
+                b,
+            ])
+            .width(Length::FILL)
+            .height(Length::FILL)
+        });
         let bar = panel(bar.unwrap_or_else(space))
             .clip()
             .radius(0.0)
