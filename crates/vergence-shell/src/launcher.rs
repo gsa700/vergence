@@ -31,7 +31,7 @@ pub fn tab_of(e: &Entry) -> Option<usize> {
 /// The order of Vergence's own applications in the launcher's top row (the
 /// native apps get a section of their own at the top);
 /// any other `vergence-*` application comes after these, by name.
-const OWN_ORDER: [&str; 9] = [
+const OWN_ORDER: [&str; 10] = [
     "vergence-files",
     "vergence-edit",
     "vergence-term",
@@ -40,6 +40,7 @@ const OWN_ORDER: [&str; 9] = [
     "vergence-reader",
     "vergence-calc",
     "vergence-hw",
+    "vergence-disks",
     "vergence-quit",
 ];
 

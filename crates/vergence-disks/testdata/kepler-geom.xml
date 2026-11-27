@@ -1,0 +1,334 @@
+<mesh>
+  <class id="0xffffffff8193b8b0">
+    <name>FD</name>
+  </class>
+  <class id="0xffffffff818b5ad8">
+    <name>RAID</name>
+  </class>
+  <class id="0xffffffff82868cf0">
+    <name>ZFS::ZVOL</name>
+  </class>
+  <class id="0xffffffff82866c10">
+    <name>ZFS::VDEV</name>
+    <geom id="0xfffff8000433a500">
+      <class ref="0xffffffff82866c10"/>
+      <name>zfs::vdev</name>
+      <rank>3</rank>
+	<consumer id="0xfffff80001c38200">
+	  <geom ref="0xfffff8000433a500"/>
+	  <provider ref="0xfffff800041e9300"/>
+	  <mode>r1w1e1</mode>
+	</consumer>
+    </geom>
+  </class>
+  <class id="0xffffffff81932498">
+    <name>SWAP</name>
+    <geom id="0xfffff80001575300">
+      <class ref="0xffffffff81932498"/>
+      <name>swap</name>
+      <rank>3</rank>
+	<consumer id="0xfffff80004fbb700">
+	  <geom ref="0xfffff80001575300"/>
+	  <provider ref="0xfffff800041e9500"/>
+	  <mode>r1w1e0</mode>
+	</consumer>
+    </geom>
+  </class>
+  <class id="0xffffffff818b4630">
+    <name>PART</name>
+    <geom id="0xfffff80001c66c00">
+      <class ref="0xffffffff818b4630"/>
+      <name>nda0</name>
+      <rank>2</rank>
+      <config>
+	<scheme>GPT</scheme>
+	<entries>128</entries>
+	<first>40</first>
+	<last>1000215175</last>
+	<fwsectors>63</fwsectors>
+	<fwheads>255</fwheads>
+	<state>OK</state>
+	<modified>false</modified>
+      </config>
+	<consumer id="0xfffff80001562b00">
+	  <geom ref="0xfffff80001c66c00"/>
+	  <provider ref="0xfffff80001572600"/>
+	  <mode>r3w3e6</mode>
+	  <config>
+	  </config>
+	</consumer>
+	<provider id="0xfffff800041e9300">
+	  <geom ref="0xfffff80001c66c00"/>
+	  <mode>r1w1e1</mode>
+	  <name>nda0p4</name>
+	  <alias>nvd0p4</alias>
+	  <mediasize>509688676352</mediasize>
+	  <sectorsize>512</sectorsize>
+	  <stripesize>0</stripesize>
+	  <stripeoffset>2421161984</stripeoffset>
+	  <config>
+	    <start>4728832</start>
+	    <end>1000214527</end>
+	    <index>4</index>
+	    <type>freebsd-zfs</type>
+	    <offset>2421161984</offset>
+	    <length>509688676352</length>
+	    <label>zfs0</label>
+	    <rawtype>516e7cba-6ecf-11d6-8ff8-00022d09712b</rawtype>
+	    <rawuuid>00000000-0000-0000-0000-000000000000</rawuuid>
+	    <efimedia>HD(x)</efimedia>
+	  </config>
+	</provider>
+	<provider id="0xfffff800041e9500">
+	  <geom ref="0xfffff80001c66c00"/>
+	  <mode>r1w1e0</mode>
+	  <name>nda0p3</name>
+	  <alias>nvd0p3</alias>
+	  <mediasize>2147483648</mediasize>
+	  <sectorsize>512</sectorsize>
+	  <stripesize>0</stripesize>
+	  <stripeoffset>273678336</stripeoffset>
+	  <config>
+	    <start>534528</start>
+	    <end>4728831</end>
+	    <index>3</index>
+	    <type>freebsd-swap</type>
+	    <offset>273678336</offset>
+	    <length>2147483648</length>
+	    <label>swap0</label>
+	    <rawtype>516e7cb5-6ecf-11d6-8ff8-00022d09712b</rawtype>
+	    <rawuuid>00000000-0000-0000-0000-000000000000</rawuuid>
+	    <efimedia>HD(x)</efimedia>
+	  </config>
+	</provider>
+	<provider id="0xfffff800041e9700">
+	  <geom ref="0xfffff80001c66c00"/>
+	  <mode>r0w0e0</mode>
+	  <name>nda0p2</name>
+	  <alias>nvd0p2</alias>
+	  <mediasize>524288</mediasize>
+	  <sectorsize>512</sectorsize>
+	  <stripesize>0</stripesize>
+	  <stripeoffset>272650240</stripeoffset>
+	  <config>
+	    <start>532520</start>
+	    <end>533543</end>
+	    <index>2</index>
+	    <type>freebsd-boot</type>
+	    <offset>272650240</offset>
+	    <length>524288</length>
+	    <label>gptboot0</label>
+	    <rawtype>83bd6b9d-7f41-11dc-be0b-001560b84f0f</rawtype>
+	    <rawuuid>00000000-0000-0000-0000-000000000000</rawuuid>
+	    <efimedia>HD(x)</efimedia>
+	  </config>
+	</provider>
+	<provider id="0xfffff800041e9900">
+	  <geom ref="0xfffff80001c66c00"/>
+	  <mode>r1w1e2</mode>
+	  <name>nda0p1</name>
+	  <alias>nvd0p1</alias>
+	  <mediasize>272629760</mediasize>
+	  <sectorsize>512</sectorsize>
+	  <stripesize>0</stripesize>
+	  <stripeoffset>20480</stripeoffset>
+	  <config>
+	    <start>40</start>
+	    <end>532519</end>
+	    <index>1</index>
+	    <type>efi</type>
+	    <offset>20480</offset>
+	    <length>272629760</length>
+	    <label>efiboot0</label>
+	    <rawtype>c12a7328-f81f-11d2-ba4b-00a0c93ec93b</rawtype>
+	    <rawuuid>00000000-0000-0000-0000-000000000000</rawuuid>
+	    <efimedia>HD(x)</efimedia>
+	  </config>
+	</provider>
+    </geom>
+  </class>
+  <class id="0xffffffff818b3280">
+    <name>LABEL</name>
+    <geom id="0xfffff80001c67c00">
+      <class ref="0xffffffff818b3280"/>
+      <name>nda0p2</name>
+      <rank>3</rank>
+      <config>
+      </config>
+	<consumer id="0xfffff80001562a00">
+	  <geom ref="0xfffff80001c67c00"/>
+	  <provider ref="0xfffff800041e9700"/>
+	  <mode>r0w0e0</mode>
+	  <config>
+	  </config>
+	</consumer>
+	<provider id="0xfffff80001c67b00">
+	  <geom ref="0xfffff80001c67c00"/>
+	  <mode>r0w0e0</mode>
+	  <name>gpt/gptboot0</name>
+	  <mediasize>524288</mediasize>
+	  <sectorsize>512</sectorsize>
+	  <stripesize>0</stripesize>
+	  <stripeoffset>272650240</stripeoffset>
+	  <config>
+	    <index>0</index>
+	    <length>524288</length>
+	    <seclength>1024</seclength>
+	    <offset>0</offset>
+	    <secoffset>0</secoffset>
+	  </config>
+	</provider>
+    </geom>
+    <geom id="0xfffff8000199a500">
+      <class ref="0xffffffff818b3280"/>
+      <name>nda0p1</name>
+      <rank>3</rank>
+      <config>
+      </config>
+	<consumer id="0xfffff80001562a80">
+	  <geom ref="0xfffff8000199a500"/>
+	  <provider ref="0xfffff800041e9900"/>
+	  <mode>r1w1e2</mode>
+	  <config>
+	  </config>
+	</consumer>
+	<provider id="0xfffff80001572300">
+	  <geom ref="0xfffff8000199a500"/>
+	  <mode>r1w1e1</mode>
+	  <name>gpt/efiboot0</name>
+	  <mediasize>272629760</mediasize>
+	  <sectorsize>512</sectorsize>
+	  <stripesize>0</stripesize>
+	  <stripeoffset>20480</stripeoffset>
+	  <config>
+	    <index>0</index>
+	    <length>272629760</length>
+	    <seclength>532480</seclength>
+	    <offset>0</offset>
+	    <secoffset>0</secoffset>
+	  </config>
+	</provider>
+    </geom>
+  </class>
+  <class id="0xffffffff818b3060">
+    <name>VFS</name>
+    <geom id="0xfffff80001574700">
+      <class ref="0xffffffff818b3060"/>
+      <name>msdosfs.gpt/efiboot0</name>
+      <rank>4</rank>
+	<consumer id="0xfffff80004fbf880">
+	  <geom ref="0xfffff80001574700"/>
+	  <provider ref="0xfffff80001572300"/>
+	  <mode>r1w1e1</mode>
+	</consumer>
+    </geom>
+  </class>
+  <class id="0xffffffff818b25d0">
+    <name>Flashmap</name>
+  </class>
+  <class id="0xffffffff818b2360">
+    <name>DISK</name>
+    <geom id="0xfffff80001572700">
+      <class ref="0xffffffff818b2360"/>
+      <name>nda0</name>
+      <rank>1</rank>
+      <config>
+      </config>
+	<provider id="0xfffff80001572600">
+	  <geom ref="0xfffff80001572700"/>
+	  <mode>r3w3e6</mode>
+	  <name>nda0</name>
+	  <alias>nvd0</alias>
+	  <mediasize>512110190592</mediasize>
+	  <sectorsize>512</sectorsize>
+	  <stripesize>0</stripesize>
+	  <stripeoffset>0</stripeoffset>
+	  <config>
+	    <fwheads>0</fwheads>
+	    <fwsectors>0</fwsectors>
+	    <rotationrate>0</rotationrate>
+	    <ident>SERIAL0001</ident>
+	    <lunid>0000</lunid>
+	    <descr>Micron_2210_MTFDHBA512QFD</descr>
+	  </config>
+	</provider>
+    </geom>
+  </class>
+  <class id="0xffffffff818b2028">
+    <name>DEV</name>
+    <geom id="0xfffff80001572200">
+      <class ref="0xffffffff818b2028"/>
+      <name>gpt/gptboot0</name>
+      <rank>4</rank>
+	<consumer id="0xfffff80001562580">
+	  <geom ref="0xfffff80001572200"/>
+	  <provider ref="0xfffff80001c67b00"/>
+	  <mode>r0w0e0</mode>
+	</consumer>
+    </geom>
+    <geom id="0xfffff800041e9200">
+      <class ref="0xffffffff818b2028"/>
+      <name>gpt/efiboot0</name>
+      <rank>4</rank>
+	<consumer id="0xfffff80001cb2b00">
+	  <geom ref="0xfffff800041e9200"/>
+	  <provider ref="0xfffff80001572300"/>
+	  <mode>r0w0e0</mode>
+	</consumer>
+    </geom>
+    <geom id="0xfffff800041e9400">
+      <class ref="0xffffffff818b2028"/>
+      <name>nda0p4</name>
+      <rank>3</rank>
+	<consumer id="0xfffff800040f8780">
+	  <geom ref="0xfffff800041e9400"/>
+	  <provider ref="0xfffff800041e9300"/>
+	  <mode>r0w0e0</mode>
+	</consumer>
+    </geom>
+    <geom id="0xfffff800041e9600">
+      <class ref="0xffffffff818b2028"/>
+      <name>nda0p3</name>
+      <rank>3</rank>
+	<consumer id="0xfffff80001562880">
+	  <geom ref="0xfffff800041e9600"/>
+	  <provider ref="0xfffff800041e9500"/>
+	  <mode>r0w0e0</mode>
+	</consumer>
+    </geom>
+    <geom id="0xfffff800041e9800">
+      <class ref="0xffffffff818b2028"/>
+      <name>nda0p2</name>
+      <rank>3</rank>
+	<consumer id="0xfffff80001cb2a80">
+	  <geom ref="0xfffff800041e9800"/>
+	  <provider ref="0xfffff800041e9700"/>
+	  <mode>r0w0e0</mode>
+	</consumer>
+    </geom>
+    <geom id="0xfffff80001572500">
+      <class ref="0xffffffff818b2028"/>
+      <name>nda0p1</name>
+      <rank>3</rank>
+	<consumer id="0xfffff80001b61e00">
+	  <geom ref="0xfffff80001572500"/>
+	  <provider ref="0xfffff800041e9900"/>
+	  <mode>r0w0e0</mode>
+	</consumer>
+    </geom>
+    <geom id="0xfffff8000199a600">
+      <class ref="0xffffffff818b2028"/>
+      <name>nda0</name>
+      <rank>2</rank>
+	<consumer id="0xfffff80001b61f00">
+	  <geom ref="0xfffff8000199a600"/>
+	  <provider ref="0xfffff80001572600"/>
+	  <mode>r0w0e0</mode>
+	</consumer>
+    </geom>
+  </class>
+  <class id="0xffffffff81839ad0">
+    <name>MD</name>
+  </class>
+</mesh>
+

@@ -227,3 +227,33 @@ encrypt, run a self-test, or read a disk's bytes for viewing.
 7. **Order:** this after AlbumWall (0.4.0) and Remote (0.5.0), with step 3
    waiting on hardware readings milestone 1's vdm lease? *Lean: yes; steps
    1 and 2 need nothing from vdm and could go earlier if a gap opens.*
+
+## Progress
+
+- **Step 1, seeing, started 2026-11-26 on techbench** (Dave: "please try and
+  make the utility work there [kepler] as well as we can"; the plan's
+  questions not yet answered, so built on the leans that touch it: the
+  name Disks, serial numbers shown). crates/vergence-disks: the library
+  (lib.rs; linux.rs from sysfs, udev's database, /proc/mounts and
+  /proc/swaps; geom.rs, a small reader of our own for
+  `kern.geom.confxml`'s fixed shape, with LABEL's other names and SWAP's
+  consumers; `zpool list -Hp` and `zpool status -p` as the person) and the
+  window (main.rs: the sidebar by Internal, External, Disk images, Pools;
+  a disk's page with its partition bar to scale, the chosen partition's
+  facts and how full it is, Open in FileView and Eject for external
+  disks through the toolkit's drive actions; a pool's page with health,
+  usage, members, last scrub, errors). `vergence-disks --list` prints
+  what the window shows, for checking a machine over ssh. Tests from
+  kepler's own GEOM picture and zpool status (serial and UUIDs replaced),
+  a FreeBSD stick with no table, a mirror's status, udev records, mount
+  tables, the bar's gaps. Desktop entry (Disks), icon, install.sh's lists,
+  the launcher's order after Hardware.
+  - **techbench** (Void): the Samsung 980 PRO, EFI (FAT32, /boot/efi),
+    swap in use, Btrfs on /, 37 °C; window opened in Dave's session.
+  - **kepler** (FreeBSD 15.1): the Micron 2210, EFI (gpt/efiboot0 on
+    /boot/efi), FreeBSD boot, swap in use, ZFS partition as part of pool
+    zroot; the pool healthy, never scrubbed. Firmware is not readable
+    there without root (camcontrol/nvmecontrol), so it is not shown.
+    Not yet seen on its screen (locked while built).
+  - Not yet: a USB stick and a disk image on each, Hubble, the display
+    suite, a package.

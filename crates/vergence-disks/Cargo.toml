@@ -1,0 +1,17 @@
+[package]
+name = "vergence-disks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Vergence's Disks app: the disks, their partitions, file systems and pools"
+
+# Our own throughout: the readings from what the kernel and udev (or GEOM)
+# have already parsed, the window on the toolkit. Disks milestone 1, step 1:
+# seeing only, no root.
+[dependencies]
+vergence-config.workspace = true
+vergence-sysinfo.workspace = true
+vergence-ui.workspace = true
+vergence-widgets.workspace = true
+vergence-scene.workspace = true

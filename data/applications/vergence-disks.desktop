@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Disks
+Comment=The disks in this computer and plugged into it: partitions, file systems and pools
+Exec=vergence-disks
+Icon=vergence-disks
+Terminal=false
+Categories=System;Utility;
+Keywords=disk;drive;partition;volume;storage;usb;stick;ssd;nvme;zfs;pool;btrfs;format;
+StartupWMClass=vergence-disks
