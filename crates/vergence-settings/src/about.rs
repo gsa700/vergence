@@ -42,28 +42,156 @@ fn installed_doc_dir() -> Option<PathBuf> {
     dir.join("THIRD-PARTY-NOTICES.md").is_file().then_some(dir)
 }
 
+/// What does not change while Settings runs, read once (the About page is
+/// drawn often; mind the battery): the system, the machine, the processor,
+/// graphics and memory.
+struct Facts {
+    system: String,
+    machine: String,
+    firmware: String,
+    processor: String,
+    cores: String,
+    graphics: String,
+    memory: String,
+}
+
+fn facts() -> &'static Facts {
+    static FACTS: std::sync::OnceLock<Facts> = std::sync::OnceLock::new();
+    FACTS.get_or_init(|| {
+        let (_, uname) = vergence_sysinfo::system();
+        let os = vergence_sysinfo::os_name();
+        // Linux: "Void Linux, kernel 6.18.65_1"; FreeBSD names its own release.
+        let system = match uname.strip_prefix("Linux ") {
+            Some(kernel) if !os.is_empty() => format!("{os}, kernel {kernel}"),
+            _ => uname,
+        };
+        let m = vergence_sysinfo::machine();
+        let cpu = vergence_sysinfo::cpu();
+        let topo = vergence_sysinfo::topology();
+        let cores = if topo.threads() > 0 {
+            vergence_sysinfo::cores_text(&topo, &cpu.model)
+        } else {
+            format!("{} Threads", cpu.ticks.len())
+        };
+        let graphics = vergence_power::gpus()
+            .iter()
+            .map(|g| format!("{} ({})", g.vendor, g.driver))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Facts {
+            system,
+            machine: m.name(),
+            firmware: m.bios,
+            processor: cpu.model,
+            cores,
+            graphics,
+            memory: installed_memory(vergence_sysinfo::memory().total),
+        }
+    })
+}
+
+/// The memory as sold ("64 GB"): the system reports a little less than is
+/// fitted (the firmware and the graphics keep some), so the smallest usual
+/// size at or above it, in GiB.
+fn installed_memory(bytes: u64) -> String {
+    if bytes == 0 {
+        return String::new();
+    }
+    let gib = bytes as f64 / (1u64 << 30) as f64;
+    const SIZES: [u32; 18] = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512];
+    match SIZES.iter().find(|&&s| s as f64 >= gib) {
+        Some(s) => format!("{s} GB"),
+        None => format!("{:.0} GB", gib.ceil()),
+    }
+}
+
+/// A screen in words: "LG ULTRAFINE, 3840 × 2160 at 60 Hz, 133%".
+fn screen_text(o: &OutputInfo) -> String {
+    let mut t = screen_label(o);
+    if let Some(m) = o.modes.get(o.mode as usize) {
+        t += &format!(", {} \u{d7} {}", m.width, m.height);
+        if m.refresh_mhz > 0 {
+            t += &format!(" at {:.0} Hz", m.refresh_mhz as f64 / 1000.0);
+        }
+    }
+    if o.scale > 0.0 {
+        t += &format!(", {:.0}%", o.scale * 100.0);
+    }
+    t
+}
+
 impl App {
-    pub(crate) fn about(&self) -> Element<Message> {
+    /// The summary's lines, name and value, as shown and as copied.
+    fn summary(&self) -> Vec<(&'static str, String)> {
+        let f = facts();
         let session = match (std::env::var("VERGENCE_BUS"), std::env::var("WAYLAND_DISPLAY")) {
             (Ok(_), Ok(w)) => format!("Vergence on {w}"),
             (_, Ok(w)) => format!("another Wayland desktop ({w})"),
             _ => "an X11 desktop".to_string(),
         };
+        let mut v = vec![
+            // The Settings app's own version, as before: which number names
+            // Vergence itself (workspace 0.4.0-pre.3 vs the package's pre16)
+            // is control's to settle with the release (Dave, 2026-11-26).
+            ("Settings app", format!("version {}", env!("CARGO_PKG_VERSION"))),
+            ("Session", session),
+        ];
+        v.push(("System", f.system.clone()));
+        let computer =
+            if f.firmware.is_empty() { f.machine.clone() } else { format!("{}, firmware {}", f.machine, f.firmware) };
+        for (name, value) in [
+            ("Computer", computer),
+            ("Processor", f.processor.clone()),
+            ("Cores", f.cores.clone()),
+            ("Graphics", f.graphics.clone()),
+            ("Memory", f.memory.clone()),
+        ] {
+            if !value.trim().is_empty() {
+                v.push((name, value));
+            }
+        }
+        for o in &self.outputs {
+            v.push(("Screen", screen_text(o)));
+        }
+        if let Some(s) = vergence_sysinfo::uptime() {
+            v.push(("Up for", vergence_sysinfo::uptime_text(s)));
+        }
+        v
+    }
+
+    /// The summary as plain text, a line each ("Processor: ..."), for a bug
+    /// report or a post (Dave: built so it could be shared).
+    pub(crate) fn summary_text(&self) -> String {
+        self.summary().into_iter().map(|(n, v)| format!("{n}: {v}\n")).collect()
+    }
+
+    pub(crate) fn about(&self) -> Element<Message> {
+        let mut rows: Vec<Element<Message>> =
+            self.summary().into_iter().map(|(n, v)| setting(n, "", label(v).dim())).collect();
+        rows.push(setting(
+            "Share",
+            "These lines as plain text, for a bug report or a question.",
+            row(vec![
+                button(label(if self.about_copied { "Copied" } else { "Copy" }).size(12.0))
+                    .padding(Padding::hv(4.0, 12.0))
+                    .on_press(Message::CopySummary)
+                    .name("Copy the summary"),
+                button(label("More in Hardware\u{2026}").size(12.0))
+                    .padding(Padding::hv(4.0, 12.0))
+                    .on_press(Message::OpenHardware)
+                    .name("Open Hardware"),
+            ])
+            .spacing(8.0),
+        ));
         self.page_layout(
             "About",
             "Vergence: every app the right size, in the right place and readable, on any monitor setup.",
             vec![
+                self.group(Some("This computer"), rows),
                 self.group(
                     None,
                     vec![
-                        setting("Settings app", "", label(format!("version {}", env!("CARGO_PKG_VERSION")))),
-                        setting("Session", "", label(session)),
                         setting("Built with", "", label("vergence-ui, Vergence's own toolkit")),
-                    ],
-                ),
-                self.group(
-                    None,
-                    vec![
                         setting("Copyright", "", label(COPYRIGHT)),
                         setting(
                             "License",
@@ -139,6 +267,14 @@ impl App {
 #[cfg(test)]
 mod about_tests {
     use super::*;
+
+    #[test]
+    fn memory_as_sold() {
+        assert_eq!(installed_memory(65_600_000_000), "64 GB");
+        assert_eq!(installed_memory(16_400_000_000), "16 GB");
+        assert_eq!(installed_memory(7_900_000_000), "8 GB");
+        assert_eq!(installed_memory(0), "");
+    }
 
     #[test]
     fn notices_summary_reads_the_table() {

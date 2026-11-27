@@ -390,6 +390,99 @@ pub fn parse_topology_spec(xml: &str) -> Vec<Place> {
         .collect()
 }
 
+/// The cores and threads in words, each kind marked where it runs two
+/// threads on a core (Dave's wording, 2026-11-26): "8 Performance
+/// (Hyper-Threading) + 16 Efficiency, 32 Threads"; one kind: "4 Cores
+/// (Hyper-Threading), 8 Threads", "6 Cores, 6 Threads". Intel's name for
+/// it is Hyper-Threading, AMD's SMT (from the processor's `model`).
+pub fn cores_text(t: &Topology, model: &str) -> String {
+    let ht = ht_word(model);
+    let parts: Vec<String> =
+        [(CoreKind::Performance, "Performance"), (CoreKind::Efficiency, "Efficiency"), (CoreKind::Plain, "Cores")]
+            .into_iter()
+            .filter_map(|(k, word)| {
+                let cores: Vec<&Core> = t
+                    .sections
+                    .iter()
+                    .filter(|s| s.kind == k)
+                    .flat_map(|s| &s.clusters)
+                    .flat_map(|c| &c.cores)
+                    .collect();
+                if cores.is_empty() {
+                    return None;
+                }
+                let mark = if cores.iter().any(|c| c.threads.len() > 1) { format!(" ({ht})") } else { String::new() };
+                Some(format!("{} {word}{mark}", cores.len()))
+            })
+            .collect();
+    format!("{}, {} Threads", parts.join(" + "), t.threads())
+}
+
+/// Two threads on a core, by its maker's name.
+pub fn ht_word(model: &str) -> &'static str {
+    if model.contains("AMD") { "SMT" } else { "Hyper-Threading" }
+}
+
+/// What the machine is, from its firmware's tables (SMBIOS/DMI): maker and
+/// model, the board, the firmware's version. Any user may read these.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Machine {
+    pub maker: String,
+    pub product: String,
+    /// A model's friendlier name where the maker puts it there (Lenovo:
+    /// "ThinkCentre M910q", the product being a type number).
+    pub version: String,
+    pub board_maker: String,
+    pub board: String,
+    pub bios: String,
+}
+
+impl Machine {
+    /// The machine in a few words: its maker and model, or, where the
+    /// maker left the firmware's placeholder (a board bought on its own:
+    /// "System Product Name", "To be filled by O.E.M."), its board:
+    /// "ASUS TUF GAMING Z690-PLUS WIFI".
+    pub fn name(&self) -> String {
+        let blank = |v: &str| {
+            let l = v.trim().to_ascii_lowercase();
+            l.is_empty()
+                || ["system product name", "to be filled", "default string", "not applicable", "none", "o.e.m", "oem"]
+                    .iter()
+                    .any(|p| l.contains(p))
+        };
+        let maker = if blank(&self.maker) { &self.board_maker } else { &self.maker };
+        let model = if self.maker.eq_ignore_ascii_case("lenovo") && !blank(&self.version) {
+            &self.version
+        } else if !blank(&self.product) {
+            &self.product
+        } else {
+            &self.board
+        };
+        let text = format!("{} {}", maker.trim(), model.trim());
+        text.trim().to_string()
+    }
+}
+
+/// /etc/os-release's PRETTY_NAME (or NAME).
+pub fn parse_os_release(text: &str) -> String {
+    let get = |k: &str| {
+        text.lines().find_map(|l| l.strip_prefix(k)?.strip_prefix('=').map(|v| v.trim().trim_matches('"').to_string()))
+    };
+    get("PRETTY_NAME").or_else(|| get("NAME")).unwrap_or_default()
+}
+
+/// A time since in words, to the two largest units: "3 days, 4 hours",
+/// "2 hours, 5 minutes", "1 minute".
+pub fn uptime_text(secs: u64) -> String {
+    let (d, h, m) = (secs / 86_400, secs / 3600 % 24, secs / 60 % 60);
+    let unit = |n: u64, w: &str| if n == 1 { format!("1 {w}") } else { format!("{n} {w}s") };
+    match (d, h) {
+        (0, 0) => unit(m.max(if secs < 60 { 0 } else { 1 }), "minute"),
+        (0, _) => format!("{}, {}", unit(h, "hour"), unit(m, "minute")),
+        _ => format!("{}, {}", unit(d, "day"), unit(h, "hour")),
+    }
+}
+
 /// Bytes in words: "7.6 GB", "512 MB".
 pub fn bytes_text(b: u64) -> String {
     let b = b as f64;
@@ -450,6 +543,28 @@ mod os {
 
     pub fn memory() -> Memory {
         parse_meminfo(&read("/proc/meminfo"))
+    }
+
+    pub fn machine() -> Machine {
+        let id = |f: &str| read(format!("/sys/class/dmi/id/{f}")).trim().to_string();
+        Machine {
+            maker: id("sys_vendor"),
+            product: id("product_name"),
+            version: id("product_version"),
+            board_maker: id("board_vendor"),
+            board: id("board_name"),
+            bios: id("bios_version"),
+        }
+    }
+
+    /// "Void Linux"; the kernel is uname's.
+    pub fn os_name() -> String {
+        let n = parse_os_release(&read("/etc/os-release"));
+        if n.is_empty() { "Linux".into() } else { n }
+    }
+
+    pub fn uptime() -> Option<u64> {
+        read("/proc/uptime").split_whitespace().next()?.parse::<f64>().ok().map(|s| s as u64)
     }
 
     /// Each online processor's place, from sysfs (any user may read it):
@@ -600,6 +715,39 @@ mod os {
         Vec::new()
     }
 
+    /// kenv's smbios.* (the loader's copy of the firmware's tables; any
+    /// user may read them).
+    pub fn machine() -> Machine {
+        let kenv = |k: &str| {
+            std::process::Command::new("kenv")
+                .args(["-q", k])
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_default()
+        };
+        Machine {
+            maker: kenv("smbios.system.maker"),
+            product: kenv("smbios.system.product"),
+            version: kenv("smbios.system.version"),
+            board_maker: kenv("smbios.planar.maker"),
+            board: kenv("smbios.planar.product"),
+            bios: kenv("smbios.bios.version"),
+        }
+    }
+
+    pub fn os_name() -> String {
+        "FreeBSD".into()
+    }
+
+    /// Since kern.boottime (a timeval: seconds first).
+    pub fn uptime() -> Option<u64> {
+        let b = sysctl("kern.boottime")?;
+        let boot = i64::from_ne_bytes(b.get(..8)?.try_into().ok()?);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64;
+        Some((now - boot).max(0) as u64)
+    }
+
     /// The scheduler's view of the chip (kern.sched.topology_spec).
     pub fn topology() -> Topology {
         arrange(&parse_topology_spec(&sysctl_text("kern.sched.topology_spec")))
@@ -635,9 +783,18 @@ mod os {
     pub fn topology() -> Topology {
         Topology::default()
     }
+    pub fn machine() -> Machine {
+        Machine::default()
+    }
+    pub fn os_name() -> String {
+        String::new()
+    }
+    pub fn uptime() -> Option<u64> {
+        None
+    }
 }
 
-pub use os::{cpu, disk_io, memory, temps, topology};
+pub use os::{cpu, disk_io, machine, memory, os_name, temps, topology, uptime};
 
 /// The effective user of process `pid`, if it can be read (the terminal's
 /// red tab and the server's mark on a superuser's windows): Linux's
@@ -830,6 +987,74 @@ mod tests {
             r#"<groups><group level="1" cache-level="3"><cpu count="6" mask="3f">0, 1, 2, 3, 4, 5</cpu></group></groups>"#,
         );
         assert_eq!(arrange(&plain).cores(), 6);
+    }
+
+    #[test]
+    fn the_cores_in_daves_words() {
+        let core = |t: &[usize]| Core { threads: t.to_vec(), id: None };
+        let hybrid = Topology {
+            sections: vec![
+                Section {
+                    kind: CoreKind::Performance,
+                    clusters: (0..8).map(|i| Cluster { cores: vec![core(&[2 * i, 2 * i + 1])] }).collect(),
+                },
+                Section {
+                    kind: CoreKind::Efficiency,
+                    clusters: (0..4)
+                        .map(|c| Cluster { cores: (0..4).map(|i| core(&[16 + 4 * c + i])).collect() })
+                        .collect(),
+                },
+            ],
+        };
+        assert_eq!(
+            cores_text(&hybrid, "13th Gen Intel(R) Core(TM) i9-13900K"),
+            "8 Performance (Hyper-Threading) + 16 Efficiency, 32 Threads"
+        );
+        let plain = |n: usize, smt: bool| Topology {
+            sections: vec![Section {
+                kind: CoreKind::Plain,
+                clusters: (0..n)
+                    .map(|i| Cluster { cores: vec![if smt { core(&[i, i + n]) } else { core(&[i]) }] })
+                    .collect(),
+            }],
+        };
+        assert_eq!(cores_text(&plain(4, true), "Intel(R) Core(TM) i5-10300H"), "4 Cores (Hyper-Threading), 8 Threads");
+        assert_eq!(cores_text(&plain(8, true), "AMD Ryzen 7 5800X"), "8 Cores (SMT), 16 Threads");
+        assert_eq!(cores_text(&plain(6, false), "Intel(R) Core(TM) i5-8500T"), "6 Cores, 6 Threads");
+    }
+
+    #[test]
+    fn machine_names_skip_the_firmwares_placeholders() {
+        let m = Machine {
+            maker: "ASUS".into(),
+            product: "System Product Name".into(),
+            board_maker: "ASUSTeK COMPUTER INC.".into(),
+            board: "TUF GAMING Z690-PLUS WIFI".into(),
+            ..Default::default()
+        };
+        assert_eq!(m.name(), "ASUS TUF GAMING Z690-PLUS WIFI");
+        let lenovo = Machine {
+            maker: "LENOVO".into(),
+            product: "10MRS0VH00".into(),
+            version: "ThinkCentre M910q".into(),
+            ..Default::default()
+        };
+        assert_eq!(lenovo.name(), "LENOVO ThinkCentre M910q");
+        let laptop = Machine {
+            maker: "ASUSTeK COMPUTER INC.".into(),
+            product: "ASUS TUF Gaming F15".into(),
+            ..Default::default()
+        };
+        assert_eq!(laptop.name(), "ASUSTeK COMPUTER INC. ASUS TUF Gaming F15");
+    }
+
+    #[test]
+    fn os_release_and_uptime_in_words() {
+        assert_eq!(parse_os_release("NAME=\"void\"\nPRETTY_NAME=\"Void Linux\"\n"), "Void Linux");
+        assert_eq!(parse_os_release("NAME=FreeBSD\n"), "FreeBSD");
+        assert_eq!(uptime_text(249_672), "2 days, 21 hours");
+        assert_eq!(uptime_text(3600 + 5 * 60), "1 hour, 5 minutes");
+        assert_eq!(uptime_text(90), "1 minute");
     }
 
     #[test]
