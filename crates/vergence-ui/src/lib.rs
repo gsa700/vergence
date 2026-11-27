@@ -2093,6 +2093,7 @@ impl<'a> Runner<'a> {
             // The brand title is the server's (Bar::Brand); a bar drawn here, on
             // the Wayland road, keeps the plain one.
             brand: None,
+            lead: None,
         };
         bar::draw(scene, &mut self.fonts, &layout, &look);
     }

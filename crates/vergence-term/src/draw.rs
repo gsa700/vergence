@@ -154,6 +154,7 @@ impl Terminal {
                     menu_open: false,
                     root: false,
                     brand: None,
+                    lead: None,
                 },
             );
         }

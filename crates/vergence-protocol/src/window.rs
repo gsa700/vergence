@@ -117,19 +117,26 @@ pub enum Bar {
 /// A program's own bar under its name (`Bar::Brand`): its ground, the rule
 /// along its bottom and its ink (0xRRGGBB), and its height in points at the
 /// Standard size of controls (scaled with that setting; 0: the desktop's).
-/// The server still draws the window's buttons and app menu on it, and a
-/// superuser's window keeps the alarm red whatever the program asks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// `mark`: its name as lettering, drawn in place of the title (AlbumWall's
+/// "αlbumWall"; empty: the title), its first letter in `lead` if given; the
+/// window's title stays what is read out and listed, so a screen reader never
+/// spells a logo. The server still draws the window's buttons and app menu on
+/// it, and a superuser's window keeps the alarm red whatever the program asks.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BrandLook {
     pub ground: u32,
     pub rule: u32,
     pub ink: u32,
     pub height: u8,
+    pub mark: String,
+    pub lead: Option<u32>,
 }
 
 impl BrandLook {
     /// The tallest bar a program may ask for, in points: a bar, not a toolbar.
     pub const MAX_HEIGHT: u8 = 56;
+    /// The longest mark, in bytes: a name, not a sentence.
+    pub const MAX_MARK: usize = 64;
 }
 
 /// A program's own button in its bar: an id it chose (unique, not 0), what
@@ -1305,7 +1312,11 @@ fn put_bar(e: &mut Encoder, bar: &Bar) {
             put_buttons(e, buttons);
             match look {
                 Some(l) => {
-                    e.bool(true).u32(l.ground).u32(l.rule).u32(l.ink).u8(l.height);
+                    e.bool(true).u32(l.ground).u32(l.rule).u32(l.ink).u8(l.height).str(&l.mark);
+                    match l.lead {
+                        Some(c) => e.bool(true).u32(c),
+                        None => e.bool(false),
+                    };
                 }
                 None => {
                     e.bool(false);
@@ -1386,7 +1397,12 @@ fn get_bar(d: &mut Decoder) -> Result<Bar, WireError> {
                 if height > BrandLook::MAX_HEIGHT {
                     return Err(WireError::BadValue("bar height"));
                 }
-                Some(BrandLook { ground, rule, ink, height })
+                let mark = d.str()?;
+                if mark.len() > BrandLook::MAX_MARK {
+                    return Err(WireError::TooLong(mark.len()));
+                }
+                let lead = if d.bool()? { Some(d.u32()? & 0xff_ffff) } else { None };
+                Some(BrandLook { ground, rule, ink, height, mark, lead })
             } else {
                 None
             };
@@ -2392,16 +2408,24 @@ mod tests {
             },
         };
         assert!(decode(long).is_err(), "title too long");
-        let brand = |height: u8| WinRequest::Bar {
+        let brand = |height: u8, mark: &str| WinRequest::Bar {
             window: 1,
             bar: Bar::Brand {
                 buttons: vec![],
-                look: Some(BrandLook { ground: 0x1c1915, rule: 0x2b2620, ink: 0xf3eee6, height }),
+                look: Some(BrandLook {
+                    ground: 0x1c1915,
+                    rule: 0x2b2620,
+                    ink: 0xf3eee6,
+                    height,
+                    mark: mark.into(),
+                    lead: None,
+                }),
             },
         };
-        assert!(decode(brand(44)).is_ok());
-        assert!(decode(brand(BrandLook::MAX_HEIGHT)).is_ok());
-        assert!(decode(brand(BrandLook::MAX_HEIGHT + 1)).is_err(), "a bar taller than a bar");
+        assert!(decode(brand(44, "\u{3b1}lbumWall")).is_ok());
+        assert!(decode(brand(BrandLook::MAX_HEIGHT, "")).is_ok());
+        assert!(decode(brand(BrandLook::MAX_HEIGHT + 1, "")).is_err(), "a bar taller than a bar");
+        assert!(decode(brand(44, &"x".repeat(BrandLook::MAX_MARK + 1))).is_err(), "a mark longer than a name");
     }
 
     #[test]
@@ -2478,7 +2502,14 @@ mod tests {
                 window: 1,
                 bar: Bar::Brand {
                     buttons: vec![],
-                    look: Some(BrandLook { ground: 0x1c1915, rule: 0x2b2620, ink: 0xf3eee6, height: 44 }),
+                    look: Some(BrandLook {
+                        ground: 0x1c1915,
+                        rule: 0x2b2620,
+                        ink: 0xf3eee6,
+                        height: 44,
+                        mark: "\u{3b1}lbumWall".into(),
+                        lead: Some(0xd9a441),
+                    }),
                 },
             },
             WinRequest::Bar {

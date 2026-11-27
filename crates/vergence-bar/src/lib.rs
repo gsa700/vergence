@@ -604,6 +604,9 @@ pub struct Look<'a> {
     /// [`BRAND_SIZE`] points, in the bar's full ink (AlbumWall, as its
     /// Avalonia app's bar). None: the plain title.
     pub brand: Option<FaceId>,
+    /// A brand title's first letter in its own color (AlbumWall's α, in the
+    /// library's hue).
+    pub lead: Option<Color>,
 }
 
 /// A brand title's size in a bar of the standard height or less; a taller bar
@@ -844,7 +847,18 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
         };
         let m = fonts.metrics(face, size);
         let baseline = room.y + ((room.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round() - 1.0;
-        text(scene, fonts, face, size, title_ink, Point::new(at, baseline), look.title);
+        let first = look.title.chars().next().map_or(0, char::len_utf8);
+        match look.lead.filter(|_| look.brand.is_some() && !look.root && first > 0) {
+            Some(lead) => {
+                let (head, rest) = look.title.split_at(first);
+                text(scene, fonts, face, size, lead, Point::new(at, baseline), head);
+                let w = fonts.layout(face, size, head).1;
+                text(scene, fonts, face, size, title_ink, Point::new(at + w, baseline), rest);
+            }
+            None => {
+                text(scene, fonts, face, size, title_ink, Point::new(at, baseline), look.title);
+            }
+        }
         scene.pop_clip();
     }
 }
@@ -1203,6 +1217,7 @@ mod tests {
                     menu_open: false,
                     root,
                     brand: None,
+                    lead: None,
                 };
                 let mut scene = Scene::new(640.0, 60.0);
                 draw(&mut scene, &mut fonts, &layout, &look);

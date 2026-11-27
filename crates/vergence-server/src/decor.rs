@@ -1075,7 +1075,7 @@ impl Server {
             let shaded = vergence_look::bar_look_shaded(light, self.bar_shade());
             // A program's own bar (Bar::Brand's look): its ground and ink.
             let brand = brand_look(&w);
-            let branded = brand.map(|l| brand_style(&shaded, &l));
+            let branded = brand.as_ref().map(|l| brand_style(&shaded, l));
             let style = branded.as_ref().unwrap_or(&shaded);
             // A parent a modal dialog blocks is dimmed, in front of its own bar
             // and content and behind the dialog (dialogs.rs).
@@ -1346,7 +1346,8 @@ impl Server {
                             alerts: &alerts,
                             edited: &edited,
                             grants: &grants,
-                            title: &title,
+                            // A program's lettering in place of its title (the title is still what is read).
+                            title: brand.as_ref().map(|l| l.mark.as_str()).filter(|m| !m.is_empty()).unwrap_or(&title),
                             shown,
                             hover,
                             dragged,
@@ -1368,6 +1369,10 @@ impl Server {
                                         .or_else(|| fonts.face("sans-serif", 600, false))
                                 })
                                 .flatten(),
+                            lead: brand
+                                .as_ref()
+                                .and_then(|l| l.lead)
+                                .map(|c| vergence_scene::Color::rgb((c >> 16) as u8, (c >> 8) as u8, c as u8)),
                         };
                         // Rounded: the bar's top corners cut to the one radius (its bottom goes on into the window).
                         if rounded {
@@ -1384,7 +1389,7 @@ impl Server {
                         vergence_bar::draw(&mut scene, fonts, &f.layout, &look);
                         // A program's own bar keeps its rule along the bottom (not
                         // on a superuser's red).
-                        if let Some(l) = brand.filter(|_| !root) {
+                        if let Some(l) = brand.as_ref().filter(|_| !root) {
                             let c = l.rule;
                             scene.fill(
                                 vergence_scene::Rect::new(0.0, f.title.size.h as f32 - 1.0, width as f32, 1.0),

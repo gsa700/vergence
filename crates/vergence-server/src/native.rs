@@ -936,9 +936,13 @@ impl Server {
             // What the bar shows (bar milestone 1): kept, and drawn from step 3.
             WinRequest::Bar { window, bar } => {
                 if let Some(Win::Native(n)) = self.natives.get(&(client, window)).cloned() {
+                    let w = Win::Native(n.clone());
+                    let was = self.bar_h(&w);
                     n.state.lock().unwrap().bar = Some(bar);
                     // A bar of its own may be taller than the one it was placed under.
-                    self.keep_bar_on_screen(&Win::Native(n));
+                    if self.bar_h(&w) != was {
+                        self.keep_bar_on_screen(&w);
+                    }
                     self.redraw_all();
                 }
             }

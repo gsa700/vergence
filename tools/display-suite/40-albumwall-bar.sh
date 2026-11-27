@@ -1,8 +1,10 @@
 # AlbumWall's bar, its Avalonia app's look with Vergence's controls (Dave,
 # 2026-11-27: "match the appearance color height of the old version ... but
-# integrate our window controls and menu"): Bar::Brand's look (bus v47), the
-# warm near-black ground #1C1915 with its rule, 44 points tall at the Standard
-# size, and the window's buttons still drawn by the server at its right end.
+# integrate our window controls and menu"; "we just need our logo in place of
+# the standard title"): Bar::Brand's look (bus v47), the library's bar color
+# with its edge as the rule, 44 points tall at the Standard size, "αlbumWall"
+# with the α in the library's hue in place of the title, and the window's
+# buttons still drawn by the server at its right end.
 scenario() {
     command -v python3 >/dev/null || { echo "  ok   skipped: no python3 on this machine"; return 0; }
     headless "1920x1080 531x299@60" || { check 0 "headless session"; return; }
@@ -16,10 +18,16 @@ scenario() {
     png=$(shot MEM-1 albumwall)
     [ -s "$png" ] || png=$OUT/albumwall.png
     # Two thirds across: bare ground between the name and the buttons.
-    set -- $(python3 "$ROOT/tools/display-suite/bar-rows.py" "$png" $((wx + ww * 2 / 3)) "$wy" 1c1915 2b2620) x 0
+    set -- $(python3 "$ROOT/tools/display-suite/bar-rows.py" "$png" $((wx + ww * 2 / 3)) "$wy") x 0
     echo "  .. the bar's ground $1, $2 rows of it above the window" >&2
-    check "$(yes_if "[ '$1' = 1c1915 ]")" "AlbumWall's bar on its own warm near-black ($1)"
+    # Not the desktop's dark bar (#333D52): the library's own.
+    check "$(yes_if "[ '$1' != x ] && [ '$1' != 333d52 ] && [ '$1' != 383838 ]")" "AlbumWall's bar on the library's color ($1)"
     check "$(yes_if "near '$2' 44 2")" "AlbumWall's bar 44 points tall ($2 rows at 1x)"
+    # The wordmark beside the window's buttons (three of them, about 100
+    # points): its α tinted, the bar and the rest of the name gray-ish.
+    c=$(python3 "$ROOT/tools/display-suite/bar-rows.py" "$png" chroma $((wx + 100)) $((wy - 36)) 30 28)
+    echo "  .. the wordmark's first letter: chroma $c" >&2
+    check "$(yes_if "[ '$c' -gt 60 ]")" "the wordmark's α in the library's hue ($c)"
     # The window's buttons at the bar's right end: their marks lighter than
     # the bare ground beside them.
     region() { python3 "$ROOT/tools/display-suite/region.py" "$@"; }

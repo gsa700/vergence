@@ -29,6 +29,13 @@ use std::time::Duration;
 use prefswin::Ask;
 use reading::{Outcome, Reader};
 use vergence_albumwall::colors::{self, Ground};
+
+/// The name as it is drawn where it is lettering, not text (the Avalonia app's
+/// App.Wordmark): a Greek alpha for the A, Dave's "aWall", "for first or best".
+/// Only where the name is looked at; whatever a screen reader, a search or
+/// another program reads says "AlbumWall". Written as an escape: in many
+/// editor fonts an alpha and an "a" look alike.
+const WORDMARK: &str = "\u{3b1}lbumWall";
 use vergence_albumwall::covers::{self, Covers};
 use vergence_albumwall::libraries::{self, Libraries};
 use vergence_albumwall::library::Album;
@@ -2245,14 +2252,25 @@ impl Program for AlbumWall {
         Some(BarStyle::Dark)
     }
 
-    /// Its name in its bar, bold, on the Avalonia app's bar: its warm
-    /// near-black, the rule under it, its ink and its 44 points (MainWindow.axaml
-    /// TopBar); the window's buttons and app menu stay the desktop's (Dave,
-    /// 2026-11-27: "a merger").
+    /// Its wordmark in its bar on the Avalonia app's bar (MainWindow.axaml
+    /// TopBar, 44 points, as ApplyGround colors it): the library's bar color,
+    /// its edge as the rule, "αlbumWall" with the α in the library's hue
+    /// (App.Wordmark; the title stays "AlbumWall", what is read out); the
+    /// window's buttons and app menu stay the desktop's (Dave, 2026-11-27: "a
+    /// merger"; "we just need our logo in place of the standard title").
     fn bar(&self) -> Option<vergence_ui::Bar> {
+        let g = self.ground();
+        let hex = |c: colors::Rgb| (c.0 as u32) << 16 | (c.1 as u32) << 8 | c.2 as u32;
         Some(vergence_ui::Bar::Brand {
             buttons: Vec::new(),
-            look: Some(vergence_ui::BrandLook { ground: 0x1c1915, rule: 0x2b2620, ink: 0xf3eee6, height: 44 }),
+            look: Some(vergence_ui::BrandLook {
+                ground: hex(g.bar),
+                rule: hex(g.edge),
+                ink: hex(colors::BODY_TEXT),
+                height: 44,
+                mark: WORDMARK.into(),
+                lead: Some(hex(g.wordmark)),
+            }),
         })
     }
 
