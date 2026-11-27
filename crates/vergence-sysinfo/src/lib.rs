@@ -83,6 +83,121 @@ pub struct DiskIo {
     pub written: u64,
 }
 
+/// What kind of core a processor is on a chip with two kinds (Intel's
+/// hybrid parts: Performance and Efficiency cores); `Plain` where the chip
+/// has one kind, or the system does not say which.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CoreKind {
+    Performance,
+    Efficiency,
+    Plain,
+}
+
+/// Where one logical processor sits: its number, the processors that share
+/// its core (itself among them: two with hyper-threading, one without), the
+/// processors that share its cluster (the core's level-2 cache: an
+/// Efficiency cluster of four, or just the core) and its kind.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Place {
+    pub cpu: usize,
+    pub siblings: Vec<usize>,
+    pub cluster: Vec<usize>,
+    pub kind: CoreKind,
+    /// The core's number as the system gives it (Linux topology/core_id):
+    /// what coretemp names its sensor by ("Core 32"). None on FreeBSD.
+    pub core_id: Option<u32>,
+}
+
+/// One core: its logical processors (threads), lowest first, and its
+/// number as the system gives it, where it does.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Core {
+    pub threads: Vec<usize>,
+    pub id: Option<u32>,
+}
+
+/// The cores that share a level-2 cache.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cluster {
+    pub cores: Vec<Core>,
+}
+
+/// All the cores of one kind, cluster by cluster.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Section {
+    pub kind: CoreKind,
+    pub clusters: Vec<Cluster>,
+}
+
+/// The chip's shape: Performance cores first, then Efficiency, then plain.
+/// Empty where the system says nothing; the Hardware app then draws the
+/// processors in a plain row.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Topology {
+    pub sections: Vec<Section>,
+}
+
+impl Topology {
+    /// Every logical processor in it.
+    pub fn threads(&self) -> usize {
+        self.sections.iter().flat_map(|s| &s.clusters).flat_map(|c| &c.cores).map(|c| c.threads.len()).sum()
+    }
+
+    pub fn cores(&self) -> usize {
+        self.sections.iter().flat_map(|s| &s.clusters).map(|c| c.cores.len()).sum()
+    }
+}
+
+/// The shape from each processor's place: sections by kind, clusters in
+/// the order of their lowest processor, cores likewise. A processor named
+/// in a sibling or cluster list but missing from `places` is left out.
+pub fn arrange(places: &[Place]) -> Topology {
+    let mut places: Vec<&Place> = places.iter().collect();
+    places.sort_by_key(|p| (p.kind, p.cpu));
+    let known = |v: &[usize]| -> Vec<usize> {
+        let mut v: Vec<usize> = v.iter().copied().filter(|c| places.iter().any(|p| p.cpu == *c)).collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    };
+    let mut done: Vec<usize> = Vec::new();
+    let mut sections: Vec<Section> = Vec::new();
+    for p in &places {
+        if done.contains(&p.cpu) {
+            continue;
+        }
+        // The cluster: the processors of this kind listed as sharing it.
+        let mut members: Vec<&Place> = known(&p.cluster)
+            .into_iter()
+            .chain(std::iter::once(p.cpu))
+            .filter_map(|c| places.iter().copied().find(|q| q.cpu == c && q.kind == p.kind))
+            .filter(|q| !done.contains(&q.cpu))
+            .collect();
+        members.sort_by_key(|q| q.cpu);
+        members.dedup_by_key(|q| q.cpu);
+        let mut cores: Vec<Core> = Vec::new();
+        for q in &members {
+            if done.contains(&q.cpu) {
+                continue;
+            }
+            let mut threads: Vec<usize> =
+                known(&q.siblings).into_iter().filter(|c| members.iter().any(|m| m.cpu == *c)).collect();
+            if !threads.contains(&q.cpu) {
+                threads.push(q.cpu);
+                threads.sort_unstable();
+            }
+            threads.retain(|c| !done.contains(c));
+            done.extend(&threads);
+            cores.push(Core { threads, id: q.core_id });
+        }
+        match sections.last_mut() {
+            Some(s) if s.kind == p.kind => s.clusters.push(Cluster { cores }),
+            _ => sections.push(Section { kind: p.kind, clusters: vec![Cluster { cores }] }),
+        }
+    }
+    Topology { sections }
+}
+
 // ---- parsers (plain text in, numbers out) ----
 
 /// Linux /proc/stat: one Ticks per "cpuN" line (not the "cpu" total).
@@ -203,6 +318,78 @@ pub fn parse_diskstats(text: &str) -> Vec<DiskIo> {
         .collect()
 }
 
+/// A kernel CPU list ("0-3,8,10-11", Linux's sysfs; FreeBSD's "0, 1")
+/// as numbers.
+pub fn parse_cpu_list(text: &str) -> Vec<usize> {
+    let mut out = Vec::new();
+    for part in text.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        match part.split_once('-') {
+            Some((a, b)) => {
+                if let (Ok(a), Ok(b)) = (a.trim().parse::<usize>(), b.trim().parse::<usize>()) {
+                    out.extend(a..=b.min(a + 4096));
+                }
+            }
+            None => out.extend(part.parse::<usize>().ok()),
+        }
+    }
+    out
+}
+
+/// FreeBSD's kern.sched.topology_spec (XML: nested groups, each with its
+/// processors and flags): the places, with a THREAD or SMT group as a core
+/// and the smallest group sharing a level-2 cache as the cluster. FreeBSD
+/// does not say which cores are Performance and which Efficiency, so every
+/// place is `Plain` there (said so in the app, not guessed).
+pub fn parse_topology_spec(xml: &str) -> Vec<Place> {
+    struct Group {
+        cache: Option<u32>,
+        cpus: Vec<usize>,
+        smt: bool,
+    }
+    let mut groups: Vec<Group> = Vec::new();
+    // The groups still open, as indices into `groups`.
+    let mut open: Vec<usize> = Vec::new();
+    let mut rest = xml;
+    while let Some(i) = rest.find('<') {
+        rest = &rest[i + 1..];
+        let end = rest.find('>').unwrap_or(rest.len());
+        let tag = &rest[..end];
+        let after = &rest[(end + 1).min(rest.len())..];
+        if let Some(attrs) = tag.strip_prefix("group") {
+            let cache = attrs
+                .split_once("cache-level=\"")
+                .and_then(|(_, v)| v.split('"').next())
+                .and_then(|v| v.parse::<u32>().ok());
+            groups.push(Group { cache, cpus: Vec::new(), smt: false });
+            open.push(groups.len() - 1);
+        } else if tag == "/group" {
+            open.pop();
+        } else if tag.starts_with("cpu ") || tag == "cpu" {
+            if let Some(&g) = open.last() {
+                groups[g].cpus = parse_cpu_list(&after[..after.find('<').unwrap_or(after.len())]);
+            }
+        } else if tag.starts_with("flag ")
+            && let Some(&g) = open.last()
+        {
+            groups[g].smt |= tag.contains("\"THREAD\"") || tag.contains("\"SMT\"");
+        }
+        rest = after;
+    }
+    let mut all: Vec<usize> = groups.iter().flat_map(|g| g.cpus.iter().copied()).collect();
+    all.sort_unstable();
+    all.dedup();
+    let smallest = |cpu: usize, pick: &dyn Fn(&Group) -> bool| {
+        groups.iter().filter(|g| pick(g) && g.cpus.contains(&cpu)).min_by_key(|g| g.cpus.len()).map(|g| g.cpus.clone())
+    };
+    all.iter()
+        .map(|&cpu| {
+            let siblings = smallest(cpu, &|g| g.smt).unwrap_or_else(|| vec![cpu]);
+            let cluster = smallest(cpu, &|g| g.cache == Some(2)).unwrap_or_else(|| siblings.clone());
+            Place { cpu, siblings, cluster, kind: CoreKind::Plain, core_id: None }
+        })
+        .collect()
+}
+
 /// Bytes in words: "7.6 GB", "512 MB".
 pub fn bytes_text(b: u64) -> String {
     let b = b as f64;
@@ -265,6 +452,41 @@ mod os {
         parse_meminfo(&read("/proc/meminfo"))
     }
 
+    /// Each online processor's place, from sysfs (any user may read it):
+    /// topology/thread_siblings_list for the core, topology/cluster_cpus_list
+    /// (or the level-2 cache's shared_cpu_list on older kernels) for the
+    /// cluster, and on a hybrid chip /sys/devices/cpu_core/cpus and
+    /// cpu_atom/cpus for the kind.
+    pub fn topology() -> Topology {
+        let base = "/sys/devices/system/cpu";
+        let perf = parse_cpu_list(read("/sys/devices/cpu_core/cpus").trim());
+        let eff = parse_cpu_list(read("/sys/devices/cpu_atom/cpus").trim());
+        let places: Vec<Place> = parse_cpu_list(read(format!("{base}/online")).trim())
+            .into_iter()
+            .filter_map(|cpu| {
+                let d = format!("{base}/cpu{cpu}");
+                let siblings = parse_cpu_list(read(format!("{d}/topology/thread_siblings_list")).trim());
+                if siblings.is_empty() {
+                    return None;
+                }
+                let mut cluster = parse_cpu_list(read(format!("{d}/topology/cluster_cpus_list")).trim());
+                if cluster.is_empty() {
+                    cluster = parse_cpu_list(read(format!("{d}/cache/index2/shared_cpu_list")).trim());
+                }
+                let kind = if perf.contains(&cpu) {
+                    CoreKind::Performance
+                } else if eff.contains(&cpu) {
+                    CoreKind::Efficiency
+                } else {
+                    CoreKind::Plain
+                };
+                let core_id = read(format!("{d}/topology/core_id")).trim().parse().ok();
+                Some(Place { cpu, siblings, cluster, kind, core_id })
+            })
+            .collect();
+        arrange(&places)
+    }
+
     pub fn disk_io() -> Vec<DiskIo> {
         parse_diskstats(&read("/proc/diskstats"))
     }
@@ -277,7 +499,20 @@ mod os {
         mons.sort();
         for m in mons {
             let name = read(m.join("name")).trim().to_string();
-            for i in 1..=32 {
+            // Every tempN_input there, not a fixed range: coretemp numbers
+            // its sensors by core id plus two, so a 13900K's Efficiency
+            // cores are temp34 to temp49 (a 1..=32 range lost all sixteen).
+            let mut nums: Vec<u32> = std::fs::read_dir(&m)
+                .map(|d| {
+                    d.flatten()
+                        .filter_map(|e| {
+                            e.file_name().to_str()?.strip_prefix("temp")?.strip_suffix("_input")?.parse().ok()
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            nums.sort_unstable();
+            for i in nums {
                 let Ok(milli) = read(m.join(format!("temp{i}_input"))).trim().parse::<i64>() else { continue };
                 let label = read(m.join(format!("temp{i}_label"))).trim().to_string();
                 let what = if label.is_empty() { name.clone() } else { format!("{name} {label}") };
@@ -365,6 +600,11 @@ mod os {
         Vec::new()
     }
 
+    /// The scheduler's view of the chip (kern.sched.topology_spec).
+    pub fn topology() -> Topology {
+        arrange(&parse_topology_spec(&sysctl_text("kern.sched.topology_spec")))
+    }
+
     /// Each processor's temperature (dev.cpu.N.temperature, in tenths of a kelvin).
     pub fn temps() -> Vec<Temp> {
         (0..256)
@@ -392,9 +632,12 @@ mod os {
     pub fn temps() -> Vec<Temp> {
         Vec::new()
     }
+    pub fn topology() -> Topology {
+        Topology::default()
+    }
 }
 
-pub use os::{cpu, disk_io, memory, temps};
+pub use os::{cpu, disk_io, memory, temps, topology};
 
 /// The effective user of process `pid`, if it can be read (the terminal's
 /// red tab and the server's mark on a superuser's windows): Linux's
@@ -482,11 +725,121 @@ mod tests {
     }
 
     #[test]
+    fn cpu_lists_in_both_spellings() {
+        assert_eq!(parse_cpu_list("0-3,8,10-11\n".trim()), [0, 1, 2, 3, 8, 10, 11]);
+        assert_eq!(parse_cpu_list("0, 1"), [0, 1]);
+        assert_eq!(parse_cpu_list(""), Vec::<usize>::new());
+    }
+
+    /// techbench's i9-13900K as its sysfs says (read 2026-11-26): eight
+    /// Performance cores of two threads (0-15), sixteen Efficiency cores
+    /// of one (16-31) in clusters of four.
+    #[test]
+    fn a_hybrid_chip_keeps_its_shape() {
+        let places: Vec<Place> = (0..32)
+            .map(|cpu| {
+                if cpu < 16 {
+                    let s = vec![cpu & !1, cpu | 1];
+                    Place {
+                        cpu,
+                        siblings: s.clone(),
+                        cluster: s,
+                        kind: CoreKind::Performance,
+                        core_id: Some(cpu as u32 / 2 * 4),
+                    }
+                } else {
+                    let c0 = 16 + (cpu - 16) / 4 * 4;
+                    Place {
+                        cpu,
+                        siblings: vec![cpu],
+                        cluster: (c0..c0 + 4).collect(),
+                        kind: CoreKind::Efficiency,
+                        core_id: Some(cpu as u32 + 16),
+                    }
+                }
+            })
+            .collect();
+        let t = arrange(&places);
+        assert_eq!(t.threads(), 32);
+        assert_eq!(t.cores(), 24);
+        assert_eq!(t.sections.len(), 2);
+        let (p, e) = (&t.sections[0], &t.sections[1]);
+        assert_eq!(p.kind, CoreKind::Performance);
+        assert_eq!(p.clusters.len(), 8);
+        assert_eq!(p.clusters[1].cores, [Core { threads: vec![2, 3], id: Some(4) }]);
+        assert_eq!(e.kind, CoreKind::Efficiency);
+        assert_eq!(e.clusters.len(), 4);
+        assert_eq!(e.clusters[1].cores.iter().map(|c| c.threads[0]).collect::<Vec<_>>(), [20, 21, 22, 23]);
+        assert_eq!(e.clusters[0].cores[0].id, Some(32));
+    }
+
+    /// A plain chip whose threads are numbered core by core apart (Linux on
+    /// many Intel parts: 0 and 4 share a core): cores still pair them.
+    #[test]
+    fn a_plain_chip_pairs_its_threads() {
+        let places: Vec<Place> = (0..8)
+            .map(|cpu| {
+                let s = vec![cpu % 4, cpu % 4 + 4];
+                Place { cpu, siblings: s.clone(), cluster: s, kind: CoreKind::Plain, core_id: Some(cpu as u32 % 4) }
+            })
+            .collect();
+        let t = arrange(&places);
+        assert_eq!(t.sections.len(), 1);
+        assert_eq!(t.sections[0].clusters.len(), 4);
+        assert_eq!(t.sections[0].clusters[0].cores, [Core { threads: vec![0, 4], id: Some(0) }]);
+        assert_eq!(t.threads(), 8);
+    }
+
+    /// FreeBSD's topology_spec in the shape it prints for a chip with SMT
+    /// cores and a cluster of four single-thread cores sharing a level-2
+    /// cache (written from the format; to check against a hybrid FreeBSD
+    /// machine when there is one).
+    #[test]
+    fn freebsd_topology_spec() {
+        let xml = r#"<groups>
+ <group level="1" cache-level="3">
+  <cpu count="8" mask="ff,0,0,0">0, 1, 2, 3, 4, 5, 6, 7</cpu>
+  <children>
+   <group level="2" cache-level="2">
+    <cpu count="2" mask="3,0,0,0">0, 1</cpu>
+    <flags><flag name="THREAD">THREAD group</flag><flag name="SMT">SMT group</flag></flags>
+   </group>
+   <group level="2" cache-level="2">
+    <cpu count="2" mask="c,0,0,0">2, 3</cpu>
+    <flags><flag name="THREAD">THREAD group</flag><flag name="SMT">SMT group</flag></flags>
+   </group>
+   <group level="2" cache-level="2">
+    <cpu count="4" mask="f0,0,0,0">4, 5, 6, 7</cpu>
+   </group>
+  </children>
+ </group>
+</groups>
+"#;
+        let places = parse_topology_spec(xml);
+        assert_eq!(places.len(), 8);
+        assert_eq!(places[1].siblings, [0, 1]);
+        assert_eq!(places[5].siblings, [5]);
+        assert_eq!(places[5].cluster, [4, 5, 6, 7]);
+        let t = arrange(&places);
+        assert_eq!(t.cores(), 6);
+        assert_eq!(t.sections[0].clusters.len(), 3);
+        assert_eq!(t.sections[0].clusters[2].cores.len(), 4);
+        // A chip of plain cores with no SMT (kepler's i5-8500T): one group,
+        // no flags; six cores of one thread, each its own cluster.
+        let plain = parse_topology_spec(
+            r#"<groups><group level="1" cache-level="3"><cpu count="6" mask="3f">0, 1, 2, 3, 4, 5</cpu></group></groups>"#,
+        );
+        assert_eq!(arrange(&plain).cores(), 6);
+    }
+
+    #[test]
     fn this_machine_reads_something() {
         let c = cpu();
         if cfg!(any(target_os = "linux", target_os = "freebsd")) {
             assert!(!c.ticks.is_empty(), "processors");
             assert!(memory().total > 0, "memory");
+            let t = topology();
+            assert_eq!(t.threads(), c.ticks.len(), "every processor placed once");
         }
     }
 }

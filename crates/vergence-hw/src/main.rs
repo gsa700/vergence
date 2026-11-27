@@ -16,17 +16,25 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
-use vergence_sysinfo::{DiskIo, FileSystem, Memory, Temp, Ticks, bytes_text};
+use vergence_scene::{Color, Point, Rect};
+use vergence_sysinfo::{CoreKind, DiskIo, FileSystem, Memory, Temp, Ticks, Topology, bytes_text};
 use vergence_ui::{AppCommand as C, BarStyle, Role};
 use vergence_widgets::chart::{chart, meter};
 use vergence_widgets::{
-    Align, ButtonLook, Element, Length, Padding, Program, Theme, Waker, Window, button, column, label, panel, row,
-    rule, scroll, space, vrule,
+    Align, ButtonLook, Element, Length, Padding, Program, Theme, Waker, Window, button, column, drawing, label, panel,
+    row, rule, scroll, space, vrule,
 };
 
 const APP_ID: &str = "vergence-hw";
 /// Samples kept for the charts: a minute.
 const SLOTS: usize = 60;
+/// A thread's graph in the core grid, in points, and the gaps that show the
+/// chip's shape: threads of one core close, cores of a cluster further.
+const GRAPH_W: f32 = 46.0;
+const GRAPH_H: f32 = 40.0;
+const THREAD_GAP: f32 = 3.0;
+const CORE_GAP: f32 = 9.0;
+const TILE_PAD: f32 = 8.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -70,6 +78,10 @@ struct Hardware {
     ticks: Vec<Ticks>,
     loads: Vec<f32>,
     cpu_hist: VecDeque<f64>,
+    /// Each logical processor's last minute, by its number.
+    thread_hist: Vec<VecDeque<f64>>,
+    /// The chip's shape (read once: cores do not move).
+    topo: Topology,
     temps: Vec<Temp>,
     mem: Memory,
     mem_hist: VecDeque<f64>,
@@ -99,6 +111,8 @@ impl Hardware {
             ticks: Vec::new(),
             loads: Vec::new(),
             cpu_hist: VecDeque::new(),
+            thread_hist: Vec::new(),
+            topo: vergence_sysinfo::topology(),
             temps: Vec::new(),
             mem: Memory::default(),
             mem_hist: VecDeque::new(),
@@ -124,6 +138,10 @@ impl Hardware {
             self.loads = vergence_sysinfo::load(&self.ticks, &cpu.ticks);
             let avg = self.loads.iter().sum::<f32>() / self.loads.len().max(1) as f32;
             push(&mut self.cpu_hist, avg as f64 * 100.0);
+            self.thread_hist.resize_with(self.loads.len(), VecDeque::new);
+            for (h, l) in self.thread_hist.iter_mut().zip(&self.loads) {
+                push(h, *l as f64 * 100.0);
+            }
         }
         (self.model, self.mhz, self.ticks) = (cpu.model, cpu.mhz, cpu.ticks);
         self.temps = vergence_sysinfo::temps();
@@ -194,6 +212,196 @@ impl Hardware {
         panel(child).padding(Padding::hv(10.0, 12.0)).width(Length::FILL)
     }
 
+    /// The shape to draw: the system's, or, where it says nothing or its
+    /// count disagrees with the processors read (one taken offline), each
+    /// processor on its own.
+    fn shape(&self) -> Topology {
+        if self.topo.threads() == self.loads.len().max(self.ticks.len()) && self.topo.threads() > 0 {
+            return self.topo.clone();
+        }
+        let n = self.ticks.len();
+        let clusters = (0..n)
+            .map(|i| vergence_sysinfo::Cluster { cores: vec![vergence_sysinfo::Core { threads: vec![i], id: None }] })
+            .collect();
+        Topology { sections: vec![vergence_sysinfo::Section { kind: CoreKind::Plain, clusters }] }
+    }
+
+    /// The cores and threads, with whether the chip runs two threads on a
+    /// core (Intel's Hyper-Threading, AMD's SMT) and on which cores:
+    /// "8 Performance + 16 Efficiency, 32 threads (Hyper-Threading on the
+    /// Performance cores)"; "4, 8 threads (Hyper-Threading)"; "6, 6 threads
+    /// (no Hyper-Threading)".
+    fn cores_text(&self) -> String {
+        let shape = self.shape();
+        let cores_of = |k: CoreKind| {
+            shape.sections.iter().filter(move |s| s.kind == k).flat_map(|s| &s.clusters).flat_map(|c| &c.cores)
+        };
+        let count = |k: CoreKind| cores_of(k).count();
+        let doubled = |k: CoreKind| cores_of(k).any(|c| c.threads.len() > 1);
+        let (p, e, plain) = (count(CoreKind::Performance), count(CoreKind::Efficiency), count(CoreKind::Plain));
+        let mut parts = Vec::new();
+        if p > 0 {
+            parts.push(format!("{p} Performance"));
+        }
+        if e > 0 {
+            parts.push(format!("{e} Efficiency"));
+        }
+        if plain > 0 {
+            parts.push(plain.to_string());
+        }
+        let ht = if self.model.contains("AMD") { "SMT" } else { "Hyper-Threading" };
+        let kinds: Vec<&str> =
+            [(CoreKind::Performance, "Performance"), (CoreKind::Efficiency, "Efficiency"), (CoreKind::Plain, "")]
+                .into_iter()
+                .filter(|(k, _)| count(*k) > 0)
+                .map(|(k, n)| if doubled(k) { n } else { "-" })
+                .collect();
+        let note = if kinds.iter().all(|n| *n == "-") {
+            format!("no {ht}")
+        } else if kinds.iter().all(|n| *n != "-") || kinds.len() == 1 {
+            ht.to_string()
+        } else {
+            let on: Vec<&str> = kinds.iter().copied().filter(|n| *n != "-" && !n.is_empty()).collect();
+            format!("{ht} on the {} cores", on.join(" and "))
+        };
+        format!("{}, {} threads ({note})", parts.join(" + "), shape.threads())
+    }
+
+    /// A core's own temperature and the sensor's name: Linux's coretemp
+    /// names each by the core's number ("coretemp Core 32"); FreeBSD gives
+    /// one per processor ("CPU 3"), so a core is its hottest thread. None
+    /// where the chip reports only the whole package (AMD's Tctl).
+    fn core_temp(&self, c: &vergence_sysinfo::Core) -> Option<(f32, Vec<String>)> {
+        let names: Vec<String> = match c.id {
+            Some(id) => vec![format!("coretemp Core {id}")],
+            None => c.threads.iter().map(|i| format!("CPU {i}")).collect(),
+        };
+        let hottest = self
+            .temps
+            .iter()
+            .filter(|tp| names.contains(&tp.what))
+            .map(|tp| tp.celsius)
+            .fold(None, |m: Option<f32>, v| Some(m.map_or(v, |m| m.max(v))))?;
+        Some((hottest, names))
+    }
+
+    /// The sensors the core tiles show, left out of the Temperatures list.
+    fn tiled_temps(&self) -> Vec<String> {
+        self.shape()
+            .sections
+            .iter()
+            .flat_map(|s| &s.clusters)
+            .flat_map(|c| &c.cores)
+            .filter_map(|c| self.core_temp(c).map(|(_, n)| n))
+            .flatten()
+            .collect()
+    }
+
+    /// Each kind of core a card; in it a tile per cluster (a Performance
+    /// core alone, Efficiency cores in their fours), in a tile a graph per
+    /// thread, the threads of one core close together.
+    fn core_grid(&self, t: &Theme) -> Vec<Element<Msg>> {
+        let shape = self.shape();
+        let mut out = Vec::new();
+        for sec in &shape.sections {
+            let (title, prefix) = match sec.kind {
+                CoreKind::Performance => ("Performance cores", "P"),
+                CoreKind::Efficiency => ("Efficiency cores", "E"),
+                CoreKind::Plain => ("Each core", ""),
+            };
+            let mut n = 0usize;
+            let mut tiles: Vec<Element<Msg>> = Vec::new();
+            for cl in &sec.clusters {
+                let first = n + 1;
+                n += cl.cores.len();
+                let name = match (prefix, cl.cores.len()) {
+                    ("", 1) => format!("Core {first}"),
+                    ("", _) => format!("Cores {first}–{n}"),
+                    (p, 1) => format!("{p}{first}"),
+                    (p, _) => format!("{p}{first}–{p}{n}"),
+                };
+                tiles.push(self.tile(t, &name, cl));
+            }
+            let threads: usize = sec.clusters.iter().flat_map(|c| &c.cores).map(|c| c.threads.len()).sum();
+            let heading =
+                if threads == n { format!("{title}: {n}") } else { format!("{title}: {n}, {threads} threads") };
+            out.push(self.group(
+                t,
+                Some(&heading),
+                vec![Hardware::wide(row(tiles).spacing(10.0).wrap().width(Length::FILL))],
+            ));
+        }
+        out
+    }
+
+    fn tile(&self, t: &Theme, name: &str, cl: &vergence_sysinfo::Cluster) -> Element<Msg> {
+        let load = |i: usize| self.loads.get(i).copied().unwrap_or(0.0) as f64 * 100.0;
+        let all: Vec<usize> = cl.cores.iter().flat_map(|c| c.threads.iter().copied()).collect();
+        let avg = all.iter().map(|&i| load(i)).sum::<f64>() / all.len().max(1) as f64;
+        let any_temps = self
+            .shape()
+            .sections
+            .iter()
+            .flat_map(|s| &s.clusters)
+            .flat_map(|c| &c.cores)
+            .any(|c| self.core_temp(c).is_some());
+        let cores: Vec<Element<Msg>> = cl
+            .cores
+            .iter()
+            .map(|c| {
+                let n = c.threads.len() as f32;
+                let core_w = n * GRAPH_W + (n - 1.0).max(0.0) * THREAD_GAP;
+                let graphs = row(c
+                    .threads
+                    .iter()
+                    .map(|&i| {
+                        let hist: Vec<f64> =
+                            self.thread_hist.get(i).map(|h| h.iter().copied().collect()).unwrap_or_default();
+                        column(vec![
+                            thread_graph(hist).width(Length::Fixed(GRAPH_W)),
+                            label(format!("{:.0}%", load(i)))
+                                .size(10.0)
+                                .dim()
+                                .align(Align::Center)
+                                .width(Length::Fixed(GRAPH_W)),
+                        ])
+                        .spacing(2.0)
+                        .name(format!("Processor {}", i + 1))
+                    })
+                    .collect())
+                .spacing(THREAD_GAP);
+                if !any_temps {
+                    return graphs;
+                }
+                let temp = self.core_temp(c).map_or("—".to_string(), |(v, _)| format!("{v:.0} °C"));
+                column(vec![graphs, label(temp).size(10.0).align(Align::Center).width(Length::Fixed(core_w))])
+                    .spacing(1.0)
+            })
+            .collect();
+        let graphs = all.len() as f32;
+        let w = graphs * GRAPH_W
+            + (graphs - cl.cores.len() as f32) * THREAD_GAP
+            + (cl.cores.len() as f32 - 1.0).max(0.0) * CORE_GAP
+            + 2.0 * TILE_PAD;
+        panel(
+            column(vec![
+                row(vec![
+                    label(name.to_string()).size(11.0).weight(600).width(Length::FILL),
+                    label(format!("{avg:.0}%")).size(11.0).dim(),
+                ])
+                .width(Length::FILL),
+                row(cores).spacing(CORE_GAP),
+            ])
+            .spacing(5.0)
+            .width(Length::FILL),
+        )
+        .color(t.page)
+        .radius(8.0)
+        .padding(TILE_PAD)
+        .width(Length::Fixed(w))
+        .name(name)
+    }
+
     fn page_view(&self, t: &Theme) -> Vec<Element<Msg>> {
         let cpu_now = self.cpu_hist.back().copied().unwrap_or(0.0);
         match self.page {
@@ -208,7 +416,7 @@ impl Hardware {
                                 "Processor",
                                 if self.model.is_empty() { "—".into() } else { self.model.clone() },
                             ),
-                            Hardware::line("Threads", self.ticks.len().to_string()),
+                            Hardware::line("Cores", self.cores_text()),
                             Hardware::line("Memory", bytes_text(self.mem.total)),
                             Hardware::line(
                                 "Graphics",
@@ -222,28 +430,12 @@ impl Hardware {
                 )]
             }
             Page::Processors => {
-                let mut cores: Vec<Element<Msg>> = Vec::new();
-                for (i, l) in self.loads.iter().enumerate() {
-                    cores.push(
-                        row(vec![
-                            label(format!("{}", i + 1)).size(11.0).dim().width(Length::Fixed(24.0)),
-                            meter(*l as f64, 8.0).width(Length::FILL),
-                            label(format!("{:.0}%", l * 100.0))
-                                .size(11.0)
-                                .dim()
-                                .align(Align::End)
-                                .width(Length::Fixed(40.0)),
-                        ])
-                        .spacing(8.0)
-                        .align(Align::Center)
-                        .width(Length::FILL),
-                    );
-                }
                 let mut v = vec![self.group(
                     t,
                     None,
                     vec![
                             Hardware::line("Processor", self.model.clone()),
+                            Hardware::line("Cores", self.cores_text()),
                             Hardware::line("Busy now", format!("{cpu_now:.0}%")),
                             Hardware::line(
                                 "Clock",
@@ -259,16 +451,19 @@ impl Hardware {
                             ),
                         ],
                 )];
-                v.push(self.group(
-                    t,
-                    Some("Each thread"),
-                    vec![Hardware::wide(column(cores).spacing(5.0).width(Length::FILL))],
-                ));
-                if !self.temps.is_empty() {
+                v.extend(self.core_grid(t));
+                let tiled = self.tiled_temps();
+                let mut left: Vec<&Temp> = self.temps.iter().filter(|tp| !tiled.contains(&tp.what)).collect();
+                // The processor's own first: the number most people look for.
+                left.sort_by_key(|tp| !tp.what.starts_with("coretemp Package"));
+                let names = plain_names(&left.iter().map(|tp| tp.what.as_str()).collect::<Vec<_>>());
+                let rest: Vec<Element<Msg>> =
+                    left.iter().zip(&names).map(|(tp, n)| Hardware::line(n, format!("{:.0} °C", tp.celsius))).collect();
+                if !rest.is_empty() {
                     v.push(self.group(
                         t,
-                        Some("Temperatures"),
-                        self.temps.iter().map(|tp| Hardware::line(&tp.what, format!("{:.0} °C", tp.celsius))).collect(),
+                        Some(if tiled.is_empty() { "Temperatures" } else { "Other temperatures" }),
+                        rest,
                     ));
                 }
                 v
@@ -471,6 +666,75 @@ impl Hardware {
     }
 }
 
+/// A sensor's name in words, from its driver's ("spd5118" is a memory
+/// module's, "acpitz" the board's ACPI thermal zone); names it does not know
+/// stay as the driver gives them. Repeats are numbered: "Memory module 1",
+/// "Memory module 2".
+fn plain_name(what: &str) -> String {
+    let (drv, rest) = what.split_once(' ').unwrap_or((what, ""));
+    let word = match drv {
+        "coretemp" if rest.starts_with("Package") => return "Processor package".into(),
+        "k10temp" | "zenpower" => return format!("Processor {}", rest).trim().into(),
+        "spd5118" | "jc42" => "Memory module",
+        "acpitz" => "Motherboard",
+        "nvme" => {
+            return match rest {
+                "Composite" | "" => "Drive (NVMe)".into(),
+                r => format!("Drive (NVMe), {}", r.to_lowercase()),
+            };
+        }
+        "iwlwifi_1" | "iwlwifi" => "Wi-Fi",
+        "pch_cannonlake" | "pch_cometlake" | "pch_alderlake" | "pch_raptorlake" => "Chipset",
+        _ => return what.into(),
+    };
+    if rest.is_empty() { word.into() } else { format!("{word} {rest}") }
+}
+
+fn plain_names(whats: &[&str]) -> Vec<String> {
+    let names: Vec<String> = whats.iter().map(|w| plain_name(w)).collect();
+    let mut seen: HashMap<&str, usize> = HashMap::new();
+    names
+        .iter()
+        .map(|n| {
+            if names.iter().filter(|m| *m == n).count() < 2 {
+                return n.clone();
+            }
+            let k = seen.entry(n.as_str()).or_insert(0);
+            *k += 1;
+            format!("{n} {k}")
+        })
+        .collect()
+}
+
+/// One thread's last minute, 0 to 100, as a filled graph on a faint ground
+/// (Task Manager's small graphs, drawn sharp at any scale).
+fn thread_graph(hist: Vec<f64>) -> Element<Msg> {
+    drawing(move |scene, _, r, t| {
+        scene.fill_rounded(r, 3.0, Color::rgba(t.dim.r, t.dim.g, t.dim.b, 28));
+        if hist.is_empty() {
+            return;
+        }
+        let step = r.w / (SLOTS - 1) as f32;
+        let y_of = |v: f64| r.y + r.h - (v / 100.0).clamp(0.0, 1.0) as f32 * r.h;
+        let x0 = r.x + r.w - step * (hist.len() - 1) as f32;
+        let fill = Color::rgba(t.accent.r, t.accent.g, t.accent.b, 70);
+        for (i, v) in hist.iter().enumerate() {
+            let x = (x0 + step * i as f32 - step / 2.0).max(r.x);
+            let y = y_of(*v);
+            scene.fill(Rect::new(x, y, (step).min(r.x + r.w - x), r.y + r.h - y), fill);
+        }
+        for (i, p) in hist.windows(2).enumerate() {
+            scene.line(
+                Point::new(x0 + step * i as f32, y_of(p[0])),
+                Point::new(x0 + step * (i + 1) as f32, y_of(p[1])),
+                1.2,
+                t.accent,
+            );
+        }
+    })
+    .height(Length::Fixed(GRAPH_H))
+}
+
 fn kind_word(f: &vergence_net::ifaces::Iface) -> &'static str {
     match f.kind {
         vergence_net::ifaces::Kind::WiFi => "Wi-Fi",
@@ -614,5 +878,35 @@ fn main() {
     if let Err(e) = vergence_widgets::run(Hardware::new(), (860, 640)) {
         eprintln!("vergence-hw: {e}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sensors_in_words_and_repeats_numbered() {
+        let n = plain_names(&[
+            "coretemp Package id 0",
+            "nvme Composite",
+            "nvme Sensor 1",
+            "acpitz",
+            "spd5118",
+            "spd5118",
+            "it8689 temp3",
+        ]);
+        assert_eq!(
+            n,
+            [
+                "Processor package",
+                "Drive (NVMe)",
+                "Drive (NVMe), sensor 1",
+                "Motherboard",
+                "Memory module 1",
+                "Memory module 2",
+                "it8689 temp3"
+            ]
+        );
     }
 }
