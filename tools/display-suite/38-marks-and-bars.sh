@@ -15,7 +15,10 @@ scenario() {
     headless "1920x1080 531x299@60" || { check 0 "headless session"; kill $SRV 2>/dev/null; return; }
     home=$HOME/.cache/vergence-headless/home
     rm -rf "$home/.config/vergence/albumwall" "$home/.cache/vergence/albumwall"
-    printf '\n[terminal]\nblink = false\n' >> "$home/.config/vergence/desktop.toml"
+    # A still cursor in the terminal; the settings put back at the end (34's note).
+    cfg=$home/.config/vergence/desktop.toml
+    kept=$(cat "$cfg" 2>/dev/null)
+    printf '\n[terminal]\nblink = false\n' >> "$cfg"
     vctl spawn "env VERGENCE_SOUND_OFF=pace $TARGET/vergence-albumwall" >/dev/null
     i=0; while ! vctl windows | grep -q '"AlbumWall" "vergence-albumwall"'; do sleep 0.2; i=$((i + 1)); [ $i -gt 50 ] && break; done
     sleep 1
@@ -127,4 +130,5 @@ scenario() {
     pw=$(python3 -c "import struct,sys; print(struct.unpack('>I', open(sys.argv[1],'rb').read()[16:20])[0])" "$OUT/edit-near.png")
     d=$(region "$OUT/edit-away.png" "$OUT/edit-near.png" $((pw - 20)) 30 20 $((eh - 100)))
     check "$(yes_if "more '$d' 0.5")" "Edit's scroll bar widens as the pointer comes ($d)"
+    printf '%s\n' "$kept" > "$cfg"
 }

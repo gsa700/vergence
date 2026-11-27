@@ -7,8 +7,12 @@ scenario() {
     zsh=$(command -v zsh) || { echo "  ok   skipped: no zsh on this machine"; return 0; }
     headless "1920x1080 531x299@60" || return 1
     home=$HOME/.cache/vergence-headless/home
-    # A still cursor, so pictures of the terminal compare.
-    printf '\n[terminal]\nblink = false\n' >> "$home/.config/vergence/desktop.toml"
+    # A still cursor, so pictures of the terminal compare; the settings put
+    # back as they were at the end (the profile is shared, and a second
+    # [terminal] table makes the file unreadable for the scenarios after).
+    cfg=$home/.config/vergence/desktop.toml
+    kept=$(cat "$cfg" 2>/dev/null)
+    printf '\n[terminal]\nblink = false\n' >> "$cfg"
     dir="$home/vg-shell/two words"
     # vctl types small letters, digits and a few signs only: two words of the
     # test's own for what needs / ~ > and quotes.
@@ -59,4 +63,5 @@ scenario() {
     # new-user questions.
     : > "$home/.zshrc"
     rm -rf "$home/vg-shell"
+    printf '%s\n' "$kept" > "$cfg"
 }
