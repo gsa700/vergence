@@ -270,8 +270,27 @@ impl App {
             }
             let screen_controls: Vec<String> = SCREEN_CONTROLS_NAMES.iter().map(|s| s.to_string()).collect();
             let mode_rows = self.mode_rows(o);
-            let mut rows = vec![
-                setting("Scale", &note, scale_slider(self.scale, o, &marks)),
+            let mut rows = vec![setting("Scale", &note, scale_slider(self.scale, o, &marks))];
+            // Its brightness, where it has a control (brightness milestone 1).
+            if let Some((connector, level)) = self.brightness.iter().find(|(c, _)| *c == o.name).cloned() {
+                rows.push(setting(
+                    "Brightness",
+                    &format!("{level}%"),
+                    slider(0.0, 100.0, level as f32, move |v| Message::Brightness(connector.clone(), v))
+                        .step(1.0)
+                        .width(Length::Fixed(220.0))
+                        // A laptop's panel by what it is, as the Display tile says.
+                        .name(&format!(
+                            "{} brightness",
+                            if vergence_dm::brightness::is_internal(&o.name) {
+                                "Built-in display".to_string()
+                            } else {
+                                screen_label(o)
+                            }
+                        )),
+                ));
+            }
+            rows.extend([
                 setting(
                     "Shown at",
                     &format!(
@@ -290,7 +309,7 @@ impl App {
                         .width(Length::Fixed(160.0))
                         .name("Size of controls"),
                 ),
-            ];
+            ]);
             if multi {
                 let is_main = self.primary().as_deref() == Some(o.id.as_str());
                 rows.push(setting(
@@ -375,6 +394,17 @@ impl App {
     /// This page's messages, as main.rs's handle routes them here.
     pub(crate) fn screens_message(&mut self, m: Message) {
         match m {
+            Message::Brightness(connector, v) => {
+                let level = v.round().clamp(0.0, 100.0) as u32;
+                let Some(entry) = self.brightness.iter_mut().find(|(c, _)| *c == connector) else { return };
+                entry.1 = level;
+                let jobs = self.brightness_jobs.get_or_insert_with(|| {
+                    let (tx, rx) = std::sync::mpsc::channel::<(String, u32)>();
+                    let _ = std::thread::Builder::new().name("brightness".into()).spawn(move || brightness_work(rx));
+                    tx
+                });
+                let _ = jobs.send((connector, level));
+            }
             Message::ScreenControls(i) => {
                 if let Some(o) = self.current_output() {
                     let (id, label) = (o.id.clone(), screen_label(o));
@@ -537,4 +567,29 @@ fn tiles(outputs: &[OutputInfo], size: (f32, f32)) -> Vec<Rect> {
 
 fn inside(r: &Rect, x: f32, y: f32) -> bool {
     x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h
+}
+
+/// Each screen with a brightness control and its level now (readable by
+/// anyone: the panel's own file).
+pub(crate) fn brightness_now() -> Vec<(String, u32)> {
+    vergence_dm::brightness::controls()
+        .iter()
+        .filter_map(|c| vergence_dm::brightness::level(c).map(|l| (c.connector.clone(), l)))
+        .collect()
+}
+
+/// Sets what the sliders asked, through vdm: of a drag only the latest for
+/// each screen (vdm answers one at a time).
+fn brightness_work(jobs: std::sync::mpsc::Receiver<(String, u32)>) {
+    while let Ok(first) = jobs.recv() {
+        let mut wanted = std::collections::HashMap::new();
+        for (c, l) in std::iter::once(first).chain(std::iter::from_fn(|| jobs.try_recv().ok())) {
+            wanted.insert(c, l);
+        }
+        for (c, l) in wanted {
+            if let Err(e) = vergence_dm::brightness::ask(&c, l) {
+                eprintln!("settings: brightness of {c}: {e}");
+            }
+        }
+    }
 }

@@ -199,6 +199,8 @@ enum Message {
     // Sound: an output's volume (as it slides), its mute, making it the
     // default, and its test tone.
     SoundVolume(String, f32),
+    /// A screen's brightness slider: its connector, the level in percent.
+    Brightness(String, f32),
     SoundMute(String, bool),
     SoundDefault(String),
     SoundTone(String),
@@ -409,6 +411,10 @@ struct App {
     prefs_open: std::rc::Rc<std::cell::Cell<bool>>,
     // Screens.
     outputs: Vec<OutputInfo>,
+    /// Each screen with a brightness control (its connector) and its level
+    /// (brightness milestone 1); set through vdm on a thread of its own.
+    brightness: Vec<(String, u32)>,
+    brightness_jobs: Option<std::sync::mpsc::Sender<(String, u32)>>,
     /// About's summary was just copied (the button says so until the page changes).
     about_copied: bool,
     /// The input devices present, and the kinds the machine has had (bus `inputs`).
@@ -553,6 +559,8 @@ impl App {
             monos: theme::font_families(true),
             prefs_open: std::rc::Rc::new(std::cell::Cell::new(false)),
             outputs: Vec::new(),
+            brightness: screens::brightness_now(),
+            brightness_jobs: None,
             about_copied: false,
             inputs: Vec::new(),
             inputs_seen: Vec::new(),
@@ -893,6 +901,7 @@ impl App {
                 let current = self.wall_output().map(|o| o.id.clone());
                 self.outputs = outputs;
                 self.setup = setup;
+                self.brightness = screens::brightness_now();
                 self.arrange_drag = None;
                 // Keep the same screen's page if it is still there.
                 if let Page::Screen(_) = self.page {
@@ -998,6 +1007,7 @@ impl App {
             | Message::MainScreen(..)
             | Message::ScaleDefault
             | Message::Arrange(..)
+            | Message::Brightness(..)
             | Message::Map(..)) => self.screens_message(m),
             m @ (Message::PickPicture(..)
             | Message::Fit(..)

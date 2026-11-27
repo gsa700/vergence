@@ -33,7 +33,28 @@ scenario() {
     printf '505\n' > "$light/brightness"
     i=0; while ! vctl tiles | grep -E '^display ' | grep -q '50%' && [ $i -lt 60 ]; do sleep 0.1; i=$((i + 1)); done
     check "$(yes_if "vctl tiles | grep -E '^display ' | grep -q '50%'")" "a level changed elsewhere shows within seconds"
+    # Kept and set again at login (question 5 a): a stand-in on the headless
+    # screen's own connector (MEM-1), so it has a monitor identity.
+    rm -rf "$sb/sys/class/drm/card0-eDP-1"
+    mem=$sb/sys/class/drm/card0-MEM-1/test_backlight
+    mkdir -p "$mem"
+    printf 'raw\n' > "$mem/type"; printf '1000\n' > "$mem/max_brightness"; printf '505\n' > "$mem/brightness"
+    kept=$HOME/.cache/vergence-headless/home/.local/state/vergence/brightness.toml
+    rm -f "$kept"
+    headless "1920x1080 531x299@60" || { check 0 "headless session for keeping"; unset VERGENCE_BRIGHTNESS_ROOT; return; }
+    vctl tile-action display MEM-1 80 >/dev/null
+    i=0; while ! grep -qE '= 80$' "$kept" 2>/dev/null && [ $i -lt 40 ]; do sleep 0.1; i=$((i + 1)); done
+    check "$(yes_if "grep -qE '= 80$' '$kept'")" "a level set is kept ($(grep -E '=' "$kept" 2>/dev/null | head -1))"
+    # As after a restart: the firmware's level again; the next session puts it back.
+    "$ROOT/tools/vergence-headless" stop >/dev/null 2>&1
+    printf '505\n' > "$mem/brightness"
+    light=$mem
+    headless "1920x1080 531x299@60" || { check 0 "headless session after keeping"; unset VERGENCE_BRIGHTNESS_ROOT; return; }
+    # Within the thread's next look (every 4 s): the screen an output by then.
+    i=0; while [ "$(raw)" != 802 ] && [ $i -lt 60 ]; do sleep 0.1; i=$((i + 1)); done
+    check "$(yes_if "[ '$(raw)' = 802 ]")" "the next session sets it back to 80% ($(raw))"
     # No control: no tile.
+    rm -rf "$sb/sys/class/drm/card0-MEM-1"
     rm -rf "$sb/sys/class/drm/card0-eDP-1"
     mkdir -p "$sb/sys/class/drm/card0-DP-1"
     unset VERGENCE_BRIGHTNESS_ROOT
