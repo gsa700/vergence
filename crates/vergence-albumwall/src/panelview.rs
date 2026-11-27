@@ -27,30 +27,45 @@ fn alpha(c: Rgb, a: u8) -> Color {
 /// The panel's ground: the arrow over the tile at `item`'s column (worked
 /// out from the width the grid gives it, as the grid does), the body in
 /// the album's color, solid to 72% of its height, then fading to nothing.
-fn ground(item: usize, p: &Palette) -> Element<Msg> {
+/// `down`: the panel sits above its album's row (an album in the row under
+/// an open panel took it over in place: WallRows.PointsDown) and everything
+/// is mirrored: the arrow at its foot pointing down, the fade at its head.
+fn ground(item: usize, p: &Palette, down: bool) -> Element<Msg> {
     let c = p.panel;
     drawing(move |scene, _, r: Rect, _| {
         let (cols, cover) = wall::columns(r.w);
         let col = item % cols.max(1);
         let cx = r.x + col as f32 * (cover + wall::GAP) + cover / 2.0;
-        // The arrow, a triangle point up, as thin bands.
+        // The arrow, a triangle pointing at the album, as thin bands.
         let bands = 22;
         for k in 0..bands {
             let t = (k as f32 + 0.5) / bands as f32;
-            let half = panel::ARROW_W / 2.0 * t;
-            let y = r.y + panel::MARGIN - panel::ARROW_H + t * panel::ARROW_H;
+            let (half, y) = if down {
+                (panel::ARROW_W / 2.0 * (1.0 - t), r.y + r.h - panel::MARGIN + t * panel::ARROW_H)
+            } else {
+                (panel::ARROW_W / 2.0 * t, r.y + panel::MARGIN - panel::ARROW_H + t * panel::ARROW_H)
+            };
             scene.fill(Rect::new(cx - half, y, half * 2.0, panel::ARROW_H / bands as f32 + 0.1), color(c));
         }
-        // The body: solid, then fading to the wall over its last 28%.
-        let top = r.y + panel::MARGIN;
+        // The body: solid, fading to the wall over its last 28% (its first,
+        // pointing down).
         let h = (r.h - panel::MARGIN).max(0.0);
+        let top = if down { r.y } else { r.y + panel::MARGIN };
         let solid = h * 0.72;
-        scene.fill_rounded(Rect::new(r.x, top, r.w, solid.min(h)), 6.0, color(c));
-        let steps = 24;
         let fade = h - solid;
+        let steps = 24;
+        if down {
+            scene.fill_rounded(Rect::new(r.x, top + fade, r.w, solid.min(h)), 6.0, color(c));
+        } else {
+            scene.fill_rounded(Rect::new(r.x, top, r.w, solid.min(h)), 6.0, color(c));
+        }
         for k in 0..steps {
-            let a = (255.0 * (1.0 - (k as f32 + 0.5) / steps as f32)) as u8;
-            let y = top + solid + fade * k as f32 / steps as f32;
+            let f = (k as f32 + 0.5) / steps as f32;
+            let (a, y) = if down {
+                ((255.0 * f) as u8, top + fade * k as f32 / steps as f32)
+            } else {
+                ((255.0 * (1.0 - f)) as u8, top + solid + fade * k as f32 / steps as f32)
+            };
             scene.fill(Rect::new(r.x, y, r.w, fade / steps as f32 + 0.1), alpha(c, a));
         }
     })
@@ -192,6 +207,7 @@ fn contents(
     text: f32,
     playing: Option<usize>,
     cursor: Option<usize>,
+    down: bool,
 ) -> Element<Msg> {
     let (left, right) = panel::columns(album);
     let col = |lines: &[Line]| -> Element<Msg> {
@@ -213,7 +229,11 @@ fn contents(
     .spacing(3.0)
     .width(Length::FILL);
     boxed(row(vec![words, sleeve(i, album, covers, scale)]).spacing(panel::GAP).width(Length::FILL))
-        .padding(Padding { top: panel::MARGIN + panel::PAD, right: panel::PAD, bottom: panel::FOOT, left: panel::PAD })
+        .padding(if down {
+            Padding { top: panel::FOOT, right: panel::PAD, bottom: panel::MARGIN + panel::PAD, left: panel::PAD }
+        } else {
+            Padding { top: panel::MARGIN + panel::PAD, right: panel::PAD, bottom: panel::FOOT, left: panel::PAD }
+        })
         .radius(0.0)
         .width(Length::FILL)
         .height(Length::FILL)
@@ -233,11 +253,12 @@ pub fn open(
     text: f32,
     shown: f32,
     playing: Option<usize>,
+    down: bool,
 ) -> Element<Msg> {
     // The arrow points at the album's place on the wall as searched.
-    let mut layers = vec![ground(at, p)];
+    let mut layers = vec![ground(at, p, down)];
     if shown > 0.0 {
-        layers.push(contents(i, album, p, covers.as_deref(), scale, text, playing, cursor).opacity(shown));
+        layers.push(contents(i, album, p, covers.as_deref(), scale, text, playing, cursor, down).opacity(shown));
     }
     stack(layers).width(Length::FILL).height(Length::FILL)
 }

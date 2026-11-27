@@ -77,6 +77,11 @@ pub struct OpenView {
     pub playing: Option<usize>,
     /// The keyboard's track in it (the arrows), if the keyboard is in its tracks.
     pub cursor: Option<usize>,
+    /// It sits above its album's row and points down at it (an album in the
+    /// row under an open panel took it over in place); then `after` is a
+    /// place in the row above, the row the panel goes under.
+    pub down: bool,
+    pub after: Option<usize>,
 }
 
 /// One tile: the cover (or its placeholder), the title and the artist.
@@ -213,8 +218,9 @@ pub fn wall(
                 text,
                 o.shown,
                 o.playing,
+                o.down,
             );
-            (at, o.height, el)
+            (if o.down { o.after.unwrap_or(at) } else { at }, o.height, el)
         });
     let mut tiles = grid(
         count,
@@ -229,8 +235,9 @@ pub fn wall(
             tile(&albums[i], i, w, covers.as_deref(), scale, &g, open.as_ref(), &fades, keyed == Some(i))
         },
     );
-    if let Some((i, h, el)) = panel_el {
-        tiles = tiles.after_item(i, h, el);
+    // Under its album's row, or pointing down: under the row above it.
+    if let Some((after, h, el)) = panel_el {
+        tiles = tiles.after_item(after, h, el);
     }
     // Only panels and buttons take padding: the wall's margins are a panel's.
     scroll(

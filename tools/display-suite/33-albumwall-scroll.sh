@@ -5,7 +5,9 @@
 # A library of 300 albums made here (Hymie's tone16.flac with tags written
 # in, its own picture taken out, two tracks each); the keys page halfway
 # down, an album opened, its last track played (Stop when it ends): the
-# album at the top of the wall the same while it plays and after.
+# album at the top of the wall the same while it plays and after. Then the
+# album in the row under the open panel takes the panel over in place,
+# pointing down at it, with nothing above moving.
 scenario() {
     music=$OUT/music
     rm -rf "$music"
@@ -75,5 +77,27 @@ PY
     echo "  .. ended: $ended" >&2
     check "$(yes_if "! vctl tree $w | grep -q 'button \"Pause\"'")" "the album ends: the play bar goes"
     check "$(yes_if "[ '$ended' = '$before' ]")" "music ends: the wall keeps its place"
+    # The album in the row just under the open panel takes the panel over
+    # where it stands, pointing down at it (WallRows.PointsDown): nothing
+    # above it moves.
+    t=$(vctl tree "$w")
+    open=$(echo "$t" | grep -oE 'button "Play Album [0-9]+"' | head -1 | sed -E 's/button "Play (Album [0-9]+)"/\1/')
+    y_of() { echo "$t" | grep -F "button \"$1" | sed -nE 's/.* at -?[0-9]+,(-?[0-9]+) .*/\1/p' | head -1; }
+    oy=$(y_of "$open, ")
+    # The first tile of the next row down: the smallest y below the open album's.
+    below=$(echo "$t" | grep -E 'button "Album [0-9]+, Artist [0-9]+"' | sed -nE 's/.*button "(Album [0-9]+), Artist [0-9]+" at -?[0-9]+,(-?[0-9]+) .*/\2 \1/p' |
+        awk -v oy="${oy:-0}" '$1 > oy' | sort -n | head -1 | cut -d' ' -f2-)
+    echo "  .. open: $open at y ${oy:-?}; the row under the panel starts with: ${below:-?}" >&2
+    check "$(yes_if "[ -n '$open' ] && [ -n '$below' ]")" "an open album, and the row under its panel"
+    top_before=$(top)
+    vctl act "$w" "$(vctl tree "$w" | grep -F "button \"$below, " | grep -oE '#[0-9]+' | head -1 | tr -d '#')" press >/dev/null; sleep 1.2
+    t=$(vctl tree "$w")
+    check "$(yes_if "echo \"\$t\" | grep -qF 'button \"Play $below\"'")" "the album under the panel took it over"
+    py=$(echo "$t" | grep -F "button \"Play $below\"" | sed -nE 's/.* at -?[0-9]+,(-?[0-9]+) .*/\1/p' | head -1)
+    ny=$(y_of "$below, ")
+    echo "  .. its sleeve at y ${py:-?}, its tile at y ${ny:-?}; top ${top_before} then $(top)" >&2
+    check "$(yes_if "[ -n '$py' ] && [ -n '$ny' ] && [ '$py' -lt '$ny' ]")" "the panel stays above it, pointing down"
+    shot MEM-1 pointing-down >/dev/null
+    check "$(yes_if "[ \"\$(top)\" = '$top_before' ]")" "nothing above the panel moved"
     printf '%s\n' "$kept" > "$cfg"
 }

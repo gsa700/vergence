@@ -117,6 +117,9 @@ struct Opened {
     swap: Option<vergence_widgets::motion::Tween>,
     /// Its tile turning over to its back (400 ms).
     turn: vergence_widgets::motion::Tween,
+    /// Its panel sits above its row, pointing down at it: it took over the
+    /// panel of the album above it in place (WallRows.PointsDown).
+    down: bool,
 }
 
 /// The album folding away: its index, its height when open, the fold (330 ms).
@@ -124,6 +127,7 @@ struct Folding {
     index: usize,
     height: f32,
     fold: vergence_widgets::motion::Tween,
+    down: bool,
 }
 
 const UNFOLD_MS: u64 = 330;
@@ -1117,6 +1121,8 @@ impl AlbumWall {
                 turn: o.turn.in_out(now),
                 playing: self.playing_track(o.index),
                 cursor: self.track.filter(|_| self.keyed == Some(o.index)),
+                down: o.down,
+                after: self.after_place(o.index, o.down),
             });
         }
         let f = self.folding.as_ref()?;
@@ -1130,12 +1136,29 @@ impl AlbumWall {
             turn: left,
             playing: None,
             cursor: None,
+            down: f.down,
+            after: self.after_place(f.index, f.down),
         })
     }
 
+    /// For a panel pointing down: a place in the row above album `i`'s, the
+    /// row the panel goes under.
+    fn after_place(&self, i: usize, down: bool) -> Option<usize> {
+        if !down {
+            return None;
+        }
+        let (_, order) = self.wall_albums()?;
+        let at = order.iter().position(|&x| x == i)?;
+        let (cols, _) = self.grid();
+        at.checked_sub(cols.max(1))
+    }
+
     /// Album `i` pressed: it unfolds under its row (the wall gliding to
-    /// center it); pressed again, it folds; another in the same row takes
-    /// the panel's place where it stands, its contents changing.
+    /// center it); pressed again, it folds; an album in the row just above
+    /// the open panel or just under it takes the panel over where it stands,
+    /// its contents changing, pointing up or down at it (Dave's idea,
+    /// 2026-10-08, in the Avalonia app: no rolling up, scrolling and
+    /// unfolding another); anywhere else, the ordinary fold and unfold.
     fn press(&mut self, i: usize) {
         let reduced = self.reduced();
         let Some(albums) = self.shown.as_ref().map(|s| s.1.clone()) else { return };
@@ -1160,21 +1183,42 @@ impl AlbumWall {
                     index: i,
                     height: albums.get(i).map_or(0.0, |a| panel::height(a, text)),
                     fold: tween(UNFOLD_MS),
+                    down: o.down,
                 });
                 return;
             }
-            if place(o.index).map(|p| p / cols) == Some(at / cols) {
-                self.opened = Some(Opened {
-                    index: i,
-                    unfold: o.unfold,
-                    swap: Some(tween(CONTENTS_MS * 2)),
-                    turn: tween(TURN_MS),
-                });
-                return;
+            // The row the panel sits under, and whether it can be seen (a
+            // panel scrolled away is folded and another unfolded as usual).
+            if let Some(p) = place(o.index) {
+                let panel_row = (p / cols).saturating_sub(usize::from(o.down));
+                let top = wall::PAD_TOP + (panel_row + 1) as f32 * (tile_h + wall::GAP);
+                let old = albums.get(o.index).map_or(0.0, |a| panel::height(a, text));
+                let view_h = (self.size.1 - wallview::BAR).max(1.0);
+                let seen = top < self.wall_offset + view_h && top + old > self.wall_offset;
+                let row = at / cols;
+                if seen && (row == panel_row || row == panel_row + 1) {
+                    let down = row == panel_row + 1;
+                    self.opened = Some(Opened {
+                        index: i,
+                        unfold: o.unfold,
+                        swap: Some(tween(CONTENTS_MS * 2)),
+                        turn: tween(TURN_MS),
+                        down,
+                    });
+                    // Nothing above the panel moves; pointing down, the wall
+                    // scrolls only if the album's row would end below the view.
+                    let bottom = top + full + wall::GAP + tile_h;
+                    if down && bottom > self.wall_offset + view_h {
+                        let target = (bottom - view_h + wall::GAP).min(top).max(0.0);
+                        self.glide = Some((self.wall_offset, target, tween(UNFOLD_MS)));
+                    }
+                    return;
+                }
             }
         }
         self.folding = None;
-        self.opened = Some(Opened { index: i, unfold: tween(UNFOLD_MS), swap: None, turn: tween(TURN_MS) });
+        self.opened =
+            Some(Opened { index: i, unfold: tween(UNFOLD_MS), swap: None, turn: tween(TURN_MS), down: false });
         // The album and its panel centered in the wall, as far as they fit.
         let row_top = wall::PAD_TOP + (at / cols) as f32 * (tile_h + wall::GAP);
         let view_h = (self.size.1 - wallview::BAR).max(1.0);
@@ -1224,7 +1268,7 @@ impl AlbumWall {
         let mut y = wall::PAD_TOP + (at / cols) as f32 * (tile_h + wall::GAP);
         if let Some(o) = &self.opened
             && let Some(p) = order.iter().position(|&i| i == o.index)
-            && p / cols < at / cols
+            && (p / cols).saturating_sub(usize::from(o.down)) < at / cols
         {
             y += albums.get(o.index).map_or(0.0, |a| panel::height(a, self.text.get())) + wall::GAP;
         }

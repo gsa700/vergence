@@ -226,19 +226,61 @@ pub fn of_bytes(head: &[u8]) -> Option<&'static str> {
             _ => TEXT,
         });
     }
-    if lower.starts_with("<svg") || (lower.starts_with("<?xml") && lower.contains("<svg")) {
-        return Some("image/svg+xml");
-    }
     if lower.starts_with("<!doctype html") || lower.starts_with("<html") {
         return Some("text/html");
     }
-    if lower.starts_with("<?xml") {
-        return Some("application/xml");
+    // XML, or a picture in it: by its root element, past the declaration,
+    // comments, a DOCTYPE and processing instructions (AlbumWall's icon has
+    // a long comment before <svg>, past the first 512 characters, and was
+    // taken for plain XML: the dock showed its letter, 2026-11-26).
+    if start.starts_with('<') {
+        match xml_root(start).map(|r| r.to_ascii_lowercase()) {
+            Some(r) if r == "svg" || r.ends_with(":svg") => return Some("image/svg+xml"),
+            Some(r) if r == "html" => return Some("text/html"),
+            Some(_) => return Some("application/xml"),
+            None if start.starts_with("<?xml") => return Some("application/xml"),
+            None => {}
+        }
     }
     if start.starts_with("[Desktop Entry]") {
         return Some("application/x-desktop");
     }
     Some(TEXT)
+}
+
+/// The name of an XML document's root element: what follows the
+/// declaration, comments, processing instructions and a DOCTYPE (its
+/// internal subset in brackets included). None if what was read ends first
+/// or it is not XML-shaped.
+fn xml_root(text: &str) -> Option<&str> {
+    let mut rest = text;
+    loop {
+        rest = rest.trim_start();
+        if let Some(r) = rest.strip_prefix("<?") {
+            rest = &r[r.find("?>")? + 2..];
+        } else if let Some(r) = rest.strip_prefix("<!--") {
+            rest = &r[r.find("-->")? + 3..];
+        } else if rest.len() >= 9 && rest[..9].eq_ignore_ascii_case("<!doctype") {
+            let r = &rest[9..];
+            let gt = r.find('>')?;
+            // An internal subset ([...]) may hold '>' of its own: past its ']'.
+            let end = match r.find('[') {
+                Some(open) if open < gt => {
+                    let close = open + r[open..].find(']')?;
+                    close + r[close..].find('>')?
+                }
+                _ => gt,
+            };
+            rest = &r[end + 1..];
+        } else {
+            let r = rest.strip_prefix('<')?;
+            let end = r.find(|c: char| c.is_whitespace() || c == '>' || c == '/')?;
+            let name = &r[..end];
+            return (!name.is_empty()
+                && name.chars().all(|c| c.is_alphanumeric() || matches!(c, ':' | '_' | '-' | '.')))
+            .then_some(name);
+        }
+    }
 }
 
 /// Whether bytes read as text: no NUL, and UTF-8 (a character cut off at
@@ -702,6 +744,23 @@ mod tests {
         assert_eq!(of_bytes(b"#!/usr/bin/env python3\nprint()"), Some("text/x-python"));
         assert_eq!(of_bytes(b"#!/bin/sh\necho"), Some("application/x-shellscript"));
         assert_eq!(of_bytes(b"<?xml version=\"1.0\"?>\n<svg xmlns="), Some("image/svg+xml"));
+        // A long comment before the root (AlbumWall's icon), a comment and no
+        // declaration, a DOCTYPE with an internal subset, a prefixed root.
+        let long = format!("<?xml version=\"1.0\"?>\n<!--{}-->\n<svg xmlns=\"x\">", "a note. ".repeat(100));
+        assert_eq!(of_bytes(long.as_bytes()), Some("image/svg+xml"));
+        assert_eq!(of_bytes(b"<!-- drawn by hand -->\n<svg width=\"16\">"), Some("image/svg+xml"));
+        assert_eq!(
+            of_bytes(
+                b"<?xml version=\"1.0\"?><!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" [<!ENTITY a \"b\">]><svg>"
+            ),
+            Some("image/svg+xml")
+        );
+        assert_eq!(of_bytes(b"<?xml version=\"1.0\"?><svg:svg xmlns:svg=\"x\">"), Some("image/svg+xml"));
+        assert_eq!(
+            of_bytes(b"<?xml version=\"1.0\"?>\n<!-- svg inside -->\n<plist version=\"1.0\">"),
+            Some("application/xml")
+        );
+        assert_eq!(of_bytes(b"<?xml version=\"1.0\"?>\n<!-- cut off"), Some("application/xml"));
         assert_eq!(of_bytes(b"<!DOCTYPE html><html>"), Some("text/html"));
         assert_eq!(of_bytes("caf\u{e9} au lait".as_bytes()), Some(TEXT));
         assert_eq!(of_bytes(b""), Some(TEXT), "empty is text");

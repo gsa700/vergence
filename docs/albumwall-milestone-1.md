@@ -489,3 +489,17 @@ where any app can use it, not inside AlbumWall):
   ended). One shape now, the bar's place empty when nothing plays.
   Scenario 33-albumwall-scroll: 300 albums, paged halfway, the wall's top
   album the same as music starts and after it ends (it failed before).
+- **After the release** (2026-11-26, Dave: "icon and the row-below panel"):
+  - **Its icon in the dock and the bar's menu:** the dock showed AlbumWall's
+    letter because its icon was taken for plain XML ("XML is not a picture
+    this can show"): the icon opens with a long comment before `<svg>`, past
+    the first 512 characters where the type check looked. vergence-types
+    now decides an XML file by its root element, past the declaration,
+    comments, a DOCTYPE and processing instructions (any program's SVG with
+    a prolog was refused the same way). A test draws every icon the project
+    ships.
+  - **The row below an open panel:** an album there now takes the panel over
+    where it stands, pointing down at it (the Avalonia app's PointsDown,
+    Dave's idea of 2026-10-08), the arrow at its foot and its fade at its
+    head; nothing above it moves, and the wall scrolls only if the album's
+    row would end below the view. Scenario 33-albumwall-scroll checks it.

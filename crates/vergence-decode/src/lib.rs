@@ -700,6 +700,31 @@ mod tests {
         assert_eq!((p.width, p.height), (200, 100));
     }
 
+    /// Every icon the project ships is taken for an SVG and draws something
+    /// at the dock's size (AlbumWall's, with a long comment before its
+    /// <svg>, was taken for plain XML and the dock showed a letter).
+    #[test]
+    fn every_shipped_icon_draws() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/icons");
+        let mut files: Vec<std::path::PathBuf> = Vec::new();
+        for dir in [root.clone(), root.join("places"), root.join("kinds")] {
+            for e in std::fs::read_dir(&dir).unwrap().flatten() {
+                if e.path().extension().is_some_and(|x| x == "svg") {
+                    files.push(e.path());
+                }
+            }
+        }
+        assert!(files.len() > 10, "{} icons found", files.len());
+        for f in files {
+            // In this process (decode_file would run whichever helper is
+            // installed, maybe an older build).
+            let data = std::fs::read(&f).unwrap();
+            let p = decode_bytes(&data, Some((64, 64))).unwrap_or_else(|e| panic!("{}: {e}", f.display()));
+            let ink = p.frames[0].rgba.as_chunks::<4>().0.iter().filter(|px| px[3] > 0).count();
+            assert!(ink > 64 * 64 / 10, "{}: {ink} pixels drawn", f.display());
+        }
+    }
+
     #[test]
     fn what_is_not_a_picture_is_refused() {
         assert!(decode_bytes(b"just some text", None).unwrap_err().contains("not a picture"));
