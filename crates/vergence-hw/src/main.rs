@@ -669,8 +669,10 @@ impl Hardware {
                         let d = self.gpu_info.get(i).cloned().unwrap_or_default();
                         let mut rows =
                             vec![Hardware::line("Driver", g.driver.clone()), Hardware::line("Slot", g.slot.clone())];
-                        if !d.pci_id.is_empty() && d.pci_id != ":" {
-                            rows.push(Hardware::line("PCI ID", d.pci_id.clone()));
+                        // sysfs's reading (Linux), else the listing's own (FreeBSD's sysctls).
+                        let pci = if !d.pci_id.is_empty() && d.pci_id != ":" { &d.pci_id } else { &g.pci_id };
+                        if !pci.is_empty() {
+                            rows.push(Hardware::line("PCI ID", pci.clone()));
                         }
                         match (d.clock_mhz, d.max_mhz) {
                             (Some(c), Some(m)) => rows.push(Hardware::line("Clock", format!("{c} MHz, up to {m} MHz"))),

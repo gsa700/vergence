@@ -97,6 +97,34 @@ pub struct Gpu {
     pub driver: String,
     /// Awake (true), asleep (false), or the system does not say.
     pub awake: Option<bool>,
+    /// Vendor and device numbers, "8086:3e92".
+    pub pci_id: String,
+}
+
+/// A field of a PCI device's FreeBSD `%pnpinfo` ("vendor=0x8086 device=0x3e92 class=0x030000").
+pub fn pnp_field(pnp: &str, key: &str) -> Option<u32> {
+    let v = pnp.split_whitespace().find_map(|kv| kv.strip_prefix(key)?.strip_prefix('='))?;
+    u32::from_str_radix(v.trim_start_matches("0x"), 16).ok()
+}
+
+/// FreeBSD's `%location` ("slot=2 function=0 dbsf=pci0:0:2:0") as Linux names a slot,
+/// "0000:00:02.0", so both systems' slots read alike.
+pub fn dbsf_slot(location: &str) -> Option<String> {
+    let d = location.split_whitespace().find_map(|kv| kv.strip_prefix("dbsf=pci"))?;
+    let n: Vec<u32> = d.split(':').map(|x| x.parse().ok()).collect::<Option<_>>()?;
+    let [dom, bus, dev, func] = n[..] else { return None };
+    Some(format!("{dom:04x}:{bus:02x}:{dev:02x}.{func:x}"))
+}
+
+/// The DRM driver FreeBSD's `hw.dri.N` names for a slot, from (busid, name) pairs such as
+/// ("pci:0000:00:02.0", "i915 0x6d"): "i915". Empty when no DRM driver holds the card.
+pub fn dri_driver(slot: &str, dri: &[(String, String)]) -> String {
+    let want = format!("pci:{slot}");
+    dri.iter()
+        .find(|(bus, _)| bus.trim() == want)
+        .and_then(|(_, name)| name.split_whitespace().next())
+        .unwrap_or_default()
+        .to_string()
 }
 
 pub fn vendor_name(id: u32) -> String {
@@ -223,11 +251,14 @@ mod sys {
                 Some("suspended") | Some("suspending") => Some(false),
                 _ => None,
             };
+            let device =
+                read(&d, "device").and_then(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).ok()).unwrap_or(0);
             out.push(Gpu {
                 slot: d.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
                 vendor: vendor_name(vendor),
                 driver,
                 awake,
+                pci_id: format!("{vendor:04x}:{device:04x}"),
             });
         }
         out
@@ -290,8 +321,44 @@ mod sys {
         p
     }
 
+    /// A sysctl's text (`%pnpinfo`, `hw.dri.0.name`), None when there is no such sysctl.
+    fn text(name: &str) -> Option<String> {
+        let c = std::ffi::CString::new(name).ok()?;
+        let mut len = 0usize;
+        // SAFETY: a NUL-terminated name; the first call asks only for the length.
+        if unsafe { sysctlbyname(c.as_ptr(), std::ptr::null_mut(), &mut len, std::ptr::null(), 0) } != 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; len];
+        // SAFETY: a buffer of the length the first call gave.
+        if unsafe { sysctlbyname(c.as_ptr(), buf.as_mut_ptr(), &mut len, std::ptr::null(), 0) } != 0 {
+            return None;
+        }
+        buf.truncate(len);
+        Some(String::from_utf8_lossy(&buf).trim_end_matches('\0').to_string())
+    }
+
+    /// Each display device the kernel's vgapci driver holds (any user may read these sysctls),
+    /// with the DRM driver hw.dri names for its slot. Whether it sleeps: FreeBSD does not say.
     pub fn gpus() -> Vec<Gpu> {
-        Vec::new()
+        let dri: Vec<(String, String)> = (0..8)
+            .filter_map(|i| Some((text(&format!("hw.dri.{i}.busid"))?, text(&format!("hw.dri.{i}.name"))?)))
+            .collect();
+        (0..16)
+            .filter_map(|i| {
+                let pnp = text(&format!("dev.vgapci.{i}.%pnpinfo"))?;
+                let slot = dbsf_slot(&text(&format!("dev.vgapci.{i}.%location"))?)?;
+                let vendor = pnp_field(&pnp, "vendor").unwrap_or(0);
+                let device = pnp_field(&pnp, "device").unwrap_or(0);
+                Some(Gpu {
+                    vendor: vendor_name(vendor),
+                    driver: dri_driver(&slot, &dri),
+                    awake: None,
+                    pci_id: format!("{vendor:04x}:{device:04x}"),
+                    slot,
+                })
+            })
+            .collect()
     }
 }
 
@@ -300,7 +367,7 @@ pub fn power() -> Power {
     sys::power()
 }
 
-/// Its GPUs and whether each is awake (Linux; empty on FreeBSD).
+/// Its GPUs and whether each is awake (Linux says; FreeBSD lists them without).
 pub fn gpus() -> Vec<Gpu> {
     sys::gpus()
 }
@@ -311,6 +378,28 @@ pub fn duration_text(minutes: u32) -> String {
         (0, m) => format!("{m} min"),
         (h, 0) => format!("{h} h"),
         (h, m) => format!("{h} h {m} min"),
+    }
+}
+
+#[cfg(test)]
+mod pci_tests {
+    use super::*;
+
+    /// kepler's UHD 630 as FreeBSD's sysctls give it.
+    #[test]
+    fn freebsd_gpu_readings() {
+        let pnp = "vendor=0x8086 device=0x3e92 subvendor=0x17aa subdevice=0x3136 class=0x030000";
+        assert_eq!(pnp_field(pnp, "vendor"), Some(0x8086));
+        assert_eq!(pnp_field(pnp, "device"), Some(0x3e92));
+        assert_eq!(pnp_field(pnp, "subvendor"), Some(0x17aa));
+        assert_eq!(pnp_field(pnp, "nothing"), None);
+        let slot = dbsf_slot("slot=2 function=0 dbsf=pci0:0:2:0 handle=\\_SB_.PCI0.GFX0").unwrap();
+        assert_eq!(slot, "0000:00:02.0");
+        assert_eq!(dbsf_slot("dbsf=pci0:1:0:0").as_deref(), Some("0000:01:00.0"));
+        assert_eq!(dbsf_slot("slot=2"), None);
+        let dri = vec![("pci:0000:00:02.0".to_string(), "i915 0x6d".to_string())];
+        assert_eq!(dri_driver(&slot, &dri), "i915");
+        assert_eq!(dri_driver("0000:01:00.0", &dri), "");
     }
 }
 
