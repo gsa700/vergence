@@ -61,6 +61,16 @@ PY
     vctl focus "$w" >/dev/null; sleep 0.3
     n=0; while [ $n -lt 8 ]; do vctl key Page_Down >/dev/null; sleep 0.25; n=$((n + 1)); done
     vctl key Return >/dev/null; sleep 1.5
+    # The open panel centered in the wall (the Avalonia app's TargetOffset;
+    # Dave, 2026-11-27): its sleeve's middle near the wall's, not half a row
+    # lower as when the album's row and its panel were centered together.
+    t=$(vctl tree "$w")
+    set -- $(echo "$t" | grep -E 'button "Play Album [0-9]+"' | head -1 | sed -nE 's/.* at -?[0-9]+,(-?[0-9]+) [0-9]+x([0-9]+).*/\1 \2/p') 0 0
+    sleeve_mid=$(($1 + $2 / 2))
+    wall_h=$(echo "$t" | grep -E 'scroll area "wall"' | sed -nE 's/.* [0-9]+x([0-9]+).*/\1/p' | head -1)
+    echo "  .. the open panel's sleeve middle at y $sleeve_mid, the wall's at $((${wall_h:-0} / 2))" >&2
+    check "$(yes_if "near $sleeve_mid $((${wall_h:-0} / 2)) 60")" "an opened album's panel centered in the wall"
+    shot MEM-1 opened >/dev/null
     before=$(top)
     echo "  .. the top with an album open halfway down: $before" >&2
     check "$(yes_if "[ -n '$before' ] && [ '$before' != 'button \"Album 000, Artist 000\"' ]")" "paged halfway down the wall"

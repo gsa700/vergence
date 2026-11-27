@@ -1564,12 +1564,30 @@ impl AlbumWall {
             down: false,
             back_at: std::cell::Cell::new(None),
         });
-        // The album and its panel centered in the wall, as far as they fit.
+        // Its panel centered in the wall (MainWindow TargetOffset).
         let row_top = wall::PAD_TOP + (at / cols) as f32 * (tile_h + wall::GAP);
-        let view_h = self.view_height();
-        let block = tile_h + wall::GAP + full;
-        let target = (row_top - ((view_h - block) / 2.0).max(0.0)).max(0.0);
+        let target = self.panel_target(row_top, tile_h, full, false);
         self.glide = Some((self.wall_offset, target, tween(UNFOLD_MS)));
+    }
+
+    /// Where the wall scrolls to for an open panel, as the Avalonia app's
+    /// TargetOffset: the panel itself centered in what can be seen (the play
+    /// bar's height left out), its top at the top when it is taller than
+    /// that; a panel pointing down at the row under it is centered together
+    /// with that row, and when both cannot fit the row wins, at the bottom.
+    /// Dave, 2026-11-27: the album and its panel were centered as one block,
+    /// leaving the panel low ("I still had to scroll up a bit").
+    fn panel_target(&self, row_top: f32, tile_h: f32, full: f32, down: bool) -> f32 {
+        let view = self.view_height();
+        let target = if down {
+            let panel_top = row_top - wall::GAP - full;
+            let unit = full + wall::GAP + tile_h;
+            if unit > view { panel_top + unit - view } else { panel_top - (view - unit) / 2.0 }
+        } else {
+            let panel_top = row_top + tile_h + wall::GAP;
+            if full > view { panel_top } else { panel_top - (view - full) / 2.0 }
+        };
+        target.max(0.0)
     }
 
     /// Escape: the open album folds.
@@ -1801,8 +1819,8 @@ impl AlbumWall {
         self.press(a);
     }
 
-    /// The open album `a` and its panel centered in the wall, as far as they
-    /// fit; with `if_away`, only if it is out of sight now.
+    /// The open album `a`'s panel centered in the wall (`panel_target`); with
+    /// `if_away`, only if it is out of sight now.
     fn bring_back(&mut self, a: usize, if_away: bool) {
         let Some((albums, order)) = self.wall_albums() else { return };
         let Some(at) = order.iter().position(|&x| x == a) else { return };
@@ -1813,8 +1831,8 @@ impl AlbumWall {
         if if_away && top + tile_h + full > self.wall_offset && top < self.wall_offset + view {
             return;
         }
-        let block = tile_h + wall::GAP + full;
-        let target = (top - ((view - block) / 2.0).max(0.0)).max(0.0);
+        let down = self.opened.as_ref().is_some_and(|o| o.index == a && o.down);
+        let target = self.panel_target(top, tile_h, full, down);
         self.glide = Some((self.wall_offset, target, vergence_widgets::motion::Tween::new(UNFOLD_MS, self.reduced())));
     }
 
