@@ -98,11 +98,14 @@
 //! as the program's name, bold and larger, beside the window's buttons.
 //! Version 47 (AlbumWall's bar, its old look with our controls, Dave): `Bar::Brand` may
 //! carry a `window::BrandLook`, the program's own ground, rule, ink and bar height.
+//! Version 48 (AlbumWall's wordmark, Dave: "our logo in place of the standard title"):
+//! `BrandLook::mark`, the name as lettering in place of the title, and `lead`, its first
+//! letter's color.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 47;
+pub const VERSION: u32 = 48;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
