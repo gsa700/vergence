@@ -105,7 +105,20 @@ pub enum Command {
     Stop,
     /// The app's own volume, 0 to 1.
     Volume(f32),
+    /// Every song given, in this order (a shuffle of the wall's songs):
+    /// each its path, its album (the window's) and its number in that
+    /// album, which the state reports as `Now`'s tag and track. When the
+    /// last one ends, `ended` is [`SHUFFLE`].
+    Shuffle {
+        tracks: Vec<(PathBuf, usize, usize)>,
+        loudness: Loudness,
+    },
+    /// The meters read after ReplayGain (true) or as mastered.
+    MetersAfterGain(bool),
 }
+
+/// The tag a shuffle of songs plays under, and `ended` when it is over.
+pub const SHUFFLE: usize = usize::MAX;
 
 /// What is playing, as heard.
 #[derive(Debug, Clone, PartialEq)]
@@ -227,7 +240,11 @@ struct Engine {
     wake: Box<dyn Fn() + Send>,
     tracks: Vec<PathBuf>,
     tag: usize,
+    /// A shuffle's album and track for each place in `tracks` (empty: one album's).
+    map: Vec<(usize, usize)>,
     loudness: Loudness,
+    /// The meters summed after the gain rather than before.
+    after_gain: bool,
     volume: f32,
     current: Option<Open>,
     next: Option<Open>,
@@ -258,7 +275,9 @@ impl Engine {
             wake,
             tracks: Vec::new(),
             tag: 0,
+            map: Vec::new(),
             loudness: Loudness::Album,
+            after_gain: false,
             volume: 1.0,
             current: None,
             next: None,
@@ -301,6 +320,7 @@ impl Engine {
             Command::Play { tracks, from, tag, loudness } => {
                 self.tracks = tracks;
                 self.tag = tag;
+                self.map.clear();
                 self.loudness = loudness;
                 self.paused = false;
                 self.next = None;
@@ -310,6 +330,7 @@ impl Engine {
             Command::Load { tracks, from, tag, loudness, seconds } => {
                 self.tracks = tracks;
                 self.tag = tag;
+                self.map.clear();
                 self.loudness = loudness;
                 self.next = None;
                 self.flush();
@@ -356,6 +377,16 @@ impl Engine {
                 self.publish(None);
             }
             Command::Volume(v) => self.volume = v.clamp(0.0, 1.0),
+            Command::Shuffle { tracks, loudness } => {
+                (self.tracks, self.map) = tracks.into_iter().map(|(p, a, t)| (p, (a, t))).unzip();
+                self.tag = SHUFFLE;
+                self.loudness = loudness;
+                self.paused = false;
+                self.next = None;
+                self.flush();
+                self.start(0, 0);
+            }
+            Command::MetersAfterGain(on) => self.after_gain = on,
         }
         self.publish(None);
     }
@@ -525,14 +556,16 @@ impl Engine {
                 };
                 let raw = src(i) * (1.0 - t) + src(i + 1) * t;
                 let v = raw * gain;
-                // The level block, summed as mastered (before the gain).
+                // The level block, summed as mastered (before the gain),
+                // or as ReplayGain sends it on, if chosen.
+                let m = if self.after_gain { v } else { raw };
                 if c == 0 {
-                    self.level.1 += raw * raw;
+                    self.level.1 += m * m;
                     if och == 1 {
-                        self.level.2 += raw * raw;
+                        self.level.2 += m * m;
                     }
                 } else if c == 1 {
-                    self.level.2 += raw * raw;
+                    self.level.2 += m * m;
                 }
                 // TPDF dither: two uniform randoms of a half step each.
                 let mut r = || {
@@ -600,10 +633,16 @@ impl Engine {
                 }
             }
         }
+        // A shuffle's place told as its album and track.
+        let now = now.map(|n| match self.map.get(n.track) {
+            Some(&(tag, track)) => Now { tag, track, ..n },
+            None => n,
+        });
         let important;
         {
             let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            let changed = s.now.as_ref().map(|n| (n.track, n.paused)) != now.as_ref().map(|n| (n.track, n.paused));
+            let key = |n: &Now| (n.tag, n.track, n.paused);
+            let changed = s.now.as_ref().map(key) != now.as_ref().map(key);
             important = changed || problem.is_some() || s.ended.is_some() || now.is_none();
             s.meter.paused = self.paused;
             s.now = now;
@@ -785,6 +824,42 @@ mod tests {
         e.command(Command::Pause(true));
         let m = e.state.lock().unwrap().meter.clone();
         assert_eq!(m.dbfs(std::time::Instant::now())[0], f64::NEG_INFINITY, "paused: the needles fall");
+    }
+
+    #[test]
+    fn a_shuffle_tells_each_songs_album_and_number() {
+        let kept: Arc<Mutex<Vec<i16>>> = Arc::default();
+        let mut e = engine(vec![(44100, 4410, 0.5), (44100, 4410, 0.5)], kept.clone());
+        let t = e.tracks.clone();
+        e.command(Command::Shuffle {
+            tracks: vec![(t[1].clone(), 9, 4), (t[0].clone(), 2, 0)],
+            loudness: Loudness::Off,
+        });
+        let n = e.state.lock().unwrap().now.clone().unwrap();
+        assert_eq!((n.tag, n.track), (9, 4));
+        e.command(Command::Next);
+        let n = e.state.lock().unwrap().now.clone().unwrap();
+        assert_eq!((n.tag, n.track), (2, 0));
+        play_out(&mut e);
+        assert_eq!(e.state.lock().unwrap().ended, Some(SHUFFLE));
+        // An album after it: its own numbers again.
+        e.command(Command::Play { tracks: t, from: 1, tag: 5, loudness: Loudness::Off });
+        let n = e.state.lock().unwrap().now.clone().unwrap();
+        assert_eq!((n.tag, n.track), (5, 1));
+    }
+
+    #[test]
+    fn the_meters_can_read_after_the_gain() {
+        let kept: Arc<Mutex<Vec<i16>>> = Arc::default();
+        let mut e = engine(vec![(48000, 96000, 0.5)], kept.clone());
+        e.command(Command::Volume(0.5));
+        e.command(Command::MetersAfterGain(true));
+        e.command(Command::Play { tracks: e.tracks.clone(), from: 0, tag: 0, loudness: Loudness::Off });
+        for _ in 0..10 {
+            e.piece();
+        }
+        let db = e.state.lock().unwrap().meter.dbfs(std::time::Instant::now());
+        assert!((db[0] - -12.04).abs() < 0.1, "{db:?}");
     }
 
     #[test]

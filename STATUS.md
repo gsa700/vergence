@@ -55,7 +55,11 @@ releases were added late).
 
 ## Next
 
-1. **Vergence Remote**, the rest of it (docs/remote-milestone-1.md, redrafted 2026-11-23
+0. **v0.4.0, the AlbumWall release** (Dave, 2026-11-26: "0.4.0 for AlbumWall,
+   Remote moves to 0.5.0"): tagged when AlbumWall milestone 1 closes (step 8,
+   Settings, built 2026-11-26; step 9 the checks, then Dave's pass on his own
+   library on techbench), with frost milestone 1 and edit syntax if closed.
+1. **Vergence Remote** (for 0.5.0), the rest of it (docs/remote-milestone-1.md, redrafted 2026-11-23
    with Dave): an app to use a Vergence machine from another as if at it
    (a KVM for use, not hardware), over SSH (WireGuard as the path), our own
    protocol only: display lists and compressed pixels, input, clipboard,

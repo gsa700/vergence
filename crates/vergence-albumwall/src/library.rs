@@ -135,7 +135,7 @@ pub fn folder_year(name: &str) -> Option<i32> {
 /// A picture beside or in the tracks, measured, with what it came from
 /// (the decoded cover's cache keys on its size and time, so a sleeve
 /// replaced in place is decoded again).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Art {
     pub path: PathBuf,
     /// The picture is in this track, not a file of its own.
@@ -149,7 +149,7 @@ pub struct Art {
 }
 
 /// One track of an album.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Track {
     pub disc: u32,
     pub number: u32,

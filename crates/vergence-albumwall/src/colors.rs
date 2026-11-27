@@ -328,6 +328,8 @@ pub const MAX_LIGHT: u32 = 40;
 /// Where Dave settled, on two very different screens.
 pub const DEFAULT_LIGHT: u32 = 21;
 pub const DEFAULT_TINT: u32 = 2;
+/// Tint's top, in percent saturation (the Avalonia slider's Maximum).
+pub const MAX_TINT: u32 = 14;
 /// The body text of every dark window, and the dim text as designed.
 pub const BODY_TEXT: Rgb = Rgb(0xF3, 0xEE, 0xE6);
 pub const DIM_TEXT: Rgb = Rgb(0xA2, 0x97, 0x8A);
@@ -376,7 +378,7 @@ impl Ground {
     /// `chrome` one of [`CHROMES`].
     pub fn new(hue: f64, light: u32, tint: u32, chrome: &Chrome) -> Ground {
         let l = light.clamp(MIN_LIGHT, MAX_LIGHT) as f64;
-        let sat = tint.min(14) as f64 / 100.0;
+        let sat = tint.min(MAX_TINT) as f64 / 100.0;
         // No lighter than light text can be read on: the field, the lightest
         // thing on the bars, sits five points above the bar.
         let bar_l = ((l + chrome.bar_delta) / 100.0)

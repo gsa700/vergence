@@ -26,31 +26,8 @@ const COVER: f32 = 58.0;
 /// The meters' width.
 const METERS: f32 = 214.0;
 
-/// What happens when an album ends.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Ending {
-    Stop,
-    NextAlbum,
-    RandomAlbum,
-}
-
-impl Ending {
-    pub fn next(self) -> Ending {
-        match self {
-            Ending::Stop => Ending::NextAlbum,
-            Ending::NextAlbum => Ending::RandomAlbum,
-            Ending::RandomAlbum => Ending::Stop,
-        }
-    }
-
-    pub fn words(self) -> &'static str {
-        match self {
-            Ending::Stop => "Stop when the album ends",
-            Ending::NextAlbum => "Then the next album",
-            Ending::RandomAlbum => "Then a random album",
-        }
-    }
-}
+/// What happens when an album ends (the settings' choice).
+pub use vergence_albumwall::settings::AfterAlbum as Ending;
 
 /// A glyph drawn in `c`, `s` points square.
 #[derive(Clone, Copy)]
@@ -83,7 +60,7 @@ pub fn glyph(g: Glyph, s: f32, c: Rgb) -> Element<Msg> {
             Glyph::Previous | Glyph::Next => (10.0, 12.0),
             Glyph::Play => (12.0, 14.0),
             Glyph::Pause => (11.0, 14.0),
-            Glyph::Ending(Ending::RandomAlbum) => (14.0, 14.0),
+            Glyph::Ending(Ending::RandomAlbum | Ending::ShuffleSongs) => (14.0, 14.0),
             Glyph::Ending(_) => (14.0, 12.0),
         };
         let (x0, y0) = (r.x + (r.w - bw) / 2.0, r.y + (r.h - bh) / 2.0);
@@ -113,7 +90,8 @@ pub fn glyph(g: Glyph, s: f32, c: Rgb) -> Element<Msg> {
                 line(scene, (11.0, 6.0), (7.0, 10.0));
                 line(scene, (14.0, 1.0), (14.0, 11.0));
             }
-            Glyph::Ending(Ending::RandomAlbum) => {
+            // Crossed arrows for either shuffle (ShowPlayMode).
+            Glyph::Ending(Ending::RandomAlbum | Ending::ShuffleSongs) => {
                 // Crossed arrows, a box 14 tall from y -1 to 13.
                 let d = 1.0;
                 let pts = [
@@ -157,8 +135,10 @@ pub struct Shown<'a> {
     pub length: f64,
     pub paused: bool,
     pub ending: Ending,
-    /// The meters' needles (0 to about 1.05 of their arcs).
+    /// The meters' needles (0 to about 1.05 of their arcs), and whether
+    /// they are shown (Appearance › Show meters in the play controls).
     pub needles: [f32; 2],
+    pub meters: bool,
     /// The seek bar while it is dragged (seconds).
     pub scrub: Option<f64>,
 }
@@ -233,16 +213,14 @@ pub fn bar(s: &Shown, p: &Palette, covers: Option<&Arc<Covers>>, scale: f32) -> 
     .spacing(12.0)
     .align(Align::Center)
     .width(Length::FILL);
-    boxed(
-        row(vec![face, words, controls, seek, crate::vumeter::pair(s.needles, METERS, HEIGHT - 20.0)])
-            .spacing(18.0)
-            .align(Align::Center)
-            .width(Length::FILL)
-            .height(Length::FILL),
-    )
-    .padding(Padding::hv(12.0, 18.0))
-    .color(color(p.light))
-    .radius(0.0)
-    .width(Length::FILL)
-    .height(Length::Fixed(HEIGHT))
+    let mut parts = vec![face, words, controls, seek];
+    if s.meters {
+        parts.push(crate::vumeter::pair(s.needles, METERS, HEIGHT - 20.0));
+    }
+    boxed(row(parts).spacing(18.0).align(Align::Center).width(Length::FILL).height(Length::FILL))
+        .padding(Padding::hv(12.0, 18.0))
+        .color(color(p.light))
+        .radius(0.0)
+        .width(Length::FILL)
+        .height(Length::Fixed(HEIGHT))
 }

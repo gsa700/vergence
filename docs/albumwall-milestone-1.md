@@ -358,3 +358,65 @@ where any app can use it, not inside AlbumWall):
     the Avalonia AlbumWall; at each step a side-by-side, every difference
     fixed or written down as a decision. Shots in techbench
     ~/Pictures/AlbumWall-Reference/.
+- **Step 8, Preferences** (2026-11-26; Dave: "lets continue the albumwall
+  porting"):
+  - **Decided** (Dave, 2026-11-26), asked whether AlbumWall should use
+    every Vergence app's one-page settings window: "There are too many
+    settings for a single page layout. we learned that building albumwall.
+    so use our toolkit but mimic the layout from avalonia". So prefswin.rs
+    is AlbumWall's own window, laid out as PrefsWindow.axaml: a 168-point
+    sidebar of pages (About set apart at its foot, the arrow keys moving
+    through it), the page on the light sheet beside it, each page
+    scrolling on its own, 780 by 640 and never under 640 by 480; the
+    Avalonia window's colors (the desk, the sheet, its edge, the picked
+    line, the ink); written straight through, no OK button. Its title is
+    Vergence's word, "AlbumWall Settings" (Ctrl+, and the app menu's
+    Settings…).
+  - **The pages**: Library (the libraries, each line with Switch to and
+    Settings…, Add a folder…, and the selected library's numbers: the five
+    totals, file types with their shares, bitrates, lossless rates, cover
+    art with "show on the wall" for `art:missing` and `art:small`; stats.rs,
+    kept beside the index so a library not on the wall shows "as of" its
+    last read); Playback (pick up where I left off, …and start playing,
+    when an album ends, ReplayGain by album, track or off, meters read
+    after ReplayGain); Appearance (the hue found and where it came from,
+    Light and Tint shown on the wall as they move and written when let go,
+    Bars, show the meters, back to the defaults); Accessibility (motion:
+    follow the desktop, always or never reduced; text size 100, 115, 130,
+    150%); Keys and search (Vergence's keys: Ctrl+arrows, no volume keys);
+    About. A library's own window (LibrarySettingsWindow's milestone 1
+    part): its name, its folder, Rescan while it is on the wall, Forget.
+    Not ported: Updates (the package), Navidrome, the equalizer, peak hold
+    (milestone 2), the Start Menu and install sections.
+  - settings.rs: every choice in desktop.toml's `[albumwall]` (resume,
+    auto-play, after-album, replaygain, meters-after-gain, light, tint,
+    bars, meters, reduced-motion, text-size), absent = the Avalonia app's
+    default, the default chosen again takes the key away; tested.
+  - **Shuffle all songs**, the fourth way an album can end (it was left
+    out of step 6): player.rs's `Command::Shuffle` plays every song the
+    wall shows in a random order and reports each song's album and number,
+    so the play bar and the panel show it and the wall opens each album as
+    its song starts; Next while an album plays in this mode starts the
+    shuffle (MainWindow.PlayNext). The play bar's button goes round all
+    four and writes the same setting. Next and random albums now take the
+    albums the wall shows (with a search, only those), as in the Avalonia
+    app. Loudness until chosen: by album, by track for a shuffle of songs
+    (step 6 had random albums by track).
+  - **Toolkit**: `checkbox` and `radio` (ButtonLook::Check and ::Radio: a
+    button with its words, so focus, keys, hover and the agent interface
+    are a button's; the meaning tree says "checkbox" or "radio" with on or
+    off; a chosen radio sends nothing); `Program::text_scale`, a program's
+    own text size times the screen's (every named size grows with it).
+  - The error screens were already in (no sound output in the status
+    line, "cannot be reached", "Reading your library"); nothing changed.
+  - Checked headless on Hubble: every page shot; a check box, a radio
+    button, Bars, the Light slider and the text size, each written to
+    desktop.toml and the wall following (Light 35 and the lift bars on the
+    wall, the text 130% in both windows, the covers their size); a
+    library's window.
+  - **Decided** (Dave, 2026-11-26): the open album's empty row under its
+    header (30 points and its 14-point gap, kept since the Shuffle button
+    went on 2026-11-01; Lyrics went under the sleeve) stays, in the port
+    and in the Avalonia app: "keep in both for now, there was a reason we
+    kept them, as I recall I thought it looked crowded right up against
+    the titles".

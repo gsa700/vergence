@@ -338,6 +338,46 @@ fn meet(a: Rect, b: Rect) -> Rect {
     Rect::new(x, y, ((a.x + a.w).min(b.x + b.w) - x).max(0.0), ((a.y + a.h).min(b.y + b.h) - y).max(0.0))
 }
 
+/// A check box's or radio button's box, at the left of its button `r`,
+/// centered on its first line: an edged square (a circle for a radio)
+/// on the page's ground, the accent filled with a white tick (a white
+/// dot) when on; faded when it cannot be pressed, its edge darker under
+/// the pointer.
+fn check_box(scene: &mut Scene, r: &Rect, look: ButtonLook, ticked: bool, usable: bool, hot: bool, theme: &Theme) {
+    let s = crate::element::CHECK_BOX;
+    // The words' first line (theme.text_size is the screen's already).
+    let line_h = (theme.text_size * 1.3).max(s);
+    let b = Rect::new(r.x, (r.y + 2.0 + (line_h - s) / 2.0).round(), s, s);
+    let radio = matches!(look, ButtonLook::Radio(_));
+    let rad = if radio { s / 2.0 } else { 3.5 };
+    let fade = |c: Color| if usable { c } else { alpha(c, c.a / 2) };
+    let white = Color::rgb(255, 255, 255);
+    if ticked {
+        scene.fill_rounded(b, rad, fade(theme.accent));
+        if radio {
+            let d = 6.0;
+            scene.fill_rounded(Rect::new(b.x + (s - d) / 2.0, b.y + (s - d) / 2.0, d, d), d / 2.0, fade(white));
+        } else {
+            let (x, y) = (b.x, b.y);
+            scene.line(Point::new(x + 4.0, y + 8.5), Point::new(x + 7.0, y + 11.5), 2.0, fade(white));
+            scene.line(Point::new(x + 7.0, y + 11.5), Point::new(x + 12.5, y + 5.0), 2.0, fade(white));
+        }
+        if hot {
+            scene.fill_rounded(b, rad, theme.hover);
+        }
+    } else {
+        let edge = if theme.high_contrast {
+            theme.text
+        } else if hot {
+            over(theme.line, alpha(theme.text, 110))
+        } else {
+            over(theme.line, alpha(theme.text, 60))
+        };
+        scene.fill_rounded(b, rad, fade(if theme.dark { alpha(white, 18) } else { white }));
+        scene.stroke(b, rad, 1.0, fade(edge));
+    }
+}
+
 fn over(base: Color, top: Color) -> Color {
     // `top` laid over `base` at its alpha; the result keeps `base`'s alpha.
     let a = top.a as u32;
@@ -910,6 +950,8 @@ impl<M: Clone> Ui<M> {
     fn activate(&mut self, id: Id, r: &mut Response<M>) {
         let Some(i) = self.index(id) else { return };
         match &self.nodes[i].what {
+            // A radio button already chosen stays chosen: nothing to send.
+            What::Button { look: ButtonLook::Radio(true), .. } => {}
             What::Button { on_press: Some(m), .. } => r.messages.push(m.clone()),
             What::Switch { on, on_toggle: Some(f) } => r.messages.push(f(!*on)),
             What::Choice { selected, on_select: Some(_), .. } => {
@@ -2327,6 +2369,8 @@ impl<M: Clone> Ui<M> {
                         ButtonLook::Accent => (tint(Some(theme.accent)), Some((theme.accent, 1.0)), radius, white),
                         ButtonLook::Chosen => (Some(theme.accent), None, radius, white),
                         ButtonLook::Custom { fill, edge, radius } => (tint(fill), edge, radius, inherited),
+                        // The box is the control; the words beside it take no ground.
+                        ButtonLook::Check(_) | ButtonLook::Radio(_) => (None, None, radius, inherited),
                     };
                     // One that cannot be pressed is faded, its own color kept.
                     let fade = |c: Color| if on { c } else { Color { a: c.a / 2, ..c } };
@@ -2335,6 +2379,9 @@ impl<M: Clone> Ui<M> {
                     }
                     if let Some((c, w)) = edge {
                         scene.stroke(r, rad, w, fade(c));
+                    }
+                    if let ButtonLook::Check(ticked) | ButtonLook::Radio(ticked) = *look {
+                        check_box(scene, &r, *look, ticked, on, hot || down, theme);
                     }
                     let strong = matches!(look, ButtonLook::Accent | ButtonLook::Chosen);
                     mine = if on {
@@ -2740,7 +2787,18 @@ impl<M: Clone> Ui<M> {
                     if *look == ButtonLook::Chosen {
                         states.push("selected");
                     }
-                    mk("button", named(self.text_under(i)), None, states)
+                    match *look {
+                        ButtonLook::Check(t) => {
+                            mk("checkbox", named(self.text_under(i)), Some(if t { "on" } else { "off" }.into()), states)
+                        }
+                        ButtonLook::Radio(t) => {
+                            if t {
+                                states.push("selected");
+                            }
+                            mk("radio", named(self.text_under(i)), Some(if t { "on" } else { "off" }.into()), states)
+                        }
+                        _ => mk("button", named(self.text_under(i)), None, states),
+                    }
                 }
                 What::Rule { .. } => mk("separator", String::new(), None, states),
                 What::Switch { on, on_toggle } => {

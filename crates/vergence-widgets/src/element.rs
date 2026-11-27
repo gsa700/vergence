@@ -79,6 +79,10 @@ pub enum ButtonLook {
     Chosen,
     /// The program's own: a ground, an edge (color, width), a radius.
     Custom { fill: Option<Color>, edge: Option<(Color, f32)>, radius: f32 },
+    /// A check box, ticked or not, its words beside it ([`checkbox`]).
+    Check(bool),
+    /// One of a group of which one is chosen ([`radio`]).
+    Radio(bool),
 }
 
 /// A slider's own colors: the track up to its value, the rest of it, the
@@ -644,6 +648,40 @@ pub fn button<M>(child: Element<M>) -> Element<M> {
             padding: Padding::hv(5.0, 14.0),
             on_press: None,
             look: ButtonLook::Normal,
+            on_drag: None,
+        },
+        Length::Shrink,
+        Length::Shrink,
+    )
+}
+
+/// The box of a check box or radio button, and the room from its left
+/// edge to its words.
+pub(crate) const CHECK_BOX: f32 = 16.0;
+pub(crate) const CHECK_GAP: f32 = 8.0;
+
+/// A check box with its words: pressing either changes it. The program
+/// gives it `on_press` (what it sends: the box's new state is `!on`).
+/// Where a page has many settings the words carry them better than a
+/// switch at the far side of a row (AlbumWall's preferences, Dave
+/// 2026-11-26: "mimic the layout from avalonia").
+pub fn checkbox<M>(on: bool, words: impl Into<String>) -> Element<M> {
+    toggle(ButtonLook::Check(on), words.into())
+}
+
+/// One choice of several, with its words; pressing it chooses it (an
+/// already chosen one sends nothing). The program gives it `on_press`.
+pub fn radio<M>(on: bool, words: impl Into<String>) -> Element<M> {
+    toggle(ButtonLook::Radio(on), words.into())
+}
+
+fn toggle<M>(look: ButtonLook, words: String) -> Element<M> {
+    Element::new(
+        Kind::Button {
+            child: Box::new(label(words)),
+            padding: Padding { top: 2.0, right: 4.0, bottom: 2.0, left: CHECK_BOX + CHECK_GAP },
+            on_press: None,
+            look,
             on_drag: None,
         },
         Length::Shrink,
