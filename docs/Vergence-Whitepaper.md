@@ -468,7 +468,7 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
 - **VDM:** the login and lock screens (§7.5).
 - **Meaning:** widgets acted on by meaning, the magnifier, the agent interface with permission, the terminal on it.
 - **The tools** of §6.10, with sound through PipeWire, archives, drives and PDFs.
-- **Releases:** packages for Void, 0.1.0 to 0.3.0 between November 22 and 23; 0.4.0 on November 26, with AlbumWall for Vergence, syntax colors in Edit and the frosted terminal. Vergence Remote follows in 0.5.0.
+- **Releases:** packages for Void, 0.1.0 to 0.3.0 between November 22 and 23; 0.4.0 on November 26, with AlbumWall for Vergence, syntax colors in Edit and the frosted terminal, and 0.4.1 the same evening with two fixes. Vergence Remote follows in 0.5.0.
 
 **Display testing.** Since November 18, three layers check what reaches the screen, all running on headless screens: geometry tests at every clean scale with no GPU; a test-pattern window with a one-pixel line on each edge, stepped through the scales and checked pixel by pixel; and a suite of scenarios (hot-plug, a window rescued and given back its place, a scale changed under a window, two scales side by side, the GPU against the CPU reference, the magnifier, syntax colors, the frosted terminal, AlbumWall's wall playing and keeping its place) that runs on the development machines before anything that draws is pushed. Its first runs found a picture drawn one pixel taller than it was shown at 120% (rounding in single precision).
 

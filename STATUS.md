@@ -12,10 +12,11 @@ sync.
 
 ## In progress
 
-- **v0.4.0, the AlbumWall release** (Dave, 2026-11-26: "0.4.0 for AlbumWall,
-  Remote moves to 0.5.0"): its milestones closed; the release being
-  prepared (version, notes, the whitepaper), then the tag and its GitHub
-  Release on Dave's word.
+- **v0.4.1 released 2026-11-26**, two fixes on v0.4.0 (released the same
+  evening, the AlbumWall release): on FreeBSD every Wayland program's window
+  was marked as the superuser's (the server now reads each client's user
+  and process from the socket itself); Terminal's Shift+Return sends Escape
+  then Return (a new line in Claude Code).
 - **Vergence Remote** (docs/remote-milestone-1.md, for 0.5.0): steps 1 to 5
   and the first part of step 6 built (2026-11-23); paused for AlbumWall.
   Left: the desk login taking the monitorless session onto the monitors,
