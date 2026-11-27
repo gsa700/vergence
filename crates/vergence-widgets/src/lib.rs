@@ -199,13 +199,6 @@ pub trait Program {
         None
     }
 
-    /// The program's own text size, times the screen's (1.0: as the desktop
-    /// has it): AlbumWall's Accessibility › Text size makes every text in
-    /// its windows larger, sizes a label names included. Asked each frame.
-    fn text_scale(&self) -> f32 {
-        1.0
-    }
-
     /// The window's height follows its content when it opens: the toolkit
     /// measures what its outermost scrolling place holds and asks for that
     /// (the server keeps it on the screen). False by default.
@@ -730,20 +723,18 @@ impl<P: Program> Host<P> {
             self.scale = frame.scale;
             self.stale |= self.program.scale(frame.scale);
         }
-        // Text as large on this screen as on any (Frame::text), times the
-        // program's own text size, if it has one.
-        let text = frame.text * self.program.text_scale().clamp(0.5, 3.0);
         if self.stale
             || self.laid_at != (frame.width, frame.height)
             || self.theme.top != frame.top
             || self.tint != frame.tint
-            || self.theme.text_factor != text
+            || self.theme.text_factor != frame.text
         {
             self.theme = self.program.theme();
             self.theme.top = frame.top;
-            self.theme.text_factor = text;
-            self.theme.text_size = vergence_look::text_size(self.theme.text_size, text);
-            self.ui.set_text_factor(text);
+            // Text as large on this screen as on any (Frame::text).
+            self.theme.text_factor = frame.text;
+            self.theme.text_size = vergence_look::text_size(self.theme.text_size, frame.text);
+            self.ui.set_text_factor(frame.text);
             // The server draws right-click menus on the native road.
             self.ui.set_server_menus(frame.native);
             // The wallpaper's color behind the window (tint, window styles milestone 1).

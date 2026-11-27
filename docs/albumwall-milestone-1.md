@@ -437,3 +437,23 @@ where any app can use it, not inside AlbumWall):
   Pause, Next, the play mode in words, "Go to <album>" on its cover, the
   seek bar "Position". Package vergence-0.4.0pre17 (step 8) installed on
   techbench at 18:48. Left: Dave's pass on his own library on techbench.
+- **The app menu** (Dave, 2026-11-26: "go ahead, build the menu. also add
+  the file edit etc as needed and the keyboard shortcuts"), as every
+  Vergence app's: File (Add a folder… Ctrl+O, Rescan the library Ctrl+R,
+  Close window), Edit (Paste into the search box, Find… Ctrl+F), View (Full
+  screen F11, Meters in the play bar, Go to what's playing Ctrl+L, Keys and
+  search… F1), Playback (Play / Pause Space, Next and Previous track
+  Ctrl+Right and Left, forward and back ten seconds Shift+Right and Left,
+  the four ways an album ends and the three ReplayGain choices as checked
+  items), Library (each library, the one on the wall checked; Library
+  statistics…), then Settings… Ctrl+, and About. The choices are Settings'
+  own, as the Avalonia gear menu's were; the everyday few on the first
+  panel.
+- **Decided** (Dave, 2026-11-26), asked whether AlbumWall needs its own
+  accessibility choices on Vergence ("since it's coded to vergence and we
+  handle that in the server"): "Yes, do it". The Accessibility page is
+  gone, with its motion and text size settings and the toolkit's
+  `Program::text_scale`; motion, text size and contrast are the desktop's
+  (Settings › Accessibility), as in every Vergence app. The Avalonia app
+  had its own because other desktops gave it nothing to read. Its "Always
+  on" paragraph moved to About.

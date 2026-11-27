@@ -51,6 +51,25 @@ mod cmd {
     pub const ABOUT: u32 = 2;
     pub const RESCAN: u32 = 3;
     pub const SETTINGS: u32 = 4;
+    pub const CLOSE: u32 = 5;
+    pub const PASTE: u32 = 6;
+    pub const FIND: u32 = 7;
+    pub const FULL_SCREEN: u32 = 8;
+    pub const METERS: u32 = 9;
+    pub const GO_TO_PLAYING: u32 = 10;
+    pub const KEYS: u32 = 11;
+    pub const PLAY_PAUSE: u32 = 20;
+    pub const NEXT: u32 = 21;
+    pub const PREVIOUS: u32 = 22;
+    pub const FORWARD: u32 = 23;
+    pub const BACK: u32 = 24;
+    /// When an album ends: AFTER + its place in AfterAlbum::ALL.
+    pub const AFTER: u32 = 30;
+    /// ReplayGain by album, by track, off.
+    pub const GAIN: u32 = 40;
+    pub const STATISTICS: u32 = 50;
+    /// The libraries: LIBRARY + its place in the list.
+    pub const LIBRARY: u32 = 100;
 }
 
 mod timer {
@@ -61,6 +80,8 @@ mod timer {
     pub const SAID: u64 = 3;
     /// The meters' needles stepped (30 a second, only while they move).
     pub const METERS: u64 = 4;
+    /// The menu's Paste, once the search box has the keyboard.
+    pub const PASTE: u64 = 5;
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +138,7 @@ const SEEK_STEP: f64 = 10.0;
 /// Keys vergence_ui::sym does not name: Enter on the keypad, F11.
 const KP_ENTER: u32 = 0xff8d;
 const F11: u32 = 0xffc8;
+const F1: u32 = 0xffbe;
 /// The meters' tick: 30 a second (VuMeter.cs: half the frames, the same spring).
 const METER_TICK: Duration = Duration::from_millis(33);
 
@@ -214,6 +236,8 @@ struct AlbumWall {
     /// Full screen (F11), and a place to jump the wall to (no glide).
     fullscreen: bool,
     jump: Option<f32>,
+    /// The menu's Paste, waiting for the search box to have the keyboard.
+    paste_wanted: bool,
 }
 
 impl AlbumWall {
@@ -272,6 +296,7 @@ impl AlbumWall {
             focus_wanted: None,
             fullscreen: false,
             jump: None,
+            paste_wanted: false,
         }
     }
 
@@ -799,6 +824,13 @@ impl AlbumWall {
             if self.opened.as_ref().is_none_or(|o| o.index != a) {
                 self.press(a);
             }
+        }
+    }
+
+    /// Forward or back in the track playing, kept within it.
+    fn seek_by(&mut self, step: f64) {
+        if let Some(n) = self.player.as_ref().and_then(|p| p.state().now) {
+            self.send(Command::Seek((n.seconds + step).clamp(0.0, n.length)));
         }
     }
 
@@ -1445,9 +1477,21 @@ impl AlbumWall {
                 return Some(true);
             }
             sym::RIGHT | sym::LEFT if m.shift && !m.ctrl && !m.alt && !typing => {
-                let n = loaded?;
-                let to = (n.seconds + if key == sym::RIGHT { SEEK_STEP } else { -SEEK_STEP }).clamp(0.0, n.length);
-                self.send(Command::Seek(to));
+                loaded?;
+                self.seek_by(if key == sym::RIGHT { SEEK_STEP } else { -SEEK_STEP });
+                return Some(true);
+            }
+            // The menu's keys: Add a folder…, Rescan, Keys and search.
+            _ if m.ctrl && !m.alt && !m.shift && letter('o') => {
+                self.choose_folder(window);
+                return Some(true);
+            }
+            _ if m.ctrl && !m.alt && !m.shift && letter('r') => {
+                self.read(true);
+                return Some(true);
+            }
+            F1 if !m.ctrl && !m.alt => {
+                self.open_settings(Some(prefswin::Page::Keys), window);
                 return Some(true);
             }
             _ => {}
@@ -1554,10 +1598,6 @@ impl Program for AlbumWall {
                 ..t
             };
         }
-        // Settings › Accessibility › Motion: the desktop's unless chosen.
-        if let Some(r) = self.settings.reduce_motion {
-            t.reduced_motion = r;
-        }
         // The library on the wall: its ground and text are the window's.
         if self.shown.is_some() {
             let g = self.ground();
@@ -1570,12 +1610,6 @@ impl Program for AlbumWall {
 
     fn bar_style(&self) -> Option<BarStyle> {
         Some(BarStyle::Dark)
-    }
-
-    /// Settings › Accessibility › Text size: the names under the covers,
-    /// the open album and the play controls grow; the covers keep their size.
-    fn text_scale(&self) -> f32 {
-        self.settings.text_size as f32 / 100.0
     }
 
     fn view(&self, t: &Theme) -> Element<Msg> {
@@ -1723,6 +1757,12 @@ impl Program for AlbumWall {
     }
 
     fn timer(&mut self, id: u64, window: &mut Window) -> bool {
+        if id == timer::PASTE {
+            if std::mem::take(&mut self.paste_wanted) && self.focus.as_deref() == Some("search") {
+                window.paste();
+            }
+            return true;
+        }
         if id == timer::RETRY && self.unreachable.is_some() {
             self.read(false);
         }
@@ -1740,16 +1780,54 @@ impl Program for AlbumWall {
         true
     }
 
+    /// The app menu, as every Vergence app's: File, Edit and View, then
+    /// Playback and Library, the everyday few on its first panel. The choices
+    /// here are Settings' own (the Avalonia app's gear menu held the same:
+    /// the play mode, ReplayGain, rescan, full screen, Keys and search).
     fn commands(&self) -> Option<(bool, Vec<C>)> {
-        Some((
-            false,
-            vec![
-                C::own(cmd::ADD_FOLDER, "Library", "Add a folder…", "").featured(),
-                C::own(cmd::RESCAN, "Library", "Rescan the library", ""),
-                C::role(cmd::SETTINGS, Role::Settings),
-                C::role(cmd::ABOUT, Role::About),
-            ],
-        ))
+        let s = &self.settings;
+        let wall = self.shown.is_some();
+        let loaded = self.player.as_ref().and_then(|p| p.state().now).is_some();
+        let mut list = vec![
+            C::own(cmd::ADD_FOLDER, "File", "Add a folder…", "Ctrl+O").featured(),
+            C::own(cmd::RESCAN, "File", "Rescan the library", "Ctrl+R").enabled(self.libraries.current().is_some()),
+            C::role(cmd::CLOSE, Role::CloseWindow),
+            C::role(cmd::PASTE, Role::Paste).enabled(wall),
+            C::role(cmd::FIND, Role::Find).enabled(wall).featured(),
+            C::role(cmd::FULL_SCREEN, Role::FullScreen).checked(self.fullscreen).featured(),
+            C::own(cmd::METERS, "View", "Meters in the play bar", "").checked(s.meters),
+            C::own(cmd::GO_TO_PLAYING, "View", "Go to what's playing", "Ctrl+L").enabled(self.playing.is_some()),
+            C::own(cmd::KEYS, "View", "Keys and search…", "F1"),
+            C::own(cmd::PLAY_PAUSE, "Playback", "Play / Pause", "Space")
+                .enabled(loaded || self.playing.is_some())
+                .featured(),
+            C::own(cmd::NEXT, "Playback", "Next track", "Ctrl+Right").enabled(loaded),
+            C::own(cmd::PREVIOUS, "Playback", "Previous track", "Ctrl+Left").enabled(loaded),
+            C::own(cmd::FORWARD, "Playback", "Forward ten seconds", "Shift+Right").enabled(loaded),
+            C::own(cmd::BACK, "Playback", "Back ten seconds", "Shift+Left").enabled(loaded),
+        ];
+        for (i, a) in AfterAlbum::ALL.iter().enumerate() {
+            list.push(C::own(cmd::AFTER + i as u32, "Playback", a.words(), "").checked(s.after == *a));
+        }
+        let gain = s.gain.unwrap_or(vergence_albumwall::player::Loudness::Album);
+        for (i, (g, words)) in [
+            (vergence_albumwall::player::Loudness::Album, "ReplayGain by album"),
+            (vergence_albumwall::player::Loudness::Track, "ReplayGain by track"),
+            (vergence_albumwall::player::Loudness::Off, "ReplayGain off"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            list.push(C::own(cmd::GAIN + i as u32, "Playback", words, "").checked(gain == g));
+        }
+        for (i, l) in self.libraries.list.iter().enumerate().take(50) {
+            list.push(C::own(cmd::LIBRARY + i as u32, "Library", &l.name, "").checked(i == self.libraries.current));
+        }
+        list.push(
+            C::own(cmd::STATISTICS, "Library", "Library statistics…", "").enabled(!self.libraries.list.is_empty()),
+        );
+        list.extend([C::role(cmd::SETTINGS, Role::Settings), C::role(cmd::ABOUT, Role::About)]);
+        Some((false, list))
     }
 
     fn command(&mut self, id: u32, window: &mut Window) {
@@ -1757,6 +1835,40 @@ impl Program for AlbumWall {
             cmd::ADD_FOLDER => self.choose_folder(window),
             cmd::RESCAN => self.read(true),
             cmd::SETTINGS => self.open_settings(None, window),
+            cmd::CLOSE => window.close(),
+            // Into the search box: the window's one field.
+            cmd::PASTE => {
+                if self.focus.as_deref() == Some("search") {
+                    window.paste();
+                } else {
+                    self.focus_wanted = Some(Some("search".into()));
+                    self.paste_wanted = true;
+                    window.wake_after(timer::PASTE, Duration::from_millis(60));
+                }
+            }
+            cmd::FIND => self.focus_wanted = Some(Some("search".into())),
+            cmd::FULL_SCREEN => {
+                self.fullscreen = !self.fullscreen;
+                window.set_fullscreen(self.fullscreen);
+            }
+            cmd::METERS => self.write_settings(Settings { meters: !self.settings.meters, ..self.settings.clone() }),
+            cmd::GO_TO_PLAYING => self.update(Msg::GoToPlaying, window),
+            cmd::KEYS => self.open_settings(Some(prefswin::Page::Keys), window),
+            cmd::STATISTICS => self.open_settings(Some(prefswin::Page::Library), window),
+            cmd::PLAY_PAUSE => self.update(Msg::PlayPause, window),
+            cmd::NEXT => self.update(Msg::Next, window),
+            cmd::PREVIOUS => self.update(Msg::Previous, window),
+            cmd::FORWARD | cmd::BACK => self.seek_by(if id == cmd::FORWARD { SEEK_STEP } else { -SEEK_STEP }),
+            id if (cmd::AFTER..cmd::AFTER + 4).contains(&id) => {
+                let after = AfterAlbum::ALL[(id - cmd::AFTER) as usize];
+                self.write_settings(Settings { after, ..self.settings.clone() });
+            }
+            id if (cmd::GAIN..cmd::GAIN + 3).contains(&id) => {
+                use vergence_albumwall::player::Loudness;
+                let gain = [Loudness::Album, Loudness::Track, Loudness::Off][(id - cmd::GAIN) as usize];
+                self.write_settings(Settings { gain: Some(gain), ..self.settings.clone() });
+            }
+            id if id >= cmd::LIBRARY => self.update(Msg::Library((id - cmd::LIBRARY) as usize), window),
             cmd::ABOUT => {
                 let about = vergence_widgets::about::About::new(
                     APP_ID,

@@ -7,7 +7,9 @@
 //! The names and defaults are the Avalonia app's (Settings.cs): resume on,
 //! auto-play off, stop when an album ends, ReplayGain chosen by what is
 //! playing until it is chosen here, Light 21, Tint 2, the ink bars, the
-//! meters shown, motion and text size following the desktop.
+//! meters shown. Motion and text size are the desktop's (Settings ›
+//! Accessibility), as for every Vergence app: the Avalonia app had its own
+//! because other desktops gave it nothing to read (Dave, 2026-11-26).
 
 use crate::colors;
 use crate::player::Loudness;
@@ -62,9 +64,6 @@ impl AfterAlbum {
     }
 }
 
-/// The text size choices, in percent of the desktop's (TextSize.Choices).
-pub const TEXT_SIZES: [u32; 4] = [100, 115, 130, 150];
-
 /// Every choice, read from desktop.toml's text.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
@@ -79,10 +78,6 @@ pub struct Settings {
     /// An index into colors::CHROMES.
     pub bars: usize,
     pub meters: bool,
-    /// None: the desktop's.
-    pub reduce_motion: Option<bool>,
-    /// Percent of the desktop's text size.
-    pub text_size: u32,
 }
 
 impl Default for Settings {
@@ -97,8 +92,6 @@ impl Default for Settings {
             tint: colors::DEFAULT_TINT,
             bars: colors::DEFAULT_CHROME,
             meters: true,
-            reduce_motion: None,
-            text_size: 100,
         }
     }
 }
@@ -132,8 +125,6 @@ impl Settings {
             tint: number("tint").map_or(d.tint, |t| t.min(colors::MAX_TINT)),
             bars: get("bars").and_then(|v| colors::CHROMES.iter().position(|c| c.name == v)).unwrap_or(d.bars),
             meters: flag("meters", d.meters),
-            reduce_motion: get("reduced-motion").map(|v| v != "false"),
-            text_size: number("text-size").filter(|p| TEXT_SIZES.contains(p)).unwrap_or(d.text_size),
         }
     }
 
@@ -161,8 +152,6 @@ impl Settings {
             ("tint", differs(self.tint != d.tint, self.tint.to_string())),
             ("bars", differs(self.bars != d.bars, format!("\"{}\"", colors::CHROMES[self.bars].name))),
             ("meters", differs(self.meters != d.meters, self.meters.to_string())),
-            ("reduced-motion", self.reduce_motion.map(|b| b.to_string())),
-            ("text-size", differs(self.text_size != d.text_size, self.text_size.to_string())),
         ]
     }
 
@@ -201,8 +190,6 @@ mod tests {
             tint: 9,
             bars: 0,
             meters: false,
-            reduce_motion: Some(false),
-            text_size: 130,
         };
         let text = s.write_into("[appearance]\naccent = \"#123456\"\n");
         assert_eq!(Settings::from_text(&text), s);
@@ -215,11 +202,8 @@ mod tests {
 
     #[test]
     fn out_of_range_is_held_or_ignored() {
-        let s = Settings::from_text("[albumwall]\nlight = 99\ntint = 40\nbars = \"chrome\"\ntext-size = 120\n");
-        assert_eq!(
-            (s.light, s.tint, s.bars, s.text_size),
-            (colors::MAX_LIGHT, colors::MAX_TINT, colors::DEFAULT_CHROME, 100)
-        );
+        let s = Settings::from_text("[albumwall]\nlight = 99\ntint = 40\nbars = \"chrome\"\n");
+        assert_eq!((s.light, s.tint, s.bars), (colors::MAX_LIGHT, colors::MAX_TINT, colors::DEFAULT_CHROME));
     }
 
     #[test]

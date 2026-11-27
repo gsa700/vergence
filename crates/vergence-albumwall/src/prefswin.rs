@@ -28,7 +28,7 @@ use std::rc::Rc;
 
 use vergence_albumwall::colors;
 use vergence_albumwall::player::Loudness;
-use vergence_albumwall::settings::{AfterAlbum, Settings, TEXT_SIZES};
+use vergence_albumwall::settings::{AfterAlbum, Settings};
 use vergence_albumwall::stats::{self, Stats};
 use vergence_scene::Color;
 use vergence_widgets::{
@@ -43,21 +43,18 @@ pub enum Page {
     Library,
     Playback,
     Appearance,
-    Accessibility,
     Keys,
     About,
 }
 
 impl Page {
-    const ALL: [Page; 6] =
-        [Page::Library, Page::Playback, Page::Appearance, Page::Accessibility, Page::Keys, Page::About];
+    const ALL: [Page; 5] = [Page::Library, Page::Playback, Page::Appearance, Page::Keys, Page::About];
 
     fn name(self) -> &'static str {
         match self {
             Page::Library => "Library",
             Page::Playback => "Playback",
             Page::Appearance => "Appearance",
-            Page::Accessibility => "Accessibility",
             Page::Keys => "Keys and search",
             Page::About => "About",
         }
@@ -157,8 +154,9 @@ const PANEL_EDGE: Color = Color { r: 0, g: 0, b: 0, a: 0x38 };
 const UNDER: f32 = 24.0;
 
 /// The sheet's theme: light, in the Avalonia window's colors, with the
-/// desktop's accent, fonts and contrast; high contrast keeps its own.
-pub fn sheet_theme(desktop: &str, s: &Settings) -> Theme {
+/// desktop's accent, fonts, text size, contrast and motion; high contrast
+/// keeps its own colors.
+pub fn sheet_theme(desktop: &str) -> Theme {
     let mut t = Theme::from_desktop(desktop, false, "[settings window]");
     let d = Theme::new(false, t.accent, t.high_contrast);
     t = Theme {
@@ -174,9 +172,6 @@ pub fn sheet_theme(desktop: &str, s: &Settings) -> Theme {
     };
     if !t.high_contrast {
         (t.page, t.card, t.line, t.text, t.dim, t.sidebar) = (DESK, SHEET, EDGE, INK, DIM, DESK);
-    }
-    if let Some(r) = s.reduce_motion {
-        t.reduced_motion = r;
     }
     t
 }
@@ -224,8 +219,6 @@ pub enum Msg {
     Bars(usize),
     Meters(bool),
     Defaults,
-    Motion(Option<bool>),
-    TextSize(usize),
     Select(PathBuf),
     SwitchTo(usize),
     LibrarySettings(usize),
@@ -324,7 +317,7 @@ impl Prefs {
     }
 
     fn high_contrast(&self) -> bool {
-        sheet_theme(&self.desktop, &self.settings).high_contrast
+        sheet_theme(&self.desktop).high_contrast
     }
 
     fn page(&self, page: Page, t: &Theme) -> Element<Msg> {
@@ -332,7 +325,6 @@ impl Prefs {
             Page::Library => self.library_page(t),
             Page::Playback => self.playback_page(),
             Page::Appearance => self.appearance_page(t),
-            Page::Accessibility => self.accessibility_page(t),
             Page::Keys => keys_page(),
             Page::About => about_page(),
         };
@@ -503,47 +495,6 @@ impl Prefs {
                 .padding(Padding { left: 70.0, top: 2.0, ..Padding::all(0.0) }),
         ])
         .spacing(16.0)
-        .width(Length::FILL)
-    }
-
-    fn accessibility_page(&self, t: &Theme) -> Element<Msg> {
-        let s = &self.settings;
-        let desktop_reduces = Theme::from_desktop(&self.desktop, false, "[settings window]").reduced_motion;
-        let _ = t;
-        let sizes: Vec<String> = TEXT_SIZES.iter().map(|p| format!("{p}%")).collect();
-        let at = TEXT_SIZES.iter().position(|p| *p == s.text_size);
-        column(vec![
-            title("Accessibility"),
-            heading("Motion"),
-            note(
-                "The play controls slide in, an album unfolds, the wall glides to it and the playing track's marker breathes. With motion reduced, all of it happens at once and the marker holds still.",
-            ),
-            with_note(
-                radio(
-                    s.reduce_motion.is_none(),
-                    format!("Follow the desktop ({} now)", if desktop_reduces { "reduced" } else { "full motion" }),
-                )
-                .on_press(Msg::Motion(None)),
-                "Settings › Accessibility › Reduce motion.",
-            ),
-            radio(s.reduce_motion == Some(true), "Always reduce motion").on_press(Msg::Motion(Some(true))),
-            radio(s.reduce_motion == Some(false), "Never reduce motion").on_press(Msg::Motion(Some(false))),
-            heading("Text size"),
-            note(
-                "Makes the text larger everywhere in the app. On the wall, the names under the covers, the open album and the play controls grow, and the covers keep their size. This window and the app's other windows grow whole, buttons and spacing with the text.",
-            ),
-            row(vec![
-                choice(sizes, at, Msg::TextSize).width(Length::Fixed(120.0)).name("Text size"),
-                label("Applies at once.").size(13.0).dim(),
-            ])
-            .spacing(12.0)
-            .align(Align::Center),
-            heading("Always on"),
-            note(
-                "Everything can be reached from the keyboard: the arrow keys move from cover to cover and into an album's tracks, and Keys and search lists the rest. Every control has a name for a screen reader. Text is always held to a minimum contrast against whatever color the wall takes from your covers.",
-            ),
-        ])
-        .spacing(14.0)
         .width(Length::FILL)
     }
 
@@ -863,6 +814,10 @@ fn about_page() -> Element<Msg> {
                 "Hymie, AlbumWall's own: the decoders, each run confined in a helper of its own, and gapless playback at each file's own rate.",
             ),
             fact(
+                "Accessibility",
+                "Motion, text size and contrast are the desktop's: Settings › Accessibility. Everything can be reached from the keyboard (Keys and search lists it), every control has a name for a screen reader, and text is always held to a minimum contrast against whatever color the wall takes from your covers.",
+            ),
+            fact(
                 "The original",
                 "The AlbumWall this one is rebuilt from runs on the Mac, Windows and the Raspberry Pi, and looks the same.",
             ),
@@ -948,15 +903,11 @@ impl Program for Prefs {
     }
 
     fn theme(&self) -> Theme {
-        sheet_theme(&self.desktop, &self.settings)
+        sheet_theme(&self.desktop)
     }
 
     fn bar_style(&self) -> Option<vergence_ui::BarStyle> {
         Some(vergence_ui::BarStyle::Light)
-    }
-
-    fn text_scale(&self) -> f32 {
-        self.settings.text_size as f32 / 100.0
     }
 
     fn view(&self, t: &Theme) -> Element<Msg> {
@@ -1021,12 +972,6 @@ impl Program for Prefs {
             Msg::Defaults => {
                 let d = Settings::default();
                 self.write(Settings { light: d.light, tint: d.tint, bars: d.bars, meters: d.meters, ..s });
-            }
-            Msg::Motion(r) => self.write(Settings { reduce_motion: r, ..s }),
-            Msg::TextSize(i) => {
-                if let Some(p) = TEXT_SIZES.get(i) {
-                    self.write(Settings { text_size: *p, ..s })
-                }
             }
             Msg::Select(folder) => self.link.borrow_mut().selected = Some(folder),
             Msg::SwitchTo(i) => {
@@ -1129,7 +1074,6 @@ pub struct LibrarySettings {
     link: Shared,
     app_id: String,
     desktop: String,
-    settings: Settings,
     /// The name as typed, until it is kept.
     name: Option<String>,
 }
@@ -1148,8 +1092,7 @@ impl LibrarySettings {
         let desktop = vergence_widgets::prefs::desktop_path()
             .map(|p| vergence_config::effective_text_with(Some(&p)))
             .unwrap_or_default();
-        let settings = Settings::from_text(&desktop);
-        LibrarySettings { link, app_id: app_id.into(), desktop, settings, name: None }
+        LibrarySettings { link, app_id: app_id.into(), desktop, name: None }
     }
 
     fn library(&self) -> Option<(usize, Line, bool)> {
@@ -1179,15 +1122,11 @@ impl Program for LibrarySettings {
 
     /// A library's name is not prose: no spelling marks under it.
     fn theme(&self) -> Theme {
-        Theme { spell: false, ..sheet_theme(&self.desktop, &self.settings) }
+        Theme { spell: false, ..sheet_theme(&self.desktop) }
     }
 
     fn bar_style(&self) -> Option<vergence_ui::BarStyle> {
         Some(vergence_ui::BarStyle::Light)
-    }
-
-    fn text_scale(&self) -> f32 {
-        self.settings.text_size as f32 / 100.0
     }
 
     fn view(&self, t: &Theme) -> Element<LibMsg> {
