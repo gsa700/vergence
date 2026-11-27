@@ -1052,12 +1052,55 @@ pub use os::{cpu, cpu_details, disk_io, machine, memory, os_name, temps, topolog
 /// A graphics card's details: its PCI ids, and its clock now and at most in
 /// MHz where the driver says (Intel i915's gt_*_freq_mhz; amdgpu's
 /// pp_dpm_sclk), and its own memory (amdgpu's mem_info_vram_total).
+///
+/// The card's own sensors, as any user may read them: amdgpu's and
+/// nouveau's hwmon (temperatures, power, fan) and amdgpu's busy share and
+/// memory in use. Never read while the card sleeps (`asleep`): a read of its
+/// hwmon or pp_dpm wakes a laptop's discrete card and keeps it awake.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GpuDetails {
     pub pci_id: String,
+    pub asleep: bool,
     pub clock_mhz: Option<u32>,
     pub max_mhz: Option<u32>,
     pub vram: Option<u64>,
+    pub vram_used: Option<u64>,
+    pub busy_percent: Option<u32>,
+    pub sensors: GpuSensors,
+}
+
+/// A card's hwmon readings: each temperature with its label ("edge",
+/// "junction"; empty where the driver gives none, as nouveau's one), the
+/// power it draws in watts, its fan's speed.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct GpuSensors {
+    pub temps: Vec<(String, f32)>,
+    pub watts: Option<f32>,
+    pub fan_rpm: Option<u32>,
+}
+
+/// The card's hwmon folder (`<device>/hwmon/hwmonN`), read: tempN_input in
+/// millidegrees, power1_average (amdgpu) or power1_input (nouveau, newer
+/// amdgpu) in microwatts, fan1_input in RPM. A fan reading 0 is a stopped
+/// fan (amdgpu's zero-RPM idle) and shown so.
+pub fn read_gpu_hwmon(dir: &Path) -> GpuSensors {
+    let mut s = GpuSensors::default();
+    let mut nums: Vec<u32> = std::fs::read_dir(dir)
+        .map(|d| {
+            d.flatten()
+                .filter_map(|e| e.file_name().to_str()?.strip_prefix("temp")?.strip_suffix("_input")?.parse().ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    nums.sort_unstable();
+    for i in nums {
+        let Ok(milli) = read(dir.join(format!("temp{i}_input"))).trim().parse::<i64>() else { continue };
+        s.temps.push((read(dir.join(format!("temp{i}_label"))).trim().to_string(), milli as f32 / 1000.0));
+    }
+    let micro = |f: &str| read(dir.join(f)).trim().parse::<u64>().ok();
+    s.watts = micro("power1_average").or_else(|| micro("power1_input")).map(|uw| uw as f32 / 1_000_000.0);
+    s.fan_rpm = read(dir.join("fan1_input")).trim().parse().ok();
+    s
 }
 
 /// amdgpu's pp_dpm_sclk: "0: 500Mhz\n1: 2400Mhz *": (now, most).
@@ -1081,6 +1124,11 @@ pub fn gpu_details(slot: &str) -> GpuDetails {
     let dev = format!("/sys/bus/pci/devices/{slot}");
     let hex = |f: &str| read(format!("{dev}/{f}")).trim().trim_start_matches("0x").to_string();
     let mut d = GpuDetails { pci_id: format!("{}:{}", hex("vendor"), hex("device")), ..Default::default() };
+    // runtime_status itself never wakes the card; everything below might.
+    if read(format!("{dev}/power/runtime_status")).trim() == "suspended" {
+        d.asleep = true;
+        return d;
+    }
     let card = std::fs::read_dir(format!("{dev}/drm")).ok().and_then(|r| {
         r.flatten()
             .map(|e| e.path())
@@ -1097,6 +1145,12 @@ pub fn gpu_details(slot: &str) -> GpuDetails {
         d.max_mhz = d.max_mhz.or(most);
     }
     d.vram = read(format!("{dev}/mem_info_vram_total")).trim().parse().ok();
+    d.vram_used = read(format!("{dev}/mem_info_vram_used")).trim().parse().ok();
+    d.busy_percent = read(format!("{dev}/gpu_busy_percent")).trim().parse().ok();
+    let mon = std::fs::read_dir(format!("{dev}/hwmon")).ok().and_then(|r| r.flatten().map(|e| e.path()).min());
+    if let Some(mon) = mon {
+        d.sensors = read_gpu_hwmon(&mon);
+    }
     d
 }
 
@@ -1409,6 +1463,46 @@ mod tests {
     fn amdgpu_clock_levels() {
         assert_eq!(parse_dpm("0: 500Mhz\n1: 1800Mhz *\n2: 2400Mhz\n"), (Some(1800), Some(2400)));
         assert_eq!(parse_dpm(""), (None, None));
+    }
+
+    /// amdgpu's hwmon as a fixture: three labeled temperatures, power1_average
+    /// in microwatts, a stopped fan (zero-RPM idle); nouveau's: one unlabeled
+    /// temperature and power1_input.
+    #[test]
+    fn a_cards_own_sensors_are_read() {
+        let base = std::env::temp_dir().join(format!("vergence-gpu-hwmon-{}", std::process::id()));
+        let amd = base.join("amd");
+        let nv = base.join("nv");
+        std::fs::create_dir_all(&amd).unwrap();
+        std::fs::create_dir_all(&nv).unwrap();
+        for (f, v) in [
+            ("temp1_input", "45000"),
+            ("temp1_label", "edge"),
+            ("temp2_input", "52000"),
+            ("temp2_label", "junction"),
+            ("temp3_input", "60000"),
+            ("temp3_label", "mem"),
+            ("power1_average", "23456000"),
+            ("fan1_input", "0"),
+        ] {
+            std::fs::write(amd.join(f), format!("{v}\n")).unwrap();
+        }
+        for (f, v) in [("temp1_input", "41000"), ("power1_input", "7100000")] {
+            std::fs::write(nv.join(f), format!("{v}\n")).unwrap();
+        }
+        let a = read_gpu_hwmon(&amd);
+        assert_eq!(
+            a.temps,
+            vec![("edge".to_string(), 45.0), ("junction".to_string(), 52.0), ("mem".to_string(), 60.0)]
+        );
+        assert_eq!(a.watts, Some(23.456));
+        assert_eq!(a.fan_rpm, Some(0));
+        let n = read_gpu_hwmon(&nv);
+        assert_eq!(n.temps, vec![(String::new(), 41.0)]);
+        assert_eq!(n.watts, Some(7.1));
+        assert_eq!(n.fan_rpm, None);
+        assert_eq!(read_gpu_hwmon(&base.join("none")), GpuSensors::default());
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

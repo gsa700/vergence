@@ -661,7 +661,7 @@ impl Hardware {
                 })
                 .collect(),
             Page::Graphics => {
-                let mut v: Vec<Element<Msg>> = self
+                let v: Vec<Element<Msg>> = self
                     .gpus
                     .iter()
                     .enumerate()
@@ -678,8 +678,28 @@ impl Hardware {
                             (None, Some(m)) => rows.push(Hardware::line("Clock", format!("up to {m} MHz"))),
                             _ => {}
                         }
-                        if let Some(b) = d.vram {
-                            rows.push(Hardware::line("Its own memory", bytes_text(b)));
+                        match (d.vram, d.vram_used) {
+                            (Some(b), Some(u)) => rows.push(Hardware::line(
+                                "Its own memory",
+                                format!("{} used of {}", bytes_text(u), bytes_text(b)),
+                            )),
+                            (Some(b), None) => rows.push(Hardware::line("Its own memory", bytes_text(b))),
+                            _ => {}
+                        }
+                        if let Some(p) = d.busy_percent {
+                            rows.push(Hardware::line("Busy", format!("{p} %")));
+                        }
+                        for (label, c) in &d.sensors.temps {
+                            rows.push(Hardware::line(&gpu_temp_word(label), format!("{c:.0} °C")));
+                        }
+                        if let Some(w) = d.sensors.watts {
+                            rows.push(Hardware::line("Power", format!("{w:.1} W")));
+                        }
+                        if let Some(r) = d.sensors.fan_rpm {
+                            rows.push(Hardware::line(
+                                "Fan",
+                                if r == 0 { "Stopped".into() } else { format!("{r} RPM") },
+                            ));
                         }
                         self.group(
                             t,
@@ -697,17 +717,8 @@ impl Hardware {
                         )
                     })
                     .collect();
-                let gpu_temps: Vec<Element<Msg>> = self
-                    .temps
-                    .iter()
-                    .filter(|tp| {
-                        ["nouveau", "amdgpu", "radeon", "i915", "nvidia"].iter().any(|n| tp.what.starts_with(n))
-                    })
-                    .map(|tp| Hardware::line(&tp.what, format!("{:.0} °C", tp.celsius)))
-                    .collect();
-                if !gpu_temps.is_empty() {
-                    v.push(self.group(t, Some("Temperatures"), gpu_temps));
-                }
+                // Each card's temperatures are in its own group now (its
+                // hwmon, read with the card), so no separate list here.
                 v
             }
             Page::Power => {
@@ -789,6 +800,18 @@ fn cache_text(caches: &[vergence_sysinfo::Cache], per_core: usize, all: usize) -
         })
         .collect::<Vec<_>>()
         .join(" · ")
+}
+
+/// A card's temperature label in words: amdgpu's "edge" is the one most
+/// tools call the GPU's temperature, "junction" its hottest spot, "mem" its
+/// memory; nouveau gives no label.
+fn gpu_temp_word(label: &str) -> String {
+    match label {
+        "" | "edge" => "Temperature".into(),
+        "junction" => "Hottest spot".into(),
+        "mem" => "Memory temperature".into(),
+        other => format!("Temperature ({other})"),
+    }
 }
 
 /// A sensor's name in words, from its driver's ("spd5118" is a memory

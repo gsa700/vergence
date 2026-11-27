@@ -43,7 +43,7 @@ left needs root, and that part goes behind a prompt the person asks for.
 
 | Reading | Where | Who may read it |
 |---|---|---|
-| Rated speed and timings (2) | each module's SPD chip: `/sys/bus/i2c/devices/*/eeprom` (the kernel's `spd5118` driver for DDR5, `ee1004` for DDR4) | **any user** (0444) |
+| Rated speed and timings (2) | each module's SPD chip: `/sys/bus/i2c/devices/*/eeprom` (the kernel's `spd5118` driver for DDR5, `ee1004` for DDR4) | any user (0444), **but unreliable on techbench: dropped** (see below) |
 | Module maker, part number (1) | the SPD chip's second half | any user, **but** techbench's board blocks the chip's page switch, so the second half reads back as a copy of the first |
 | Speed now, slots, maker, part number, size (1) | the firmware's memory table (SMBIOS type 17): `/sys/firmware/dmi/tables/DMI` | root only (0400) |
 | Processor package power (3) | `/sys/class/powercap/intel-rapl:0/energy_uj` | root only (0400) since PLATYPUS (CVE-2020-8694) |
@@ -164,10 +164,18 @@ and a test enforces that.
 
 ## Steps
 
-1. vergence-sysinfo: SPD decoding (DDR4 `ee1004`, DDR5 `spd5118`) for rated
-   speed and timings; Memory > "Rated" in Hardware; amdgpu's power,
-   temperature, fan, busy and memory where present. **No root, no decision
-   pending: can be built now.**
+1. vergence-sysinfo: each graphics card's own sensors as any user may read
+   them (its hwmon: temperatures, power, fan; amdgpu's busy share and memory
+   in use), never read while the card sleeps (a read would wake it), shown
+   in the card's group on Hardware's Graphics page. **SPD dropped (Dave,
+   2026-11-26):** on techbench the `spd5118` reads fail now and then (ENXIO
+   on any read past 16 bytes), the page switch does not work and the CRC
+   cannot be reached, so a decoded speed could not be trusted; memory's
+   readings come wholly from Advanced (SMBIOS type 17 through vdm). **Built
+   2026-11-26**; no lab machine shows it yet (techbench's UHD 770 and
+   kepler's UHD 630 have no hwmon; Hubble's GTX 1650 under nouveau exposes
+   none), so it is tested on fixtures: an amdgpu card is the first real
+   test.
 2. The toolkit: the settings app's Advanced part (`disclosure` in
    vergence-settings' look.rs) moves into vergence-widgets, so Hardware and
    any app can use it (the settings app keeps its look; control's call on
