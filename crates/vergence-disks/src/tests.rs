@@ -163,3 +163,35 @@ fn the_bar_shows_real_gaps_only() {
         ]
     );
 }
+
+/// Hubble's two Crucial P3s: one holds `/`, the other Windows; a stick says its label.
+#[test]
+fn what_a_disk_is_for() {
+    let part = |fs: &str, ptype: &str, mount: Option<&str>, label: &str, start: u64| Part {
+        fs: fs.into(),
+        ptype: ptype.into(),
+        mount: mount.map(String::from),
+        label: label.into(),
+        start,
+        ..Default::default()
+    };
+    let mut linux = Disk::default();
+    linux.parts = vec![
+        part("ext4", "Linux file system", Some("/home"), "", 3),
+        part("ext4", "Linux file system", Some("/"), "", 2),
+    ];
+    assert_eq!(disk_use(&linux).as_deref(), Some("System"));
+    let mut windows = Disk::default();
+    windows.parts = vec![
+        part("FAT32", "EFI system", None, "Basic data partition", 1),
+        part("NTFS", "Microsoft basic data", None, "Basic data partition", 3),
+    ];
+    assert_eq!(disk_use(&windows).as_deref(), Some("Windows"));
+    let mut stick = Disk::default();
+    stick.whole = Some(part("exFAT", "", None, "BACKUP", 0));
+    assert_eq!(disk_use(&stick).as_deref(), Some("BACKUP"));
+    let mut pool = Disk::default();
+    pool.parts = vec![Part { role: "Part of ZFS pool zroot".into(), ..Default::default() }];
+    assert_eq!(disk_use(&pool).as_deref(), Some("Pool zroot"));
+    assert_eq!(disk_use(&Disk::default()), None);
+}

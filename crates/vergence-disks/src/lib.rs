@@ -397,12 +397,13 @@ pub fn udev_label(u: &HashMap<String, String>) -> String {
         let mut out = Vec::with_capacity(b.len());
         let mut i = 0;
         while i < b.len() {
-            if b[i] == b'\\' && b.get(i + 1) == Some(&b'x') {
-                if let Some(v) = s.get(i + 2..i + 4).and_then(|h| u8::from_str_radix(h, 16).ok()) {
-                    out.push(v);
-                    i += 4;
-                    continue;
-                }
+            if b[i] == b'\\'
+                && b.get(i + 1) == Some(&b'x')
+                && let Some(v) = s.get(i + 2..i + 4).and_then(|h| u8::from_str_radix(h, 16).ok())
+            {
+                out.push(v);
+                i += 4;
+                continue;
             }
             out.push(b[i]);
             i += 1;
@@ -440,6 +441,27 @@ pub fn parse_proc_mounts(text: &str) -> Vec<(String, String, String)> {
 }
 
 /// A short size for the bar: "1 TB", "512 MB", "8 GB".
+/// What a disk is for, in a word or two, so two disks of one model can be told apart in the
+/// sidebar: "System" (it holds `/`), "Pool zroot", "Windows", else its first mount point or
+/// volume label; None when nothing on it says.
+pub fn disk_use(d: &Disk) -> Option<String> {
+    let mut parts: Vec<&Part> = d.parts.iter().chain(d.whole.as_ref()).collect();
+    parts.sort_by_key(|p| p.start);
+    if parts.iter().any(|p| p.mount.as_deref() == Some("/")) {
+        return Some("System".into());
+    }
+    if let Some(pool) = parts.iter().find_map(|p| p.role.strip_prefix("Part of ZFS pool ")) {
+        return Some(format!("Pool {pool}"));
+    }
+    if parts.iter().any(|p| p.fs == "NTFS" && p.ptype == "Microsoft basic data") {
+        return Some("Windows".into());
+    }
+    parts
+        .iter()
+        .find_map(|p| p.mount.clone())
+        .or_else(|| parts.iter().find(|p| !p.label.is_empty()).map(|p| p.label.clone()))
+}
+
 pub fn size_text(b: u64) -> String {
     vergence_sysinfo::bytes_text(b)
 }

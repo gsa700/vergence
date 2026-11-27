@@ -130,7 +130,7 @@ pub fn disks(fs: &[vergence_sysinfo::FileSystem]) -> Vec<Disk> {
 /// A partition's file system, label, UUID, and what holds it, from udev and sysfs.
 fn fill(part: &mut Part, u: &std::collections::HashMap<String, String>, name: &str, sys: &Path, swaps: &[String]) {
     part.fs = fs_word(u.get("ID_FS_TYPE").map_or("", String::as_str));
-    part.label = udev_label(&u);
+    part.label = udev_label(u);
     part.uuid = u.get("ID_FS_UUID").cloned().unwrap_or_default();
     if swaps.iter().any(|s| s == &format!("/dev/{name}")) {
         part.role = "Swap, in use".into();

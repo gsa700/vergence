@@ -13,7 +13,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use vergence_disks::{Disk, Kind, Part, Pool, Segment, size_text};
+use vergence_disks::{Disk, Kind, Part, Pool, Segment, disk_use, size_text};
 use vergence_scene::Color;
 use vergence_ui::{AppCommand as C, BarStyle, Role};
 use vergence_widgets::chart::meter;
@@ -185,7 +185,14 @@ impl Disks {
                         column(vec![label(name.clone()), soft(label(p.ptype.clone()).size(11.0))])
                             .spacing(1.0)
                             .width(Length::FILL),
-                        soft(label(right).align(Align::End)),
+                        {
+                            let mut col = vec![soft(label(right).align(Align::End))];
+                            let at = p.mount.clone().unwrap_or_else(|| p.role.clone());
+                            if !at.is_empty() {
+                                col.push(soft(label(at).size(11.0).align(Align::End)));
+                            }
+                            column(col).spacing(1.0).align(Align::End)
+                        },
                     ])
                     .spacing(10.0)
                     .align(Align::Center)
@@ -412,9 +419,13 @@ impl Program for Disks {
         let entry = |title: String, sub: String, sel: Sel| -> Element<Msg> {
             let here = cur == Some(sel);
             button(
-                column(vec![label(title.clone()).wrap().width(Length::FILL), label(sub).size(11.0).dim()])
-                    .spacing(1.0)
-                    .width(Length::FILL),
+                // Dim text vanished on the accent (seen on Hubble): there it takes the button's color.
+                column(vec![label(title.clone()).wrap().width(Length::FILL), {
+                    let l = label(sub).size(11.0);
+                    if here { l } else { l.dim() }
+                }])
+                .spacing(1.0)
+                .width(Length::FILL),
             )
             .look(if here { ButtonLook::Accent } else { ButtonLook::Plain })
             .padding(Padding::hv(6.0, 10.0))
@@ -429,9 +440,22 @@ impl Program for Disks {
                 continue;
             }
             side.push(panel(label(heading).size(11.0).dim().weight(600)).padding(Padding::hv(8.0, 10.0)));
-            for (i, d) in items {
-                let title = if d.model.is_empty() { d.name.clone() } else { d.model.clone() };
-                side.push(entry(title, format!("{} {}", size_text(d.size), d.bus).trim().to_string(), Sel::Disk(i)));
+            let described: Vec<(usize, String, String, &Disk)> = items
+                .iter()
+                .map(|&(i, d)| {
+                    let title = if d.model.is_empty() { d.name.clone() } else { d.model.clone() };
+                    let mut sub = format!("{} {}", size_text(d.size), d.bus).trim().to_string();
+                    if let Some(u) = disk_use(d) {
+                        sub = format!("{sub}, {u}");
+                    }
+                    (i, title, sub, d)
+                })
+                .collect();
+            for (i, title, sub, d) in &described {
+                // Two disks of one model and one use (two blank sticks) still need telling apart.
+                let twin = described.iter().filter(|(_, t, s, _)| t == title && s == sub).count() > 1;
+                let sub = if twin { format!("{sub}, {}", d.name) } else { sub.clone() };
+                side.push(entry(title.clone(), sub, Sel::Disk(*i)));
             }
         }
         if !self.pools.is_empty() {
