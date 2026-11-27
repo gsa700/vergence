@@ -1,5 +1,7 @@
 # Edit syntax milestone 1: syntax colors by file type, and each language's words in completion
 
+**Closed 2026-11-26** (Dave: "close edit syntax"), in v0.4.0.
+
 **Built 2026-11-24**, steps 1 to 8, in one evening; installed on techbench
 (vergence-0.4.0pre8) and looked at by Dave there ("the highlighting really
 helps the readability"). Progress below.

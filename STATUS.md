@@ -1,6 +1,6 @@
 # Where Vergence stands
 
-The one status page (updated 2026-11-25). Each milestone's plan and progress
+The one status page (updated 2026-11-26). Each milestone's plan and progress
 is in docs/<area>-milestone-N.md; the order of work and its reasons are in
 the whitepaper's §9 (docs/Vergence-Whitepaper.md); wishes and what comes
 after are in docs/apps-roadmap.md.
@@ -12,22 +12,36 @@ sync.
 
 ## In progress
 
-- **AlbumWall milestone 1** (docs/albumwall-milestone-1.md, answered
-  2026-11-25: "all leans, go ahead"): AlbumWall for Vergence,
-  `vergence-albumwall`, on a folder library: the wall, albums unfolding in
-  place, gapless playback with ReplayGain, the play bar, colors from the
-  covers, search, the keyboard, Preferences. Navidrome, lyrics, MPRIS and
-  the rest in milestone 2. Building, step 1.
-- **Vergence Remote** (docs/remote-milestone-1.md): steps 1 to 5 and the
-  first part of step 6 built (2026-11-23); paused for AlbumWall. Left: the
-  desk login taking the monitorless session onto the monitors, and full
-  screen for every app (proposed, waiting for Dave's word).
-- **Edit syntax milestone 1** (docs/edit-syntax-milestone-1.md): built
-  2026-11-24, in the techbench package; closes on Dave's word.
+- **v0.4.0, the AlbumWall release** (Dave, 2026-11-26: "0.4.0 for AlbumWall,
+  Remote moves to 0.5.0"): its milestones closed; the release being
+  prepared (version, notes, the whitepaper), then the tag and its GitHub
+  Release on Dave's word.
+- **Vergence Remote** (docs/remote-milestone-1.md, for 0.5.0): steps 1 to 5
+  and the first part of step 6 built (2026-11-23); paused for AlbumWall.
+  Left: the desk login taking the monitorless session onto the monitors,
+  and full screen for every app (proposed, waiting for Dave's word).
+- **The Hardware app** (docs/hardware-readings-milestone-1.md, on branch
+  `hw-core-grid`, not merged): the per-core grid in the chip's real shape,
+  Details, the About summary, built on techbench 2026-11-26; the readings
+  only root may read behind Advanced (a read lease through vdm) planned and
+  answered. Continued here when Dave picks it up.
 
-Closed since v0.3.0: **frost milestone 1** (docs/frost-milestone-1.md,
-2026-11-25): frosted glass behind a see-through terminal, its bar the
-window's glass, its text running up under the bar blurred.
+Closed since v0.3.0, all in 0.4.0:
+
+- **AlbumWall milestone 1** (docs/albumwall-milestone-1.md, 2026-11-26):
+  AlbumWall for Vergence, rebuilt in Rust on the toolkit and Hymie, looking
+  and working as the Avalonia AlbumWall: a folder library, the wall, albums
+  unfolding in place, gapless playback at each file's own rate with
+  ReplayGain, the play bar and VU meters, colors from the covers, search,
+  the keyboard, its Settings, the app menu.
+- **Edit syntax milestone 1** (docs/edit-syntax-milestone-1.md, 2026-11-26):
+  syntax colors by file type and each language's words in completion,
+  languages added by definition files.
+- **Frost milestone 1** (docs/frost-milestone-1.md, 2026-11-25): frosted
+  glass behind a see-through terminal, its bar the window's glass, its text
+  running up under the bar blurred.
+- Bus v42: a window told when it cannot be seen, so it can stop drawing
+  (Mind the battery, CONTRIBUTING.md).
 
 **v0.3.0 released 2026-11-23**, closing two milestones the same day after
 Dave's hands-on passes on techbench:
@@ -55,10 +69,6 @@ releases were added late).
 
 ## Next
 
-0. **v0.4.0, the AlbumWall release** (Dave, 2026-11-26: "0.4.0 for AlbumWall,
-   Remote moves to 0.5.0"): tagged when AlbumWall milestone 1 closes (step 8,
-   Settings, built 2026-11-26; step 9 the checks, then Dave's pass on his own
-   library on techbench), with frost milestone 1 and edit syntax if closed.
 1. **Vergence Remote** (for 0.5.0), the rest of it (docs/remote-milestone-1.md, redrafted 2026-11-23
    with Dave): an app to use a Vergence machine from another as if at it
    (a KVM for use, not hardware), over SSH (WireGuard as the path), our own

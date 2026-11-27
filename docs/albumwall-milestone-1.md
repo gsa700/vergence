@@ -1,5 +1,12 @@
 # AlbumWall milestone 1: AlbumWall for Vergence
 
+**Closed 2026-11-26**, after Dave's pass on his own library on techbench
+(package pre18, "pass done"; the one bug it found, the wall losing its
+place when music started or ended, fixed in pre19). In v0.4.0, the
+AlbumWall release (Dave: "0.4.0 for AlbumWall, Remote moves to 0.5.0").
+Milestone 2 (Navidrome, lyrics, MPRIS and the media keys, compact mode,
+the other meters, the equalizer) is under "Later" below.
+
 *Drafted 2026-11-25* from two inventories made that evening: what the
 Avalonia AlbumWall does (0.9.7, ~19k lines of app plus ~3k of library code
 and Spindle's ~10k of codecs and playback), and what Vergence already has to
