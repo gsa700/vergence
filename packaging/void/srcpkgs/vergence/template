@@ -1,11 +1,11 @@
 # Template file for 'vergence'
 pkgname=vergence
-version=0.4.0pre16
+version=0.4.0pre17
 revision=1
-# A lab build before the 0.4.0 release (Vergence Remote), from a commit:
+# A lab build before the 0.4.0 release (AlbumWall), from a commit:
 # xbps orders 0.4.0pre1 after 0.3.0 and before 0.4.0. GitHub serves a
 # commit's tarball as it serves a tag's.
-_commit=40a390e09f64ffd1c01a632cfb7383a499385786
+_commit=f69373786e971ba6f8fcb700d4d02daf37fafa40
 build_style=cargo
 hostmakedepends="pkg-config"
 makedepends="libarchive-devel libinput-devel libxkbcommon-devel libseat-devel libgbm-devel
@@ -23,7 +23,7 @@ maintainer="David Erickson <gsa700@gmail.com>"
 license="Apache-2.0 OR GPL-2.0-or-later, GPL-2.0-or-later, OFL-1.1, custom:SCOWL"
 homepage="https://github.com/gsa700/vergence"
 distfiles="https://github.com/gsa700/vergence/archive/${_commit}.tar.gz"
-checksum=1eb23dcbe3633e0e38c3c444f4c195c765dee33a0a9648ce2d58d3f9a1dbf12c
+checksum=c926e96847c4cb9d1a5291ea15b6ef75264d3206bc760b3e0866ab7c4d864b39
 
 # The login screen's account: owns nothing, logs in nowhere, may use the seat.
 system_accounts="_vdm"
