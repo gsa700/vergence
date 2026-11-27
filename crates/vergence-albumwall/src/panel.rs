@@ -141,10 +141,24 @@ pub fn list_height(album: &Album, text: f32) -> f32 {
     column_height(&left, text).max(column_height(&right, text))
 }
 
-/// The lyrics view's height in place of the track list: the list's, or
-/// down to the sleeve's foot if that is more, so the panel keeps its height.
+/// Under the sleeve while the song playing has words: the Lyrics button,
+/// 12 points below it (the Avalonia app's Button.panel: 12-point text,
+/// padding 6 and 15, a 1-point edge).
+pub const LYRICS_GAP: f32 = 12.0;
+pub fn lyrics_button(text: f32) -> f32 {
+    (12.0 * text * 1.3).ceil() + 12.0 + 2.0
+}
+
+/// The sleeve's side: the cover, and the Lyrics button under it if shown.
+fn sleeve_side(text: f32, button: bool) -> f32 {
+    SLEEVE + if button { LYRICS_GAP + lyrics_button(text) } else { 0.0 }
+}
+
+/// The lyrics view's height: the whole of the album's side of the panel,
+/// title and tracks together ("give them the full vertical height of the
+/// album", Dave, 2026-11-01), as tall as the panel's contents.
 pub fn words_height(album: &Album, text: f32) -> f32 {
-    list_height(album, text).max(SLEEVE - header_height(text) - LIST_GAP)
+    (header_height(text) + LIST_GAP + list_height(album, text)).max(sleeve_side(text, true))
 }
 
 /// The header: title, artist, the header line, the row kept for Lyrics.
@@ -163,10 +177,13 @@ pub fn header_height(text: f32) -> f32 {
 /// padding, the taller of the header and track list or the sleeve, and the
 /// foot where it fades.
 pub fn height(album: &Album, text: f32) -> f32 {
-    let (left, right) = columns(album);
-    let list = column_height(&left, text).max(column_height(&right, text));
-    let words = header_height(text) + LIST_GAP + list;
-    MARGIN + PAD + words.max(SLEEVE) + FOOT
+    height_with(album, text, false)
+}
+
+/// As [`height`], with the Lyrics button under the sleeve or not.
+pub fn height_with(album: &Album, text: f32, button: bool) -> f32 {
+    let words = header_height(text) + LIST_GAP + list_height(album, text);
+    MARGIN + PAD + words.max(sleeve_side(text, button)) + FOOT
 }
 
 #[cfg(test)]

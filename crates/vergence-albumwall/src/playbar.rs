@@ -176,11 +176,16 @@ pub fn bar(s: &Shown, p: &Palette, covers: Option<&Arc<Covers>>, scale: f32) -> 
             .color(color(p.on_light))
             .elide()
             .width(Length::FILL),
-        label(t.map_or(album.album_artist.clone(), |t| t.artist.clone()))
-            .size(11.0)
-            .color(color(p.on_light_dim))
-            .elide()
-            .width(Length::FILL),
+        // The artist · the album (the Avalonia bar's second line).
+        label(match t {
+            Some(t) if !album.title.is_empty() => format!("{} · {}", t.artist, album.title),
+            Some(t) => t.artist.clone(),
+            None => album.album_artist.clone(),
+        })
+        .size(11.0)
+        .color(color(p.on_light_dim))
+        .elide()
+        .width(Length::FILL),
     ])
     .spacing(2.0)
     .width(Length::Fixed(260.0));

@@ -34,6 +34,43 @@ pub struct Words {
     pub length: f64,
     pub motion: Rc<lyricsview::Motion>,
     pub reduced: bool,
+    /// How opaque the title and tracks are behind the words: 0.22 while the
+    /// words show, 1 without, easing between over 250 ms (the Avalonia app's
+    /// DockPanel.tracks.behind; its blur is not drawn here yet).
+    pub behind: f32,
+}
+
+/// The Lyrics button under the sleeve (the Avalonia app's Button.panel
+/// onwall): "Show Lyrics" / "Hide Lyrics", a clock face when the words are timed.
+fn lyrics_button(w: &Words, text: f32) -> Element<Msg> {
+    let ink = Color::rgb(0xF3, 0xEE, 0xE6);
+    let words = if w.on { "Hide Lyrics" } else { "Show Lyrics" };
+    let mut parts: Vec<Element<Msg>> = Vec::new();
+    if w.lyrics.timed {
+        let side = (12.0 * text).round();
+        parts.push(
+            drawing(move |scene, _, r: Rect, _| {
+                let d = r.w.min(r.h);
+                let k = d / 14.0;
+                let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+                scene.stroke(Rect::new(cx - 6.0 * k, cy - 6.0 * k, 12.0 * k, 12.0 * k), 6.0 * k, 1.4 * k.max(0.8), ink);
+                scene.line(Point::new(cx, cy - 3.5 * k), Point::new(cx, cy), 1.4 * k.max(0.8), ink);
+                scene.line(Point::new(cx, cy), Point::new(cx + 2.5 * k, cy + 1.5 * k), 1.4 * k.max(0.8), ink);
+            })
+            .width(Length::Fixed(side))
+            .height(Length::Fixed(side)),
+        );
+    }
+    parts.push(label(words).size(12.0).color(ink));
+    button(row(parts).spacing(7.0).align(Align::Center))
+        .look(ButtonLook::Custom {
+            fill: Some(Color::rgba(255, 255, 255, 0x26)),
+            edge: Some((Color::rgba(255, 255, 255, 0x33), 1.0)),
+            radius: 4.0,
+        })
+        .padding(Padding::hv(6.0, 15.0))
+        .on_press(Msg::Lyrics)
+        .name(words)
 }
 
 fn alpha(c: Rgb, a: u8) -> Color {
@@ -227,63 +264,69 @@ fn contents(
     words: Option<Words>,
 ) -> Element<Msg> {
     let (left, right) = panel::columns(album);
+    // Behind the words: the title and tracks faded toward the panel's color
+    // (the Avalonia app's 22% opacity; on the panel's solid ground the same
+    // look, and an element's opacity is a picture's only in this toolkit).
+    let behind = words.as_ref().map_or(1.0, |w| w.behind);
+    let full = *p;
+    let faded;
+    let p = if behind < 1.0 {
+        let mix = |c: Rgb| {
+            let m = |a: u8, b: u8| (b as f32 + (a as f32 - b as f32) * behind).round() as u8;
+            Rgb(m(c.0, p.panel.0), m(c.1, p.panel.1), m(c.2, p.panel.2))
+        };
+        faded = Palette { text: mix(p.text), text_dim: mix(p.text_dim), accent: mix(p.accent), ..*p };
+        &faded
+    } else {
+        p
+    };
     let col = |lines: &[Line]| -> Element<Msg> {
         column(lines.iter().map(|l| line(i, album, l, p, text, playing, cursor)).collect()).width(Length::FILL)
     };
-    let words = column(vec![
+    let words_col = column(vec![
         label(album.title.clone()).size(21.0).weight(700).color(color(p.text)).elide().width(Length::FILL),
         label(album.album_artist.clone()).size(14.0).color(color(p.text_dim)).elide().width(Length::FILL),
         boxed(label(panel::header_line(album)).size(11.0).color(color(p.text_dim)).elide().width(Length::FILL))
             .padding(Padding { top: 4.0, right: 0.0, bottom: 0.0, left: 0.0 })
             .radius(0.0)
             .width(Length::FILL),
-        space().height(Length::Fixed(panel::BUTTON_GAP)),
-        // The row kept for Lyrics: the button while the song playing has words.
-        {
-            let row_h = (panel::BUTTON_ROW * text).round();
-            let button_el: Element<Msg> = match &words {
-                Some(w) => {
-                    let words = if w.on { "Show Tracks" } else { "Show Lyrics" };
-                    button(label(words).size(12.0).color(color(p.text)))
-                        .look(ButtonLook::Custom {
-                            fill: Some(alpha(p.text, if w.on { 46 } else { 26 })),
-                            edge: Some((alpha(p.text, 70), 1.0)),
-                            radius: 4.0,
-                        })
-                        .padding(Padding::hv(3.0, 12.0))
-                        .on_press(Msg::Lyrics)
-                        .name(words)
-                }
-                None => space(),
-            };
-            row(vec![button_el, space().width(Length::FILL)])
-                .align(Align::Center)
-                .width(Length::FILL)
-                .height(Length::Fixed(row_h))
-        },
-        boxed(match words.filter(|w| w.on) {
-            Some(w) => lyricsview::view(
-                lyricsview::Shown {
-                    lyrics: w.lyrics,
-                    seconds: w.seconds,
-                    length: w.length,
-                    bright: p.text,
-                    dim: p.text_dim,
-                    text,
-                    height: panel::words_height(album, text),
-                },
-                w.motion,
-                w.reduced,
-            ),
-            None => row(vec![col(&left), col(&right)]).spacing(panel::COLUMN_GAP).width(Length::FILL),
-        })
-        .padding(Padding { top: panel::LIST_GAP, right: 0.0, bottom: 0.0, left: 0.0 })
-        .radius(0.0)
-        .width(Length::FILL),
+        space().height(Length::Fixed(panel::BUTTON_GAP + (panel::BUTTON_ROW * text).round())),
+        boxed(row(vec![col(&left), col(&right)]).spacing(panel::COLUMN_GAP).width(Length::FILL))
+            .padding(Padding { top: panel::LIST_GAP, right: 0.0, bottom: 0.0, left: 0.0 })
+            .radius(0.0)
+            .width(Length::FILL),
     ])
     .spacing(3.0)
     .width(Length::FILL);
-    boxed(row(vec![words, sleeve(i, album, covers, scale)]).spacing(panel::GAP).width(Length::FILL))
+    // The words over the whole of the album's side, title and tracks
+    // together, faded behind them while they show (the Avalonia app's panel).
+    let mut side = vec![words_col];
+    if let Some(w) = words.as_ref().filter(|w| w.on) {
+        side.push(lyricsview::view(
+            lyricsview::Shown {
+                lyrics: w.lyrics.clone(),
+                seconds: w.seconds,
+                length: w.length,
+                bright: full.text,
+                dim: full.text_dim,
+                text,
+                height: panel::words_height(album, text),
+            },
+            w.motion.clone(),
+            w.reduced,
+        ));
+    }
+    let left_side = stack(side).width(Length::FILL);
+    // The sleeve, and under it Lyrics while the song playing has words.
+    let mut right_side = vec![sleeve(i, album, covers, scale)];
+    if let Some(w) = &words {
+        right_side.push(
+            row(vec![space().width(Length::FILL), lyrics_button(w, text), space().width(Length::FILL)])
+                .width(Length::Fixed(panel::SLEEVE)),
+        );
+    }
+    let right_side = column(right_side).spacing(panel::LYRICS_GAP).width(Length::Fixed(panel::SLEEVE));
+    boxed(row(vec![left_side, right_side]).spacing(panel::GAP).width(Length::FILL))
         .padding(if down {
             Padding { top: panel::FOOT, right: panel::PAD, bottom: panel::MARGIN + panel::PAD, left: panel::PAD }
         } else {

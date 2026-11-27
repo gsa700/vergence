@@ -18,7 +18,7 @@ use vergence_albumwall::library::Album;
 use vergence_albumwall::wall;
 use vergence_scene::Color;
 use vergence_widgets::{
-    Align, ButtonLook, Element, Length, Padding, Theme, button, choice, column, field, grid, label, panel, picture,
+    Align, ButtonLook, Element, Length, Padding, Theme, button, column, drawing, field, grid, label, panel, picture,
     row, scroll, space, stack,
 };
 
@@ -306,15 +306,46 @@ pub fn bar(
     current: usize,
     g: &Ground,
 ) -> Element<Msg> {
-    let mut right: Vec<Element<Msg>> = vec![label(counts).size(12.0).color(color(g.text_dim))];
-    if libraries.len() > 1 {
-        right.push(choice(libraries, Some(current), Msg::Library));
+    // The library picker in front of the counts, which are about the library
+    // it names (the Avalonia app's LibraryLink, decided 2026-09-22): its name
+    // in semibold and a small ▾, the libraries in a menu that opens from it.
+    let mut right: Vec<Element<Msg>> = Vec::new();
+    if let Some(name) = libraries.get(current) {
+        let ink = color(g.text);
+        right.push(
+            button(
+                row(vec![
+                    label(name.clone()).size(13.0).weight(600).color(ink),
+                    drawing(move |scene, _, r: vergence_scene::Rect, _| {
+                        // A triangle 7 wide and 4 tall, pointing down.
+                        let (x0, y0) = (r.x + (r.w - 7.0) / 2.0, r.y + (r.h - 4.0) / 2.0);
+                        for k in 0..8 {
+                            let t = k as f32 / 8.0;
+                            let half = 3.5 * (1.0 - t);
+                            scene.fill(vergence_scene::Rect::new(x0 + 3.5 - half, y0 + t * 4.0, half * 2.0, 0.55), ink);
+                        }
+                    })
+                    .width(Length::Fixed(7.0))
+                    .height(Length::Fixed(8.0)),
+                ])
+                .spacing(5.0)
+                .align(Align::Center),
+            )
+            .look(ButtonLook::Plain)
+            .padding(0.0)
+            .on_press(Msg::LibraryMenu)
+            .name(format!("Library: {name}")),
+        );
+        if !counts.is_empty() {
+            right.push(label("·").size(11.0).color(color(g.text_dim)));
+        }
     }
+    right.push(label(counts).size(11.0).color(color(g.text_dim)));
     panel(
         row(vec![
-            label(status).size(12.0).color(color(g.text_dim)).elide().width(Length::FILL),
+            label(status).size(11.0).color(color(g.text_dim)).elide().width(Length::FILL),
             field(query, Msg::Search).placeholder("Search artist or album…").name("search").width(Length::Fixed(320.0)),
-            row(vec![space().width(Length::FILL), row(right).spacing(12.0).align(Align::Center)])
+            row(vec![space().width(Length::FILL), row(right).spacing(14.0).align(Align::Center)])
                 .align(Align::Center)
                 .width(Length::FILL),
         ])

@@ -204,6 +204,13 @@ struct Shared {
 }
 
 impl Covers {
+    /// The covers held decoded, and their bytes (the status line's "covers
+    /// held · MB art", as the Avalonia app's ArtCache told it).
+    pub fn held(&self) -> (usize, usize) {
+        let l = self.shared.lru.lock().unwrap_or_else(|e| e.into_inner());
+        (l.len(), l.bytes())
+    }
+
     /// `workers` threads decoding with `decode`; `wake` told when a cover is ready.
     pub fn new(workers: usize, decode: Arc<Decode>, wake: impl Fn() + Send + Sync + 'static) -> Covers {
         let shared = Arc::new(Shared {

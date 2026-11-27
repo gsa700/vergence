@@ -77,6 +77,8 @@ mod cmd {
     /// ReplayGain by album, by track, off.
     pub const GAIN: u32 = 40;
     pub const STATISTICS: u32 = 50;
+    /// The library menu's "Libraries…": Settings › Library.
+    pub const LIBRARIES: u32 = 13;
     /// The libraries: LIBRARY + its place in the list.
     pub const LIBRARY: u32 = 100;
 }
@@ -117,7 +119,9 @@ pub enum Msg {
     GoToPlaying,
     /// The search box's text.
     Search(String),
-    /// Show Lyrics / Show Tracks in the playing album's panel.
+    /// The bottom bar's library name pressed: the libraries' menu.
+    LibraryMenu,
+    /// Show Lyrics / Hide Lyrics in the playing album's panel.
     Lyrics,
     /// A timed line of the lyrics clicked: the song there (seconds).
     LyricLine(f64),
@@ -170,6 +174,8 @@ type BarShown = (usize, usize, f64, f64, bool);
 /// The play bar sliding in or out (the Avalonia bar's TransportSlide).
 const BAR_SLIDE: Duration = Duration::from_millis(620);
 const CONTENTS_MS: u64 = 110;
+/// The tracks fading behind the lyrics, and back (the Avalonia app's 0.25 s).
+const LYRICS_FADE: f32 = 0.25;
 const TURN_MS: u64 = 400;
 /// The wall's albums for a search, as indexes in wall order.
 type Order = Rc<Vec<usize>>;
@@ -252,6 +258,14 @@ struct AlbumWall {
     lyrics_on: bool,
     /// The lyrics view's motion between frames.
     lyrics_motion: Rc<lyricsview::Motion>,
+    /// When Show or Hide Lyrics was pressed: the tracks behind fade over 250 ms.
+    lyrics_pressed: Option<std::time::Instant>,
+    /// Where the pointer was last pressed (the library menu opens there).
+    pressed_at: (f32, f32),
+    /// When the read under way began, and how long the last one took (the
+    /// status line's "ms scan", as the Avalonia app's).
+    read_started: Option<std::time::Instant>,
+    scan_ms: Option<u128>,
     stepped: std::time::Instant,
     meters_wanted: bool,
     /// The library on the wall cannot be reached, and why (and how many
@@ -343,6 +357,10 @@ impl AlbumWall {
             words: Words::default(),
             lyrics_on: false,
             lyrics_motion: Rc::default(),
+            lyrics_pressed: None,
+            pressed_at: (0.0, 0.0),
+            read_started: None,
+            scan_ms: None,
             stepped: std::time::Instant::now(),
             meters_wanted: false,
             said: None,
@@ -409,6 +427,7 @@ impl AlbumWall {
             return;
         }
         self.reading = Some(root.clone());
+        self.read_started = Some(std::time::Instant::now());
         // A music server: its login, and HTTPS through the helper.
         let server = self
             .libraries
@@ -431,6 +450,9 @@ impl AlbumWall {
         }
         match outcome {
             Outcome::Albums { albums, files } => {
+                if let Some(t) = self.read_started {
+                    self.scan_ms = Some(t.elapsed().as_millis());
+                }
                 self.watch(&root);
                 self.measure_hue(&root, &albums);
                 // Its numbers, for Settings › Library, kept for when it is not on the wall.
@@ -614,9 +636,17 @@ impl AlbumWall {
         let g = self.ground();
         self.fades.reduced.set(t.reduced_motion);
         let tracks: usize = albums.iter().map(|a| a.tracks.len()).sum();
-        let mut counts = format!("{} albums · {} tracks", group(albums.len()), group(tracks));
+        // As the Avalonia app counted: albums, tracks, artists (its album artists).
+        let count = |n: usize, noun: &str| if n == 1 { format!("1 {noun}") } else { format!("{n} {noun}s") };
+        let artists: std::collections::HashSet<String> = albums.iter().map(|a| a.album_artist.to_lowercase()).collect();
+        let mut counts = format!(
+            "{} · {} · {}",
+            count(albums.len(), "album"),
+            count(tracks, "track"),
+            count(artists.len(), "artist")
+        );
         if files > tracks {
-            counts.push_str(&format!(" · {} not played", group(files - tracks)));
+            counts.push_str(&format!(" · {} not played", files - tracks));
         }
         let status = if self.unreachable.is_some() {
             let name = self.libraries.current().map(|l| l.name.clone()).unwrap_or_default();
@@ -627,7 +657,12 @@ impl AlbumWall {
                 _ => "rescanning".into(),
             }
         } else {
-            String::new()
+            // The scan's time and the art held (the Avalonia app's status line).
+            let (held, bytes) = self.covers.as_ref().map_or((0, 0), |c| c.held());
+            match self.scan_ms {
+                Some(ms) => format!("{ms} ms scan · {held} covers held · {} MB art", bytes / (1024 * 1024)),
+                None => format!("{held} covers held · {} MB art", bytes / (1024 * 1024)),
+            }
         };
         let order = self.order_of(albums);
         let status = if vergence_albumwall::search::normalize(&self.query).is_empty() {
@@ -1250,7 +1285,20 @@ impl AlbumWall {
             length: now.length,
             motion: self.lyrics_motion.clone(),
             reduced: self.reduced(),
+            behind: {
+                let t = match self.lyrics_pressed {
+                    Some(at) if !self.reduced() => (at.elapsed().as_secs_f32() / LYRICS_FADE).min(1.0),
+                    _ => 1.0,
+                };
+                if self.lyrics_on { 1.0 - 0.78 * t } else { 0.22 + 0.78 * t }
+            },
         })
+    }
+
+    /// The open panel's height: with the Lyrics button under the sleeve
+    /// while album `i` is playing a song with words.
+    fn panel_height(&self, i: usize, album: &Album, text: f32) -> f32 {
+        panel::height_with(album, text, self.words_of(i).is_some())
     }
 
     /// The track playing of album `a` on the wall, if it is the album playing.
@@ -1307,7 +1355,7 @@ impl AlbumWall {
         self.text.set(t.text_factor);
         if let Some(o) = &self.opened {
             let album = albums.get(o.index)?;
-            let full = panel::height(album, t.text_factor);
+            let full = self.panel_height(o.index, album, t.text_factor);
             let unfold = o.unfold.out(now);
             let since = now.saturating_duration_since(o.unfold.start).as_millis() as u64;
             // The contents fade in once the panel is open (and again when they swap).
@@ -1437,13 +1485,13 @@ impl AlbumWall {
         let text = self.text.get();
         let (cols, cover) = wall::columns(self.wall_width());
         let tile_h = wall::tile_height(cover, text);
-        let full = panel::height(album, text);
+        let full = self.panel_height(i, album, text);
         let tween = |ms| vergence_widgets::motion::Tween::new(ms, reduced);
         if let Some(o) = self.opened.take() {
             if o.index == i {
                 self.folding = Some(Folding {
                     index: i,
-                    height: albums.get(i).map_or(0.0, |a| panel::height(a, text)),
+                    height: albums.get(i).map_or(0.0, |a| self.panel_height(i, a, text)),
                     fold: tween(UNFOLD_MS),
                     down: o.down,
                 });
@@ -1454,7 +1502,7 @@ impl AlbumWall {
             if let Some(p) = place(o.index) {
                 let panel_row = (p / cols).saturating_sub(usize::from(o.down));
                 let top = wall::PAD_TOP + (panel_row + 1) as f32 * (tile_h + wall::GAP);
-                let old = albums.get(o.index).map_or(0.0, |a| panel::height(a, text));
+                let old = albums.get(o.index).map_or(0.0, |a| self.panel_height(o.index, a, text));
                 let view_h = (self.size.1 - wallview::BAR).max(1.0);
                 let seen = top < self.wall_offset + view_h && top + old > self.wall_offset;
                 let row = at / cols;
@@ -1539,7 +1587,7 @@ impl AlbumWall {
             && let Some(p) = order.iter().position(|&i| i == o.index)
             && (p / cols).saturating_sub(usize::from(o.down)) < at / cols
         {
-            y += albums.get(o.index).map_or(0.0, |a| panel::height(a, self.text.get())) + wall::GAP;
+            y += albums.get(o.index).map_or(0.0, |a| self.panel_height(o.index, a, self.text.get())) + wall::GAP;
         }
         y
     }
@@ -2002,7 +2050,35 @@ impl Program for AlbumWall {
                 }
             }
             Msg::Search(text) => self.search(text),
-            Msg::Lyrics => self.lyrics_on = !self.lyrics_on,
+            Msg::LibraryMenu => {
+                // Opened where it was pressed (the Avalonia menu opened from the name).
+                let mut lines: Vec<vergence_ui::MenuLine> = self
+                    .libraries
+                    .list
+                    .iter()
+                    .enumerate()
+                    .map(|(i, l)| vergence_ui::MenuLine::Item {
+                        id: cmd::LIBRARY + i as u32,
+                        label: l.name.clone(),
+                        keys: String::new(),
+                        enabled: true,
+                        checked: Some(i == self.libraries.current),
+                    })
+                    .collect();
+                lines.push(vergence_ui::MenuLine::Separator);
+                lines.push(vergence_ui::MenuLine::Item {
+                    id: cmd::LIBRARIES,
+                    label: "Libraries…".into(),
+                    keys: String::new(),
+                    enabled: true,
+                    checked: None,
+                });
+                window.menu(self.pressed_at.0, self.pressed_at.1, lines);
+            }
+            Msg::Lyrics => {
+                self.lyrics_on = !self.lyrics_on;
+                self.lyrics_pressed = Some(std::time::Instant::now());
+            }
             Msg::LyricLine(seconds) => self.send(Command::Seek(seconds)),
             Msg::Library(i) => {
                 if i < self.libraries.list.len() && i != self.libraries.current {
@@ -2022,6 +2098,9 @@ impl Program for AlbumWall {
     /// share; any library on FreeBSD for now) is looked at again, at most
     /// once a minute (Dave, 2026-11-25: "the lean is fine").
     fn saw(&mut self, input: &vergence_widgets::Input) {
+        if let vergence_widgets::Input::Button { pressed: true, x, y, .. } = input {
+            self.pressed_at = (*x, *y);
+        }
         let unwatched = self.watcher.as_ref().is_some_and(|(_, w)| w.is_none());
         if matches!(input, vergence_widgets::Input::Focus(true))
             && unwatched
@@ -2190,7 +2269,7 @@ impl Program for AlbumWall {
             cmd::GO_TO_PLAYING => self.update(Msg::GoToPlaying, window),
             cmd::KEYS => self.open_settings(Some(prefswin::Page::Keys), window),
             cmd::ADD_SERVER => self.add_server(window),
-            cmd::STATISTICS => self.open_settings(Some(prefswin::Page::Library), window),
+            cmd::STATISTICS | cmd::LIBRARIES => self.open_settings(Some(prefswin::Page::Library), window),
             cmd::PLAY_PAUSE => self.update(Msg::PlayPause, window),
             cmd::NEXT => self.update(Msg::Next, window),
             cmd::PREVIOUS => self.update(Msg::Previous, window),
@@ -2308,6 +2387,7 @@ impl Program for AlbumWall {
             || self.folding.as_ref().is_some_and(|f| busy(&f.fold))
             || self.glide.is_some()
             || (self.lyrics_on && self.lyrics_motion.moving.get())
+            || self.lyrics_pressed.is_some_and(|at| at.elapsed().as_secs_f32() < LYRICS_FADE + 0.06)
             || self.fades.fading(now)
             || self.bar_motion.get().is_some_and(|(_, at)| now.saturating_duration_since(at) < BAR_SLIDE + past)
     }

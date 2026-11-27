@@ -275,3 +275,18 @@ program can use it):
   nudging plain lyrics (the toolkit tells a drawing of presses, not the
   wheel). Checked headless against the stand-in server: timed and plain
   sets, and a song without words going back to its tracks.
+- **Matched to the Avalonia app** (Dave, 2026-11-26: "match the avalonia
+  whenever possible, we spent a lot of time working that out"): the words
+  over the whole of the album's side, title and tracks faded behind them
+  (to 22%, easing over 250 ms; the Avalonia blur waits for a scene blur in
+  the renderer: the frost's arithmetic, a new scene command, bus v43);
+  "Show Lyrics" / "Hide Lyrics" centered under the sleeve, a clock face when
+  the words are timed, the panel growing by the button as the Avalonia grid
+  did. The bottom bar as the Avalonia app's: the scan's time, the covers
+  held and their megabytes on the left; on the right the library's name in
+  semibold with a small triangle (its menu: the libraries, the current one
+  checked, then Libraries…), a dot, then "albums · tracks · artists". The
+  play bar's second line is "artist · album". Found: an element's opacity
+  is a picture's only in the toolkit, so the panel's contents fading in
+  after it unfolds has never faded; the tracks behind the words are blended
+  toward the panel's color instead.
