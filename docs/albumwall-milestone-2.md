@@ -312,3 +312,30 @@ program can use it):
 - **Server libraries named as the Avalonia app names them** (Dave,
   2026-11-27: easier to tell from the local ones): "Navidrome" for a
   server's only library, "Navidrome · its name" when it has several.
+- **Dave's wall items** (2026-11-27, from his wish list), each as the
+  Avalonia app does it:
+  - *Back where it was left, off by about the play bar*: an album opened
+    was centered in the window less the bottom bar only; the play bar
+    covers the wall's foot, and on picking up where it was left it is not
+    up yet when the album opens. One `view_height` now, less the play bar
+    while it is up or coming up (music asked for in the last 3 s). Found
+    with it: a server's song picked up at the start never played (its
+    server was told to the player only after the library was read); now
+    told before any read.
+  - *The play bar's cover takes you back*: it opened the playing album only
+    if it was closed; open and scrolled away, it is brought back into
+    sight.
+  - *Scrolled away, the wall returns* (MainWindow.PlayMode's "the wall
+    follows"): a scroll, a click or a key in the wall, or the search, is
+    browsing; a minute after the last, with music playing and the play
+    mode not Stop, the wall goes back to the playing album (opened, or
+    brought back if open but out of sight); an album changed by itself is
+    followed as soon as the hand has been off the wall 2 s. Off at Stop,
+    as the Avalonia app (both default to Stop).
+  - *Oblong covers on their color*: the color is a stand-in that leaves as
+    the cover fades in (AlbumVm.GroundOpacity); a cover square to 6% fills
+    its tile, cropped a hair (CoverStretch); an oblong one sits whole on
+    the bare wall. The sleeve the same.
+  Checked headless with the stand-in server (a wide cover, a nearly square
+  one; play, close, reopen: the album's tile at 184 then 186, the bar up;
+  browse away with "next album": back at 64 s, not at 50 s).

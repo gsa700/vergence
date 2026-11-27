@@ -220,9 +220,21 @@ fn sleeve(album_index: usize, album: &Album, covers: Option<&Covers>, scale: f32
     let ph = color(wall::placeholder(&album.album_artist, &album.title));
     let px = (s * scale).ceil();
     let cover = album.front.as_ref().and_then(|art| covers?.get(&covers::Key::of(art, covers::bucket(px))));
-    let mut layers = vec![boxed(space()).color(ph).radius(3.0).width(Length::Fixed(s)).height(Length::Fixed(s))];
-    if let Some(c) = cover {
-        layers.push(picture(c.image).radius(3.0).width(Length::Fixed(s)).height(Length::Fixed(s)));
+    // As a tile's (the Avalonia sleeve's Album.CoverStretch and GroundOpacity):
+    // the color only while there is no cover; one square to within 6% fills
+    // the sleeve, an oblong one sits whole on the panel.
+    let mut layers = Vec::new();
+    match cover {
+        Some(c) => {
+            let (iw, ih) = (c.image.width.max(1) as f32, c.image.height.max(1) as f32);
+            let fit = if (iw - ih).abs() <= 0.06 * iw.max(ih) {
+                vergence_widgets::Fit::Cover
+            } else {
+                vergence_widgets::Fit::Contain
+            };
+            layers.push(picture(c.image).fit(fit).radius(3.0).width(Length::Fixed(s)).height(Length::Fixed(s)));
+        }
+        None => layers.push(boxed(space()).color(ph).radius(3.0).width(Length::Fixed(s)).height(Length::Fixed(s))),
     }
     layers.push(
         drawing(move |scene, _, r: Rect, _| {

@@ -118,24 +118,30 @@ fn tile(
     };
     let ground = centered(panel(space()).color(ph).radius(2.0).width(Length::Fixed(face_w)).height(Length::Fixed(w)));
     let mut face = match cover {
-        // The whole cover, never cropped: a small or oblong one sits centered
-        // on its color; it fades in when it first comes.
+        // The cover, as the Avalonia app shows it (AlbumVm.CoverStretch and
+        // GroundOpacity): one square to within 6% fills the tile (shown whole
+        // it would grow a stripe of color down each side); a properly oblong
+        // one is shown whole, on the bare wall: the color is a stand-in for a
+        // cover and leaves as the cover fades in ("how about transparency
+        // instead of the colored borders", Dave; again 2026-11-27).
         Some(c) => {
             let o = key.as_ref().map_or(1.0, |k| fades.opacity(k, now));
-            // Fitted whole, then squeezed across by the turn (a small or
-            // oblong cover keeps its place on its color as it turns).
             let (iw, ih) = (c.image.width.max(1) as f32, c.image.height.max(1) as f32);
-            let k = (w / iw).min(w / ih);
-            let (fw, fh) = ((iw * k * squeeze).max(1.0), ih * k);
+            let square = (iw - ih).abs() <= 0.06 * iw.max(ih);
+            // Fitted, then squeezed across by the turn.
+            let (fw, fh) = if square {
+                ((w * squeeze).max(1.0), w)
+            } else {
+                let k = (w / iw).min(w / ih);
+                ((iw * k * squeeze).max(1.0), ih * k)
+            };
+            // Filled: cropped a hair when still, stretched by the turn while turning.
+            let fit =
+                if square && squeeze >= 0.999 { vergence_widgets::Fit::Cover } else { vergence_widgets::Fit::Stretch };
             stack(vec![
-                ground,
+                ground.opacity(1.0 - o),
                 panel(
-                    picture(c.image)
-                        .fit(vergence_widgets::Fit::Stretch)
-                        .radius(2.0)
-                        .opacity(o)
-                        .width(Length::Fixed(fw))
-                        .height(Length::Fixed(fh)),
+                    picture(c.image).fit(fit).radius(2.0).opacity(o).width(Length::Fixed(fw)).height(Length::Fixed(fh)),
                 )
                 .align(Align::Center)
                 .radius(0.0)

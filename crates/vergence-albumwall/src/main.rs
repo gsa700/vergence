@@ -174,6 +174,11 @@ type BarShown = (usize, usize, f64, f64, bool);
 /// The play bar sliding in or out (the Avalonia bar's TransportSlide).
 const BAR_SLIDE: Duration = Duration::from_millis(620);
 const CONTENTS_MS: u64 = 110;
+/// The wall follows the music a minute after the last look round it; a
+/// change waits only for a hand on it now (the Avalonia app's FollowAfter
+/// and HandsOff).
+const FOLLOW_AFTER: Duration = Duration::from_secs(60);
+const FOLLOW_HANDS_OFF: Duration = Duration::from_secs(2);
 /// The tracks fading behind the lyrics, and back (the Avalonia app's 0.25 s).
 const LYRICS_FADE: f32 = 0.25;
 const TURN_MS: u64 = 400;
@@ -262,6 +267,20 @@ struct AlbumWall {
     lyrics_pressed: Option<std::time::Instant>,
     /// Where the pointer was last pressed (the library menu opens there).
     pressed_at: (f32, f32),
+    /// When music was last asked for: the play bar is coming up, so an album
+    /// opened now is centered above it (Dave, 2026-11-27: the wall came
+    /// back off by about the play bar).
+    bar_coming: std::cell::Cell<Option<std::time::Instant>>,
+    /// The wall follows the music (the Avalonia app's MainWindow.PlayMode):
+    /// when someone last looked round the wall (a scroll, a click, a key in
+    /// it, the search), whether they have since the wall last went to what
+    /// plays, and a change of album waiting for a hand to leave the wall.
+    last_browse: Option<std::time::Instant>,
+    strayed: bool,
+    /// Where the wall's own motion last put it (a glide, a jump): a scroll
+    /// to there is not someone browsing.
+    scripted: Option<f32>,
+    follow_pending: bool,
     /// When the read under way began, and how long the last one took (the
     /// status line's "ms scan", as the Avalonia app's).
     read_started: Option<std::time::Instant>,
@@ -359,6 +378,11 @@ impl AlbumWall {
             lyrics_motion: Rc::default(),
             lyrics_pressed: None,
             pressed_at: (0.0, 0.0),
+            bar_coming: std::cell::Cell::new(None),
+            last_browse: None,
+            strayed: false,
+            scripted: None,
+            follow_pending: false,
             read_started: None,
             scan_ms: None,
             stepped: std::time::Instant::now(),
@@ -428,6 +452,11 @@ impl AlbumWall {
         }
         self.reading = Some(root.clone());
         self.read_started = Some(std::time::Instant::now());
+        // The servers signed in to, before anything of a server's is played:
+        // picking up where it was left loads a song as soon as the library
+        // is read (it found no server, and played nothing, when they were
+        // told only after: 2026-11-27).
+        vergence_albumwall::subsonic::register(self.libraries.list.iter().filter_map(|l| l.server.clone()).collect());
         // A music server: its login, and HTTPS through the helper.
         let server = self
             .libraries
@@ -936,6 +965,9 @@ impl AlbumWall {
     }
 
     fn send(&self, c: Command) {
+        if matches!(c, Command::Play { .. } | Command::Load { .. } | Command::Shuffle { .. }) {
+            self.bar_coming.set(Some(std::time::Instant::now()));
+        }
         if let Some(p) = &self.player {
             p.send(c);
         }
@@ -991,9 +1023,7 @@ impl AlbumWall {
         };
         if let Some(a) = next {
             self.play(a, 0);
-            if self.opened.as_ref().is_none_or(|o| o.index != a) {
-                self.press(a);
-            }
+            self.follow_now(a);
         }
     }
 
@@ -1053,9 +1083,7 @@ impl AlbumWall {
         if now.tag != *a && now.tag != SHUFFLE {
             *a = now.tag;
             let tag = now.tag;
-            if self.opened.as_ref().is_none_or(|o| o.index != tag) {
-                self.press(tag);
-            }
+            self.follow_now(tag);
         }
     }
 
@@ -1503,7 +1531,7 @@ impl AlbumWall {
                 let panel_row = (p / cols).saturating_sub(usize::from(o.down));
                 let top = wall::PAD_TOP + (panel_row + 1) as f32 * (tile_h + wall::GAP);
                 let old = albums.get(o.index).map_or(0.0, |a| self.panel_height(o.index, a, text));
-                let view_h = (self.size.1 - wallview::BAR).max(1.0);
+                let view_h = self.view_height();
                 let seen = top < self.wall_offset + view_h && top + old > self.wall_offset;
                 let row = at / cols;
                 if seen && (row == panel_row || row == panel_row + 1) {
@@ -1538,7 +1566,7 @@ impl AlbumWall {
         });
         // The album and its panel centered in the wall, as far as they fit.
         let row_top = wall::PAD_TOP + (at / cols) as f32 * (tile_h + wall::GAP);
-        let view_h = (self.size.1 - wallview::BAR).max(1.0);
+        let view_h = self.view_height();
         let block = tile_h + wall::GAP + full;
         let target = (row_top - ((view_h - block) / 2.0).max(0.0)).max(0.0);
         self.glide = Some((self.wall_offset, target, tween(UNFOLD_MS)));
@@ -1603,6 +1631,7 @@ impl AlbumWall {
     /// The search box's text changed: the wall shows what it finds (live;
     /// the wall builds only the rows in view, so no pause for the keys).
     fn search(&mut self, text: String) {
+        self.browsed();
         let was = !vergence_albumwall::search::normalize(&self.query).is_empty();
         let now = !vergence_albumwall::search::normalize(&text).is_empty();
         if now && !was && self.before_search.is_none() {
@@ -1657,7 +1686,7 @@ impl AlbumWall {
         (self.keyed, self.track) = (Some(i), None);
         let (_, tile_h) = self.grid();
         let top = self.row_top(at, &order, &albums);
-        let view = (self.size.1 - wallview::BAR - if self.player_showing() { playbar::HEIGHT } else { 0.0 }).max(1.0);
+        let view = self.view_height();
         let at_y = self.wall_offset;
         if top < at_y {
             self.jump = Some((top - wall::GAP).max(0.0));
@@ -1688,7 +1717,7 @@ impl AlbumWall {
         let header = panel::MARGIN + panel::PAD + 60.0 * text + panel::BUTTON_GAP + panel::LIST_GAP;
         let y = self.row_top(at, &order, &albums) + tile_h + wall::GAP + header + within;
         let line_h = (panel::LINE * text).ceil();
-        let view = (self.size.1 - wallview::BAR - if self.player_showing() { playbar::HEIGHT } else { 0.0 }).max(1.0);
+        let view = self.view_height();
         if y < self.wall_offset {
             self.jump = Some((y - wall::GAP).max(0.0));
         } else if y + line_h > self.wall_offset + view {
@@ -1699,6 +1728,94 @@ impl AlbumWall {
     /// The play bar is over the wall's foot.
     fn player_showing(&self) -> bool {
         self.player.as_ref().is_some_and(|p| p.state().now.is_some())
+    }
+
+    /// The wall's height that can be seen: the window less the bottom bar,
+    /// and less the play bar while it is up or coming up (music just asked
+    /// for: it is not up yet when an album opens to it, as on picking up
+    /// where it was left).
+    fn view_height(&self) -> f32 {
+        let coming = self.bar_coming.get().is_some_and(|t| t.elapsed() < Duration::from_secs(3));
+        let bar = if self.player_showing() || coming { playbar::HEIGHT } else { 0.0 };
+        (self.size.1 - wallview::BAR - bar).max(1.0)
+    }
+
+    /// Someone is looking round the wall: following waits a minute after it.
+    fn browsed(&mut self) {
+        self.last_browse = Some(std::time::Instant::now());
+        self.strayed = true;
+    }
+
+    /// The playing album changed by itself (the next album, a shuffle's
+    /// song): opened now, unless a hand is on the wall (then as soon as it
+    /// stops, the Avalonia app's two seconds).
+    fn follow_now(&mut self, a: usize) {
+        if self.last_browse.is_some_and(|t| t.elapsed() < FOLLOW_HANDS_OFF) {
+            self.follow_pending = true;
+            return;
+        }
+        self.strayed = false;
+        if self.opened.as_ref().is_none_or(|o| o.index != a) {
+            self.press(a);
+        }
+    }
+
+    /// The wall back to what plays, a minute after the last look round it
+    /// (or as soon as a hand leaves it, for a change waiting): the playing
+    /// album opened, or, open but scrolled out of sight, brought back. Not
+    /// with the play mode at Stop, nor while paused.
+    fn follow(&mut self) {
+        if self.settings.after == AfterAlbum::Stop {
+            self.follow_pending = false;
+            return;
+        }
+        let playing = self.player.as_ref().and_then(|p| p.state().now).is_some_and(|n| !n.paused);
+        let current = self.libraries.current().map(|l| l.folder.clone());
+        let Some(a) = self.playing.as_ref().filter(|(root, _)| Some(root) == current.as_ref()).map(|p| p.1) else {
+            return;
+        };
+        if !playing {
+            return;
+        }
+        let Some((albums, order)) = self.wall_albums() else { return };
+        if !order.contains(&a) {
+            self.follow_pending = false;
+            return;
+        }
+        let open = self.opened.as_ref().is_some_and(|o| o.index == a);
+        if open && !self.strayed && !self.follow_pending {
+            return;
+        }
+        let wait = if self.follow_pending { FOLLOW_HANDS_OFF } else { FOLLOW_AFTER };
+        if self.last_browse.is_some_and(|t| t.elapsed() < wait) {
+            return;
+        }
+        self.follow_pending = false;
+        self.strayed = false;
+        if open {
+            // Open and still in sight: left be. Scrolled away: brought back.
+            self.bring_back(a, true);
+            return;
+        }
+        let _ = albums;
+        self.press(a);
+    }
+
+    /// The open album `a` and its panel centered in the wall, as far as they
+    /// fit; with `if_away`, only if it is out of sight now.
+    fn bring_back(&mut self, a: usize, if_away: bool) {
+        let Some((albums, order)) = self.wall_albums() else { return };
+        let Some(at) = order.iter().position(|&x| x == a) else { return };
+        let (_, tile_h) = self.grid();
+        let top = self.row_top(at, &order, &albums);
+        let full = albums.get(a).map_or(0.0, |al| self.panel_height(a, al, self.text.get()));
+        let view = self.view_height();
+        if if_away && top + tile_h + full > self.wall_offset && top < self.wall_offset + view {
+            return;
+        }
+        let block = tile_h + wall::GAP + full;
+        let target = (top - ((view - block) / 2.0).max(0.0)).max(0.0);
+        self.glide = Some((self.wall_offset, target, vergence_widgets::motion::Tween::new(UNFOLD_MS, self.reduced())));
     }
 
     /// Where the keyboard starts: the open album, else the first at the top
@@ -1752,7 +1869,7 @@ impl AlbumWall {
             return true;
         };
         let (cols, tile_h) = self.grid();
-        let view = (self.size.1 - wallview::BAR).max(1.0);
+        let view = self.view_height();
         let per_screen = ((view / (tile_h + wall::GAP)) as usize).max(1);
         let last = order.len() - 1;
         let k = order[at];
@@ -1810,6 +1927,10 @@ impl AlbumWall {
         else {
             return None;
         };
+        // A key in the wall (not the search box, which counts as it changes): browsing.
+        if self.focus.as_deref() != Some("search") {
+            self.browsed();
+        }
         let typing = self.focus.as_deref() == Some("search");
         let plain = !m.ctrl && !m.alt && !m.logo && !m.shift;
         let letter = |c: char| key == c as u32 || key == c.to_ascii_uppercase() as u32;
@@ -2003,6 +2124,7 @@ impl Program for AlbumWall {
             // A click: the keyboard's ring goes (a click never shows it).
             Msg::Open(i) => {
                 (self.keyed, self.track) = (None, None);
+                self.browsed();
                 self.press(i);
             }
             Msg::Play(album, track) => self.play(album, track),
@@ -2043,10 +2165,17 @@ impl Program for AlbumWall {
                 }
             }
             Msg::GoToPlaying => {
-                if let Some((_, a)) = self.playing
-                    && self.opened.as_ref().is_none_or(|o| o.index != a)
-                {
-                    self.press(a);
+                // The play bar's cover: back to the playing album, opened, or
+                // brought back into sight if it is open already (Dave,
+                // 2026-11-27: "click cover takes you back to it").
+                if let Some((_, a)) = self.playing {
+                    self.strayed = false;
+                    self.follow_pending = false;
+                    if self.opened.as_ref().is_some_and(|o| o.index == a) {
+                        self.bring_back(a, false);
+                    } else {
+                        self.press(a);
+                    }
                 }
             }
             Msg::Search(text) => self.search(text),
@@ -2183,6 +2312,7 @@ impl Program for AlbumWall {
             if self.step_meters() {
                 window.wake_after(timer::METERS, METER_TICK);
             }
+            self.follow();
             return true;
         }
         if id == timer::POLL {
@@ -2334,6 +2464,11 @@ impl Program for AlbumWall {
 
     fn scrolled(&mut self, name: &str, offset: f32) {
         if name == "wall" {
+            // A scroll of the wall's own (not its glide to an album): browsing.
+            let ours = self.scripted.is_some_and(|y| (offset - y).abs() < 0.5);
+            if !ours && self.glide.is_none() && (offset - self.wall_offset).abs() > 0.5 {
+                self.browsed();
+            }
             self.wall_offset = offset;
         }
     }
@@ -2342,11 +2477,13 @@ impl Program for AlbumWall {
     fn scroll_to(&mut self) -> Vec<(String, f32)> {
         if let Some(y) = self.jump.take() {
             self.glide = None;
+            self.scripted = Some(y);
             return vec![("wall".into(), y)];
         }
         let now = std::time::Instant::now();
         let Some((from, to, t)) = &self.glide else { return Vec::new() };
         let at = vergence_widgets::motion::mix(*from, *to, t.out(now));
+        self.scripted = Some(at);
         if !t.running(now) {
             self.glide = None;
         }
