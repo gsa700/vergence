@@ -180,6 +180,9 @@ enum Message {
     /// desktop.toml changed under the app (its own settings window wrote it).
     Reread,
     Go(Page),
+    /// About: the summary to the clipboard; the Hardware app.
+    CopySummary,
+    OpenHardware,
     /// The Wi-Fi page (wifi.rs).
     Wifi(wifi::WifiMsg),
     /// Time to read the battery again (battery.rs).
@@ -406,6 +409,8 @@ struct App {
     prefs_open: std::rc::Rc<std::cell::Cell<bool>>,
     // Screens.
     outputs: Vec<OutputInfo>,
+    /// About's summary was just copied (the button says so until the page changes).
+    about_copied: bool,
     /// The input devices present, and the kinds the machine has had (bus `inputs`).
     inputs: Vec<InputInfo>,
     inputs_seen: Vec<InputKind>,
@@ -548,6 +553,7 @@ impl App {
             monos: theme::font_families(true),
             prefs_open: std::rc::Rc::new(std::cell::Cell::new(false)),
             outputs: Vec::new(),
+            about_copied: false,
             inputs: Vec::new(),
             inputs_seen: Vec::new(),
             setup: String::new(),
@@ -836,7 +842,17 @@ impl App {
 
     fn handle(&mut self, m: Message) {
         match m {
-            Message::Go(p) => self.open(p),
+            Message::Go(p) => {
+                self.about_copied = false;
+                self.open(p)
+            }
+            // Copied in update, which has the window.
+            Message::CopySummary => {}
+            Message::OpenHardware => {
+                if let Err(e) = std::process::Command::new("vergence-hw").spawn() {
+                    eprintln!("vergence-settings: vergence-hw: {e}");
+                }
+            }
             Message::Wifi(m) => self.wifi_handle(m),
             Message::BatterySample => self.battery_sample(),
             Message::Notify(m) => self.notify_message(m),
@@ -1195,6 +1211,10 @@ impl Program for App {
         let was = self.page;
         if matches!(m, Message::KeepMode(_)) {
             window.cancel_timer(modes::REVERT_TIMER);
+        }
+        if matches!(m, Message::CopySummary) {
+            window.copy(&self.summary_text());
+            self.about_copied = true;
         }
         self.handle(m);
         // A new mode: ask, and go back by itself unless kept.

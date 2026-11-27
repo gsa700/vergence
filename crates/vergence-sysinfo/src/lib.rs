@@ -83,6 +83,121 @@ pub struct DiskIo {
     pub written: u64,
 }
 
+/// What kind of core a processor is on a chip with two kinds (Intel's
+/// hybrid parts: Performance and Efficiency cores); `Plain` where the chip
+/// has one kind, or the system does not say which.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CoreKind {
+    Performance,
+    Efficiency,
+    Plain,
+}
+
+/// Where one logical processor sits: its number, the processors that share
+/// its core (itself among them: two with hyper-threading, one without), the
+/// processors that share its cluster (the core's level-2 cache: an
+/// Efficiency cluster of four, or just the core) and its kind.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Place {
+    pub cpu: usize,
+    pub siblings: Vec<usize>,
+    pub cluster: Vec<usize>,
+    pub kind: CoreKind,
+    /// The core's number as the system gives it (Linux topology/core_id):
+    /// what coretemp names its sensor by ("Core 32"). None on FreeBSD.
+    pub core_id: Option<u32>,
+}
+
+/// One core: its logical processors (threads), lowest first, and its
+/// number as the system gives it, where it does.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Core {
+    pub threads: Vec<usize>,
+    pub id: Option<u32>,
+}
+
+/// The cores that share a level-2 cache.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cluster {
+    pub cores: Vec<Core>,
+}
+
+/// All the cores of one kind, cluster by cluster.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Section {
+    pub kind: CoreKind,
+    pub clusters: Vec<Cluster>,
+}
+
+/// The chip's shape: Performance cores first, then Efficiency, then plain.
+/// Empty where the system says nothing; the Hardware app then draws the
+/// processors in a plain row.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Topology {
+    pub sections: Vec<Section>,
+}
+
+impl Topology {
+    /// Every logical processor in it.
+    pub fn threads(&self) -> usize {
+        self.sections.iter().flat_map(|s| &s.clusters).flat_map(|c| &c.cores).map(|c| c.threads.len()).sum()
+    }
+
+    pub fn cores(&self) -> usize {
+        self.sections.iter().flat_map(|s| &s.clusters).map(|c| c.cores.len()).sum()
+    }
+}
+
+/// The shape from each processor's place: sections by kind, clusters in
+/// the order of their lowest processor, cores likewise. A processor named
+/// in a sibling or cluster list but missing from `places` is left out.
+pub fn arrange(places: &[Place]) -> Topology {
+    let mut places: Vec<&Place> = places.iter().collect();
+    places.sort_by_key(|p| (p.kind, p.cpu));
+    let known = |v: &[usize]| -> Vec<usize> {
+        let mut v: Vec<usize> = v.iter().copied().filter(|c| places.iter().any(|p| p.cpu == *c)).collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    };
+    let mut done: Vec<usize> = Vec::new();
+    let mut sections: Vec<Section> = Vec::new();
+    for p in &places {
+        if done.contains(&p.cpu) {
+            continue;
+        }
+        // The cluster: the processors of this kind listed as sharing it.
+        let mut members: Vec<&Place> = known(&p.cluster)
+            .into_iter()
+            .chain(std::iter::once(p.cpu))
+            .filter_map(|c| places.iter().copied().find(|q| q.cpu == c && q.kind == p.kind))
+            .filter(|q| !done.contains(&q.cpu))
+            .collect();
+        members.sort_by_key(|q| q.cpu);
+        members.dedup_by_key(|q| q.cpu);
+        let mut cores: Vec<Core> = Vec::new();
+        for q in &members {
+            if done.contains(&q.cpu) {
+                continue;
+            }
+            let mut threads: Vec<usize> =
+                known(&q.siblings).into_iter().filter(|c| members.iter().any(|m| m.cpu == *c)).collect();
+            if !threads.contains(&q.cpu) {
+                threads.push(q.cpu);
+                threads.sort_unstable();
+            }
+            threads.retain(|c| !done.contains(c));
+            done.extend(&threads);
+            cores.push(Core { threads, id: q.core_id });
+        }
+        match sections.last_mut() {
+            Some(s) if s.kind == p.kind => s.clusters.push(Cluster { cores }),
+            _ => sections.push(Section { kind: p.kind, clusters: vec![Cluster { cores }] }),
+        }
+    }
+    Topology { sections }
+}
+
 // ---- parsers (plain text in, numbers out) ----
 
 /// Linux /proc/stat: one Ticks per "cpuN" line (not the "cpu" total).
@@ -203,6 +318,365 @@ pub fn parse_diskstats(text: &str) -> Vec<DiskIo> {
         .collect()
 }
 
+/// A kernel CPU list ("0-3,8,10-11", Linux's sysfs; FreeBSD's "0, 1")
+/// as numbers.
+pub fn parse_cpu_list(text: &str) -> Vec<usize> {
+    let mut out = Vec::new();
+    for part in text.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        match part.split_once('-') {
+            Some((a, b)) => {
+                if let (Ok(a), Ok(b)) = (a.trim().parse::<usize>(), b.trim().parse::<usize>()) {
+                    out.extend(a..=b.min(a + 4096));
+                }
+            }
+            None => out.extend(part.parse::<usize>().ok()),
+        }
+    }
+    out
+}
+
+/// FreeBSD's kern.sched.topology_spec (XML: nested groups, each with its
+/// processors and flags): the places, with a THREAD or SMT group as a core
+/// and the smallest group sharing a level-2 cache as the cluster. FreeBSD
+/// does not say which cores are Performance and which Efficiency, so every
+/// place is `Plain` there (said so in the app, not guessed).
+pub fn parse_topology_spec(xml: &str) -> Vec<Place> {
+    struct Group {
+        cache: Option<u32>,
+        cpus: Vec<usize>,
+        smt: bool,
+    }
+    let mut groups: Vec<Group> = Vec::new();
+    // The groups still open, as indices into `groups`.
+    let mut open: Vec<usize> = Vec::new();
+    let mut rest = xml;
+    while let Some(i) = rest.find('<') {
+        rest = &rest[i + 1..];
+        let end = rest.find('>').unwrap_or(rest.len());
+        let tag = &rest[..end];
+        let after = &rest[(end + 1).min(rest.len())..];
+        if let Some(attrs) = tag.strip_prefix("group") {
+            let cache = attrs
+                .split_once("cache-level=\"")
+                .and_then(|(_, v)| v.split('"').next())
+                .and_then(|v| v.parse::<u32>().ok());
+            groups.push(Group { cache, cpus: Vec::new(), smt: false });
+            open.push(groups.len() - 1);
+        } else if tag == "/group" {
+            open.pop();
+        } else if tag.starts_with("cpu ") || tag == "cpu" {
+            if let Some(&g) = open.last() {
+                groups[g].cpus = parse_cpu_list(&after[..after.find('<').unwrap_or(after.len())]);
+            }
+        } else if tag.starts_with("flag ")
+            && let Some(&g) = open.last()
+        {
+            groups[g].smt |= tag.contains("\"THREAD\"") || tag.contains("\"SMT\"");
+        }
+        rest = after;
+    }
+    let mut all: Vec<usize> = groups.iter().flat_map(|g| g.cpus.iter().copied()).collect();
+    all.sort_unstable();
+    all.dedup();
+    let smallest = |cpu: usize, pick: &dyn Fn(&Group) -> bool| {
+        groups.iter().filter(|g| pick(g) && g.cpus.contains(&cpu)).min_by_key(|g| g.cpus.len()).map(|g| g.cpus.clone())
+    };
+    all.iter()
+        .map(|&cpu| {
+            let siblings = smallest(cpu, &|g| g.smt).unwrap_or_else(|| vec![cpu]);
+            let cluster = smallest(cpu, &|g| g.cache == Some(2)).unwrap_or_else(|| siblings.clone());
+            Place { cpu, siblings, cluster, kind: CoreKind::Plain, core_id: None }
+        })
+        .collect()
+}
+
+/// The cores and threads in words, each kind marked where it runs two
+/// threads on a core (Dave's wording, 2026-11-26): "8 Performance
+/// (Hyper-Threading) + 16 Efficiency, 32 Threads"; one kind: "4 Cores
+/// (Hyper-Threading), 8 Threads", "6 Cores, 6 Threads". Intel's name for
+/// it is Hyper-Threading, AMD's SMT (from the processor's `model`).
+pub fn cores_text(t: &Topology, model: &str) -> String {
+    let ht = ht_word(model);
+    let parts: Vec<String> =
+        [(CoreKind::Performance, "Performance"), (CoreKind::Efficiency, "Efficiency"), (CoreKind::Plain, "Cores")]
+            .into_iter()
+            .filter_map(|(k, word)| {
+                let cores: Vec<&Core> = t
+                    .sections
+                    .iter()
+                    .filter(|s| s.kind == k)
+                    .flat_map(|s| &s.clusters)
+                    .flat_map(|c| &c.cores)
+                    .collect();
+                if cores.is_empty() {
+                    return None;
+                }
+                let mark = if cores.iter().any(|c| c.threads.len() > 1) { format!(" ({ht})") } else { String::new() };
+                Some(format!("{} {word}{mark}", cores.len()))
+            })
+            .collect();
+    format!("{}, {} Threads", parts.join(" + "), t.threads())
+}
+
+/// Two threads on a core, by its maker's name.
+pub fn ht_word(model: &str) -> &'static str {
+    if model.contains("AMD") { "SMT" } else { "Hyper-Threading" }
+}
+
+/// What the machine is, from its firmware's tables (SMBIOS/DMI): maker and
+/// model, the board, the firmware's version. Any user may read these.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Machine {
+    pub maker: String,
+    pub product: String,
+    /// A model's friendlier name where the maker puts it there (Lenovo:
+    /// "ThinkCentre M910q", the product being a type number).
+    pub version: String,
+    pub board_maker: String,
+    pub board: String,
+    pub bios: String,
+    /// The firmware's maker and date as it gives it ("American Megatrends
+    /// Inc.", "04/29/2025").
+    pub bios_vendor: String,
+    pub bios_date: String,
+}
+
+impl Machine {
+    /// The machine in a few words: its maker and model, or, where the
+    /// maker left the firmware's placeholder (a board bought on its own:
+    /// "System Product Name", "To be filled by O.E.M."), its board:
+    /// "ASUS TUF GAMING Z690-PLUS WIFI".
+    pub fn name(&self) -> String {
+        let blank = |v: &str| {
+            let l = v.trim().to_ascii_lowercase();
+            l.is_empty()
+                || ["system product name", "to be filled", "default string", "not applicable", "none", "o.e.m", "oem"]
+                    .iter()
+                    .any(|p| l.contains(p))
+        };
+        let maker = if blank(&self.maker) { &self.board_maker } else { &self.maker };
+        let model = if self.maker.eq_ignore_ascii_case("lenovo") && !blank(&self.version) {
+            &self.version
+        } else if !blank(&self.product) {
+            &self.product
+        } else {
+            &self.board
+        };
+        let text = format!("{} {}", maker.trim(), model.trim());
+        text.trim().to_string()
+    }
+}
+
+/// /etc/os-release's PRETTY_NAME (or NAME).
+pub fn parse_os_release(text: &str) -> String {
+    let get = |k: &str| {
+        text.lines().find_map(|l| l.strip_prefix(k)?.strip_prefix('=').map(|v| v.trim().trim_matches('"').to_string()))
+    };
+    get("PRETTY_NAME").or_else(|| get("NAME")).unwrap_or_default()
+}
+
+/// A time since in words, to the two largest units: "3 days, 4 hours",
+/// "2 hours, 5 minutes", "1 minute".
+pub fn uptime_text(secs: u64) -> String {
+    let (d, h, m) = (secs / 86_400, secs / 3600 % 24, secs / 60 % 60);
+    let unit = |n: u64, w: &str| if n == 1 { format!("1 {w}") } else { format!("{n} {w}s") };
+    match (d, h) {
+        (0, 0) => unit(m.max(if secs < 60 { 0 } else { 1 }), "minute"),
+        (0, _) => format!("{}, {}", unit(h, "hour"), unit(m, "minute")),
+        _ => format!("{}, {}", unit(d, "day"), unit(h, "hour")),
+    }
+}
+
+/// One cache: its level, "Data", "Instruction" or "Unified", its size, and
+/// how many logical processors share it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cache {
+    pub level: u32,
+    pub kind: String,
+    pub bytes: u64,
+    pub shared_by: usize,
+}
+
+/// A kind of core's clocks and caches (on a plain chip, one entry).
+#[derive(Debug, Clone, PartialEq)]
+pub struct KindDetails {
+    pub kind: CoreKind,
+    pub base_mhz: Option<u32>,
+    pub max_mhz: Option<u32>,
+    pub caches: Vec<Cache>,
+}
+
+/// What the processor is, beyond its name (CPU-Z's first page): read once.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CpuDetails {
+    /// "GenuineIntel", "AuthenticAMD".
+    pub vendor: String,
+    pub family: Option<u32>,
+    pub model: Option<u32>,
+    pub stepping: Option<u32>,
+    pub microcode: String,
+    /// Feature flags in Linux's spelling ("avx2", "sha_ni"), whatever the
+    /// system.
+    pub flags: Vec<String>,
+    pub kinds: Vec<KindDetails>,
+    /// How the clock is run: driver and policy ("intel_pstate", "powersave").
+    pub driver: String,
+    pub governor: String,
+}
+
+/// The design's name from its family and model (our own table of the
+/// common ones; None where we do not know it rather than a guess).
+pub fn codename(vendor: &str, family: u32, model: u32, stepping: u32) -> Option<&'static str> {
+    if vendor.contains("Intel") && family == 6 {
+        return Some(match model {
+            0x2A | 0x2D => "Sandy Bridge",
+            0x3A | 0x3E => "Ivy Bridge",
+            0x3C | 0x3F | 0x45 | 0x46 => "Haswell",
+            0x3D | 0x47 | 0x4F | 0x56 => "Broadwell",
+            0x4E | 0x5E => "Skylake",
+            0x55 => "Skylake-SP / Cascade Lake",
+            0x9E if stepping <= 9 => "Kaby Lake",
+            0x9E => "Coffee Lake",
+            0x66 => "Cannon Lake",
+            0xA5 | 0xA6 => "Comet Lake",
+            0x7D | 0x7E => "Ice Lake",
+            0x6A | 0x6C => "Ice Lake-SP",
+            0x8C | 0x8D => "Tiger Lake",
+            0xA7 => "Rocket Lake",
+            0x97 | 0x9A => "Alder Lake",
+            0xBE => "Alder Lake-N",
+            0xB7 | 0xBA | 0xBF => "Raptor Lake",
+            0xAA | 0xAC => "Meteor Lake",
+            0xBD => "Lunar Lake",
+            0xC5 | 0xC6 => "Arrow Lake",
+            0x8F => "Sapphire Rapids",
+            0xCF => "Emerald Rapids",
+            0x5C => "Apollo Lake",
+            0x7A => "Gemini Lake",
+            0x9C => "Jasper Lake",
+            _ => return None,
+        });
+    }
+    if vendor.contains("AMD") {
+        return Some(match (family, model) {
+            (0x17, 0x00..=0x2F) => "Zen / Zen+",
+            (0x17, _) => "Zen 2",
+            (0x19, 0x00..=0x0F) | (0x19, 0x20..=0x5F) => "Zen 3",
+            (0x19, 0xA0..=0xAF) => "Zen 4c",
+            (0x19, _) => "Zen 4",
+            (0x1A, _) => "Zen 5",
+            _ => return None,
+        });
+    }
+    None
+}
+
+/// The instruction sets and features worth naming, in their makers'
+/// words, from Linux-spelled flags, in a fixed order.
+pub fn instruction_sets(flags: &[String]) -> Vec<&'static str> {
+    const NAMES: [(&str, &str); 22] = [
+        ("sse4_2", "SSE4.2"),
+        ("avx", "AVX"),
+        ("avx2", "AVX2"),
+        ("fma", "FMA3"),
+        ("avx512f", "AVX-512"),
+        ("avx512_vnni", "AVX-512 VNNI"),
+        ("avx512_bf16", "AVX-512 BF16"),
+        ("avx_vnni", "AVX-VNNI"),
+        ("amx_tile", "AMX"),
+        ("f16c", "F16C"),
+        ("bmi2", "BMI2"),
+        ("aes", "AES-NI"),
+        ("vaes", "VAES"),
+        ("sha_ni", "SHA"),
+        ("gfni", "GFNI"),
+        ("rdrand", "RDRAND"),
+        ("vmx", "VT-x"),
+        ("svm", "AMD-V"),
+        ("ept", "EPT"),
+        ("npt", "NPT"),
+        ("lm", "x86-64"),
+        ("nx", "NX"),
+    ];
+    NAMES.iter().filter(|(f, _)| flags.iter().any(|g| g == f)).map(|(_, n)| *n).collect()
+}
+
+/// Linux /proc/cpuinfo's first processor: vendor, family, model, stepping,
+/// microcode, flags (the caches and clocks come from sysfs).
+pub fn parse_cpuinfo_details(text: &str) -> CpuDetails {
+    let first = text.split("\n\n").next().unwrap_or("");
+    let get = |k: &str| {
+        first.lines().find_map(|l| {
+            let (key, v) = l.split_once(':')?;
+            (key.trim() == k).then(|| v.trim().to_string())
+        })
+    };
+    CpuDetails {
+        vendor: get("vendor_id").unwrap_or_default(),
+        family: get("cpu family").and_then(|v| v.parse().ok()),
+        model: get("model").and_then(|v| v.parse().ok()),
+        stepping: get("stepping").and_then(|v| v.parse().ok()),
+        microcode: get("microcode").unwrap_or_default(),
+        flags: get("flags").map(|f| f.split_whitespace().map(String::from).collect()).unwrap_or_default(),
+        ..Default::default()
+    }
+}
+
+/// FreeBSD's boot messages (/var/run/dmesg.boot, readable by any user):
+/// the CPU's Origin, Family, Model and Stepping, and its Features lines'
+/// names, spelled as Linux spells them.
+pub fn parse_dmesg_cpu(text: &str) -> CpuDetails {
+    let mut d = CpuDetails::default();
+    let num = |v: &str| {
+        let v = v.trim_matches(|c: char| c == '"' || c.is_whitespace());
+        match v.strip_prefix("0x") {
+            Some(h) => u32::from_str_radix(h, 16).ok(),
+            None => v.parse().ok(),
+        }
+    };
+    let mut flags: Vec<String> = Vec::new();
+    for l in text.lines() {
+        let l = l.trim();
+        if l.starts_with("Origin=") && d.vendor.is_empty() {
+            for part in l.split_whitespace() {
+                match part.split_once('=') {
+                    Some(("Origin", v)) => d.vendor = v.trim_matches('"').to_string(),
+                    Some(("Family", v)) => d.family = num(v),
+                    Some(("Model", v)) => d.model = num(v),
+                    Some(("Stepping", v)) => d.stepping = num(v),
+                    _ => {}
+                }
+            }
+        } else if l.contains("Features") && l.contains('<') && d.family.is_some() {
+            let inner = l.split_once('<').map(|(_, r)| r.trim_end_matches('>')).unwrap_or("");
+            for name in inner.split(',') {
+                let f = match name.trim() {
+                    "SSE4.2" => "sse4_2",
+                    "AESNI" => "aes",
+                    "SHA" => "sha_ni",
+                    "AVXVNNI" | "AVX-VNNI" => "avx_vnni",
+                    "AVX512F" => "avx512f",
+                    "AVX512VNNI" => "avx512_vnni",
+                    "VMX" => "vmx",
+                    "SVM" => "svm",
+                    "LM" => "lm",
+                    "NX" => "nx",
+                    "RDRAND" => "rdrand",
+                    other => {
+                        flags.push(other.to_ascii_lowercase());
+                        continue;
+                    }
+                };
+                flags.push(f.to_string());
+            }
+        }
+    }
+    flags.sort();
+    flags.dedup();
+    d.flags = flags;
+    d
+}
+
 /// Bytes in words: "7.6 GB", "512 MB".
 pub fn bytes_text(b: u64) -> String {
     let b = b as f64;
@@ -265,6 +739,102 @@ mod os {
         parse_meminfo(&read("/proc/meminfo"))
     }
 
+    /// The processor's details: /proc/cpuinfo, then for each kind of core
+    /// its first processor's caches and the highest clocks among its own.
+    pub fn cpu_details(t: &Topology) -> CpuDetails {
+        let mut d = parse_cpuinfo_details(&read("/proc/cpuinfo"));
+        let base = "/sys/devices/system/cpu";
+        let khz = |cpu: usize, f: &str| read(format!("{base}/cpu{cpu}/cpufreq/{f}")).trim().parse::<u32>().ok();
+        for sec in &t.sections {
+            let cpus: Vec<usize> =
+                sec.clusters.iter().flat_map(|c| &c.cores).flat_map(|c| c.threads.iter().copied()).collect();
+            let Some(&first) = cpus.first() else { continue };
+            let mut caches = Vec::new();
+            for i in 0..8 {
+                let dir = format!("{base}/cpu{first}/cache/index{i}");
+                let Ok(level) = read(format!("{dir}/level")).trim().parse::<u32>() else { break };
+                let size = read(format!("{dir}/size"));
+                let size = size.trim();
+                let bytes = size
+                    .strip_suffix('K')
+                    .and_then(|n| n.parse::<u64>().ok())
+                    .map(|n| n * 1024)
+                    .or_else(|| size.strip_suffix('M').and_then(|n| n.parse::<u64>().ok()).map(|n| n << 20))
+                    .unwrap_or(0);
+                let shared_by = parse_cpu_list(read(format!("{dir}/shared_cpu_list")).trim()).len().max(1);
+                caches.push(Cache { level, kind: read(format!("{dir}/type")).trim().to_string(), bytes, shared_by });
+            }
+            d.kinds.push(KindDetails {
+                kind: sec.kind,
+                base_mhz: khz(first, "base_frequency").map(|k| k / 1000),
+                max_mhz: cpus.iter().filter_map(|&c| khz(c, "cpuinfo_max_freq")).max().map(|k| k / 1000),
+                caches,
+            });
+        }
+        d.driver = read(format!("{base}/cpu0/cpufreq/scaling_driver")).trim().to_string();
+        d.governor = read(format!("{base}/cpu0/cpufreq/scaling_governor")).trim().to_string();
+        d
+    }
+
+    pub fn machine() -> Machine {
+        let id = |f: &str| read(format!("/sys/class/dmi/id/{f}")).trim().to_string();
+        Machine {
+            maker: id("sys_vendor"),
+            product: id("product_name"),
+            version: id("product_version"),
+            board_maker: id("board_vendor"),
+            board: id("board_name"),
+            bios: id("bios_version"),
+            bios_vendor: id("bios_vendor"),
+            bios_date: id("bios_date"),
+        }
+    }
+
+    /// "Void Linux"; the kernel is uname's.
+    pub fn os_name() -> String {
+        let n = parse_os_release(&read("/etc/os-release"));
+        if n.is_empty() { "Linux".into() } else { n }
+    }
+
+    pub fn uptime() -> Option<u64> {
+        read("/proc/uptime").split_whitespace().next()?.parse::<f64>().ok().map(|s| s as u64)
+    }
+
+    /// Each online processor's place, from sysfs (any user may read it):
+    /// topology/thread_siblings_list for the core, topology/cluster_cpus_list
+    /// (or the level-2 cache's shared_cpu_list on older kernels) for the
+    /// cluster, and on a hybrid chip /sys/devices/cpu_core/cpus and
+    /// cpu_atom/cpus for the kind.
+    pub fn topology() -> Topology {
+        let base = "/sys/devices/system/cpu";
+        let perf = parse_cpu_list(read("/sys/devices/cpu_core/cpus").trim());
+        let eff = parse_cpu_list(read("/sys/devices/cpu_atom/cpus").trim());
+        let places: Vec<Place> = parse_cpu_list(read(format!("{base}/online")).trim())
+            .into_iter()
+            .filter_map(|cpu| {
+                let d = format!("{base}/cpu{cpu}");
+                let siblings = parse_cpu_list(read(format!("{d}/topology/thread_siblings_list")).trim());
+                if siblings.is_empty() {
+                    return None;
+                }
+                let mut cluster = parse_cpu_list(read(format!("{d}/topology/cluster_cpus_list")).trim());
+                if cluster.is_empty() {
+                    cluster = parse_cpu_list(read(format!("{d}/cache/index2/shared_cpu_list")).trim());
+                }
+                let kind = if perf.contains(&cpu) {
+                    CoreKind::Performance
+                } else if eff.contains(&cpu) {
+                    CoreKind::Efficiency
+                } else {
+                    CoreKind::Plain
+                };
+                let core_id = read(format!("{d}/topology/core_id")).trim().parse().ok();
+                Some(Place { cpu, siblings, cluster, kind, core_id })
+            })
+            .collect();
+        arrange(&places)
+    }
+
     pub fn disk_io() -> Vec<DiskIo> {
         parse_diskstats(&read("/proc/diskstats"))
     }
@@ -277,7 +847,20 @@ mod os {
         mons.sort();
         for m in mons {
             let name = read(m.join("name")).trim().to_string();
-            for i in 1..=32 {
+            // Every tempN_input there, not a fixed range: coretemp numbers
+            // its sensors by core id plus two, so a 13900K's Efficiency
+            // cores are temp34 to temp49 (a 1..=32 range lost all sixteen).
+            let mut nums: Vec<u32> = std::fs::read_dir(&m)
+                .map(|d| {
+                    d.flatten()
+                        .filter_map(|e| {
+                            e.file_name().to_str()?.strip_prefix("temp")?.strip_suffix("_input")?.parse().ok()
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            nums.sort_unstable();
+            for i in nums {
                 let Ok(milli) = read(m.join(format!("temp{i}_input"))).trim().parse::<i64>() else { continue };
                 let label = read(m.join(format!("temp{i}_label"))).trim().to_string();
                 let what = if label.is_empty() { name.clone() } else { format!("{name} {label}") };
@@ -365,6 +948,61 @@ mod os {
         Vec::new()
     }
 
+    /// The boot messages for what the processor is; the top clock from
+    /// dev.cpu.0.freq_levels ("4300/65000 3900/..."). Caches FreeBSD does not
+    /// offer a user.
+    pub fn cpu_details(t: &Topology) -> CpuDetails {
+        let mut d = parse_dmesg_cpu(&read("/var/run/dmesg.boot"));
+        let max = sysctl_text("dev.cpu.0.freq_levels")
+            .split_whitespace()
+            .filter_map(|l| l.split('/').next()?.parse::<u32>().ok())
+            .max();
+        let kind = t.sections.first().map_or(CoreKind::Plain, |s| s.kind);
+        d.kinds.push(KindDetails { kind, base_mhz: None, max_mhz: max, caches: Vec::new() });
+        d.driver = sysctl_text("dev.cpufreq.0.freq_driver");
+        d
+    }
+
+    /// kenv's smbios.* (the loader's copy of the firmware's tables; any
+    /// user may read them).
+    pub fn machine() -> Machine {
+        let kenv = |k: &str| {
+            std::process::Command::new("kenv")
+                .args(["-q", k])
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_default()
+        };
+        Machine {
+            maker: kenv("smbios.system.maker"),
+            product: kenv("smbios.system.product"),
+            version: kenv("smbios.system.version"),
+            board_maker: kenv("smbios.planar.maker"),
+            board: kenv("smbios.planar.product"),
+            bios: kenv("smbios.bios.version"),
+            bios_vendor: kenv("smbios.bios.vendor"),
+            bios_date: kenv("smbios.bios.reldate"),
+        }
+    }
+
+    pub fn os_name() -> String {
+        "FreeBSD".into()
+    }
+
+    /// Since kern.boottime (a timeval: seconds first).
+    pub fn uptime() -> Option<u64> {
+        let b = sysctl("kern.boottime")?;
+        let boot = i64::from_ne_bytes(b.get(..8)?.try_into().ok()?);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64;
+        Some((now - boot).max(0) as u64)
+    }
+
+    /// The scheduler's view of the chip (kern.sched.topology_spec).
+    pub fn topology() -> Topology {
+        arrange(&parse_topology_spec(&sysctl_text("kern.sched.topology_spec")))
+    }
+
     /// Each processor's temperature (dev.cpu.N.temperature, in tenths of a kelvin).
     pub fn temps() -> Vec<Temp> {
         (0..256)
@@ -392,9 +1030,129 @@ mod os {
     pub fn temps() -> Vec<Temp> {
         Vec::new()
     }
+    pub fn topology() -> Topology {
+        Topology::default()
+    }
+    pub fn machine() -> Machine {
+        Machine::default()
+    }
+    pub fn os_name() -> String {
+        String::new()
+    }
+    pub fn uptime() -> Option<u64> {
+        None
+    }
+    pub fn cpu_details(_: &Topology) -> CpuDetails {
+        CpuDetails::default()
+    }
 }
 
-pub use os::{cpu, disk_io, memory, temps};
+pub use os::{cpu, cpu_details, disk_io, machine, memory, os_name, temps, topology, uptime};
+
+/// A graphics card's details: its PCI ids, and its clock now and at most in
+/// MHz where the driver says (Intel i915's gt_*_freq_mhz; amdgpu's
+/// pp_dpm_sclk), and its own memory (amdgpu's mem_info_vram_total).
+///
+/// The card's own sensors, as any user may read them: amdgpu's and
+/// nouveau's hwmon (temperatures, power, fan) and amdgpu's busy share and
+/// memory in use. Never read while the card sleeps (`asleep`): a read of its
+/// hwmon or pp_dpm wakes a laptop's discrete card and keeps it awake.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct GpuDetails {
+    pub pci_id: String,
+    pub asleep: bool,
+    pub clock_mhz: Option<u32>,
+    pub max_mhz: Option<u32>,
+    pub vram: Option<u64>,
+    pub vram_used: Option<u64>,
+    pub busy_percent: Option<u32>,
+    pub sensors: GpuSensors,
+}
+
+/// A card's hwmon readings: each temperature with its label ("edge",
+/// "junction"; empty where the driver gives none, as nouveau's one), the
+/// power it draws in watts, its fan's speed.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct GpuSensors {
+    pub temps: Vec<(String, f32)>,
+    pub watts: Option<f32>,
+    pub fan_rpm: Option<u32>,
+}
+
+/// The card's hwmon folder (`<device>/hwmon/hwmonN`), read: tempN_input in
+/// millidegrees, power1_average (amdgpu) or power1_input (nouveau, newer
+/// amdgpu) in microwatts, fan1_input in RPM. A fan reading 0 is a stopped
+/// fan (amdgpu's zero-RPM idle) and shown so.
+pub fn read_gpu_hwmon(dir: &Path) -> GpuSensors {
+    let mut s = GpuSensors::default();
+    let mut nums: Vec<u32> = std::fs::read_dir(dir)
+        .map(|d| {
+            d.flatten()
+                .filter_map(|e| e.file_name().to_str()?.strip_prefix("temp")?.strip_suffix("_input")?.parse().ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    nums.sort_unstable();
+    for i in nums {
+        let Ok(milli) = read(dir.join(format!("temp{i}_input"))).trim().parse::<i64>() else { continue };
+        s.temps.push((read(dir.join(format!("temp{i}_label"))).trim().to_string(), milli as f32 / 1000.0));
+    }
+    let micro = |f: &str| read(dir.join(f)).trim().parse::<u64>().ok();
+    s.watts = micro("power1_average").or_else(|| micro("power1_input")).map(|uw| uw as f32 / 1_000_000.0);
+    s.fan_rpm = read(dir.join("fan1_input")).trim().parse().ok();
+    s
+}
+
+/// amdgpu's pp_dpm_sclk: "0: 500Mhz\n1: 2400Mhz *": (now, most).
+pub fn parse_dpm(text: &str) -> (Option<u32>, Option<u32>) {
+    let levels: Vec<(u32, bool)> = text
+        .lines()
+        .filter_map(|l| {
+            let mhz = l.split_once(':')?.1.trim().split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()?;
+            Some((mhz, l.trim_end().ends_with('*')))
+        })
+        .collect();
+    (levels.iter().find(|l| l.1).map(|l| l.0), levels.iter().map(|l| l.0).max())
+}
+
+/// The card in PCI slot `slot` ("0000:00:02.0"), from sysfs (Linux; other
+/// systems: nothing).
+pub fn gpu_details(slot: &str) -> GpuDetails {
+    if !cfg!(target_os = "linux") {
+        return GpuDetails::default();
+    }
+    let dev = format!("/sys/bus/pci/devices/{slot}");
+    let hex = |f: &str| read(format!("{dev}/{f}")).trim().trim_start_matches("0x").to_string();
+    let mut d = GpuDetails { pci_id: format!("{}:{}", hex("vendor"), hex("device")), ..Default::default() };
+    // runtime_status itself never wakes the card; everything below might.
+    if read(format!("{dev}/power/runtime_status")).trim() == "suspended" {
+        d.asleep = true;
+        return d;
+    }
+    let card = std::fs::read_dir(format!("{dev}/drm")).ok().and_then(|r| {
+        r.flatten()
+            .map(|e| e.path())
+            .find(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("card") && !n.contains('-')))
+    });
+    if let Some(card) = card {
+        let mhz = |f: &str| read(card.join(f)).trim().parse::<u32>().ok();
+        d.clock_mhz = mhz("gt_act_freq_mhz");
+        d.max_mhz = mhz("gt_RP0_freq_mhz").or_else(|| mhz("gt_max_freq_mhz"));
+    }
+    if d.clock_mhz.is_none() {
+        let (now, most) = parse_dpm(&read(format!("{dev}/pp_dpm_sclk")));
+        d.clock_mhz = now;
+        d.max_mhz = d.max_mhz.or(most);
+    }
+    d.vram = read(format!("{dev}/mem_info_vram_total")).trim().parse().ok();
+    d.vram_used = read(format!("{dev}/mem_info_vram_used")).trim().parse().ok();
+    d.busy_percent = read(format!("{dev}/gpu_busy_percent")).trim().parse().ok();
+    let mon = std::fs::read_dir(format!("{dev}/hwmon")).ok().and_then(|r| r.flatten().map(|e| e.path()).min());
+    if let Some(mon) = mon {
+        d.sensors = read_gpu_hwmon(&mon);
+    }
+    d
+}
 
 /// The effective user of process `pid`, if it can be read (the terminal's
 /// red tab and the server's mark on a superuser's windows): Linux's
@@ -482,11 +1240,279 @@ mod tests {
     }
 
     #[test]
+    fn cpu_lists_in_both_spellings() {
+        assert_eq!(parse_cpu_list("0-3,8,10-11\n".trim()), [0, 1, 2, 3, 8, 10, 11]);
+        assert_eq!(parse_cpu_list("0, 1"), [0, 1]);
+        assert_eq!(parse_cpu_list(""), Vec::<usize>::new());
+    }
+
+    /// techbench's i9-13900K as its sysfs says (read 2026-11-26): eight
+    /// Performance cores of two threads (0-15), sixteen Efficiency cores
+    /// of one (16-31) in clusters of four.
+    #[test]
+    fn a_hybrid_chip_keeps_its_shape() {
+        let places: Vec<Place> = (0..32)
+            .map(|cpu| {
+                if cpu < 16 {
+                    let s = vec![cpu & !1, cpu | 1];
+                    Place {
+                        cpu,
+                        siblings: s.clone(),
+                        cluster: s,
+                        kind: CoreKind::Performance,
+                        core_id: Some(cpu as u32 / 2 * 4),
+                    }
+                } else {
+                    let c0 = 16 + (cpu - 16) / 4 * 4;
+                    Place {
+                        cpu,
+                        siblings: vec![cpu],
+                        cluster: (c0..c0 + 4).collect(),
+                        kind: CoreKind::Efficiency,
+                        core_id: Some(cpu as u32 + 16),
+                    }
+                }
+            })
+            .collect();
+        let t = arrange(&places);
+        assert_eq!(t.threads(), 32);
+        assert_eq!(t.cores(), 24);
+        assert_eq!(t.sections.len(), 2);
+        let (p, e) = (&t.sections[0], &t.sections[1]);
+        assert_eq!(p.kind, CoreKind::Performance);
+        assert_eq!(p.clusters.len(), 8);
+        assert_eq!(p.clusters[1].cores, [Core { threads: vec![2, 3], id: Some(4) }]);
+        assert_eq!(e.kind, CoreKind::Efficiency);
+        assert_eq!(e.clusters.len(), 4);
+        assert_eq!(e.clusters[1].cores.iter().map(|c| c.threads[0]).collect::<Vec<_>>(), [20, 21, 22, 23]);
+        assert_eq!(e.clusters[0].cores[0].id, Some(32));
+    }
+
+    /// A plain chip whose threads are numbered core by core apart (Linux on
+    /// many Intel parts: 0 and 4 share a core): cores still pair them.
+    #[test]
+    fn a_plain_chip_pairs_its_threads() {
+        let places: Vec<Place> = (0..8)
+            .map(|cpu| {
+                let s = vec![cpu % 4, cpu % 4 + 4];
+                Place { cpu, siblings: s.clone(), cluster: s, kind: CoreKind::Plain, core_id: Some(cpu as u32 % 4) }
+            })
+            .collect();
+        let t = arrange(&places);
+        assert_eq!(t.sections.len(), 1);
+        assert_eq!(t.sections[0].clusters.len(), 4);
+        assert_eq!(t.sections[0].clusters[0].cores, [Core { threads: vec![0, 4], id: Some(0) }]);
+        assert_eq!(t.threads(), 8);
+    }
+
+    /// FreeBSD's topology_spec in the shape it prints for a chip with SMT
+    /// cores and a cluster of four single-thread cores sharing a level-2
+    /// cache (written from the format; to check against a hybrid FreeBSD
+    /// machine when there is one).
+    #[test]
+    fn freebsd_topology_spec() {
+        let xml = r#"<groups>
+ <group level="1" cache-level="3">
+  <cpu count="8" mask="ff,0,0,0">0, 1, 2, 3, 4, 5, 6, 7</cpu>
+  <children>
+   <group level="2" cache-level="2">
+    <cpu count="2" mask="3,0,0,0">0, 1</cpu>
+    <flags><flag name="THREAD">THREAD group</flag><flag name="SMT">SMT group</flag></flags>
+   </group>
+   <group level="2" cache-level="2">
+    <cpu count="2" mask="c,0,0,0">2, 3</cpu>
+    <flags><flag name="THREAD">THREAD group</flag><flag name="SMT">SMT group</flag></flags>
+   </group>
+   <group level="2" cache-level="2">
+    <cpu count="4" mask="f0,0,0,0">4, 5, 6, 7</cpu>
+   </group>
+  </children>
+ </group>
+</groups>
+"#;
+        let places = parse_topology_spec(xml);
+        assert_eq!(places.len(), 8);
+        assert_eq!(places[1].siblings, [0, 1]);
+        assert_eq!(places[5].siblings, [5]);
+        assert_eq!(places[5].cluster, [4, 5, 6, 7]);
+        let t = arrange(&places);
+        assert_eq!(t.cores(), 6);
+        assert_eq!(t.sections[0].clusters.len(), 3);
+        assert_eq!(t.sections[0].clusters[2].cores.len(), 4);
+        // A chip of plain cores with no SMT (kepler's i5-8500T): one group,
+        // no flags; six cores of one thread, each its own cluster.
+        let plain = parse_topology_spec(
+            r#"<groups><group level="1" cache-level="3"><cpu count="6" mask="3f">0, 1, 2, 3, 4, 5</cpu></group></groups>"#,
+        );
+        assert_eq!(arrange(&plain).cores(), 6);
+    }
+
+    #[test]
+    fn the_cores_in_daves_words() {
+        let core = |t: &[usize]| Core { threads: t.to_vec(), id: None };
+        let hybrid = Topology {
+            sections: vec![
+                Section {
+                    kind: CoreKind::Performance,
+                    clusters: (0..8).map(|i| Cluster { cores: vec![core(&[2 * i, 2 * i + 1])] }).collect(),
+                },
+                Section {
+                    kind: CoreKind::Efficiency,
+                    clusters: (0..4)
+                        .map(|c| Cluster { cores: (0..4).map(|i| core(&[16 + 4 * c + i])).collect() })
+                        .collect(),
+                },
+            ],
+        };
+        assert_eq!(
+            cores_text(&hybrid, "13th Gen Intel(R) Core(TM) i9-13900K"),
+            "8 Performance (Hyper-Threading) + 16 Efficiency, 32 Threads"
+        );
+        let plain = |n: usize, smt: bool| Topology {
+            sections: vec![Section {
+                kind: CoreKind::Plain,
+                clusters: (0..n)
+                    .map(|i| Cluster { cores: vec![if smt { core(&[i, i + n]) } else { core(&[i]) }] })
+                    .collect(),
+            }],
+        };
+        assert_eq!(cores_text(&plain(4, true), "Intel(R) Core(TM) i5-10300H"), "4 Cores (Hyper-Threading), 8 Threads");
+        assert_eq!(cores_text(&plain(8, true), "AMD Ryzen 7 5800X"), "8 Cores (SMT), 16 Threads");
+        assert_eq!(cores_text(&plain(6, false), "Intel(R) Core(TM) i5-8500T"), "6 Cores, 6 Threads");
+    }
+
+    #[test]
+    fn machine_names_skip_the_firmwares_placeholders() {
+        let m = Machine {
+            maker: "ASUS".into(),
+            product: "System Product Name".into(),
+            board_maker: "ASUSTeK COMPUTER INC.".into(),
+            board: "TUF GAMING Z690-PLUS WIFI".into(),
+            ..Default::default()
+        };
+        assert_eq!(m.name(), "ASUS TUF GAMING Z690-PLUS WIFI");
+        let lenovo = Machine {
+            maker: "LENOVO".into(),
+            product: "10MRS0VH00".into(),
+            version: "ThinkCentre M910q".into(),
+            ..Default::default()
+        };
+        assert_eq!(lenovo.name(), "LENOVO ThinkCentre M910q");
+        let laptop = Machine {
+            maker: "ASUSTeK COMPUTER INC.".into(),
+            product: "ASUS TUF Gaming F15".into(),
+            ..Default::default()
+        };
+        assert_eq!(laptop.name(), "ASUSTeK COMPUTER INC. ASUS TUF Gaming F15");
+    }
+
+    #[test]
+    fn os_release_and_uptime_in_words() {
+        assert_eq!(parse_os_release("NAME=\"void\"\nPRETTY_NAME=\"Void Linux\"\n"), "Void Linux");
+        assert_eq!(parse_os_release("NAME=FreeBSD\n"), "FreeBSD");
+        assert_eq!(uptime_text(249_672), "2 days, 21 hours");
+        assert_eq!(uptime_text(3600 + 5 * 60), "1 hour, 5 minutes");
+        assert_eq!(uptime_text(90), "1 minute");
+    }
+
+    #[test]
+    fn codenames_from_our_table() {
+        assert_eq!(codename("GenuineIntel", 6, 183, 1), Some("Raptor Lake"));
+        assert_eq!(codename("GenuineIntel", 6, 0xA5, 2), Some("Comet Lake"));
+        assert_eq!(codename("GenuineIntel", 6, 0x9E, 10), Some("Coffee Lake"));
+        assert_eq!(codename("GenuineIntel", 6, 0x9E, 9), Some("Kaby Lake"));
+        assert_eq!(codename("GenuineIntel", 6, 0x3C, 3), Some("Haswell"));
+        assert_eq!(codename("AuthenticAMD", 0x19, 0x21, 0), Some("Zen 3"));
+        assert_eq!(codename("AuthenticAMD", 0x19, 0x61, 2), Some("Zen 4"));
+        assert_eq!(codename("GenuineIntel", 6, 0x8E, 10), None, "ambiguous: no guess");
+    }
+
+    #[test]
+    fn cpuinfo_details_and_named_instruction_sets() {
+        let d = parse_cpuinfo_details(
+            "processor\t: 0\nvendor_id\t: GenuineIntel\ncpu family\t: 6\nmodel\t\t: 183\nmodel name\t: 13th Gen\nstepping\t: 1\nmicrocode\t: 0x12f\nflags\t\t: fpu vmx lm nx sse4_2 avx avx2 fma sha_ni avx_vnni\n\nprocessor\t: 1\nmodel\t\t: 999\n",
+        );
+        assert_eq!((d.family, d.model, d.stepping), (Some(6), Some(183), Some(1)));
+        assert_eq!(d.microcode, "0x12f");
+        assert_eq!(
+            instruction_sets(&d.flags),
+            ["SSE4.2", "AVX", "AVX2", "FMA3", "AVX-VNNI", "SHA", "VT-x", "x86-64", "NX"]
+        );
+    }
+
+    #[test]
+    fn freebsd_boot_messages_name_the_cpu() {
+        let t = r#"CPU: Intel(R) Core(TM) i5-8500T CPU @ 2.10GHz (2112.00-MHz K8-class CPU)
+  Origin="GenuineIntel"  Id=0x906ea  Family=0x6  Model=0x9e  Stepping=10
+  Features=0xbfebfbff<FPU,VME,DE,PSE,TSC,MSR,PAE,MCE,CX8,APIC,SEP,MTRR,PGE,MCA,CMOV,PAT,PSE36,CLFLUSH,DTS,ACPI,MMX,FXSR,SSE,SSE2,SS,HTT,TM,PBE>
+  Features2=0x7ffafbbf<SSE3,PCLMULQDQ,DTES64,MON,DS_CPL,VMX,SMX,EST,TM2,SSSE3,SDBG,FMA,CX16,xTPR,PDCM,PCID,SSE4.1,SSE4.2,x2APIC,MOVBE,POPCNT,TSCDLT,AESNI,XSAVE,OSXSAVE,AVX,F16C,RDRAND>
+  AMD Features=0x2c100800<SYSCALL,NX,Page1GB,RDTSCP,LM>
+  Structured Extended Features=0x29c6fbf<FSGSBASE,TSCADJ,SGX,BMI1,HLE,AVX2,SMEP,BMI2,ERMS,INVPCID,RTM,NFPM,MPX,RDSEED,ADX,SMAP,CLFLUSHOPT,PROCTRACE>
+"#;
+        let d = parse_dmesg_cpu(t);
+        assert_eq!(d.vendor, "GenuineIntel");
+        assert_eq!((d.family, d.model, d.stepping), (Some(6), Some(0x9e), Some(10)));
+        assert_eq!(codename(&d.vendor, 6, 0x9e, 10), Some("Coffee Lake"));
+        assert_eq!(
+            instruction_sets(&d.flags),
+            ["SSE4.2", "AVX", "AVX2", "FMA3", "F16C", "BMI2", "AES-NI", "RDRAND", "VT-x", "x86-64", "NX"]
+        );
+    }
+
+    #[test]
+    fn amdgpu_clock_levels() {
+        assert_eq!(parse_dpm("0: 500Mhz\n1: 1800Mhz *\n2: 2400Mhz\n"), (Some(1800), Some(2400)));
+        assert_eq!(parse_dpm(""), (None, None));
+    }
+
+    /// amdgpu's hwmon as a fixture: three labeled temperatures, power1_average
+    /// in microwatts, a stopped fan (zero-RPM idle); nouveau's: one unlabeled
+    /// temperature and power1_input.
+    #[test]
+    fn a_cards_own_sensors_are_read() {
+        let base = std::env::temp_dir().join(format!("vergence-gpu-hwmon-{}", std::process::id()));
+        let amd = base.join("amd");
+        let nv = base.join("nv");
+        std::fs::create_dir_all(&amd).unwrap();
+        std::fs::create_dir_all(&nv).unwrap();
+        for (f, v) in [
+            ("temp1_input", "45000"),
+            ("temp1_label", "edge"),
+            ("temp2_input", "52000"),
+            ("temp2_label", "junction"),
+            ("temp3_input", "60000"),
+            ("temp3_label", "mem"),
+            ("power1_average", "23456000"),
+            ("fan1_input", "0"),
+        ] {
+            std::fs::write(amd.join(f), format!("{v}\n")).unwrap();
+        }
+        for (f, v) in [("temp1_input", "41000"), ("power1_input", "7100000")] {
+            std::fs::write(nv.join(f), format!("{v}\n")).unwrap();
+        }
+        let a = read_gpu_hwmon(&amd);
+        assert_eq!(
+            a.temps,
+            vec![("edge".to_string(), 45.0), ("junction".to_string(), 52.0), ("mem".to_string(), 60.0)]
+        );
+        assert_eq!(a.watts, Some(23.456));
+        assert_eq!(a.fan_rpm, Some(0));
+        let n = read_gpu_hwmon(&nv);
+        assert_eq!(n.temps, vec![(String::new(), 41.0)]);
+        assert_eq!(n.watts, Some(7.1));
+        assert_eq!(n.fan_rpm, None);
+        assert_eq!(read_gpu_hwmon(&base.join("none")), GpuSensors::default());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
     fn this_machine_reads_something() {
         let c = cpu();
         if cfg!(any(target_os = "linux", target_os = "freebsd")) {
             assert!(!c.ticks.is_empty(), "processors");
             assert!(memory().total > 0, "memory");
+            let t = topology();
+            assert_eq!(t.threads(), c.ticks.len(), "every processor placed once");
         }
     }
 }

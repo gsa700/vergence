@@ -30,5 +30,7 @@ vergence-xsettings.workspace = true
 vergence-sound.workspace = true
 vergence-net.workspace = true
 vergence-power.workspace = true
+# About's summary of the machine (processor, cores, memory, board, uptime).
+vergence-sysinfo.workspace = true
 # Elevation prompts (vdm's elevate socket and protocol; PAM is not called here).
 vergence-dm.workspace = true
