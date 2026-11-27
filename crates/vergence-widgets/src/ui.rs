@@ -695,7 +695,7 @@ impl<M: Clone> Ui<M> {
     }
 
     /// The menu message of the innermost element at `x`, `y` that has one.
-    fn menu_at(&self, x: f32, y: f32) -> Option<M>
+    pub(crate) fn menu_at(&self, x: f32, y: f32) -> Option<M>
     where
         M: Clone,
     {
@@ -2287,7 +2287,11 @@ impl<M: Clone> Ui<M> {
         let mut ink: Vec<Color> = Vec::with_capacity(self.nodes.len());
         let hidden = self.hidden();
         // The scrolling places being drawn into, the innermost last.
+        // What is open, innermost last: a clip (its node), or a node's fade
+        // and blur (where its drawing began). Closed in that order, so a
+        // blurred group never holds half of a clip.
         let mut open: Vec<usize> = Vec::new();
+        let mut effects: Vec<Effect> = Vec::new();
         let mut field_stops: Vec<(Id, Vec<(usize, f32)>, f32)> = Vec::new();
         let ancestor = |nodes: &[Node<M>], a: usize, mut i: usize| {
             while let Some(p) = nodes[i].parent {
@@ -2305,13 +2309,34 @@ impl<M: Clone> Ui<M> {
         let edge_c = if theme.high_contrast { theme.text } else { theme.line };
         let white = Color::rgb(255, 255, 255);
         for i in 0..self.nodes.len() {
-            while let Some(&top) = open.last() {
-                if ancestor(&self.nodes, top, i) {
-                    break;
+            // Close what is open around nodes this one is not inside, the
+            // innermost first, clips and effects in the order they opened.
+            loop {
+                let clip = open.last().copied().filter(|&t| !ancestor(&self.nodes, t, i));
+                let effect = effects.last().filter(|e| !ancestor(&self.nodes, e.node, i)).map(|e| e.node);
+                match (clip, effect) {
+                    // The one opened later closes first: a node's clip is opened after its effect.
+                    (Some(c), Some(e)) if c >= e => {
+                        open.pop();
+                        scene.pop_clip();
+                        self.draw_bar(scene, c, theme);
+                    }
+                    (Some(_), Some(_)) | (None, Some(_)) => close_effect(scene, effects.pop()),
+                    (Some(c), None) => {
+                        open.pop();
+                        scene.pop_clip();
+                        self.draw_bar(scene, c, theme);
+                    }
+                    (None, None) => break,
                 }
-                open.pop();
-                scene.pop_clip();
-                self.draw_bar(scene, top, theme);
+            }
+            let n = &self.nodes[i];
+            if n.fade < 1.0 || n.blur > 0.0 {
+                let r = self.shown(i);
+                if n.blur > 0.0 {
+                    scene.push_blur(r, n.blur);
+                }
+                effects.push(Effect { node: i, from: scene.commands.len(), fade: n.fade, blur: n.blur > 0.0 });
             }
             let n = &self.nodes[i];
             let inherited = n.parent.map_or(theme.text, |p| ink[p]);
@@ -2651,9 +2676,21 @@ impl<M: Clone> Ui<M> {
             }
             ink.push(mine);
         }
-        while let Some(top) = open.pop() {
-            scene.pop_clip();
-            self.draw_bar(scene, top, theme);
+        loop {
+            match (open.last().copied(), effects.last().map(|e| e.node)) {
+                (Some(c), Some(e)) if c >= e => {
+                    open.pop();
+                    scene.pop_clip();
+                    self.draw_bar(scene, c, theme);
+                }
+                (_, Some(_)) => close_effect(scene, effects.pop()),
+                (Some(c), None) => {
+                    open.pop();
+                    scene.pop_clip();
+                    self.draw_bar(scene, c, theme);
+                }
+                (None, None) => break,
+            }
         }
         for (id, stops, shift) in field_stops {
             if let Some(f) = self.fields.get_mut(&id) {
@@ -2947,4 +2984,21 @@ fn menu_ground(scene: &mut Scene, r: Rect, theme: &Theme) -> MenuInk {
     scene.fill_rounded(r, radius, c(s.menu));
     scene.stroke(r, radius, vergence_look::EDGE, if theme.high_contrast { theme.text } else { c(s.edge) });
     MenuInk { hover: c(s.hover), ink: c(s.menu_ink), ink_off: c(s.menu_ink_off) }
+}
+
+/// A node's fade and blur, open while its subtree is drawn.
+struct Effect {
+    node: usize,
+    /// The scene's first command drawn inside it.
+    from: usize,
+    fade: f32,
+    blur: bool,
+}
+
+fn close_effect(scene: &mut Scene, e: Option<Effect>) {
+    let Some(e) = e else { return };
+    if e.blur {
+        scene.pop_blur();
+    }
+    scene.fade_from(e.from, e.fade);
 }

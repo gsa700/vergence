@@ -17,6 +17,12 @@ sync.
   was marked as the superuser's (the server now reads each client's user
   and process from the socket itself); Terminal's Shift+Return sends Escape
   then Return (a new line in Claude Code).
+- **AlbumWall milestone 2** (docs/albumwall-milestone-2.md): steps 1 to 4
+  built 2026-11-26/27: HTTP and TLS (vergence-http, vergence-tls through
+  the system's OpenSSL), a Navidrome server as a library, playing from it,
+  lyrics; matched to the Avalonia app's layout on Dave's word. Bus v43:
+  blurred groups in scenes and opacity for any toolkit element. Next: step
+  5, MPRIS.
 - **Vergence Remote** (docs/remote-milestone-1.md, for 0.5.0): steps 1 to 5
   and the first part of step 6 built (2026-11-23); paused for AlbumWall.
   Left: the desk login taking the monitorless session onto the monitors,

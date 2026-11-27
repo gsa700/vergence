@@ -320,6 +320,8 @@ pub(crate) fn prepare<'a>(
                 };
                 clips.push((intersect(scissor, bounds), chain));
             }
+            // Made pictures before a scene is prepared (layers.rs).
+            Command::PushBlur { .. } | Command::PopBlur => {}
             Command::PopClip => {
                 // A valid scene never pops more than it pushed.
                 if clips.len() > 1 {
@@ -640,7 +642,9 @@ impl Cpu {
         if rows.is_empty() {
             return Ok(());
         }
-        let prepared = prepare(scene, fonts, scale, w, h, into.order, true);
+        // Blurred groups drawn as pictures (layers.rs).
+        let flat = crate::layers::flatten(scene, fonts, scale);
+        let prepared = prepare(&flat, fonts, scale, w, h, into.order, true);
         let stride = w as usize * 4;
         let a = background.a as u32;
         let ground = straight(&background, into.order);

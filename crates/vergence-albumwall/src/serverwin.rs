@@ -18,6 +18,9 @@ use vergence_widgets::{
 
 use crate::prefswin::{Ask, Link, Shared};
 
+/// A server library's name, as the Avalonia app's.
+const NAVIDROME: &str = "Navidrome";
+
 /// Signed in: the login, the server's libraries (id, name, ticked), and
 /// whether to warn about plain HTTP.
 type Signed = (Login, Vec<(String, String, bool)>, bool);
@@ -113,16 +116,23 @@ impl ServerWindow {
     /// The libraries chosen, named, handed to the wall.
     fn add(&mut self, window: &mut Window) {
         let Some((login, folders, _)) = &self.signed else { return };
-        let host = login.address.split_once("://").map_or(login.address.as_str(), |(_, r)| r).to_string();
+        // Named as the Avalonia app names them (Settings.cs, NavidromeName):
+        // "Navidrome" for a server's only library, "Navidrome · its name" when
+        // it has several to tell apart; told from a folder at a glance (Dave,
+        // 2026-11-27). Renamed in Settings › Library as any library is.
         let chosen: Vec<(String, Login)> = if folders.len() < 2 {
             // Its one library, or a server that does not say: taken whole.
             let folder = folders.first().map(|(id, ..)| id.clone());
-            vec![(host, Login { folder, ..login.clone() })]
+            vec![(NAVIDROME.to_string(), Login { folder, ..login.clone() })]
         } else {
             folders
                 .iter()
                 .filter(|(.., on)| *on)
-                .map(|(id, name, _)| (name.clone(), Login { folder: Some(id.clone()), ..login.clone() }))
+                .map(|(id, name, _)| {
+                    let named =
+                        if name.trim().is_empty() { NAVIDROME.to_string() } else { format!("{NAVIDROME} · {name}") };
+                    (named, Login { folder: Some(id.clone()), ..login.clone() })
+                })
                 .collect()
         };
         if chosen.is_empty() {

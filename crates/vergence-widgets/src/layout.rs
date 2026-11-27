@@ -133,6 +133,9 @@ pub(crate) struct Node<M> {
     pub hover_only: bool,
     /// The pointer over it, if not the usual ([`crate::Element::cursor`]).
     pub pointer: Option<vergence_ui::Cursor>,
+    /// Its opacity and blur, with everything in it ([`crate::Element::opacity`], [`crate::Element::blur`]).
+    pub fade: f32,
+    pub blur: f32,
 }
 
 pub(crate) fn child_id(parent: Id, index: usize, key: Option<u64>) -> Id {
@@ -473,6 +476,7 @@ impl Layout<'_> {
         let hover_only = e.hover_only;
         let pointer = e.pointer;
         let on_menu = e.on_menu;
+        let (fade, blur) = (e.fade, e.blur);
         let push = |out: &mut Vec<Node<M>>, what: What<M>| {
             out.push(Node {
                 id,
@@ -485,6 +489,8 @@ impl Layout<'_> {
                 reveal,
                 hover_only,
                 pointer,
+                fade,
+                blur,
             })
         };
         // Each element is one node, pushed before its children.

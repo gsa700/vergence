@@ -264,22 +264,8 @@ fn contents(
     words: Option<Words>,
 ) -> Element<Msg> {
     let (left, right) = panel::columns(album);
-    // Behind the words: the title and tracks faded toward the panel's color
-    // (the Avalonia app's 22% opacity; on the panel's solid ground the same
-    // look, and an element's opacity is a picture's only in this toolkit).
     let behind = words.as_ref().map_or(1.0, |w| w.behind);
     let full = *p;
-    let faded;
-    let p = if behind < 1.0 {
-        let mix = |c: Rgb| {
-            let m = |a: u8, b: u8| (b as f32 + (a as f32 - b as f32) * behind).round() as u8;
-            Rgb(m(c.0, p.panel.0), m(c.1, p.panel.1), m(c.2, p.panel.2))
-        };
-        faded = Palette { text: mix(p.text), text_dim: mix(p.text_dim), accent: mix(p.accent), ..*p };
-        &faded
-    } else {
-        p
-    };
     let col = |lines: &[Line]| -> Element<Msg> {
         column(lines.iter().map(|l| line(i, album, l, p, text, playing, cursor)).collect()).width(Length::FILL)
     };
@@ -300,6 +286,14 @@ fn contents(
     .width(Length::FILL);
     // The words over the whole of the album's side, title and tracks
     // together, faded behind them while they show (the Avalonia app's panel).
+    // Behind the words: faded to 22% and blurred by 7 points (the Avalonia
+    // app's DockPanel.tracks.behind), easing in and out with the fade.
+    let words_col = if behind < 1.0 {
+        let shown = ((1.0 - behind) / 0.78).clamp(0.0, 1.0);
+        words_col.opacity(behind).blur(7.0 * shown)
+    } else {
+        words_col
+    };
     let mut side = vec![words_col];
     if let Some(w) = words.as_ref().filter(|w| w.on) {
         side.push(lyricsview::view(

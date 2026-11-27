@@ -63,6 +63,9 @@ pub const MAX_IMAGE_SIDE: u32 = 16_384;
 pub const MAX_IMAGE_BYTES: usize = 256 << 20;
 /// How deep clips may nest.
 pub const MAX_CLIP_DEPTH: usize = 64;
+/// The largest blur radius, in points, and how deep blurred groups nest.
+pub const MAX_BLUR: f32 = 64.0;
+pub const MAX_BLUR_DEPTH: usize = 4;
 /// Cells in one row of a grid. (The cells of a whole scene count with its
 /// glyphs, against [`MAX_SCENE_GLYPHS`].)
 pub const MAX_GRID_COLUMNS: usize = 1 << 12;
@@ -209,6 +212,16 @@ pub enum Command {
         radius: f32,
     },
     PopClip,
+    /// Until the matching [`Command::PopBlur`], what is drawn is cut to
+    /// `rect` and blurred by `radius` points (a Gaussian, the radius as
+    /// Skia's: AlbumWall's tracks behind the lyrics, as the Avalonia app's
+    /// BlurEffect). The renderers draw the group as a picture
+    /// (vergence-render's layers.rs). Bus v43.
+    PushBlur {
+        rect: Rect,
+        radius: f32,
+    },
+    PopBlur,
     /// A grid of cells, `columns` to the row, rows downwards from `origin`
     /// (the first cell's top-left corner), each `cell_w` by `cell_h`. Drawn
     /// a row at a time: the grounds, neighbors of one color as a single
@@ -339,6 +352,46 @@ impl Scene {
         self
     }
 
+    pub fn push_blur(&mut self, rect: Rect, radius: f32) -> &mut Self {
+        self.commands.push(Command::PushBlur { rect, radius });
+        self
+    }
+
+    pub fn pop_blur(&mut self) -> &mut Self {
+        self.commands.push(Command::PopBlur);
+        self
+    }
+
+    /// Everything drawn from command `from` on made `opacity` as opaque
+    /// (its colors' alpha, its pictures' opacity): an element faded, its
+    /// children with it, with nothing sent but the colors (the toolkit's
+    /// `opacity`). Shapes that overlap show through each other a little,
+    /// which a fade of text and fills does not show.
+    pub fn fade_from(&mut self, from: usize, opacity: f32) -> &mut Self {
+        let k = opacity.clamp(0.0, 1.0);
+        if k >= 1.0 {
+            return self;
+        }
+        let a = |c: &mut Color| c.a = (c.a as f32 * k).round() as u8;
+        for c in self.commands.iter_mut().skip(from) {
+            match c {
+                Command::Fill { color, .. }
+                | Command::Stroke { color, .. }
+                | Command::Line { color, .. }
+                | Command::Glyphs { color, .. } => a(color),
+                Command::Image { opacity, .. } => *opacity *= k,
+                Command::Cells { cells, .. } => {
+                    for cell in cells {
+                        a(&mut cell.ground);
+                        a(&mut cell.ink);
+                    }
+                }
+                Command::PushClip { .. } | Command::PopClip | Command::PushBlur { .. } | Command::PopBlur => {}
+            }
+        }
+        self
+    }
+
     /// Moves everything drawn so far by (dx, dy): a scene made for a part
     /// of a window put in its place (the toolkit's fallback bar above a
     /// program's scene). Glyphs and cells move with their origins.
@@ -356,13 +409,14 @@ impl Scene {
                 Command::Fill { rect, .. }
                 | Command::Stroke { rect, .. }
                 | Command::Image { rect, .. }
-                | Command::PushClip { rect, .. } => r(rect),
+                | Command::PushClip { rect, .. }
+                | Command::PushBlur { rect, .. } => r(rect),
                 Command::Line { from, to, .. } => {
                     p(from);
                     p(to);
                 }
                 Command::Glyphs { origin, .. } | Command::Cells { origin, .. } => p(origin),
-                Command::PopClip => {}
+                Command::PopClip | Command::PopBlur => {}
             }
         }
         self
@@ -421,7 +475,10 @@ impl Scene {
         if self.commands.len() > MAX_COMMANDS {
             return Err(SceneError::TooMany("commands"));
         }
+        // The open clips and blurs, innermost last: each closed by its own kind.
+        let mut open: Vec<bool> = Vec::new();
         let mut depth = 0usize;
+        let mut blurs = 0usize;
         let mut glyph_total = 0usize;
         for (at, c) in self.commands.iter().enumerate() {
             let bad = |what| Err(SceneError::BadNumber { at, what });
@@ -496,12 +553,32 @@ impl Scene {
                     if depth > MAX_CLIP_DEPTH {
                         return Err(SceneError::Clip { at });
                     }
+                    open.push(false);
                 }
                 Command::PopClip => {
-                    if depth == 0 {
+                    if depth == 0 || open.pop() != Some(false) {
                         return Err(SceneError::Clip { at });
                     }
                     depth -= 1;
+                }
+                Command::PushBlur { rect, radius } => {
+                    if !rect_ok(rect) {
+                        return bad("rectangle");
+                    }
+                    if !(radius.is_finite() && (0.0..=MAX_BLUR).contains(radius)) {
+                        return bad("blur radius");
+                    }
+                    blurs += 1;
+                    if blurs > MAX_BLUR_DEPTH {
+                        return Err(SceneError::Clip { at });
+                    }
+                    open.push(true);
+                }
+                Command::PopBlur => {
+                    if open.pop() != Some(true) {
+                        return Err(SceneError::Clip { at });
+                    }
+                    blurs -= 1;
                 }
                 Command::Cells { origin, cell_w, cell_h, baseline, size, columns, cells } => {
                     if !coord(origin.x) || !coord(origin.y) {
@@ -543,7 +620,7 @@ impl Scene {
                 }
             }
         }
-        if depth != 0 {
+        if depth != 0 || !open.is_empty() {
             return Err(SceneError::Clip { at: self.commands.len() });
         }
         Ok(())
@@ -600,11 +677,50 @@ mod tests {
                     assert_eq!((ob.x, ob.y), (oa.x, oa.y + 30.0));
                     assert_eq!(ga, gb, "glyphs stay where they are on their origin");
                 }
-                (Command::PopClip, Command::PopClip) | (Command::Cells { .. }, Command::Cells { .. }) => {}
+                (Command::PushBlur { rect: ra, .. }, Command::PushBlur { rect: rb, .. }) => {
+                    assert_eq!((rb.x, rb.y), (ra.x, ra.y + 30.0));
+                }
+                (Command::PopClip, Command::PopClip)
+                | (Command::PopBlur, Command::PopBlur)
+                | (Command::Cells { .. }, Command::Cells { .. }) => {}
                 other => panic!("the commands changed kind: {other:?}"),
             }
         }
         assert!(s.validate().is_ok());
+    }
+
+    #[test]
+    fn blurred_groups_nest_with_clips_or_are_refused() {
+        let r = Rect::new(1.0, 1.0, 10.0, 10.0);
+        let mut ok = Scene::new(20.0, 20.0);
+        ok.push_blur(r, 4.0).push_clip(r, 2.0).fill(r, Color::rgb(1, 2, 3)).pop_clip().pop_blur();
+        assert!(ok.validate().is_ok());
+        let back = Scene::decode(&ok.encode().expect("encodes")).expect("its bytes read back");
+        assert_eq!(back.commands, ok.commands);
+        // A clip closed by the blur's end, a blur left open, a radius too large.
+        let mut crossed = Scene::new(20.0, 20.0);
+        crossed.push_blur(r, 4.0).push_clip(r, 0.0).pop_blur().pop_clip();
+        assert!(crossed.validate().is_err());
+        let mut open = Scene::new(20.0, 20.0);
+        open.push_blur(r, 4.0);
+        assert!(open.validate().is_err());
+        let mut huge = Scene::new(20.0, 20.0);
+        huge.push_blur(r, MAX_BLUR + 1.0).pop_blur();
+        assert!(huge.validate().is_err());
+    }
+
+    #[test]
+    fn a_fade_scales_alpha_from_its_start() {
+        let r = Rect::new(0.0, 0.0, 4.0, 4.0);
+        let mut s = Scene::new(10.0, 10.0);
+        s.fill(r, Color::rgba(10, 10, 10, 200)).fill(r, Color::rgba(10, 10, 10, 200));
+        s.fade_from(1, 0.25);
+        let alphas: Vec<u8> = s
+            .commands
+            .iter()
+            .filter_map(|c| if let Command::Fill { color, .. } = c { Some(color.a) } else { None })
+            .collect();
+        assert_eq!(alphas, [200, 50]);
     }
 
     fn sample() -> Scene {

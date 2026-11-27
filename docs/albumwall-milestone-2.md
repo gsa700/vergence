@@ -290,3 +290,25 @@ program can use it):
   is a picture's only in the toolkit, so the panel's contents fading in
   after it unfolds has never faded; the tracks behind the words are blended
   toward the panel's color instead.
+- **The blur, and opacity for every element** (2026-11-27, bus v43; Dave:
+  "what about the blur we built for terminal?"). The frost blurs a
+  window's finished picture in the server, so it could not blur part of
+  an app's drawing. Scenes gain `PushBlur { rect, radius }` / `PopBlur`
+  (wire opcodes 9 and 10); vergence-render's `layers.rs` draws each group
+  on the CPU renderer, cut to its rectangle, blurs it (a Gaussian of
+  `radius × 0.577 + 0.5` pixels as Skia and so Avalonia take a radius;
+  three box passes each way, on premultiplied colors) and puts it in the
+  scene as a picture before either renderer prepares it, so the GPU
+  renderer never meets a command it could refuse (a refusal draws every
+  window on the CPU). Kept by the group's contents and scale (eight), so a
+  group that does not change is drawn once and the GPU keeps its texture.
+  The toolkit: `Element::blur(radius)` and `Element::opacity` for any
+  element (`Scene::fade_from`: its colors' alpha; it was a picture's only,
+  so AlbumWall's panel contents never faded in as meant), opened and
+  closed with clips innermost first. AlbumWall's tracks behind the lyrics:
+  `opacity(0.22).blur(7)`, as the Avalonia style. Tests: scene validation
+  and wire, the toolkit's nesting and fade, the GPU against the CPU for a
+  blurred group; seen headless on Hubble's GPU.
+- **Server libraries named as the Avalonia app names them** (Dave,
+  2026-11-27: easier to tell from the local ones): "Navidrome" for a
+  server's only library, "Navidrome · its name" when it has several.

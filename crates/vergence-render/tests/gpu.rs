@@ -251,6 +251,15 @@ fn simple_shapes_agree_with_the_reference() {
     s.pop_clip();
     s.pop_clip();
     scenes.push(("a rounded clip cut by rectangles", s));
+    // A blurred group (bus v43): drawn as a picture for both renderers, so
+    // they agree as for any picture.
+    let mut s = Scene::new(40.0, 30.0);
+    s.fill(Rect::new(0.0, 0.0, 40.0, 30.0), Color::rgb(40, 40, 60));
+    s.push_blur(Rect::new(5.0, 5.0, 30.0, 20.0), 3.0);
+    s.fill(Rect::new(8.0, 8.0, 12.0, 14.0), white);
+    s.line(Point::new(5.0, 25.0), Point::new(35.0, 5.0), 2.0, Color::rgb(255, 80, 0));
+    s.pop_blur();
+    scenes.push(("a blurred group", s));
     let mut s = Scene::new(16.0, 8.0);
     let two = s.image(Image { width: 2, height: 1, rgba: vec![255, 0, 0, 255, 0, 0, 255, 255] });
     let half =

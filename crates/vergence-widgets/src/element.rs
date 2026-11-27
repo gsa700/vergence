@@ -270,6 +270,10 @@ pub struct Element<M> {
     /// Sent on a right click (or a touch held) on it or on anything inside it
     /// that has none of its own: a list row's menu, the ground's menu.
     pub(crate) on_menu: Option<M>,
+    /// How opaque it is with everything in it ([`Element::opacity`]).
+    pub(crate) fade: f32,
+    /// What it draws, blurred by this many points ([`Element::blur`]).
+    pub(crate) blur: f32,
 }
 
 impl<M> Element<M> {
@@ -286,7 +290,17 @@ impl<M> Element<M> {
             hover_only: false,
             pointer: None,
             on_menu: None,
+            fade: 1.0,
+            blur: 0.0,
         }
+    }
+
+    /// What it draws, and everything in it, blurred by `radius` points and
+    /// cut to its place (a Gaussian, the radius as Skia's and so the Avalonia
+    /// apps': AlbumWall's tracks behind the lyrics). Bus v43.
+    pub fn blur(mut self, radius: f32) -> Self {
+        self.blur = if radius.is_finite() { radius.clamp(0.0, vergence_scene::MAX_BLUR) } else { 0.0 };
+        self
     }
 
     pub fn width(mut self, width: Length) -> Self {
@@ -585,10 +599,15 @@ impl<M> Element<M> {
         self
     }
 
-    /// A picture's opacity, 0 to 1.
+    /// How opaque it is, 0 to 1, with everything in it: a picture's own
+    /// opacity, anything else's colors faded (until 2026-11-26 a picture's
+    /// only: AlbumWall's panel contents never faded in as meant).
     pub fn opacity(mut self, opacity: f32) -> Self {
+        let opacity = if opacity.is_finite() { opacity.clamp(0.0, 1.0) } else { 1.0 };
         if let Kind::Picture { opacity: o, .. } = &mut self.kind {
-            *o = opacity.clamp(0.0, 1.0);
+            *o = opacity;
+        } else {
+            self.fade *= opacity;
         }
         self
     }

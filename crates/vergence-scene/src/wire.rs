@@ -17,6 +17,8 @@
 //!   5 Image     u32 image  rect  f32 opacity
 //!   6 PushClip  rect  f32 radius
 //!   7 PopClip
+//!   9 PushBlur  rect  f32 radius      (bus v43)
+//!  10 PopBlur
 //!   8 Cells     point origin  f32 cell_w  f32 cell_h  f32 baseline  f32 size
 //!               u32 columns  u32 count, each: color ground  color ink
 //!               u32 glyph  u16 font  u16 flags
@@ -58,6 +60,8 @@ const OP_IMAGE: u8 = 5;
 const OP_PUSH_CLIP: u8 = 6;
 const OP_POP_CLIP: u8 = 7;
 const OP_CELLS: u8 = 8;
+const OP_PUSH_BLUR: u8 = 9;
+const OP_POP_BLUR: u8 = 10;
 
 /// The smallest a font, an image and a command can be on the wire, for
 /// refusing counts the remaining bytes cannot hold.
@@ -298,6 +302,12 @@ impl Scene {
                     w.f32(*radius);
                 }
                 Command::PopClip => w.u8(OP_POP_CLIP),
+                Command::PushBlur { rect, radius } => {
+                    w.u8(OP_PUSH_BLUR);
+                    w.rect(rect);
+                    w.f32(*radius);
+                }
+                Command::PopBlur => w.u8(OP_POP_BLUR),
                 Command::Cells { origin, cell_w, cell_h, baseline, size, columns, cells } => {
                     w.u8(OP_CELLS);
                     w.point(origin);
@@ -420,6 +430,8 @@ impl Scene {
                 OP_IMAGE => Command::Image { image: r.u32()?, rect: r.rect()?, opacity: r.f32()? },
                 OP_PUSH_CLIP => Command::PushClip { rect: r.rect()?, radius: r.f32()? },
                 OP_POP_CLIP => Command::PopClip,
+                OP_PUSH_BLUR => Command::PushBlur { rect: r.rect()?, radius: r.f32()? },
+                OP_POP_BLUR => Command::PopBlur,
                 OP_CELLS => {
                     let origin = r.point()?;
                     let (cell_w, cell_h, baseline, size) = (r.f32()?, r.f32()?, r.f32()?, r.f32()?);

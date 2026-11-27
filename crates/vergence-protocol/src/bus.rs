@@ -86,11 +86,14 @@
 //! asking for the whole screen (F11) and back.
 //! Version 42 (Mind the battery): `window::WinEvent::Seen`, a window told when it cannot be
 //! seen (minimized, or the session locked) and when it can again, so it can stop drawing.
+//! Version 43 (AlbumWall's lyrics, as the Avalonia app's): scenes gain
+//! `PushBlur` / `PopBlur` (vergence-scene wire opcodes 9 and 10), a group
+//! drawn blurred; the renderers draw it as a picture (vergence-render's layers.rs).
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 42;
+pub const VERSION: u32 = 43;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

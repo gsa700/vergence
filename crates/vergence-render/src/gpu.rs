@@ -888,6 +888,9 @@ impl Gpu {
     ) -> Result<Pixmap, GpuError> {
         let (w, h) = pixel_size(scene, scale)?;
         scene.validate().map_err(RenderError::from)?;
+        // Blurred groups drawn as pictures (layers.rs): nothing here to refuse.
+        let flat = crate::layers::flatten(scene, fonts, scale);
+        let scene: &Scene = &flat;
         let prepared = prepare(scene, fonts, scale, w, h, Order::Rgba, false);
         // SAFETY: the context is made current on this thread for the calls that follow.
         unsafe {

@@ -1193,3 +1193,48 @@ fn a_program_puts_the_keyboard_in_a_named_field_and_takes_it_out() {
     ui.layout(page(), 300.0, 100.0, &mut Fixed, 10.0);
     assert_eq!(ui.focused_name(), None);
 }
+
+#[test]
+fn an_element_fades_and_blurs_with_everything_in_it() {
+    use vergence_render::Cpu;
+    use vergence_scene::Command;
+    use vergence_text::db::FontDb;
+    // A faded, blurred panel holding a clipping panel holding a white fill:
+    // the blur opens before the inner clip and closes after it, the fill is
+    // half as opaque, and the scene is whole.
+    let inner = panel(drawing::<Msg>(|scene, _, r, _| {
+        scene.fill(r, vergence_scene::Color::rgb(255, 255, 255));
+    }))
+    .clip()
+    .width(Length::Fixed(20.0))
+    .height(Length::Fixed(20.0));
+    let outer = panel(inner).padding(10.0).opacity(0.5).blur(3.0);
+    let mut ui = laid(column(vec![outer, space().height(Length::Fixed(10.0))]), 60.0, 60.0);
+    let mut scene = Scene::new(60.0, 60.0);
+    let mut fonts = Fonts::new(FontDb::default());
+    ui.draw(&mut scene, &mut fonts, &Theme::default());
+    assert!(scene.validate().is_ok(), "{:?}", scene.validate());
+    let kinds: Vec<&str> = scene
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            Command::PushBlur { .. } => Some("blur"),
+            Command::PopBlur => Some("/blur"),
+            Command::PushClip { .. } => Some("clip"),
+            Command::PopClip => Some("/clip"),
+            _ => None,
+        })
+        .collect();
+    let b = kinds.iter().position(|k| *k == "blur").expect("a blur");
+    let c = kinds.iter().position(|k| *k == "clip").expect("a clip");
+    assert!(b < c && kinds.iter().position(|k| *k == "/clip") < kinds.iter().position(|k| *k == "/blur"), "{kinds:?}");
+    let white = scene.commands.iter().find_map(|c| match c {
+        Command::Fill { color, .. } if color.r == 255 && color.g == 255 => Some(color.a),
+        _ => None,
+    });
+    assert_eq!(white, Some(128), "faded by half");
+    // Drawn: soft at the fill's edge, not a sharp step.
+    let p = Cpu::new().render(&scene, &mut fonts, 1.0, vergence_scene::Color::rgb(0, 0, 0)).expect("renders");
+    let (mid, edge, out) = (p.pixel(20, 20)[0], p.pixel(10, 20)[0], p.pixel(5, 20)[0]);
+    assert!(mid > 90 && edge > 20 && edge < mid && out < edge, "{mid} {edge} {out}");
+}
