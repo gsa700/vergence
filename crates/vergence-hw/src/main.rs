@@ -226,14 +226,19 @@ impl Hardware {
         Topology { sections: vec![vergence_sysinfo::Section { kind: CoreKind::Plain, clusters }] }
     }
 
+    /// Two threads on a core, by its maker's name (Dave, 2026-11-26:
+    /// Intel's own term, Hyper-Threading; AMD's is SMT).
+    fn ht_word(&self) -> &'static str {
+        if self.model.contains("AMD") { "SMT" } else { "Hyper-Threading" }
+    }
+
     /// The cores and threads, each kind marked where it runs two threads
     /// on a core (Dave's wording, 2026-11-26): "8 Performance
-    /// (Hyper-Threaded) + 16 Efficiency, 32 Threads"; one kind: "4 Cores
-    /// (Hyper-Threaded), 8 Threads", "6 Cores, 6 Threads". AMD's word for
-    /// it is SMT.
+    /// (Hyper-Threading) + 16 Efficiency, 32 Threads"; one kind: "4 Cores
+    /// (Hyper-Threading), 8 Threads", "6 Cores, 6 Threads".
     fn cores_text(&self) -> String {
         let shape = self.shape();
-        let ht = if self.model.contains("AMD") { "SMT" } else { "Hyper-Threaded" };
+        let ht = self.ht_word();
         let parts: Vec<String> =
             [(CoreKind::Performance, "Performance"), (CoreKind::Efficiency, "Efficiency"), (CoreKind::Plain, "Cores")]
                 .into_iter()
@@ -312,8 +317,12 @@ impl Hardware {
                 tiles.push(self.tile(t, &name, cl));
             }
             let threads: usize = sec.clusters.iter().flat_map(|c| &c.cores).map(|c| c.threads.len()).sum();
-            let heading =
-                if threads == n { format!("{title}: {n}") } else { format!("{title}: {n}, {threads} threads") };
+            // Like the Cores line: "Performance cores: 8 (Hyper-Threading), 16 Threads".
+            let heading = if threads == n {
+                format!("{title}: {n}")
+            } else {
+                format!("{title}: {n} ({}), {threads} Threads", self.ht_word())
+            };
             out.push(self.group(
                 t,
                 Some(&heading),
