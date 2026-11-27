@@ -151,10 +151,21 @@ fn member_is(member: &str, part: &str) -> bool {
     m == part
 }
 
+/// The system's own tool by a fixed path, never PATH: a session's PATH may leave out the
+/// sbin directories (kepler's did, 2026-11-27, and Disks found no disks), and a program
+/// earlier in PATH is not the system's.
+fn system_tool(name: &str) -> std::path::PathBuf {
+    let dirs = ["/sbin", "/usr/sbin", "/bin", "/usr/bin", "/usr/local/sbin", "/usr/local/bin"];
+    dirs.iter()
+        .map(|d| std::path::Path::new(d).join(name))
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| std::path::Path::new("/sbin").join(name))
+}
+
 #[cfg(target_os = "freebsd")]
 fn freebsd_disks(fs: &[vergence_sysinfo::FileSystem]) -> Vec<Disk> {
     let run = |cmd: &str, args: &[&str]| {
-        std::process::Command::new(cmd)
+        std::process::Command::new(system_tool(cmd))
             .args(args)
             .output()
             .ok()
@@ -205,7 +216,7 @@ fn attach_mount(p: &mut Part, mounts: &[(String, String, String)], fs: &[vergenc
 /// not there.
 pub fn pools() -> Vec<Pool> {
     let run = |args: &[&str]| {
-        std::process::Command::new("zpool")
+        std::process::Command::new(system_tool("zpool"))
             .args(args)
             .stderr(std::process::Stdio::null())
             .output()

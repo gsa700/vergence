@@ -195,3 +195,11 @@ fn what_a_disk_is_for() {
     assert_eq!(disk_use(&pool).as_deref(), Some("Pool zroot"));
     assert_eq!(disk_use(&Disk::default()), None);
 }
+
+/// The system's tools by fixed path: found in /bin or /sbin whatever PATH says.
+#[test]
+fn system_tools_by_path() {
+    let sh = system_tool("sh");
+    assert!(sh.is_absolute() && sh.is_file(), "{sh:?}");
+    assert!(system_tool("no-such-tool-here").starts_with("/sbin"));
+}
