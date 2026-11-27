@@ -135,6 +135,18 @@ fn column_height(lines: &[Line], text: f32) -> f32 {
         .sum()
 }
 
+/// The track list's height: the taller column.
+pub fn list_height(album: &Album, text: f32) -> f32 {
+    let (left, right) = columns(album);
+    column_height(&left, text).max(column_height(&right, text))
+}
+
+/// The lyrics view's height in place of the track list: the list's, or
+/// down to the sleeve's foot if that is more, so the panel keeps its height.
+pub fn words_height(album: &Album, text: f32) -> f32 {
+    list_height(album, text).max(SLEEVE - header_height(text) - LIST_GAP)
+}
+
 /// The header: title, artist, the header line, the row kept for Lyrics.
 pub fn header_height(text: f32) -> f32 {
     (21.0 * text * 1.3).ceil()

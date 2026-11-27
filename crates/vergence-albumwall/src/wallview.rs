@@ -82,6 +82,8 @@ pub struct OpenView {
     /// place in the row above, the row the panel goes under.
     pub down: bool,
     pub after: Option<usize>,
+    /// The playing song's words, if this is the album playing and it has any.
+    pub words: Option<crate::panelview::Words>,
 }
 
 /// One tile: the cover (or its placeholder), the title and the artist.
@@ -239,6 +241,8 @@ pub fn wall(
     let count = order.len();
     // The open album's place on the wall as searched (none: not found).
     let open_at = open.as_ref().and_then(|o| order.iter().position(|&i| i == o.index));
+    let mut open = open;
+    let words = open.as_mut().and_then(|o| o.words.take());
     let panel_el =
         open.as_ref().zip(open_at).filter(|(o, _)| o.index < albums.len() && o.height > 0.5).map(|(o, at)| {
             let el = crate::panelview::open(
@@ -253,6 +257,7 @@ pub fn wall(
                 o.shown,
                 o.playing,
                 o.down,
+                words,
             );
             (if o.down { o.after.unwrap_or(at) } else { at }, o.height, el)
         });

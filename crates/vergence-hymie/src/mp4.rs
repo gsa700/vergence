@@ -371,6 +371,8 @@ impl Walker<'_> {
                 // the Vorbis comment names the rest of Hymie's tags use.
                 b"aART" => self.value_item(body, body_end, movie, "ALBUMARTIST"),
                 b"\xa9day" => self.value_item(body, body_end, movie, "DATE"),
+                // Lyrics (AlbumWall's, milestone 2), under the Vorbis comment name.
+                b"\xa9lyr" => self.value_item(body, body_end, movie, "LYRICS"),
                 b"trkn" => self.number_item(body, body_end, movie, "TRACKNUMBER"),
                 b"disk" => self.number_item(body, body_end, movie, "DISCNUMBER"),
                 _ => {}

@@ -255,3 +255,23 @@ program can use it):
   headless on Hubble against the stand-in server serving WAVs half a second
   late: Play heard at 0.75 s, track 2 on time at the seam, each song asked
   for once.
+- **Step 4, lyrics** (2026-11-26): `lyrics.rs` (the Avalonia app's
+  Lyrics.cs: LRC as found in the wild, several stamps a line, the offset,
+  headers dropped, plain lyrics with their verse gaps; its test cases and
+  random text); the three sources, first found wins: a `.lrc` beside the
+  file, the file's tag (Hymie now reads MP3's USLT and M4A's ©lyr as LYRICS;
+  FLAC and Ogg's LYRICS / UNSYNCEDLYRICS it already passed on), and a
+  server song's `getLyricsBySongId`, timed preferred. Read on threads of
+  their own for the song playing and the next one, so a song change finds
+  its words waiting. The view (`lyricsview.rs`, as LyricsView.cs): "Show
+  Lyrics" in the row kept under the header while the song playing has
+  words, "Show Tracks" back, kept on across songs and albums; timed lines
+  lit in the middle 150 ms early, the first from the start, ♪ for a gap, a
+  click takes the song to a line; plain lyrics drift down with the song,
+  from a fifth of the way down to a fifth from the foot, centered and still
+  if they fit; held with the button, they stop; lines fade at both edges;
+  glides, or jumps with motion reduced; as tall as the track list or down
+  to the sleeve's foot, so the panel keeps its height. Not done: the wheel
+  nudging plain lyrics (the toolkit tells a drawing of presses, not the
+  wheel). Checked headless against the stand-in server: timed and plain
+  sets, and a song without words going back to its tracks.

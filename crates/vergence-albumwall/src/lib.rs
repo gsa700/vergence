@@ -6,6 +6,7 @@ pub mod covers;
 pub mod index;
 pub mod libraries;
 pub mod library;
+pub mod lyrics;
 pub mod md5;
 pub mod panel;
 pub mod player;

@@ -12,6 +12,7 @@
 //! The window is AlbumWall's own dark one whatever the desktop's scheme
 //! (question 3: the covers are the point); its bar is the server's, dark.
 
+mod lyricsview;
 mod panelview;
 mod playbar;
 mod prefswin;
@@ -116,7 +117,27 @@ pub enum Msg {
     GoToPlaying,
     /// The search box's text.
     Search(String),
+    /// Show Lyrics / Show Tracks in the playing album's panel.
+    Lyrics,
+    /// A timed line of the lyrics clicked: the song there (seconds).
+    LyricLine(f64),
 }
+
+/// The words of the song playing and the next one, read on threads of their
+/// own (the Avalonia app read the next song's ahead, as the next track is
+/// opened ahead: a song change finds its words waiting).
+#[derive(Default)]
+struct Words {
+    /// Read: a song's path and its words (None: it has none).
+    read: std::collections::HashMap<PathBuf, Option<Arc<vergence_albumwall::lyrics::Lyrics>>>,
+    /// Being read now.
+    reading: std::collections::HashSet<PathBuf>,
+    /// Handed back by the reading threads.
+    came: Arc<Mutex<Vec<Read>>>,
+}
+
+/// A song's words as a reading thread hands them back.
+type Read = (PathBuf, Option<vergence_albumwall::lyrics::Lyrics>);
 
 /// The open album and its motion (the Avalonia app's timings).
 struct Opened {
@@ -224,6 +245,13 @@ struct AlbumWall {
     /// plays, in front or not (Dave, 2026-11-26: "they should work all the
     /// time"), and rest, asking for nothing, when it stops or pauses.
     needles: [vumeter::Needle; 2],
+    /// The playing song's words, the next one's read ahead.
+    words: Words,
+    /// Show Lyrics pressed and not Show Tracks since: kept as songs and
+    /// albums change, until turned off or the app closes (as the Avalonia app).
+    lyrics_on: bool,
+    /// The lyrics view's motion between frames.
+    lyrics_motion: Rc<lyricsview::Motion>,
     stepped: std::time::Instant,
     meters_wanted: bool,
     /// The library on the wall cannot be reached, and why (and how many
@@ -312,6 +340,9 @@ impl AlbumWall {
             played: std::collections::HashSet::new(),
             scrub: None,
             needles: [vumeter::Needle::default(); 2],
+            words: Words::default(),
+            lyrics_on: false,
+            lyrics_motion: Rc::default(),
             stepped: std::time::Instant::now(),
             meters_wanted: false,
             said: None,
@@ -1162,6 +1193,66 @@ impl AlbumWall {
         }
     }
 
+    /// The paths of the song playing and the one after it, on the wall shown.
+    fn playing_paths(&self) -> (Option<PathBuf>, Option<PathBuf>) {
+        let found = (|| {
+            let (root, a) = self.playing.as_ref()?;
+            let (shown_root, albums, _) = self.shown.as_ref()?;
+            let album = albums.get(*a).filter(|_| shown_root == root)?;
+            let now = self.player.as_ref()?.state().now.filter(|n| n.tag == *a)?;
+            let path = |i: usize| album.tracks.get(i).map(|t| t.path.clone());
+            Some((path(now.track), path(now.track + 1)))
+        })();
+        found.unwrap_or((None, None))
+    }
+
+    /// The words of the song playing and the next one: taken as they come,
+    /// read if not yet, the rest forgotten.
+    fn words_for_playing(&mut self) {
+        let came: Vec<_> = std::mem::take(&mut *self.words.came.lock().unwrap_or_else(|e| e.into_inner()));
+        for (path, words) in came {
+            self.words.reading.remove(&path);
+            self.words.read.insert(path, words.map(Arc::new));
+        }
+        let (now, next) = self.playing_paths();
+        let keep: Vec<PathBuf> = [now, next].into_iter().flatten().collect();
+        self.words.read.retain(|p, _| keep.contains(p));
+        for path in keep {
+            if self.words.read.contains_key(&path) || !self.words.reading.insert(path.clone()) {
+                continue;
+            }
+            let (came, waker) = (self.words.came.clone(), self.waker.clone());
+            let _ = std::thread::Builder::new().name("lyrics".into()).spawn(move || {
+                let words = if vergence_albumwall::subsonic::song_id(&path).is_some() {
+                    vergence_albumwall::subsonic::song_lyrics(&path, tls())
+                } else {
+                    vergence_albumwall::lyrics::Lyrics::for_file(&path)
+                };
+                came.lock().unwrap_or_else(|e| e.into_inner()).push((path, words));
+                if let Some(w) = &waker {
+                    w.wake();
+                }
+            });
+        }
+    }
+
+    /// The panel's words for open album `a`: the song playing's, if `a` is
+    /// the album playing and the song has any.
+    fn words_of(&self, a: usize) -> Option<panelview::Words> {
+        self.playing_track(a)?;
+        let (path, _) = self.playing_paths();
+        let lyrics = self.words.read.get(&path?)?.clone()?;
+        let now = self.player.as_ref()?.state().now?;
+        Some(panelview::Words {
+            lyrics,
+            on: self.lyrics_on,
+            seconds: now.seconds,
+            length: now.length,
+            motion: self.lyrics_motion.clone(),
+            reduced: self.reduced(),
+        })
+    }
+
     /// The track playing of album `a` on the wall, if it is the album playing.
     fn playing_track(&self, a: usize) -> Option<usize> {
         let (root, playing) = self.playing.as_ref()?;
@@ -1240,6 +1331,7 @@ impl AlbumWall {
                 cursor: self.track.filter(|_| self.keyed == Some(o.index)),
                 down: o.down,
                 after: self.after_place(o.index, o.down),
+                words: self.words_of(o.index),
             });
         }
         let f = self.folding.as_ref()?;
@@ -1255,6 +1347,7 @@ impl AlbumWall {
             cursor: None,
             down: f.down,
             after: self.after_place(f.index, f.down),
+            words: None,
         })
     }
 
@@ -1909,6 +2002,8 @@ impl Program for AlbumWall {
                 }
             }
             Msg::Search(text) => self.search(text),
+            Msg::Lyrics => self.lyrics_on = !self.lyrics_on,
+            Msg::LyricLine(seconds) => self.send(Command::Seek(seconds)),
             Msg::Library(i) => {
                 if i < self.libraries.list.len() && i != self.libraries.current {
                     self.libraries.current = i;
@@ -1974,6 +2069,7 @@ impl Program for AlbumWall {
         }
         self.album_ended();
         self.follow_shuffle();
+        self.words_for_playing();
         self.tell_link();
         // Music playing: the needles move (the tick keeps itself going while
         // they do).
@@ -2211,6 +2307,7 @@ impl Program for AlbumWall {
         opening
             || self.folding.as_ref().is_some_and(|f| busy(&f.fold))
             || self.glide.is_some()
+            || (self.lyrics_on && self.lyrics_motion.moving.get())
             || self.fades.fading(now)
             || self.bar_motion.get().is_some_and(|(_, at)| now.saturating_duration_since(at) < BAR_SLIDE + past)
     }

@@ -660,3 +660,33 @@ fn mp4_is_gapless_by_itunsmpb_as_ffmpeg_does_it() {
     let d = with_freeform("iTunSMPB", " 00000000 00000100 00000200 0000000000010266");
     assert_eq!(open(d).unwrap().frames(), 66_150 - 256);
 }
+
+#[test]
+fn mp3_lyrics_from_uslt_in_utf16() {
+    // USLT: UTF-16 with a byte-order mark, language "eng", an empty
+    // description, then the words: kept under LYRICS.
+    let utf16 = |s: &str| -> Vec<u8> {
+        let mut b = vec![0xFF, 0xFE];
+        for u in s.encode_utf16() {
+            b.extend_from_slice(&u.to_le_bytes());
+        }
+        b
+    };
+    let body = [&[1u8][..], b"eng", &utf16(""), &[0, 0], &utf16("First line\nSécond line"), &[0, 0]].concat();
+    let mut frames = b"USLT".to_vec();
+    frames.extend_from_slice(&(body.len() as u32).to_be_bytes());
+    frames.extend_from_slice(&[0, 0]);
+    frames.extend_from_slice(&body);
+    let size = frames.len();
+    let mut tag = b"ID3\x03\x00\x00".to_vec();
+    tag.extend_from_slice(&[
+        (size >> 21) as u8 & 0x7f,
+        (size >> 14) as u8 & 0x7f,
+        (size >> 7) as u8 & 0x7f,
+        size as u8 & 0x7f,
+    ]);
+    tag.extend_from_slice(&frames);
+    let mut tags = crate::tags::Tags::default();
+    crate::tags::read_id3(&tag, 0, &mut tags);
+    assert_eq!(tags.values.get("LYRICS").map(String::as_str), Some("First line\nSécond line"));
+}

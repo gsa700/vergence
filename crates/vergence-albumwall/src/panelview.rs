@@ -4,7 +4,10 @@
 //! columns (a track pressed plays from it, step 6), the 260-point sleeve
 //! that is the play button (a translucent play overlay under the pointer).
 
+use std::rc::Rc;
 use std::sync::Arc;
+
+use vergence_albumwall::lyrics::Lyrics;
 
 use vergence_albumwall::colors::{Palette, Rgb};
 use vergence_albumwall::covers::{self, Covers};
@@ -18,7 +21,20 @@ use vergence_widgets::{
 };
 
 use crate::Msg;
+use crate::lyricsview;
 use crate::wallview::color;
+
+/// The playing song's words, for the open album that is playing: the Show
+/// Lyrics button in the kept row, and the view in place of the tracks when on.
+#[derive(Clone)]
+pub struct Words {
+    pub lyrics: Arc<Lyrics>,
+    pub on: bool,
+    pub seconds: f64,
+    pub length: f64,
+    pub motion: Rc<lyricsview::Motion>,
+    pub reduced: bool,
+}
 
 fn alpha(c: Rgb, a: u8) -> Color {
     Color::rgba(c.0, c.1, c.2, a)
@@ -208,6 +224,7 @@ fn contents(
     playing: Option<usize>,
     cursor: Option<usize>,
     down: bool,
+    words: Option<Words>,
 ) -> Element<Msg> {
     let (left, right) = panel::columns(album);
     let col = |lines: &[Line]| -> Element<Msg> {
@@ -220,11 +237,49 @@ fn contents(
             .padding(Padding { top: 4.0, right: 0.0, bottom: 0.0, left: 0.0 })
             .radius(0.0)
             .width(Length::FILL),
-        space().height(Length::Fixed(panel::BUTTON_GAP + (panel::BUTTON_ROW * text).round())),
-        boxed(row(vec![col(&left), col(&right)]).spacing(panel::COLUMN_GAP).width(Length::FILL))
-            .padding(Padding { top: panel::LIST_GAP, right: 0.0, bottom: 0.0, left: 0.0 })
-            .radius(0.0)
-            .width(Length::FILL),
+        space().height(Length::Fixed(panel::BUTTON_GAP)),
+        // The row kept for Lyrics: the button while the song playing has words.
+        {
+            let row_h = (panel::BUTTON_ROW * text).round();
+            let button_el: Element<Msg> = match &words {
+                Some(w) => {
+                    let words = if w.on { "Show Tracks" } else { "Show Lyrics" };
+                    button(label(words).size(12.0).color(color(p.text)))
+                        .look(ButtonLook::Custom {
+                            fill: Some(alpha(p.text, if w.on { 46 } else { 26 })),
+                            edge: Some((alpha(p.text, 70), 1.0)),
+                            radius: 4.0,
+                        })
+                        .padding(Padding::hv(3.0, 12.0))
+                        .on_press(Msg::Lyrics)
+                        .name(words)
+                }
+                None => space(),
+            };
+            row(vec![button_el, space().width(Length::FILL)])
+                .align(Align::Center)
+                .width(Length::FILL)
+                .height(Length::Fixed(row_h))
+        },
+        boxed(match words.filter(|w| w.on) {
+            Some(w) => lyricsview::view(
+                lyricsview::Shown {
+                    lyrics: w.lyrics,
+                    seconds: w.seconds,
+                    length: w.length,
+                    bright: p.text,
+                    dim: p.text_dim,
+                    text,
+                    height: panel::words_height(album, text),
+                },
+                w.motion,
+                w.reduced,
+            ),
+            None => row(vec![col(&left), col(&right)]).spacing(panel::COLUMN_GAP).width(Length::FILL),
+        })
+        .padding(Padding { top: panel::LIST_GAP, right: 0.0, bottom: 0.0, left: 0.0 })
+        .radius(0.0)
+        .width(Length::FILL),
     ])
     .spacing(3.0)
     .width(Length::FILL);
@@ -254,11 +309,12 @@ pub fn open(
     shown: f32,
     playing: Option<usize>,
     down: bool,
+    words: Option<Words>,
 ) -> Element<Msg> {
     // The arrow points at the album's place on the wall as searched.
     let mut layers = vec![ground(at, p, down)];
     if shown > 0.0 {
-        layers.push(contents(i, album, p, covers.as_deref(), scale, text, playing, cursor, down).opacity(shown));
+        layers.push(contents(i, album, p, covers.as_deref(), scale, text, playing, cursor, down, words).opacity(shown));
     }
     stack(layers).width(Length::FILL).height(Length::FILL)
 }

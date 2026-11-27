@@ -95,6 +95,13 @@ fn server(albums: usize, songs_per: usize) -> String {
                         .into_bytes();
                 r.extend_from_slice(&body);
                 r
+            } else if path.starts_with("/rest/getLyricsBySongId") && q("id") == "so-0" {
+                json(r#"{"subsonic-response":{"status":"ok","lyricsList":{"structuredLyrics":[
+                    {"synced":false,"lang":"eng","line":[{"value":"plain words"}]},
+                    {"synced":true,"lang":"eng","line":[{"start":1000,"value":"Sung"},{"start":2500,"value":"words"}]}]}}}"#
+                    .into())
+            } else if path.starts_with("/rest/getLyricsBySongId") {
+                json(r#"{"subsonic-response":{"status":"ok","lyricsList":{}}}"#.into())
             } else if path.starts_with("/rest/stream") {
                 json(
                     r#"{"subsonic-response":{"status":"failed","error":{"code":70,"message":"Song not found"}}}"#
@@ -190,6 +197,11 @@ fn a_song_is_fetched_once_for_two_asks_and_kept() {
     // The server's own words when it will not play one.
     let gone = song_bytes(&PathBuf::from(format!("{key}/song/so-9.flac")), None).unwrap().unwrap_err();
     assert!(gone.contains("Song not found"), "{gone}");
+    // Its lyrics, the server's timed set; a song without any has none.
+    let words = song_lyrics(&path, None).expect("lyrics");
+    assert!(words.timed);
+    assert_eq!(words.lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["Sung", "words"]);
+    assert_eq!(song_lyrics(&PathBuf::from(format!("{key}/song/so-9.flac")), None), None);
     // A file is not a server's song; a server not signed in to says so.
     assert!(song_bytes(Path::new("/music/a.flac"), None).is_none());
     let stranger = song_bytes(Path::new("navidrome://eve@10.9.9.9:4533/song/x.flac"), None).unwrap().unwrap_err();

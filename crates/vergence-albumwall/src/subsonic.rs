@@ -479,13 +479,10 @@ pub fn register(logins: Vec<Login>) {
     *LOGINS.lock().unwrap_or_else(|e| e.into_inner()) = logins;
 }
 
-/// A song's bytes, if `path` is a server's song: kept, being fetched (then
-/// waited for), or fetched now. A song is at most Hymie's largest file; it
-/// may take as long as a slow line needs.
-pub fn song_bytes(path: &Path, tls: Option<Arc<dyn vergence_http::Connector>>) -> Option<Result<Arc<Vec<u8>>, String>> {
-    let id = song_id(path)?;
+/// The signed-in server a song's path names (its key, then "/song/").
+fn login_of(path: &Path) -> Option<Login> {
     let p = path.to_string_lossy().to_string();
-    let login = LOGINS
+    LOGINS
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .iter()
@@ -493,8 +490,27 @@ pub fn song_bytes(path: &Path, tls: Option<Arc<dyn vergence_http::Connector>>) -
             let k = l.key().to_string_lossy().to_string();
             p.starts_with(&format!("{k}/song/"))
         })
-        .cloned();
-    let Some(login) = login else { return Some(Err("its server is not signed in to".into())) };
+        .cloned()
+}
+
+/// A server song's lyrics, as the server has them (getLyricsBySongId,
+/// OpenSubsonic: Navidrome reads them from the file's tags and from an
+/// .lrc beside it): timed preferred. None for a server without the call,
+/// a song without words, or one that cannot be asked now. Not for the
+/// window's thread.
+pub fn song_lyrics(path: &Path, tls: Option<Arc<dyn vergence_http::Connector>>) -> Option<crate::lyrics::Lyrics> {
+    let id = song_id(path)?;
+    let server = Server::new(login_of(path)?, tls).ok()?;
+    let v = server.call("getLyricsBySongId", &format!("id={}", vergence_http::encode(&id))).ok()?;
+    crate::lyrics::Lyrics::from_structured(v.get("lyricsList")?)
+}
+
+/// A song's bytes, if `path` is a server's song: kept, being fetched (then
+/// waited for), or fetched now. A song is at most Hymie's largest file; it
+/// may take as long as a slow line needs.
+pub fn song_bytes(path: &Path, tls: Option<Arc<dyn vergence_http::Connector>>) -> Option<Result<Arc<Vec<u8>>, String>> {
+    let id = song_id(path)?;
+    let Some(login) = login_of(path) else { return Some(Err("its server is not signed in to".into())) };
     {
         let mut fetching = FETCHING.lock().unwrap_or_else(|e| e.into_inner());
         loop {

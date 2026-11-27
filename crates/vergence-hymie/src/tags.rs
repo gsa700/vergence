@@ -181,6 +181,8 @@ fn read_tag(tag: &[u8], tags: &mut Tags) {
             b"TRCK" | b"TRK" => tags.put_value("TRACKNUMBER", text_frame(frame)),
             b"TPOS" | b"TPA" => tags.put_value("DISCNUMBER", text_frame(frame)),
             b"TDRC" | b"TYER" | b"TYE" | b"TDOR" => tags.put_value("DATE", text_frame(frame)),
+            // Lyrics (AlbumWall's, milestone 2), under the Vorbis comment name.
+            b"USLT" | b"ULT" => uslt(frame, tags),
             b"APIC" => apic(frame, tags, false),
             b"PIC" => apic(frame, tags, true),
             _ => {}
@@ -208,6 +210,20 @@ fn txxx(frame: &[u8], tags: &mut Tags) {
     let value_bytes = &rest[after..];
     let value = text(&value_bytes[..terminator(value_bytes, wide)], enc);
     tags.put_value(&key, value);
+}
+
+/// USLT (ULT in 2.2): an encoding, a three-letter language, a description,
+/// the words. The first one kept, as for every key.
+fn uslt(frame: &[u8], tags: &mut Tags) {
+    if frame.len() < 5 {
+        return;
+    }
+    let (enc, rest) = (frame[0], &frame[4..]);
+    let wide = matches!(enc, 1 | 2);
+    let end = terminator(rest, wide);
+    let after = rest.len().min(end + if wide { 2 } else { 1 });
+    let words = &rest[after..];
+    tags.put_value("LYRICS", text(&words[..terminator(words, wide)], enc));
 }
 
 /// APIC (2.3, 2.4): an encoding, a MIME type (Latin-1, ended by 0), the
