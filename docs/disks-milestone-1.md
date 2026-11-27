@@ -6,8 +6,18 @@ list, 2026-11-14: "useful tool all desktops should have"; the roadmap:
 root, so a small root helper of our own"). It builds on two plans already
 answered: elevation milestone 1 (the server-drawn prompt, vdm doing one
 named action) and hardware readings milestone 1 (a read lease for root-only
-readings, opened from Advanced). Nothing here is built yet. **Draft: the
-questions at the end are for Dave.***
+readings, opened from Advanced). Step 1 is built (see Progress).*
+
+**Decisions (Dave, 2026-11-27, "go with your leans on the questions"):**
+1, the name "Disks"; 2 a, only removable and hot-plugged disks can be
+changed in milestone 1, internal disks are seen but never changed; 3 a,
+our own GPT, exFAT and FAT32 writers in vdm, the system's `mkfs.ext4` and
+`newfs` for ext4 and UFS, not udisks2; 4 a, serial numbers shown, with
+Copy; 5 a, ZFS read with `zpool` as the person; 6, self-tests, partitions
+changed among others, pools, encryption, disk images and USB installers,
+and a benchmark are later, not milestone 1; 7, after AlbumWall and Remote,
+step 3 waiting on hardware readings milestone 1's lease, steps 1 and 2
+earlier if a gap opens.
 
 ## Why
 
@@ -202,7 +212,7 @@ encrypt, run a self-test, or read a disk's bytes for viewing.
    lab USB stick); then **an independent review** of the vdm parts (Dave's
    code security policy: a new root interface, and a destructive one).
 
-## Questions (with leans)
+## Questions (with leans; answered 2026-11-27: all leans, see Decisions)
 
 1. **Its name.** *Lean: "Disks"* (as GNOME's; short, as Edit, FileView,
    Reader, Hardware). Or "Disk Utility" (macOS's).
