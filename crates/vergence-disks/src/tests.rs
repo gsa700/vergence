@@ -114,6 +114,18 @@ fn udev_records_and_words() {
     assert_eq!(ptype_word("!12345"), "!12345");
 }
 
+/// udev's escaped names: Hubble's Windows disk (GPT names) and a stick whose label has spaces.
+#[test]
+fn udev_labels_unescaped() {
+    let gpt = parse_udev("E:ID_PART_ENTRY_NAME=Basic\\x20data\\x20partition\n");
+    assert_eq!(udev_label(&gpt), "Basic data partition");
+    let stick = parse_udev("E:ID_FS_LABEL=My_Stick\nE:ID_FS_LABEL_ENC=My\\x20Stick\nE:ID_PART_ENTRY_NAME=x\n");
+    assert_eq!(udev_label(&stick), "My Stick");
+    let hostile = parse_udev("E:ID_FS_LABEL_ENC=a\\x1b[2Jb\\x0a\\xc3\\xa9\\xzz\n");
+    assert_eq!(udev_label(&hostile), "a[2Jb\u{e9}\\xzz");
+    assert_eq!(udev_label(&parse_udev("")), "");
+}
+
 #[test]
 fn mount_tables() {
     let m = parse_proc_mounts("/dev/sdb1 /run/media/d/My\\040Stick vfat rw 0 0\n/dev/nvme0n1p3 / btrfs rw 0 0\n");

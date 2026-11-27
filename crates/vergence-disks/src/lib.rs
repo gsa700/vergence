@@ -387,6 +387,35 @@ pub fn parse_udev(text: &str) -> HashMap<String, String> {
         .collect()
 }
 
+/// The name to show for a partition from udev's record: the file system's label as written
+/// (`ID_FS_LABEL_ENC`; plain `ID_FS_LABEL` has its spaces turned to `_`), else the GPT
+/// partition's own name (`ID_PART_ENTRY_NAME`). udev writes both with `\xHH` escapes; they
+/// are undone here, and control characters dropped (a stick's label is anyone's bytes).
+pub fn udev_label(u: &HashMap<String, String>) -> String {
+    let undo = |s: &str| {
+        let b = s.as_bytes();
+        let mut out = Vec::with_capacity(b.len());
+        let mut i = 0;
+        while i < b.len() {
+            if b[i] == b'\\' && b.get(i + 1) == Some(&b'x') {
+                if let Some(v) = s.get(i + 2..i + 4).and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                    out.push(v);
+                    i += 4;
+                    continue;
+                }
+            }
+            out.push(b[i]);
+            i += 1;
+        }
+        String::from_utf8_lossy(&out).chars().filter(|c| !c.is_control()).collect::<String>()
+    };
+    u.get("ID_FS_LABEL_ENC")
+        .map(|v| undo(v))
+        .or_else(|| u.get("ID_FS_LABEL").cloned())
+        .or_else(|| u.get("ID_PART_ENTRY_NAME").map(|v| undo(v)))
+        .unwrap_or_default()
+}
+
 /// Mount tables of the `/proc/mounts` shape: device, point, type; octal escapes ("\040") undone.
 pub fn parse_proc_mounts(text: &str) -> Vec<(String, String, String)> {
     let unescape = |s: &str| {
