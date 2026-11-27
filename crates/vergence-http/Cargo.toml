@@ -1,0 +1,11 @@
+[package]
+name = "vergence-http"
+description = "Vergence's own HTTP/1.1 client: what a music server's client needs (AlbumWall milestone 2)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Our own code only (whitepaper §8, "Our own parts"): no dependencies. HTTPS
+# comes through a Connector (the system's OpenSSL in a confined helper).
+[dependencies]

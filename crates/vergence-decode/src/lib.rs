@@ -436,6 +436,16 @@ fn limit_self() {
 /// process (exit 3). The PDF helper (vergence-pdf) uses it too, with more
 /// time: it lives as long as its document's window.
 pub fn confine(cpu_seconds: u64) {
+    confine_allowing(cpu_seconds, &[]);
+}
+
+/// As [`confine`], with these system calls allowed as well on Linux (by
+/// their x86_64 numbers): the TLS helper waits on its two descriptors with
+/// poll (7, ppoll 271). Capability mode on FreeBSD already allows such
+/// calls; the list only ever adds to the filter, never takes away.
+pub fn confine_allowing(cpu_seconds: u64, extra_linux: &[u32]) {
+    #[cfg(not(target_os = "linux"))]
+    let _ = extra_linux;
     #[repr(C)]
     struct Rlimit {
         cur: u64,
@@ -503,7 +513,7 @@ pub fn confine(cpu_seconds: u64) {
         if unsafe { prctl(38, 1, 0, 0, 0) } != 0 {
             refuse("no-new-privileges");
         }
-        if let Err(what) = seccomp::enter() {
+        if let Err(what) = seccomp::enter(extra_linux) {
             refuse(what);
         }
     }
@@ -562,7 +572,7 @@ mod seccomp {
     /// The filter program: the wrong architecture or a call not listed is
     /// killed.
     #[cfg(target_arch = "x86_64")]
-    fn program() -> Vec<SockFilter> {
+    fn program(extra: &[u32]) -> Vec<SockFilter> {
         let f = |code, jt, jf, k| SockFilter { code, jt, jf, k };
         let mut p = vec![
             f(LD_W_ABS, 0, 0, OFF_ARCH),
@@ -570,7 +580,7 @@ mod seccomp {
             f(RET_K, 0, 0, RET_KILL_PROCESS),
             f(LD_W_ABS, 0, 0, OFF_NR),
         ];
-        for &nr in ALLOWED {
+        for &nr in ALLOWED.iter().chain(extra) {
             p.push(f(JEQ_K, 0, 1, nr));
             p.push(f(RET_K, 0, 0, RET_ALLOW));
         }
@@ -579,11 +589,11 @@ mod seccomp {
     }
 
     #[cfg(target_arch = "x86_64")]
-    pub fn enter() -> Result<(), &'static str> {
+    pub fn enter(extra: &[u32]) -> Result<(), &'static str> {
         unsafe extern "C" {
             fn prctl(option: i32, a: u64, b: u64, c: u64, d: u64) -> i32;
         }
-        let prog = program();
+        let prog = program(extra);
         let fprog = SockFprog { len: prog.len() as u16, filter: prog.as_ptr() };
         // SAFETY: PR_SET_SECCOMP (22), SECCOMP_MODE_FILTER (2) with a valid
         // sock_fprog whose filter outlives the call (the kernel copies it).
@@ -596,7 +606,7 @@ mod seccomp {
     /// No list of system calls for this processor yet: refused rather than
     /// decoding unconfined.
     #[cfg(not(target_arch = "x86_64"))]
-    pub fn enter() -> Result<(), &'static str> {
+    pub fn enter(_extra: &[u32]) -> Result<(), &'static str> {
         Err("the seccomp filter (no system call list for this processor)")
     }
 }

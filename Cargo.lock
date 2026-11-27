@@ -2284,6 +2284,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "vergence-http"
+version = "0.4.1"
+
+[[package]]
 name = "vergence-hw"
 version = "0.4.1"
 dependencies = [
@@ -2544,6 +2548,14 @@ dependencies = [
  "vergence-pdf",
  "vergence-scene",
  "vergence-types",
+]
+
+[[package]]
+name = "vergence-tls"
+version = "0.4.1"
+dependencies = [
+ "vergence-decode",
+ "vergence-http",
 ]
 
 [[package]]

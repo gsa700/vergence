@@ -4,7 +4,7 @@ version=0.4.1
 revision=1
 build_style=cargo
 hostmakedepends="pkg-config"
-makedepends="libarchive-devel libinput-devel libxkbcommon-devel libseat-devel libgbm-devel
+makedepends="libarchive-devel openssl-devel libinput-devel libxkbcommon-devel libseat-devel libgbm-devel
  libdrm-devel eudev-libudev-devel wayland-devel wayland-protocols
  fontconfig-devel pam-devel"
 # The two font packages are for characters our own fonts lack: symbols

@@ -17,6 +17,15 @@ player, with the media keys and the picture primitive; one instance and the
 command line over MPRIS; a Subsonic server of our own in the suite, then
 Dave's MusicServer read-only. Building, step 1.
 
+**And HTTP's warning** (Dave, 2026-11-26: "let do no warning on http IF the
+address is a lan address?"): no warning when the address connected to,
+after the name is looked up, is on the local network: IPv4 private
+(10/8, 172.16/12, 192.168/16), link-local (169.254/16) and loopback;
+IPv6 unique local (fc00::/7), link-local (fe80::/10) and ::1. Anything
+else over HTTP is warned about. 100.64/10 (carrier-grade NAT, also
+Tailscale's) is not counted as local: it is shared with an ISP's other
+customers.
+
 ## What milestone 2 does
 
 - **A music server as a library: Navidrome.** The welcome's second half ("On
@@ -81,7 +90,13 @@ Dave's MusicServer read-only. Building, step 1.
 What Vergence has, and what this milestone adds (each addition where any
 program can use it):
 
-- **HTTP**: nothing in the tree speaks it. Added: our own small HTTP/1.1
+- **HTTP** (Dave, 2026-11-26: "keep in mind the same code may be needed for
+  our upcoming browser project"): so it lives in two crates of its own,
+  vergence-http and vergence-tls, for any program that fetches something (a
+  mail checker, weather or radar tiles, update checks). The browser planned
+  on WebKit (WPE) brings its own network stack for its pages; the TLS helper
+  is general enough to serve it where it wants one of ours.
+  Nothing in the tree spoke HTTP. Added: our own small HTTP/1.1
   client (requests, chunked and fixed-length answers, range requests for
   seeking, redirects within a server, time limits), in a crate of its own;
   every byte from the network parsed as untrusted, fuzzed as the D-Bus wire
@@ -175,3 +190,26 @@ program can use it):
    picture primitive, the tile and card.
 7. **The checks**: the suite's Subsonic server and scenarios; a package for
    techbench; your pass with your own server.
+
+## Progress
+
+- **Step 1, HTTP and HTTPS** (2026-11-26): `crates/vergence-http`, our own
+  HTTP/1.1 client: addresses (IPv6 literals too), GET with a query and a
+  Range, one request a connection, answers fixed-length, chunked or read to
+  close, redirects within the same server (five at most), a deadline for the
+  whole answer and a limit on its size (the Avalonia review's stalled
+  server and 400 MB cover), the address connected to and `is_local` for the
+  warning rule. The head is limited (64 KB, 100 headers); the parsers are
+  given random bytes in the tests. `crates/vergence-tls`: HTTPS through the
+  system's OpenSSL in the confined helper `vergence-tls` (the program
+  connects and hands over the socket; the helper loads the certificates,
+  confines itself, then does the handshake, checking the chain and the
+  name or address, TLS 1.2 at least, and relays). Found on the way: OpenSSL
+  asks for its process id (getpid added to the helper's Linux filter, with
+  poll; `vergence_decode::confine_allowing` adds calls for one helper and
+  never takes any away), and glibc opened /etc/localtime to check a
+  certificate's dates (TZ=UTC0 first). Tested against `openssl s_server`
+  with a throwaway authority on Hubble and kepler: trusted and named,
+  connected; another address, refused ("IP address mismatch"); not
+  vouched for, refused ("self-signed certificate"). Tests 1192/1192/1180.
+

@@ -191,6 +191,26 @@ writers pass names through the locale's character set (make.rs sets a
 per-thread UTF-8 locale), and its pax writer crashed on a non-ASCII UTF-8
 name in the C locale (3.8.11; the app writes only .zip).
 
+### OpenSSL (Apache-2.0), linked from the system
+
+AlbumWall milestone 2 (Dave, 2026-11-26: "all leans, go ahead", question 2's
+lean: the system's OpenSSL in a confined helper): HTTPS for our own HTTP
+client (crates/vergence-http), so a music server can be reached from
+outside the house. Only the helper `vergence-tls` links it, through our own
+small FFI (crates/vergence-tls/src/bin/vergence-tls.rs; no bindings
+crate). Linked from the system, not shipped: Void's package manager uses
+it, FreeBSD has it in its base system. The program connects the socket and
+hands it to the helper, which loads the system's certificates, confines
+itself (no file system, no network of its own; poll and getpid added to
+the Linux filter), and only then reads a byte from the server: a flaw in
+OpenSSL reaches no further than the helper. It checks the certificate
+chain and the name (or address) asked for, TLS 1.2 at least. Review: keep;
+our own TLS would be months of work, and cryptography is where writing our
+own is the risk rather than the safety. The alternatives weighed: rustls
+and a crypto library as crates (several crates and a crypto implementation
+brought in), or HTTP only. Watch: glibc opened /etc/localtime when a
+certificate's dates were checked (the helper sets TZ=UTC0 first).
+
 ### Xwayland
 
 X11 applications, off by default since 2026-11-10. Review: keep as the only
