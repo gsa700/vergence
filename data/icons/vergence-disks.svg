@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Vergence's Disks: a drive seen from the front, its partitions as a bar across it and a light. Drawn by the project. -->
+  <rect x="6" y="14" width="52" height="36" rx="7" fill="#20232c"/>
+  <rect x="6" y="14" width="52" height="36" rx="7" fill="none" stroke="#6b7a9e" stroke-width="2"/>
+  <rect x="12" y="22" width="9" height="10" rx="2" fill="#f0962b"/>
+  <rect x="23" y="22" width="29" height="10" rx="2" fill="#729fcf"/>
+  <path d="M13 42 H40" stroke="#6b7a9e" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="49" cy="42" r="3" fill="#8ae234"/>
+</svg>
