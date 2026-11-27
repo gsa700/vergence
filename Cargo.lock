@@ -2157,11 +2157,13 @@ version = "0.4.1"
 dependencies = [
  "vergence-config",
  "vergence-decode",
+ "vergence-http",
  "vergence-hymie",
  "vergence-render",
  "vergence-scene",
  "vergence-sound",
  "vergence-text",
+ "vergence-tls",
  "vergence-ui",
  "vergence-widgets",
 ]
