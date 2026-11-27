@@ -199,7 +199,21 @@ fn rows_from_top(frame: &GlesFrame<'_, '_>) -> bool {
 /// drawn with: a new look (the dock's opacity, the Frost step, light or
 /// dark) is a new commit, or the screen kept the old frost until something
 /// behind it changed (the dock's opacity slider seemed to do nothing).
-pub type Slot = Option<(Id, GlesTexture, CommitCounter, Look)>;
+pub type Slot = Option<(Id, GlesTexture, CommitCounter, Look, Ctx)>;
+
+/// The GL context a texture or program was made on. After a GPU hang the
+/// server draws with a new context (drm.rs renew_renderer); everything made on
+/// the old one is dead there (textures warn "from different renderer context",
+/// programs fail glUseProgram), so each cache keeps the context its things were
+/// made on and makes them again when it differs (kepler, 2026-11-27: windows
+/// flashing and the desktop's icons gone after a hang).
+pub type Ctx = smithay::backend::renderer::ContextId<GlesTexture>;
+
+/// The renderer's context now.
+pub fn ctx(renderer: &GlesRenderer) -> Ctx {
+    use smithay::backend::renderer::Renderer;
+    renderer.context_id()
+}
 
 /// The backdrop frost over `dst` for a surface whose texture is kept in
 /// `slot` (made or remade here when the size changed). None if the texture
@@ -215,8 +229,10 @@ pub fn element(
     if dst.size.w <= 0 || dst.size.h <= 0 {
         return None;
     }
-    let fresh =
-        slot.as_ref().is_none_or(|(_, t, ..)| (t.width() as i32, t.height() as i32) != (dst.size.w, dst.size.h));
+    let now = ctx(renderer);
+    let fresh = slot
+        .as_ref()
+        .is_none_or(|(_, t, _, _, c)| (t.width() as i32, t.height() as i32) != (dst.size.w, dst.size.h) || *c != now);
     if fresh {
         match Offscreen::<GlesTexture>::create_buffer(
             renderer,
@@ -225,9 +241,9 @@ pub fn element(
         ) {
             Ok(t) => {
                 let (id, mut commit) =
-                    slot.take().map_or_else(|| (Id::new(), CommitCounter::default()), |(id, _, c, _)| (id, c));
+                    slot.take().map_or_else(|| (Id::new(), CommitCounter::default()), |(id, _, c, ..)| (id, c));
                 commit.increment();
-                *slot = Some((id, t, commit, *look));
+                *slot = Some((id, t, commit, *look, now));
             }
             Err(e) => {
                 tracing::warn!("frost: no texture for {dst:?}: {e:?}");
@@ -235,13 +251,13 @@ pub fn element(
             }
         }
     }
-    if let Some((_, _, commit, was)) = slot.as_mut()
+    if let Some((_, _, commit, was, _)) = slot.as_mut()
         && *was != *look
     {
         commit.increment();
         *was = *look;
     }
-    let (id, texture, commit, _) = slot.as_ref()?;
+    let (id, texture, commit, ..) = slot.as_ref()?;
     Some(Backdrop::new(id.clone(), *commit, dst, texture.clone(), program, look))
 }
 

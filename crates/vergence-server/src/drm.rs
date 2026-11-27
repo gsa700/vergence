@@ -1090,12 +1090,29 @@ fn render(state: &mut Server, crtc: Key) {
     // cannot ask. Start over with a new context; textures are cached per context
     // and upload again.
     if ms > 2000 {
+        tracing::warn!("GPU hang suspected (frame blocked {ms} ms)");
         renew_renderer(&mut backend);
+        state.scenes_renew();
     }
     state.backend = Some(backend);
 }
 
+impl Server {
+    /// The control socket's `renew-gpu`: what a GPU hang does to the drawing, on purpose
+    /// (tests of renew_renderer: every window, the frost, the corners and the screen
+    /// itself drawn again on a new context, none of the old one's textures kept).
+    pub fn renew_gpu(&mut self) -> String {
+        let Some(mut b) = self.backend.take() else { return "renew-gpu: only with --drm".into() };
+        renew_renderer(&mut b);
+        self.backend = Some(b);
+        self.scenes_renew();
+        "renew-gpu: drawing with a new GL context".into()
+    }
+}
+
 /// Replace the renderer with one on a new EGL context, and draw every monitor in full.
+/// What the backend itself made on the old context is made again here; the caches
+/// elsewhere each notice the new context themselves (backdrop.rs Ctx).
 fn renew_renderer(b: &mut Backend) {
     let display = b.renderer.egl_context().display().clone();
     let context = match EGLContext::new(&display) {
@@ -1105,8 +1122,24 @@ fn renew_renderer(b: &mut Backend) {
     match unsafe { GlesRenderer::new(context) } {
         Ok(r) => {
             b.renderer = r;
+            // Remote views make their texture again at their next frame.
+            for r in &mut b.remotes {
+                (r.tex, r.damage) = (None, None);
+            }
+            // Screens kept in memory (virtual screens) draw into a texture of the renderer's.
+            use smithay::backend::renderer::Offscreen;
+            for s in b.surfaces.values_mut() {
+                let Present::Memory(m) = &mut s.present else { continue };
+                match b.renderer.create_buffer(Fourcc::Abgr8888, (s.px.0 as i32, s.px.1 as i32).into()) {
+                    Ok(t) => {
+                        m.tex = t;
+                        m.damage = smithay::backend::renderer::damage::OutputDamageTracker::from_output(&s.output);
+                    }
+                    Err(e) => tracing::error!("GPU renewed: {} has no texture to draw in: {e}", s.connector),
+                }
+            }
             b.redraw_all();
-            tracing::warn!("GPU hang suspected (frame blocked); drawing with a new GL context");
+            tracing::warn!("GPU renewed: drawing with a new GL context");
         }
         Err(e) => tracing::error!("GPU hang: cannot make a new renderer: {e:?}"),
     }

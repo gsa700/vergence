@@ -237,6 +237,8 @@ impl Server {
             }
             "windows" => self.describe_windows(),
             "gpus" => self.describe_gpus(),
+            // What a GPU hang does to the drawing (a new GL context), on purpose: for tests.
+            "renew-gpu" => self.renew_gpu(),
             // The order of use, most recent first, and the focused window (Alt+Tab's order).
             "used" => self.order_of_use_report(),
             // Alt+Tab's list: what it holds, which row is stepped to, whether it shows.
@@ -822,7 +824,7 @@ impl Server {
                 self.loop_signal.stop();
                 "quitting".into()
             }
-            _ => "commands: shot, windows, gpus, shelf, tiles, actions, action <id or name>, session, drives, apps, key <name> (chords: ctrl+v), type <text>, touch, dbus, notes, spawn <cmd>, move <i> <x> <y>, scale [<screen> <scale>|reset], screen [add|remove], focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
+            _ => "commands: shot, windows, gpus, renew-gpu, shelf, tiles, actions, action <id or name>, session, drives, apps, key <name> (chords: ctrl+v), type <text>, touch, dbus, notes, spawn <cmd>, move <i> <x> <y>, scale [<screen> <scale>|reset], screen [add|remove], focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
         }
     }
 

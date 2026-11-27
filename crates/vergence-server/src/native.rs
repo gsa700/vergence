@@ -336,6 +336,8 @@ pub struct GpuPicture {
     pub gles: Option<smithay::backend::renderer::gles::GlesTexture>,
     /// The renderer refused it: not tried again (the window keeps its last picture).
     pub failed: bool,
+    /// The GL context it was imported on (backdrop.rs Ctx).
+    pub ctx: Option<crate::backdrop::Ctx>,
     /// Which attach this was, counted over all windows: what tells a new
     /// frame from the last (backdrop.rs Shaded). The GL texture's number
     /// can't: a freed one is handed straight back to the next import, so a
@@ -1467,7 +1469,7 @@ impl Server {
         let mut s = n.state.lock().unwrap();
         let logical = (points_of(width as i32, s.scale), points_of(height as i32, s.scale)).into();
         let serial = PICTURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-        let gpu = GpuPicture { dmabuf, texture: None, gles: None, failed: false, serial };
+        let gpu = GpuPicture { dmabuf, texture: None, gles: None, failed: false, ctx: None, serial };
         s.picture =
             Some(Picture { content: Content::Gpu(Arc::new(Mutex::new(gpu))), px, logical, format, opaque: false });
         Ok(())

@@ -153,6 +153,8 @@ pub struct Alt {
     pub px: Size<i32, BufferCoords>,
     /// Counted apart from the pictures' serials (backdrop.rs tells frames apart by it).
     pub serial: u64,
+    /// The GL context it was imported on (backdrop.rs Ctx).
+    pub ctx: crate::backdrop::Ctx,
 }
 
 static ALT_SERIALS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1 << 48);
@@ -287,6 +289,36 @@ impl Server {
         );
     }
 
+    /// After a GPU hang (or `renew-gpu`): the scene renderer's own context may be as dead
+    /// as the screen's (drawing nothing, every call succeeding), so it starts again on a
+    /// new one at the next draw, and the hang's slow frame counts against no window.
+    pub fn scenes_renew(&mut self) {
+        let all: Vec<GpuBuffer> = self
+            .scenes
+            .buffers
+            .drain()
+            .flat_map(|(_, (b, _))| b)
+            .chain(self.scenes.alts.drain().flat_map(|(_, e)| e.bufs))
+            .collect();
+        self.scenes.release(all);
+        self.scenes.gpu = None;
+        self.scenes.strikes.clear();
+        // Every window's scene drawn again on the new one.
+        let wins: Vec<std::sync::Arc<NativeWindow>> = self
+            .natives
+            .values()
+            .filter_map(|w| match w {
+                crate::win::Win::Native(n) if !n.scenes_off() => Some(n.clone()),
+                _ => None,
+            })
+            .collect();
+        for n in wins {
+            if let Err(e) = self.native_draw_scene(&n) {
+                tracing::warn!("scenes: window {} of client {} not drawn again: {e}", n.id, n.client);
+            }
+        }
+    }
+
     /// A window gone: its buffers let go.
     pub fn scenes_forget(&mut self, client: u32, window: u32) {
         let mut gone: Vec<GpuBuffer> =
@@ -319,7 +351,8 @@ impl Server {
         let key = (n.client, n.id, scale.to_bits());
         if let Some(e) = self.scenes.alts.get_mut(&key) {
             e.used = now;
-            if e.scene == at && e.alt.is_some() {
+            let now = crate::backdrop::ctx(renderer);
+            if e.scene == at && e.alt.as_ref().is_some_and(|a| a.ctx == now) {
                 return e.alt.clone();
             }
         }
@@ -383,7 +416,8 @@ impl Server {
             None,
         );
         let serial = ALT_SERIALS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let alt = Alt { texture, gles, px: (pw as i32, ph as i32).into(), serial };
+        let ctx = crate::backdrop::ctx(renderer);
+        let alt = Alt { texture, gles, px: (pw as i32, ph as i32).into(), serial, ctx };
         entry.next = (entry.next + 1) % 2;
         entry.scene = at;
         entry.alt = Some(alt.clone());

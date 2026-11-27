@@ -49,6 +49,8 @@ const KEEP: Duration = Duration::from_secs(10);
 /// asked for, and its element's id and commit.
 pub struct Thumb {
     texture: GlesTexture,
+    /// The GL context it was drawn on (backdrop.rs Ctx).
+    ctx: crate::backdrop::Ctx,
     px: Size<i32, Physical>,
     drawn: Instant,
     asked: Instant,
@@ -149,6 +151,11 @@ impl Server {
         let content = content_size(w)?;
         let (k, px) = fit(content, room);
         let now = Instant::now();
+        let ctx = crate::backdrop::ctx(renderer);
+        // A picture from a context gone since (a GPU hang) is no picture at all.
+        if self.thumbs.by_window.get(w).is_some_and(|t| t.ctx != ctx) {
+            self.thumbs.by_window.remove(w);
+        }
         let fresh = self.thumbs.by_window.get(w).is_some_and(|t| t.px == px && now.duration_since(t.drawn) < EVERY);
         if !fresh {
             match draw(renderer, w, k, px) {
@@ -159,7 +166,9 @@ impl Server {
                         .remove(w)
                         .map_or_else(|| (Id::new(), CommitCounter::default()), |t| (t.id, t.commit));
                     commit.increment();
-                    self.thumbs.by_window.insert(w.clone(), Thumb { texture, px, drawn: now, asked: now, id, commit });
+                    self.thumbs
+                        .by_window
+                        .insert(w.clone(), Thumb { texture, ctx, px, drawn: now, asked: now, id, commit });
                 }
                 Err(e) => {
                     tracing::debug!("thumbs: {:?}: {e}", self.window_title(w));

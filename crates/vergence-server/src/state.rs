@@ -138,9 +138,9 @@ pub struct Server {
     /// The frost's shader program (look milestone 1, step 3), compiled the
     /// first time a bar is frosted; None inside when the renderer cannot
     /// frost (software drawing, or the shader failed): bars are then solid.
-    pub frost: Option<Option<smithay::backend::renderer::gles::GlesTexProgram>>,
+    pub frost: Option<(crate::backdrop::Ctx, Option<smithay::backend::renderer::gles::GlesTexProgram>)>,
     /// The rounded corners' shader program (look milestone 1, step 7), as the frost's.
-    pub round: Option<Option<smithay::backend::renderer::gles::GlesTexProgram>>,
+    pub round: Option<(crate::backdrop::Ctx, Option<smithay::backend::renderer::gles::GlesTexProgram>)>,
     /// Wayland windows already placed (place.rs: on their first sized commit).
     pub placed: std::collections::HashSet<Win>,
     /// When X11 windows were mapped (a move soon after is the app restoring its place).

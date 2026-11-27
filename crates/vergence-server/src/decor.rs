@@ -294,11 +294,17 @@ pub(crate) fn native_texture(
     let p = n.picture()?;
     let crate::native::Content::Gpu(g) = &p.content else { return None };
     let mut g = g.lock().unwrap();
+    let now = crate::backdrop::ctx(renderer);
+    if g.ctx.as_ref().is_some_and(|c| *c != now) {
+        // Imported on a context gone since (a GPU hang): import again.
+        (g.texture, g.gles, g.failed, g.ctx) = (None, None, false, None);
+    }
     if g.texture.is_none() && !g.failed {
         use smithay::backend::renderer::ImportDma;
         match renderer.import_dmabuf(&g.dmabuf, None) {
             Ok(t) => {
                 g.gles = Some(t.clone());
+                g.ctx = Some(now.clone());
                 g.texture = Some(smithay::backend::renderer::element::texture::TextureBuffer::from_texture(
                     renderer,
                     t,
@@ -658,6 +664,10 @@ impl Server {
         &mut self,
         renderer: &mut GlesRenderer,
     ) -> Option<smithay::backend::renderer::gles::GlesTexProgram> {
+        let now = crate::backdrop::ctx(renderer);
+        if self.round.as_ref().is_some_and(|(c, _)| *c != now) {
+            self.round = None;
+        }
         self.round
             .get_or_insert_with(|| {
                 use smithay::backend::renderer::gles::{UniformName, UniformType};
@@ -666,14 +676,16 @@ impl Server {
                     UniformName::new("radius", UniformType::_1f),
                     UniformName::new("top", UniformType::_1f),
                 ];
-                match renderer.compile_custom_texture_shader(vergence_render::round::ROUND_SHADER, &uniforms) {
+                let p = match renderer.compile_custom_texture_shader(vergence_render::round::ROUND_SHADER, &uniforms) {
                     Ok(p) => Some(p),
                     Err(e) => {
                         tracing::warn!("corners: the shader did not compile, windows stay square: {e:?}");
                         None
                     }
-                }
+                };
+                (now, p)
             })
+            .1
             .clone()
     }
 
@@ -696,6 +708,10 @@ impl Server {
         if high_contrast {
             return None;
         }
+        let now = crate::backdrop::ctx(renderer);
+        if self.frost.as_ref().is_some_and(|(c, _)| *c != now) {
+            self.frost = None;
+        }
         self.frost
             .get_or_insert_with(|| {
                 use smithay::backend::renderer::gles::{UniformName, UniformType, ffi};
@@ -711,7 +727,7 @@ impl Server {
                     .unwrap_or_default();
                 if name.contains("llvmpipe") || name.contains("softpipe") {
                     tracing::info!("frost: off, drawing in software ({name})");
-                    return None;
+                    return (now, None);
                 }
                 let uniforms = [
                     UniformName::new("texel", UniformType::_2f),
@@ -726,7 +742,7 @@ impl Server {
                     UniformName::new("cap", UniformType::_1f),
                     UniformName::new("clear", UniformType::_1f),
                 ];
-                match renderer.compile_custom_texture_shader(vergence_render::blur::FROST_SHADER, &uniforms) {
+                let p = match renderer.compile_custom_texture_shader(vergence_render::blur::FROST_SHADER, &uniforms) {
                     Ok(p) => {
                         tracing::info!("frost: on ({name})");
                         Some(p)
@@ -735,8 +751,10 @@ impl Server {
                         tracing::warn!("frost: the shader did not compile, bars stay solid: {e:?}");
                         None
                     }
-                }
+                };
+                (now, p)
             })
+            .1
             .clone()
     }
 
