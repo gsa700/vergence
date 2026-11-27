@@ -25,6 +25,7 @@
 #   share/vergence/fonts/                    Inter, JetBrains Mono and Liberation (data/fonts), with their licenses
 #   share/vergence/syntax/                   languages described in files, for Edit's colors (data/syntax)
 #   share/vergence/defaults/desktop.toml     every account's defaults: wallpaper, the dock's apps, energy (data/defaults)
+#   share/vergence/zshrc                     the zsh setup a person's ~/.zshrc loads (data/shell; vergence-setup writes that ~/.zshrc)
 #   share/backgrounds/vergence/              Vergence's wallpapers (data/backgrounds, drawn by the project)
 #   share/vergence/icons/{places,kinds}/     Vergence's own icons for places and files (data/icons)
 #   share/icons/Vergence/                    the Vergence icon theme: our apps, places, kinds of files, and the pointers (drawn at install)
@@ -136,6 +137,7 @@ if [ -n "$uninstall" ]; then
     rm -f "$fonts"/InterVariable*.ttf "$fonts"/JetBrainsMono-Variable*.ttf "$fonts"/Liberation*.ttf "$fonts"/Inter-OFL.txt "$fonts"/JetBrainsMono-OFL.txt "$fonts"/Liberation-OFL.txt
     rm -rf "$ownicons" "$cursortheme" "$backgrounds" "$syntax"
     rm -f "$defaults/desktop.toml"; rmdir "$defaults" 2>/dev/null || true
+    rm -f "$destdir$prefix/share/vergence/zshrc"
     rmdir "$words" "$fonts" "$destdir$prefix/share/vergence" 2>/dev/null || true
     rmdir "$libexec" 2>/dev/null || true
     rmdir "$docs" 2>/dev/null || true
@@ -220,6 +222,8 @@ for f in "$root"/data/syntax/*.toml; do install -m 644 "$f" "$syntax/"; done
 mkdir -p "$defaults" "$backgrounds"
 sed "s#@PREFIX@#$prefix#g" "$root/data/defaults/desktop.toml" > "$defaults/desktop.toml" && chmod 644 "$defaults/desktop.toml"
 for f in "$root"/data/backgrounds/*.svg; do install -m 644 "$f" "$backgrounds/"; done
+# The zsh setup (data/shell/zshrc), loaded by one line in a person's ~/.zshrc.
+install -m 644 "$root/data/shell/zshrc" "$destdir$prefix/share/vergence/zshrc"
 # Every app on the machine may use them (GTK, Qt, Firefox find fonts through
 # fontconfig): its conf.d gets our directory, after the system's own.
 if [ -z "$destdir" ]; then

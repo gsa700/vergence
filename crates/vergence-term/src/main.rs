@@ -143,6 +143,9 @@ struct Terminal {
     /// rest do (a window opened from a request); none: where we stand.
     start_dirs: Vec<String>,
     start_cwd: Option<String>,
+    /// The folder the next new tab or split starts in: the front terminal's
+    /// (tabs.rs front_folder), taken by the start.
+    next_cwd: Option<String>,
     /// The toolkit's number for this window (App::opened): the server's tab
     /// events name other windows by it.
     wid: u32,
@@ -308,6 +311,7 @@ impl Terminal {
             native: false,
             start_dirs: Vec::new(),
             start_cwd: None,
+            next_cwd: None,
             wid: 0,
             moved: Vec::new(),
             ask: None,

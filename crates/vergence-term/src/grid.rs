@@ -125,6 +125,13 @@ pub struct Grid {
     /// Text a program copied with OSC 52 (Claude Code, tmux, vim...), for
     /// the clipboard. Writes only: programs can never read the clipboard.
     pub clipboard: Option<String>,
+    /// The shell's folder as it last said (OSC 7, `file://host/path`): the
+    /// host as written and the path decoded. New tabs and splits open there
+    /// when the host is this machine (tabs.rs).
+    pub folder: Option<(String, String)>,
+    /// Where each prompt starts (OSC 133;A), as absolute line numbers
+    /// (`pushed` counts them), oldest first; let go with their lines.
+    pub prompts: VecDeque<usize>,
     /// Replies to the program (device status, attributes).
     pub out: Vec<u8>,
     /// Something changed since the last look.
@@ -162,6 +169,33 @@ pub fn width(c: char) -> usize {
     if wide.iter().any(|(a, b)| (*a..=*b).contains(&u)) { 2 } else { 1 }
 }
 
+/// OSC 7's `file://host/path` (path percent-encoded) as (host, path); None for
+/// anything else, or a path with control characters in it.
+pub fn parse_folder_url(url: &str) -> Option<(String, String)> {
+    let rest = url.strip_prefix("file://")?;
+    let slash = rest.find('/')?;
+    let (host, enc) = rest.split_at(slash);
+    let b = enc.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%'
+            && let Some(v) = enc.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok())
+        {
+            out.push(v);
+            i += 3;
+            continue;
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    let path = String::from_utf8(out).ok()?;
+    if path.chars().any(char::is_control) {
+        return None;
+    }
+    Some((host.to_string(), path))
+}
+
 impl Grid {
     pub fn new(cols: usize, rows: usize) -> Grid {
         let (cols, rows) = (cols.max(2), rows.max(1));
@@ -192,6 +226,8 @@ impl Grid {
             mouse_sgr: false,
             title: String::new(),
             clipboard: None,
+            folder: None,
+            prompts: VecDeque::new(),
             out: Vec::new(),
             dirty: true,
         }
@@ -289,6 +325,19 @@ impl Grid {
         let keep = KEEP.load(std::sync::atomic::Ordering::Relaxed);
         while self.scrollback.len() > keep {
             self.scrollback.pop_front();
+        }
+        let first = self.pushed - self.scrollback.len();
+        while self.prompts.front().is_some_and(|p| *p < first) {
+            self.prompts.pop_front();
+        }
+    }
+
+    /// The prompt before line `line` (Ctrl+Shift+Up), or after it (Down).
+    pub fn prompt_near(&self, line: usize, up: bool) -> Option<usize> {
+        if up {
+            self.prompts.iter().rev().find(|p| **p < line).copied()
+        } else {
+            self.prompts.iter().find(|p| **p > line).copied()
         }
     }
 
@@ -698,6 +747,16 @@ impl Perform for Grid {
         {
             self.title = text.chars().take(200).collect();
             self.dirty = true;
+        } else if let Some(("7", url)) = s.split_once(';') {
+            self.folder = parse_folder_url(url);
+        } else if let Some(("133", mark)) = s.split_once(';') {
+            // A: a prompt starts on the cursor's line (B, C and D: later steps).
+            if mark.starts_with('A') && !self.alt {
+                let line = self.pushed + self.cy;
+                if self.prompts.back().is_none_or(|p| *p < line) {
+                    self.prompts.push_back(line);
+                }
+            }
         } else if let Some(("52", rest)) = s.split_once(';')
             && let Some((_targets, data)) = rest.split_once(';')
         {
@@ -978,6 +1037,40 @@ mod tests {
         let mut g = Grid::new(6, 4);
         feed(&mut g, "1\r\n2\r\n3\r\n4\x1b[2;3r\x1b[3;1H\n");
         assert_eq!(g.text(), "1\n3\n\n4");
+    }
+
+    /// OSC 7, the shell's folder; OSC 133;A, prompts, kept as long as their lines.
+    #[test]
+    fn folder_and_prompt_marks() {
+        let mut g = Grid::new(20, 3);
+        feed(&mut g, "\x1b]7;file://kepler/home/d/My%20Stuff\x1b\\");
+        assert_eq!(g.folder, Some(("kepler".into(), "/home/d/My Stuff".into())));
+        feed(&mut g, "\x1b]7;file:///tmp\x07");
+        assert_eq!(g.folder, Some((String::new(), "/tmp".into())));
+        feed(&mut g, "\x1b]7;file://h/a%0ab\x07");
+        assert_eq!(g.folder, None, "a path with a newline in it is refused");
+        assert_eq!(parse_folder_url("http://h/x"), None);
+        // Three prompts, each with a line of output after it.
+        for _ in 0..3 {
+            feed(&mut g, "\x1b]133;A\x07$ \x1b]133;B\x07ls\r\n\x1b]133;C\x07out\r\n\x1b]133;D;0\x07");
+        }
+        assert_eq!(g.prompts.iter().copied().collect::<Vec<_>>(), vec![0, 2, 4]);
+        assert_eq!(g.prompt_near(4, true), Some(2));
+        assert_eq!(g.prompt_near(0, true), None);
+        assert_eq!(g.prompt_near(2, false), Some(4));
+        assert_eq!(g.prompt_near(4, false), None);
+        // A second A on the same line is one prompt.
+        feed(&mut g, "\x1b]133;A\x07\x1b]133;A\x07");
+        assert_eq!(g.prompts.len(), 4);
+        // Lines let go of the scrollback take their marks with them.
+        feed(&mut g, &"\r\n".repeat(SCROLLBACK + 5));
+        let first = g.pushed - g.scrollback.len();
+        assert!(g.prompts.iter().all(|p| *p >= first), "{:?} from {first}", g.prompts);
+        assert!(g.prompts.is_empty(), "every marked line has left the scrollback");
+        // The alternate screen marks nothing.
+        let mut a = Grid::new(20, 3);
+        feed(&mut a, "\x1b[?1049h\x1b]133;A\x07");
+        assert!(a.prompts.is_empty());
     }
 
     #[test]

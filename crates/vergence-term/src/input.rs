@@ -467,6 +467,10 @@ impl Terminal {
                         sym::HOME => isize::MAX,
                         _ => isize::MIN,
                     });
+                } else if m.ctrl && m.shift && !m.alt && !s.grid.alt && matches!(*key, sym::UP | sym::DOWN) {
+                    // The prompt before or after the one at the top (OSC 133 marks, sent by
+                    // Vergence's zsh setup): Ctrl+Shift+Up and Down.
+                    s.jump_to_prompt(*key == sym::UP);
                 } else if let Some(bytes) = Terminal::key_bytes(*key, text.as_deref(), m, s.grid.app_cursor) {
                     // Typing goes to the live screen, and what was selected is let go.
                     s.scroll = 0;

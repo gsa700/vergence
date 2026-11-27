@@ -45,6 +45,17 @@ impl Screen {
         self.clamp_scroll();
     }
 
+    /// Scrolls so the prompt before (or after) the top line is at the top
+    /// (OSC 133 marks); past the last one, down to the live screen.
+    pub(crate) fn jump_to_prompt(&mut self, up: bool) {
+        match self.grid.prompt_near(self.top_line(), up) {
+            Some(line) if line < self.grid.pushed => self.scroll = self.grid.pushed - line,
+            Some(_) | None if !up => self.scroll = 0,
+            _ => {}
+        }
+        self.clamp_scroll();
+    }
+
     /// The line shown at row `r` (from the scrollback while scrolled back).
     pub(crate) fn shown(&self, r: usize) -> &[Cell] {
         self.grid.abs_line(self.top_line() + r).unwrap_or(&[])

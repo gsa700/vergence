@@ -223,6 +223,29 @@ pub fn listen(inbox: Arc<Mutex<Vec<OpenRequest>>>, wake: impl Fn() + Send + 'sta
         .is_ok()
 }
 
+/// This machine's name, as a shell's OSC 7 writes it (`file://<host>/path`).
+pub fn hostname() -> String {
+    unsafe extern "C" {
+        fn gethostname(name: *mut std::ffi::c_char, len: usize) -> std::ffi::c_int;
+    }
+    let mut buf = [0u8; 256];
+    // SAFETY: a buffer of the length given; the name ends at its first NUL.
+    if unsafe { gethostname(buf.as_mut_ptr().cast(), buf.len()) } != 0 {
+        return String::new();
+    }
+    let end = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
+    String::from_utf8_lossy(&buf[..end]).into_owned()
+}
+
+/// A folder a shell named in OSC 7, if it is on this machine: no host,
+/// `localhost`, or this machine's name (its short form too). A shell over ssh
+/// names the other machine's folders, which mean nothing here.
+pub fn local_folder(host: &str, path: &str, me: &str) -> Option<String> {
+    let short = |h: &str| h.split('.').next().unwrap_or(h).to_ascii_lowercase();
+    let here = host.is_empty() || host.eq_ignore_ascii_case("localhost") || short(host) == short(me);
+    (here && path.starts_with('/')).then(|| path.to_string())
+}
+
 /// The working directory of process `pid` (a tab's shell), if it can be read.
 pub fn cwd_of(pid: u32) -> Option<String> {
     #[cfg(target_os = "linux")]
@@ -341,6 +364,17 @@ mod tests {
         assert_eq!(p.written.len(), 1);
         p.remove(b);
         assert!(p.written.is_empty());
+    }
+
+    /// OSC 7's folder is used only when the shell is on this machine.
+    #[test]
+    fn local_folders_only() {
+        assert_eq!(local_folder("", "/tmp", "kepler").as_deref(), Some("/tmp"));
+        assert_eq!(local_folder("localhost", "/tmp", "kepler").as_deref(), Some("/tmp"));
+        assert_eq!(local_folder("Kepler.home.arpa", "/a b", "kepler").as_deref(), Some("/a b"));
+        assert_eq!(local_folder("hubble", "/tmp", "kepler"), None);
+        assert_eq!(local_folder("", "relative", "kepler"), None);
+        assert!(!hostname().is_empty());
     }
 
     #[test]

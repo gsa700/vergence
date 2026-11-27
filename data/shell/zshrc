@@ -1,0 +1,234 @@
+# Vergence zsh setup: <prefix>/share/vergence/zshrc (/usr/share/vergence/zshrc
+# from the package).
+#
+# Loaded by one line at the top of ~/.zshrc (vergence-setup writes that file
+# for a person who has none). Your choices live in
+# ~/.config/vergence/shell.conf (written by Settings > Shell, or by hand).
+# This file is replaced on every Vergence update: do not edit it.
+#
+# Designed with Dave on techbench, 2026-11-26/27 (prompt and colors, red root,
+# small defaults, shell.conf parsed never run, live reload, Terminal's codes);
+# repo source data/shell/zshrc.
+
+[[ -o interactive ]] || return 0
+
+zmodload -F zsh/stat b:zstat 2>/dev/null
+
+# ---- Built-in defaults ----------------------------------------------------
+# Every setting has a default here; shell.conf only holds what you changed.
+# Colors are terminal color numbers (0-255) or names (black red green yellow
+# blue magenta cyan white).
+typeset -gA VG_DEFAULTS=(
+  prompt.blank_line       yes   # empty line before each prompt
+  prompt.user_color       2     # green
+  prompt.host_color       13    # pink (bright magenta)
+  prompt.dir_color        2     # green
+  prompt.sep_color        15    # white
+  prompt.root_red         yes   # as root: user name and separators turn red
+  prompt.root_color       9     # bright red
+  history.file            ~/.zsh_history
+  history.size            50000
+  history.share           no    # yes: every open shell sees each other's commands
+  history.ignore_dups     yes
+  keys.mode               emacs # or vi
+  completion.ignore_case  yes
+  completion.menu         yes   # Tab twice gives a menu you can arrow through
+  welcome.fortune         no    # fortune | cowsay at startup, if installed
+  welcome.date            no    # local and UTC date at startup
+  terminal.integration    yes   # folder, prompt marks and title for Terminal
+  editor.terminal         nano
+  editor.visual           vergence-edit
+)
+
+# Default aliases. The rule: a default may ADD a word or make output easier to
+# read, never change what a familiar command does (no rm -I, no ls -l, no
+# mkdir -p: those are personal choices for shell.conf).
+# shell.conf can add or change one (alias.ll=ls -l) or turn one off with an
+# empty value (alias.df=).
+typeset -gA VG_ALIASES=(
+  ls     'ls --color=auto'
+  grep   'grep --color=auto'
+  df     'df -h'
+  ..     'cd ..'
+  ...    'cd ../..'
+)
+# Feature tests, not OS checks: an ls without --color (older BSD) uses -G.
+ls --color=auto -d / >/dev/null 2>&1 || VG_ALIASES[ls]='ls -G'
+
+typeset -g VG_CONF=${XDG_CONFIG_HOME:-$HOME/.config}/vergence/shell.conf
+
+# ---- Reading shell.conf ---------------------------------------------------
+# The file is PARSED, never run: each "key=value" line replaces one default;
+# blank lines and lines starting with # are skipped; anything else is ignored.
+_vg_load() {
+  emulate -L zsh
+  setopt extendedglob
+  typeset -gA VG=("${(@kv)VG_DEFAULTS}")
+  typeset -gA VG_ALIAS_SET=("${(@kv)VG_ALIASES}")
+  [[ -r $VG_CONF ]] || return 0
+  local line key val
+  while IFS= read -r line || [[ -n $line ]]; do
+    [[ $line == [[:space:]]#(\#*|) ]] && continue
+    [[ $line == *=* ]] || continue
+    key=${${line%%=*}//[[:space:]]/}
+    val=${${line#*=}##[[:space:]]#}
+    val=${val%%[[:space:]]#}
+    if [[ $key == alias.?* ]]; then
+      VG_ALIAS_SET[${key#alias.}]=$val
+    elif (( ${+VG_DEFAULTS[$key]} )); then
+      VG[$key]=$val
+    fi
+  done < $VG_CONF
+}
+
+# A color value that is not a number or a known name falls back to the default,
+# so a bad line can never break the prompt.
+_vg_color() {
+  emulate -L zsh
+  setopt extendedglob
+  local v=${VG[$1]}
+  [[ $v == ([0-9](#c1,3)|black|red|green|yellow|blue|magenta|cyan|white) ]] || v=${VG_DEFAULTS[$1]}
+  REPLY=$v
+}
+
+_vg_is_yes() { [[ ${VG[$1]:l} == (yes|on|true|1) ]] }
+
+# ---- Applying settings ----------------------------------------------------
+# Everything here can be redone while the shell runs (live reload).
+_vg_apply() {
+  local u s h d
+  _vg_color prompt.user_color; u=$REPLY
+  _vg_color prompt.sep_color;  s=$REPLY
+  _vg_color prompt.host_color; h=$REPLY
+  _vg_color prompt.dir_color;  d=$REPLY
+  if (( EUID == 0 )) && _vg_is_yes prompt.root_red; then
+    _vg_color prompt.root_color; u=$REPLY; s=$REPLY
+  fi
+
+  # Layout: who @ where : working directory :   (full path, ~ for home)
+  PROMPT="%F{$u}%n %F{$s}@ %F{$h}%m %F{$s}: %F{$d}%~%F{$s} : %f"
+  _vg_is_yes prompt.blank_line && PROMPT=$'\n'"$PROMPT"
+  if _vg_is_yes terminal.integration && [[ $TERM != (linux|dumb) ]]; then
+    # OSC 133 A/B: prompt start and end, so Terminal can jump between prompts.
+    PROMPT=$'%{\e]133;A\a%}'"$PROMPT"$'%{\e]133;B\a%}'
+  fi
+
+  # History size and sharing
+  HISTSIZE=${VG[history.size]//[^0-9]/}
+  SAVEHIST=$HISTSIZE
+  [[ -n $HISTSIZE ]] || { HISTSIZE=${VG_DEFAULTS[history.size]}; SAVEHIST=$HISTSIZE }
+  if _vg_is_yes history.share; then
+    setopt SHARE_HISTORY; unsetopt INC_APPEND_HISTORY
+  else
+    unsetopt SHARE_HISTORY; setopt INC_APPEND_HISTORY
+  fi
+  if _vg_is_yes history.ignore_dups; then setopt HIST_IGNORE_ALL_DUPS; else unsetopt HIST_IGNORE_ALL_DUPS; fi
+
+  # Keys
+  if [[ ${VG[keys.mode]:l} == vi ]]; then bindkey -v; else bindkey -e; fi
+
+  # Completion
+  if _vg_is_yes completion.ignore_case; then
+    zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
+  else
+    zstyle -d ':completion:*' matcher-list
+  fi
+  if _vg_is_yes completion.menu; then
+    zstyle ':completion:*' menu select
+  else
+    zstyle -d ':completion:*' menu
+  fi
+
+  # Aliases: drop the ones we set last time, then set the current list.
+  local a
+  for a in ${_vg_aliases_set[@]}; do unalias -- $a 2>/dev/null; done
+  typeset -ga _vg_aliases_set=()
+  for a in ${(k)VG_ALIAS_SET}; do
+    [[ -n ${VG_ALIAS_SET[$a]} ]] || continue
+    alias -- "$a=${VG_ALIAS_SET[$a]}"
+    _vg_aliases_set+=($a)
+  done
+
+  # Editors (only names that exist on this machine)
+  (( $+commands[${VG[editor.terminal]%% *}] )) && export EDITOR=${VG[editor.terminal]}
+  (( $+commands[${VG[editor.visual]%% *}] ))   && export VISUAL=${VG[editor.visual]}
+}
+
+# ---- Startup-only settings ------------------------------------------------
+_vg_load
+_vg_apply
+
+HISTFILE=${VG[history.file]/#\~/$HOME}
+setopt HIST_VERIFY EXTENDED_HISTORY NO_FLOW_CONTROL
+
+autoload -Uz compinit
+command mkdir -p ${XDG_CACHE_HOME:-$HOME/.cache}/zsh
+compinit -d ${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zcompdump-$ZSH_VERSION
+zstyle ':completion:*:descriptions' format '%U%B%d%b%u'
+zstyle ':completion:*:warnings' format '%BSorry, no matches for: %d%b'
+zstyle ':completion:*:killall:*' command 'ps -u $USER -o cmd'
+
+typeset -U path
+[[ -d $HOME/.local/bin ]] && path=($HOME/.local/bin $path)
+
+# ---- Live reload + Terminal integration -----------------------------------
+typeset -g _vg_conf_mtime=0 _vg_ran_command=0
+[[ -e $VG_CONF ]] && zstat -A _vg_conf_mtime +mtime -- $VG_CONF 2>/dev/null
+
+_vg_urlencode() {
+  emulate -L zsh
+  setopt extendedglob
+  REPLY=${1//(#b)([^A-Za-z0-9\/._~-])/%${(l:2::0:)$(( [##16] #match[1] ))}}
+}
+
+_vg_precmd() {
+  local st=$?
+  # Live reload: shell.conf changed since we read it -> re-read and re-apply.
+  local m=0
+  [[ -e $VG_CONF ]] && zstat -A m +mtime -- $VG_CONF 2>/dev/null
+  if [[ $m != $_vg_conf_mtime ]]; then
+    _vg_conf_mtime=$m
+    _vg_load
+    _vg_apply
+  fi
+
+  _vg_is_yes terminal.integration && [[ $TERM != (linux|dumb) ]] || return 0
+  # OSC 133 D: the command before this prompt finished, with its exit code.
+  (( _vg_ran_command )) && print -n "\e]133;D;$st\a"
+  _vg_ran_command=0
+  # OSC 7: the folder we are in, so a new tab opens here.
+  _vg_urlencode $PWD
+  print -n "\e]7;file://${HOST}${REPLY}\e\\"
+  # OSC 2: tab title = folder while at the prompt.
+  print -Pn "\e]2;%~\a"
+}
+
+_vg_preexec() {
+  _vg_is_yes terminal.integration && [[ $TERM != (linux|dumb) ]] || return 0
+  _vg_ran_command=1
+  # OSC 133 C: command output starts here.
+  print -n "\e]133;C\a"
+  # OSC 2: tab title = the command while it runs (first 60 characters).
+  local t=${1[1,60]}
+  print -n "\e]2;${t//[[:cntrl:]]/}\a"
+}
+
+autoload -Uz add-zsh-hook
+add-zsh-hook precmd  _vg_precmd
+add-zsh-hook preexec _vg_preexec
+
+# ---- Welcome (off by default) ---------------------------------------------
+# fortune can be installed with no fortune files (FreeBSD base): show nothing then.
+if _vg_is_yes welcome.fortune && (( $+commands[fortune] )); then
+  () {
+    local f
+    f=$(fortune 2>/dev/null) && [[ -n $f ]] || return 0
+    print
+    if (( $+commands[cowsay] )); then print -r -- $f | cowsay; else print -r -- $f; fi
+  }
+fi
+if _vg_is_yes welcome.date; then
+  print
+  date && date -u
+fi
+_vg_is_yes welcome.fortune || _vg_is_yes welcome.date && print

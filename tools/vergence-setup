@@ -19,8 +19,10 @@
 # wpa_supplicant (where there is a Wi-Fi card), acpid leaving the power key to
 # a running session, a system log for vdm, ALSA programs routed through
 # PipeWire (Linux, where alsa-pipewire is installed: the session starts
-# PipeWire). Then hints for what it cannot do (packages to install). Linux
-# with runit (Void) or systemd, and FreeBSD.
+# PipeWire), the person's shell (a ~/.zshrc loading Vergence's zsh setup when
+# they have none; zsh as their login shell, asked, never with --yes). Then
+# hints for what it cannot do (packages to install). Linux with runit (Void)
+# or systemd, and FreeBSD.
 #
 # --undo, before `xbps-remove vergence`: vdm disabled (the login screen ends,
 # and with it every Vergence session), automatic login and the login screen
@@ -274,6 +276,45 @@ if [ "$os" = Linux ] && [ -f "$alsa_share/50-pipewire.conf" ] && [ -f "$alsa_sha
     fi
 elif [ "$os" = Linux ] && command -v pipewire >/dev/null 2>&1 && [ ! -f "$alsa_share/50-pipewire.conf" ]; then
     echo "sound: ALSA programs will not go through PipeWire (Void: xbps-install alsa-pipewire, then run this again)" >&2
+fi
+
+# ---- the person's shell: Vergence's zsh setup ----
+# A ~/.zshrc of one line loading share/vergence/zshrc (data/shell/zshrc), only
+# for a person who has none: theirs from then on, never written again; an
+# existing one is left as it is, with the line to add. Made with noclobber
+# (O_EXCL), so nothing at that path, a link included, is ever written through.
+# Their login shell becomes zsh only on a yes asked here, never with --yes
+# (Dave, 2026-11-27).
+zshrc=$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/share/vergence/zshrc
+if [ -n "$user" ] && [ -f "$zshrc" ]; then
+    entry=$(getent passwd "$user")
+    home=$(echo "$entry" | cut -d: -f6)
+    shell=$(echo "$entry" | cut -d: -f7)
+    if [ -z "$home" ] || [ ! -d "$home" ]; then
+        echo "shell: $user has no home folder; no ~/.zshrc written" >&2
+    elif [ -e "$home/.zshrc" ] || [ -L "$home/.zshrc" ]; then
+        grep -qF "$zshrc" "$home/.zshrc" 2>/dev/null \
+            || echo "shell: $home/.zshrc is $user's own and stays as it is; for Vergence's zsh setup, put this line at its top: source $zshrc"
+    elif ask "shell: write $home/.zshrc for $user (one line loading Vergence's zsh setup; theirs to change)?"; then
+        if ( set -C; umask 022; printf '%s\n' \
+            "# Vergence's zsh setup. Your choices go in ~/.config/vergence/shell.conf (Settings > Shell);" \
+            "# this file is yours: add your own lines below." \
+            "source $zshrc" > "$home/.zshrc" ) 2>/dev/null; then
+            chown -h "$user:$(id -gn -- "$user")" "$home/.zshrc" && echo "shell: $home/.zshrc written"
+        else
+            echo "shell: could not write $home/.zshrc" >&2
+        fi
+    fi
+    zsh=$(command -v zsh)
+    if [ -z "$zsh" ]; then
+        echo "shell: zsh is not installed (Void: xbps-install zsh; FreeBSD: pkg install zsh)" >&2
+    elif [ "$(basename "$shell")" != zsh ]; then
+        if [ -n "$yes" ]; then
+            echo "shell: $user's login shell stays $shell (vergence-setup without --yes asks to make it zsh)"
+        elif ask "shell: make zsh the login shell for $user (now $shell)?"; then
+            chsh -s "$zsh" "$user" && echo "shell: $user's login shell is now $zsh (from their next login)"
+        fi
+    fi
 fi
 
 # ---- what it cannot do: hints ----

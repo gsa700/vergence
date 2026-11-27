@@ -14,7 +14,7 @@ makedepends="libarchive-devel openssl-devel libinput-devel libxkbcommon-devel li
 # The two font packages are for characters our own fonts lack: symbols
 # programs print in a terminal (Claude Code's ✻ ⏵ ⎿) and other scripts.
 # A base Void has no fonts at all (techbench, 2026-11-23).
-depends="seatd mesa-dri fontconfig dbus udisks2 polkit openbsd-netcat
+depends="seatd mesa-dri fontconfig dbus udisks2 polkit openbsd-netcat zsh
  pipewire wireplumber alsa-pipewire dejavu-fonts-ttf noto-fonts-ttf"
 short_desc="Desktop with its own display server, toolkit and applications"
 maintainer="David Erickson <gsa700@gmail.com>"

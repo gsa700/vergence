@@ -194,8 +194,13 @@ impl Terminal {
     /// Starts a terminal and gives it a number.
     pub(crate) fn start(&mut self, cols: usize, rows: usize) -> Option<(u64, Session)> {
         let waker = self.waker.clone()?;
-        // A restored tab starts where its shell stood; then where the request said.
-        let cwd = if self.start_dirs.is_empty() { self.start_cwd.clone() } else { Some(self.start_dirs.remove(0)) };
+        // A restored tab starts where its shell stood; a new tab or split in the
+        // folder of the terminal it came from; else where the request said.
+        let cwd = if self.start_dirs.is_empty() {
+            self.next_cwd.take().or_else(|| self.start_cwd.clone())
+        } else {
+            Some(self.start_dirs.remove(0))
+        };
         // `-e`'s program runs in the first terminal only; the others get the shell.
         match Session::start(cols, rows, waker, self.run.take(), cwd.as_deref()) {
             Ok(session) => Some((NEXT_PANE.fetch_add(1, Ordering::SeqCst), session)),
@@ -211,7 +216,18 @@ impl Terminal {
         window.open_window(Box::new(self.window_for(String::new(), Vec::new(), None, None)));
     }
 
+    /// The folder the front terminal is in: what its shell last said (OSC 7,
+    /// when on this machine), else the shell's own working directory.
+    pub(crate) fn front_folder(&self) -> Option<String> {
+        let session = self.front()?;
+        let said = lock(&session.screen).grid.folder.clone();
+        said.and_then(|(host, path)| program::local_folder(&host, &path, &program::hostname()))
+            .filter(|p| std::path::Path::new(p).is_dir())
+            .or_else(|| program::cwd_of(session.pty.pid()))
+    }
+
     pub(crate) fn new_tab(&mut self, window: &mut Window) {
+        self.next_cwd = self.front_folder();
         if let Some((id, session)) = self.start(self.fits.0, self.fits.1) {
             self.tabs.push(Tab {
                 id: NEXT_TAB.fetch_add(1, Ordering::SeqCst),
@@ -234,6 +250,7 @@ impl Terminal {
 
     pub(crate) fn split_active(&mut self, axis: Axis) {
         let Some(active) = self.tabs.get(self.shown).map(|tab| tab.active) else { return };
+        self.next_cwd = self.front_folder();
         // The new terminal starts at the size of the one it divides; the next frame fits both.
         let size = self.session(active).map(|s| {
             let s = lock(&s.screen);
