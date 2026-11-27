@@ -1,6 +1,6 @@
 # Template file for 'vergence'
 pkgname=vergence
-version=0.4.0
+version=0.4.1
 revision=1
 build_style=cargo
 hostmakedepends="pkg-config"
@@ -19,7 +19,7 @@ maintainer="David Erickson <gsa700@gmail.com>"
 license="Apache-2.0 OR GPL-2.0-or-later, GPL-2.0-or-later, OFL-1.1, custom:SCOWL"
 homepage="https://github.com/gsa700/vergence"
 distfiles="https://github.com/gsa700/vergence/archive/refs/tags/v${version}.tar.gz"
-checksum=4a712db204091f0aef57c8e6729d4108e09af9e3582fbea3534f4e1398ccd281
+checksum=825fe4ccf4413d54c84d8d5ca04b724c8835c1f08338d0ba9667e2eeed400033
 
 # The login screen's account: owns nothing, logs in nowhere, may use the seat.
 system_accounts="_vdm"
