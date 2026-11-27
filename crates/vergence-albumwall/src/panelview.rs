@@ -169,7 +169,11 @@ fn sleeve(album_index: usize, album: &Album, covers: Option<&Covers>, scale: f32
         .height(Length::Fixed(s))
         .shown_on_hover(),
     );
-    button(stack(layers)).look(ButtonLook::Plain).padding(0.0).on_press(Msg::Play(album_index, 0))
+    button(stack(layers))
+        .look(ButtonLook::Plain)
+        .padding(0.0)
+        .on_press(Msg::Play(album_index, 0))
+        .name(format!("Play {}", album.title))
 }
 
 /// The panel's contents: the header, the track list, the sleeve.

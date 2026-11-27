@@ -172,7 +172,13 @@ fn tile(
         label(album.album_artist.clone()).size(wall::ARTIST).elide().width(Length::Fixed(w)).color(color(g.text_dim)),
     ])
     .spacing(wall::UNDER_GAP);
-    button(body).look(ButtonLook::Plain).padding(0.0).on_press(Msg::Open(i)).key(i as u64)
+    // Named for a screen reader, the album and who made it.
+    button(body)
+        .look(ButtonLook::Plain)
+        .padding(0.0)
+        .on_press(Msg::Open(i))
+        .key(i as u64)
+        .name(format!("{}, {}", album.title, album.album_artist))
 }
 
 /// The wall: every album's tile, the rows in view built; the open album's

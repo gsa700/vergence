@@ -116,9 +116,19 @@ pub fn glyph(g: Glyph, s: f32, c: Rgb) -> Element<Msg> {
 
 /// A round transport button (Button.transport: 32 across, 40 for play, a
 /// faint dark disc that darkens under the pointer, dark on the light bar).
-fn press(g: Glyph, s: f32, c: Rgb, m: Msg) -> Element<Msg> {
+fn press(g: Glyph, s: f32, c: Rgb, m: Msg, name: String) -> Element<Msg> {
     let look = ButtonLook::Custom { fill: Some(Color::rgba(0, 0, 0, 0x18)), edge: None, radius: s / 2.0 };
-    button(glyph(g, s, c)).look(look).padding(0.0).on_press(m)
+    button(glyph(g, s, c)).look(look).padding(0.0).on_press(m).name(name)
+}
+
+/// The play mode in MainWindow.Words's words, lower case.
+fn ending_words(e: Ending) -> &'static str {
+    match e {
+        Ending::Stop => "stop",
+        Ending::NextAlbum => "play the next album",
+        Ending::RandomAlbum => "play a random album",
+        Ending::ShuffleSongs => "shuffle all songs",
+    }
 }
 
 /// `c` at 40% over the bar's ground `g` (the Avalonia button's opacity 0.4).
@@ -154,7 +164,11 @@ pub fn bar(s: &Shown, p: &Palette, covers: Option<&Arc<Covers>>, scale: f32) -> 
     if let Some(c) = cover {
         face.push(picture(c.image).radius(3.0).width(Length::Fixed(COVER)).height(Length::Fixed(COVER)));
     }
-    let face = button(stack(face)).look(ButtonLook::Plain).padding(0.0).on_press(Msg::GoToPlaying);
+    let face = button(stack(face))
+        .look(ButtonLook::Plain)
+        .padding(0.0)
+        .on_press(Msg::GoToPlaying)
+        .name(format!("Go to {}", album.title));
     let words = column(vec![
         label(t.map_or(String::new(), |t| t.title.clone()))
             .size(16.0)
@@ -171,15 +185,23 @@ pub fn bar(s: &Shown, p: &Palette, covers: Option<&Arc<Covers>>, scale: f32) -> 
     .spacing(2.0)
     .width(Length::Fixed(260.0));
     let controls = row(vec![
-        press(Glyph::Previous, 32.0, p.on_light, Msg::Previous),
-        press(if s.paused { Glyph::Play } else { Glyph::Pause }, 40.0, p.on_light, Msg::PlayPause),
-        press(Glyph::Next, 32.0, p.on_light, Msg::Next),
+        press(Glyph::Previous, 32.0, p.on_light, Msg::Previous, "Previous".into()),
+        press(
+            if s.paused { Glyph::Play } else { Glyph::Pause },
+            40.0,
+            p.on_light,
+            Msg::PlayPause,
+            if s.paused { "Play" } else { "Pause" }.into(),
+        ),
+        press(Glyph::Next, 32.0, p.on_light, Msg::Next, "Next".into()),
         // Dimmed at Stop, lit while the music would go on (ShowPlayMode).
         press(
             Glyph::Ending(s.ending),
             32.0,
             if s.ending == Ending::Stop { faded(p.on_light, p.light) } else { p.on_light },
             Msg::Ending,
+            // ShowPlayMode's words.
+            format!("When this album ends: {}", ending_words(s.ending)),
         ),
     ])
     .spacing(4.0)
@@ -196,6 +218,7 @@ pub fn bar(s: &Shown, p: &Palette, covers: Option<&Arc<Covers>>, scale: f32) -> 
             .width(Length::Fixed(46.0)),
         slider(0.0, length as f32, at as f32, |v| Msg::Scrub(v as f64))
             .on_release(Msg::SeekDone)
+            .name("Position")
             // Slider.onlight: dark on the light bar (#CC000000 played,
             // #33000000 to come, a near-black thumb with a light edge).
             .slider_colors(SliderColors {

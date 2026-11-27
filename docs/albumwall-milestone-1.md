@@ -420,3 +420,20 @@ where any app can use it, not inside AlbumWall):
     and in the Avalonia app: "keep in both for now, there was a reason we
     kept them, as I recall I thought it looked crowded right up against
     the titles".
+- **Step 9, the checks** (2026-11-26, Dave: "start on step 9 while it
+  builds"): display-suite scenario 32-albumwall. A library made in the
+  scenario (five albums of tone16.flac with tags written in and its own
+  picture taken out, colored covers beside four, one under 300 pixels, one
+  album with none); the counts; the covers drawn (colored pixels); an
+  album unfolding (its sleeve, its tracks); playing on the paced silent
+  output (the play bar, the position moving); with "next album" chosen the
+  album ends, the next plays and the wall opens it; the play mode's button
+  on to "random album", written to desktop.toml; search: "cobalt" 2 of 5,
+  `art:missing` 1, `art:small` 1; Ctrl+, opens Settings, the Library page's
+  numbers "as it is now", a check box written and shown off. Passed three
+  times on Hubble and once on techbench. For it, and for a screen reader,
+  the wall's controls got names (the Avalonia app's): each tile its album
+  and artist, the sleeve "Play <album>", the play bar's Previous, Play or
+  Pause, Next, the play mode in words, "Go to <album>" on its cover, the
+  seek bar "Position". Package vergence-0.4.0pre17 (step 8) installed on
+  techbench at 18:48. Left: Dave's pass on his own library on techbench.
