@@ -433,7 +433,12 @@ impl Server {
                 // Inside the callback, you should insert the client into the display.
                 //
                 // You may also associate some data with the client when inserting the client.
-                state.display_handle.insert_client(client_stream, Arc::new(ClientState::default())).unwrap();
+                // Who connected, from the kernel, kept with the client (control::peer_creds).
+                let peer = crate::control::peer_creds(&client_stream);
+                state
+                    .display_handle
+                    .insert_client(client_stream, Arc::new(ClientState { peer, ..Default::default() }))
+                    .unwrap();
             })
             .expect("Failed to init the wayland event source.");
 
@@ -567,6 +572,15 @@ impl Server {
 #[derive(Default)]
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
+    /// Its process's user and process ids, read from the socket at accept.
+    pub peer: Option<crate::control::Peer>,
+}
+
+/// A Wayland client's user and process ids, as read when it connected
+/// (never the Wayland library's get_credentials, which is uid 0 and pid 0
+/// off Linux). None for a client the server did not accept on its socket.
+pub fn client_peer(client: &smithay::reexports::wayland_server::Client) -> Option<crate::control::Peer> {
+    client.get_data::<ClientState>()?.peer
 }
 
 impl ClientData for ClientState {

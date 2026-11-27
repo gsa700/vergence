@@ -434,12 +434,12 @@ impl Server {
 
 /// The name of the program a surface's client runs, from its process id.
 fn program_of(
-    dh: &smithay::reexports::wayland_server::DisplayHandle,
+    _dh: &smithay::reexports::wayland_server::DisplayHandle,
     surface: &smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
 ) -> Option<String> {
     use smithay::reexports::wayland_server::Resource;
     let client = surface.client()?;
-    let pid = client.get_credentials(dh).ok()?.pid;
+    let pid = crate::state::client_peer(&client)?.pid?;
     #[cfg(target_os = "linux")]
     if let Ok(s) = std::fs::read_to_string(format!("/proc/{pid}/comm")) {
         return Some(s.trim().to_string()).filter(|s| !s.is_empty());

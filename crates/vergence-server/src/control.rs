@@ -151,6 +151,24 @@ pub fn our_uid() -> u32 {
     unsafe { libc_getuid() }
 }
 
+/// The process at the other end of a Unix socket, as the kernel tells it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Peer {
+    pub uid: u32,
+    /// None where the kernel does not say (FreeBSD before 13).
+    pub pid: Option<u32>,
+}
+
+/// Who connected, from the kernel (peer_uid, peer_pid: SO_PEERCRED on
+/// Linux; getpeereid and LOCAL_PEERCRED's xucred on FreeBSD). The
+/// Wayland library's own get_credentials answers uid 0 and pid 0 for
+/// everyone off Linux ("for now this only works on linux"), which made
+/// every Wayland window on FreeBSD look like the superuser's (techbench,
+/// 2026-11-26): the server reads it here, at accept, instead.
+pub fn peer_creds(stream: &std::os::unix::net::UnixStream) -> Option<Peer> {
+    Some(Peer { uid: peer_uid(stream)?, pid: peer_pid(stream) })
+}
+
 /// The connecting process's user id: getpeereid on FreeBSD; SO_PEERCRED on Linux,
 /// where glibc has no getpeereid.
 pub fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
@@ -854,8 +872,8 @@ impl Server {
                 None => w
                     .toplevel()
                     .and_then(|t| smithay::reexports::wayland_server::Resource::client(t.wl_surface()))
-                    .and_then(|c| c.get_credentials(&self.display_handle).ok())
-                    .map(|c| c.pid as u32),
+                    .and_then(|c| crate::state::client_peer(&c))
+                    .and_then(|p| p.pid),
             };
             let pid = pid.map(|p| format!(" pid {p}")).unwrap_or_default();
             // A native window's scale and text factor, as told (the display suite).
@@ -921,5 +939,7 @@ mod tests {
         let (a, _b) = std::os::unix::net::UnixStream::pair().unwrap();
         assert_eq!(super::peer_pid(&a), Some(std::process::id()));
         assert_eq!(super::peer_uid(&a), Some(super::our_uid()));
+        // What a Wayland client is known by (the red superuser bar, Force Quit).
+        assert_eq!(super::peer_creds(&a), Some(super::Peer { uid: super::our_uid(), pid: Some(std::process::id()) }));
     }
 }

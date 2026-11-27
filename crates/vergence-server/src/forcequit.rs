@@ -112,7 +112,7 @@ impl Server {
         }
         let t = w.toplevel()?;
         let client = smithay::reexports::wayland_server::Resource::client(t.wl_surface())?;
-        client.get_credentials(&self.display_handle).ok().map(|c| c.pid as u32)
+        crate::state::client_peer(&client).and_then(|p| p.pid)
     }
 
     /// Ends an application at once (its dock key): SIGKILL to each process

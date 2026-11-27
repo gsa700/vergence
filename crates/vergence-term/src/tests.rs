@@ -69,6 +69,11 @@ fn keys_send_what_xterm_sends() {
     assert_eq!(k('a' as u32, Some("a"), NONE), Some(b"a".to_vec()));
     assert_eq!(k(0xe9, Some("é"), NONE), Some("é".as_bytes().to_vec()));
     assert_eq!(k(sym::RETURN, None, NONE), Some(b"\r".to_vec()));
+    // Shift+Return and Alt+Return: a new line in Claude Code, Return to a shell.
+    assert_eq!(k(sym::RETURN, None, Modifiers { shift: true, ..NONE }), Some(b"\x1b\r".to_vec()));
+    assert_eq!(k(sym::RETURN, None, alt), Some(b"\x1b\r".to_vec()));
+    assert_eq!(k(0xff8d, None, Modifiers { shift: true, ..NONE }), Some(b"\x1b\r".to_vec()), "keypad Enter");
+    assert_eq!(k(sym::RETURN, None, ctrl), Some(b"\r".to_vec()));
     assert_eq!(k(sym::BACKSPACE, None, NONE), Some(vec![0x7f]));
     assert_eq!(k(sym::BACKSPACE, None, ctrl), Some(vec![0x08]));
     assert_eq!(k(sym::TAB, None, Modifiers { shift: true, ..NONE }), Some(b"\x1b[Z".to_vec()));

@@ -219,7 +219,7 @@ it is today:
   ends, as the terminal does) is likely all it takes. Small. As in the
   terminal (Dave): the row's change is for now (this window, this run);
   the lasting text size is the app's own settings window's.
-- **A context menu for File Viewer's items**, "a blend of macOS and
+- *Done (FileView's right-click menu, seen in Dave's screenshot 2026-11-26).* **A context menu for File Viewer's items**, "a blend of macOS and
   Windows with Linux flavoring": Open, Open With ▸, Show in Folder; Cut,
   Copy, Paste, Duplicate, Make Alias/Link; Rename, Move to Trash; Compress,
   Get Info/Properties; Copy Path and Open in Terminal (the Linux flavor);
@@ -606,3 +606,11 @@ to check what was built, and the agent interface to try it.
   maybe we should shade it more?"
 - ~~**Text scrolling up under a frosted terminal's bar, blurred**~~ Done
   2026-11-25 (docs/frost-milestone-1.md, "Text under the glass bar").
+
+## Terminal: every modified key told apart (techbench handoff, 2026-11-26)
+
+- *Done 2026-11-26 (0.4.1): Shift+Return and Alt+Return send Escape then
+  Return, a new line in Claude Code, Return to a shell (Dave: Shift+Return
+  submitted instead).* **The kitty keyboard protocol**, as a wish: a program
+  that asks (CSI > flags u, popped with CSI < u, queried with CSI ? u) gets
+  every modified key unambiguously; Claude Code uses it when offered.

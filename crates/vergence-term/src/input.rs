@@ -78,6 +78,13 @@ impl Terminal {
         const INSERT: u32 = 0xff63;
         const F1: u32 = 0xffbe;
         match sym_ {
+            // Shift+Return and Alt+Return: Escape then Return, which Claude
+            // Code and line editors read as a new line within what is being
+            // typed (Claude Code's own terminal setup sends this for
+            // Shift+Enter) and a shell as Return. Not CSI 13;2u: a program
+            // that never asked for those sequences (bash) would print them.
+            // Dave, 2026-11-26: Shift+Return was a plain Return here.
+            sym::RETURN | KP_ENTER if (m.shift || m.alt) && !m.ctrl => return Some(b"\x1b\r".to_vec()),
             sym::RETURN | KP_ENTER => return Some(b"\r".to_vec()),
             sym::BACKSPACE => return Some(if m.ctrl { vec![0x08] } else { vec![0x7f] }),
             sym::TAB => return Some(if m.shift { b"\x1b[Z".to_vec() } else { b"\t".to_vec() }),

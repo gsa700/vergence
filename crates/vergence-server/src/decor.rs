@@ -1820,7 +1820,7 @@ impl Server {
         }
         let t = w.toplevel()?;
         let client = smithay::reexports::wayland_server::Resource::client(t.wl_surface())?;
-        client.get_credentials(&self.display_handle).ok().map(|c| c.uid)
+        crate::state::client_peer(&client).map(|p| p.uid)
     }
 
     pub fn window_title(&self, w: &Win) -> String {
