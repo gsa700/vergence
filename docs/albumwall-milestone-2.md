@@ -339,3 +339,30 @@ program can use it):
   Checked headless with the stand-in server (a wide cover, a nearly square
   one; play, close, reopen: the album's tile at 184 then 186, the bar up;
   browse away with "next album": back at 64 s, not at 50 s).
+- **Step 5, MPRIS, the command line and one instance** (2026-11-27):
+  `vergence-dbus` gains a service's half (the session bus, its address
+  `unix:path=` or Linux's `unix:abstract=`; RequestName; method calls kept
+  and handed out by `next_message`; replies that respect "no reply
+  expected"; signals). `mpris.rs` ports Mpris.cs: `org.mpris.MediaPlayer2`
+  and `.Player` on `/org/mpris/MediaPlayer2` as `org.mpris.MediaPlayer2.albumwall`
+  (Identity "AlbumWall", DesktopEntry "vergence-albumwall"), the protocol a
+  pure `handle` (unit-tested), a thread that owns the connection and answers
+  from the window's latest state. Pushed, not only pulled (Mpris.cs's
+  lesson): PropertiesChanged whenever what is announced changes, Position
+  never in it, Seeked after every seek (the bar, the keys, a lyric line, the
+  bus). mpris:trackid differs per track (a hash of the path: no folders on
+  the bus); Seek past the end is Next; SetPosition for another track is
+  ignored; Volume and Rate read-only (1.0). The art is `mpris:artUrl` when
+  the album's cover is a file of its own (not one inside a track).
+  One AlbumWall at a time and its command line (CommandLine.cs): main()
+  asks for the name first; a second start hands `--play-pause`, `--play`,
+  `--pause`, `--next`, `--previous`, `--stop`, `--show` (Raise) or `--quit`
+  to the first over MPRIS, or Raise for a plain start, and goes; a command
+  with nothing running says so (exit 1); no session bus: it runs alone, as
+  before. Not yet: `--play "words"` (MPRIS has no such call; it needs a
+  method of our own), and the media keys on Vergence, which are step 6's
+  (the server's Now Playing). Display suite 35: Stopped, Playing with its
+  track and album, Pause over the bus, PropertiesChanged pushed (watched
+  with gdbus monitor), a second start's --play and --pause, no second
+  window, --quit, the name let go, --next with nothing running; through
+  the headless session's own bus (its address now in `vergence-headless env`).

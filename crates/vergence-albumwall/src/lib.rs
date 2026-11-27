@@ -8,6 +8,7 @@ pub mod libraries;
 pub mod library;
 pub mod lyrics;
 pub mod md5;
+pub mod mpris;
 pub mod panel;
 pub mod player;
 pub mod scan;

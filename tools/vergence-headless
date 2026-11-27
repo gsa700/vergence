@@ -100,6 +100,11 @@ env)
     # Its session bus, for bus clients (vtile, vagent): never the monitors' session's.
     bus=$(ls "$run"/vergence-bus-* 2>/dev/null | head -n 1)
     [ -n "$bus" ] && echo "VERGENCE_BUS=$bus; export VERGENCE_BUS"
+    # Its D-Bus session bus (the server's edge: started with none, it is the
+    # session bus of everything the session runs), for dbus-send, gdbus and the
+    # like in a test (AlbumWall's MPRIS player).
+    dbus=$(ls "$run"/vergence-dbus-* 2>/dev/null | head -n 1)
+    [ -n "$dbus" ] && echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$dbus; export DBUS_SESSION_BUS_ADDRESS"
     # This checkout's vctl: an older installed one ignores VCTL_SOCKET.
     echo "vctl() { sh '$root/tools/vctl' \"\$@\"; }"
     ;;

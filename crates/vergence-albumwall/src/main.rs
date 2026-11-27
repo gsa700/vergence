@@ -32,6 +32,7 @@ use vergence_albumwall::colors::{self, Ground};
 use vergence_albumwall::covers::{self, Covers};
 use vergence_albumwall::libraries::{self, Libraries};
 use vergence_albumwall::library::Album;
+use vergence_albumwall::mpris;
 use vergence_albumwall::player::{Command, SHUFFLE};
 use vergence_albumwall::scan::Unreachable;
 use vergence_albumwall::settings::{AfterAlbum, Settings};
@@ -195,6 +196,10 @@ const F1: u32 = 0xffbe;
 /// The meters' tick: 30 a second (VuMeter.cs: half the frames, the same spring).
 const METER_TICK: Duration = Duration::from_millis(33);
 
+/// The session bus connection that won AlbumWall's MPRIS name in main(), for the
+/// window to serve on once it has a waker (mpris.rs).
+static MPRIS_CLIENT: Mutex<Option<vergence_dbus::client::Client>> = Mutex::new(None);
+
 struct AlbumWall {
     libraries: Libraries,
     /// Where the library list is kept; None without a home folder (then
@@ -204,6 +209,11 @@ struct AlbumWall {
     /// The folder dialog's answer, handed over from its window.
     chosen: Arc<Mutex<Option<PathBuf>>>,
     waker: Option<Waker>,
+    /// On the session bus as a media player (MPRIS): the service, the commands it
+    /// hands over, and what was last announced (Position left out).
+    mpris: Option<mpris::Service>,
+    mpris_cmds: Option<std::sync::mpsc::Receiver<mpris::Cmd>>,
+    mpris_said: Option<mpris::State>,
     /// A problem to show (a folder that could not be kept).
     problem: Option<String>,
     reader: Reader,
@@ -349,6 +359,9 @@ impl AlbumWall {
             desktop,
             chosen: Arc::default(),
             waker: None,
+            mpris: None,
+            mpris_cmds: None,
+            mpris_said: None,
             problem: None,
             reader: Reader::default(),
             reading: None,
@@ -1033,10 +1046,84 @@ impl AlbumWall {
         window.open_window(vergence_widgets::window(serverwin::ServerWindow::new(self.link.clone(), APP_ID)));
     }
 
+    /// To `seconds` in the track playing, told to the bus as well (Seeked:
+    /// clients run their position on from the last one they heard).
+    fn seek_to(&mut self, seconds: f64) {
+        self.send(Command::Seek(seconds));
+        if let Some(m) = &self.mpris {
+            m.send(mpris::Out::Seeked((seconds.max(0.0) * 1e6) as i64));
+        }
+    }
+
+    /// What the bus asked (a media key, playerctl, a second start): done as the
+    /// play bar and the window would. True if anything was asked.
+    fn take_mpris(&mut self, window: &mut Window) -> bool {
+        let asked: Vec<mpris::Cmd> = self.mpris_cmds.as_ref().map(|rx| rx.try_iter().collect()).unwrap_or_default();
+        let any = !asked.is_empty();
+        for cmd in asked {
+            let now = self.player.as_ref().and_then(|p| p.state().now);
+            match cmd {
+                mpris::Cmd::Raise => window.activate(),
+                mpris::Cmd::Quit => window.close(),
+                mpris::Cmd::PlayPause => self.update(Msg::PlayPause, window),
+                mpris::Cmd::Play => match now {
+                    Some(n) if n.paused => self.update(Msg::PlayPause, window),
+                    Some(_) => {}
+                    None => self.update(Msg::PlayPause, window),
+                },
+                mpris::Cmd::Pause => {
+                    if now.is_some_and(|n| !n.paused) {
+                        self.update(Msg::PlayPause, window);
+                    }
+                }
+                mpris::Cmd::Next => self.update(Msg::Next, window),
+                mpris::Cmd::Previous => self.update(Msg::Previous, window),
+                mpris::Cmd::Stop => self.send(Command::Stop),
+                mpris::Cmd::SeekTo(s) => self.seek_to(s),
+            }
+        }
+        any
+    }
+
+    /// What the bus is told: the track playing (its album from the library on
+    /// the wall, as the play bar finds it), announced when it changes.
+    fn tell_mpris(&mut self) {
+        let Some(service) = &self.mpris else { return };
+        let mut s = mpris::State { volume: 1.0, ..Default::default() };
+        if let Some(n) = self.player.as_ref().and_then(|p| p.state().now) {
+            s.has_track = true;
+            s.playing = !n.paused;
+            s.length_us = (n.length.max(0.0) * 1e6) as i64;
+            s.position_us = (n.seconds.max(0.0) * 1e6) as i64;
+            let here = self
+                .playing
+                .as_ref()
+                .is_some_and(|(root, _)| Some(root) == self.libraries.current().map(|l| &l.folder));
+            let album = self.shown.as_ref().filter(|_| here).and_then(|sh| sh.1.get(n.tag));
+            if let Some(a) = album {
+                s.album = a.title.clone();
+                if let Some(t) = a.tracks.get(n.track) {
+                    s.title = t.title.clone();
+                    s.artist = if t.artist.is_empty() { a.album_artist.clone() } else { t.artist.clone() };
+                    s.track_key = t.path.to_string_lossy().into_owned();
+                }
+                if let Some(f) = a.front.as_ref().filter(|f| !f.embedded && f.path.is_absolute()) {
+                    s.art_url = mpris::file_url(&f.path);
+                }
+            }
+        }
+        let said = mpris::State { position_us: 0, ..s.clone() };
+        service.set(s);
+        if self.mpris_said.as_ref() != Some(&said) {
+            self.mpris_said = Some(said);
+            service.send(mpris::Out::Changed);
+        }
+    }
+
     /// Forward or back in the track playing, kept within it.
     fn seek_by(&mut self, step: f64) {
         if let Some(n) = self.player.as_ref().and_then(|p| p.state().now) {
-            self.send(Command::Seek((n.seconds + step).clamp(0.0, n.length)));
+            self.seek_to((n.seconds + step).clamp(0.0, n.length));
         }
     }
 
@@ -2179,7 +2266,7 @@ impl Program for AlbumWall {
             Msg::Scrub(v) => self.scrub = Some(v),
             Msg::SeekDone => {
                 if let Some(v) = self.scrub.take() {
-                    self.send(Command::Seek(v));
+                    self.seek_to(v);
                 }
             }
             Msg::GoToPlaying => {
@@ -2226,7 +2313,7 @@ impl Program for AlbumWall {
                 self.lyrics_on = !self.lyrics_on;
                 self.lyrics_pressed = Some(std::time::Instant::now());
             }
-            Msg::LyricLine(seconds) => self.send(Command::Seek(seconds)),
+            Msg::LyricLine(seconds) => self.seek_to(seconds),
             Msg::Library(i) => {
                 if i < self.libraries.list.len() && i != self.libraries.current {
                     self.libraries.current = i;
@@ -2276,6 +2363,13 @@ impl Program for AlbumWall {
         let w = waker.clone();
         self.player = Some(vergence_albumwall::player::Player::new(track, output, move || w.wake()));
         self.link.borrow_mut().wall = Some(waker.clone());
+        // The media player on the session bus, if main() won its name.
+        if let Some(client) = MPRIS_CLIENT.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let w = waker.clone();
+            self.mpris = Some(mpris::Service::start(client, tx, move || w.wake()));
+            self.mpris_cmds = Some(rx);
+        }
         self.waker = Some(waker);
         self.send(Command::MetersAfterGain(self.settings.meters_after_gain));
         // The library on the wall last time, read as the window opens.
@@ -2283,7 +2377,8 @@ impl Program for AlbumWall {
     }
 
     fn woken(&mut self, window: &mut Window) -> bool {
-        let asked = self.take_asks(window);
+        let told = self.take_mpris(window);
+        let asked = self.take_asks(window) || told;
         let reread = self.reread();
         let chosen = self.take_chosen();
         let read = self.take_outcome();
@@ -2297,6 +2392,7 @@ impl Program for AlbumWall {
         self.follow_shuffle();
         self.words_for_playing();
         self.tell_link();
+        self.tell_mpris();
         // Music playing: the needles move (the tick keeps itself going while
         // they do).
         let playing = self.player.as_ref().and_then(|p| p.state().now).is_some_and(|n| !n.paused);
@@ -2588,6 +2684,36 @@ fn main() {
             std::process::exit(2);
         };
         std::process::exit(scan_and_print(std::path::Path::new(folder), args.iter().any(|a| a == "--rescan")));
+    }
+    // One AlbumWall at a time, and its command line (mpris.rs): a second start
+    // hands its command (or Raise) to the first over the session bus and goes.
+    if args.iter().any(|a| matches!(a.as_str(), "--help" | "-h")) {
+        println!("{}", mpris::help());
+        return;
+    }
+    let command = mpris::command_of(&args);
+    match mpris::claim() {
+        mpris::Start::Second(mut c) => {
+            let (iface, method) = command.map_or((mpris::ROOT, "Raise"), |c| (c.1, c.2));
+            if let Err(e) = mpris::ask(&mut c, iface, method) {
+                eprintln!("vergence-albumwall: the AlbumWall running did not answer: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
+        mpris::Start::First(c) => {
+            if let Some((flag, ..)) = command {
+                eprintln!("vergence-albumwall: AlbumWall is not running ({flag} is for the one running)");
+                std::process::exit(1);
+            }
+            *MPRIS_CLIENT.lock().unwrap_or_else(|e| e.into_inner()) = Some(c);
+        }
+        mpris::Start::NoBus => {
+            if let Some((flag, ..)) = command {
+                eprintln!("vergence-albumwall: no session bus to reach a running AlbumWall ({flag})");
+                std::process::exit(1);
+            }
+        }
     }
     // The Avalonia app's default size.
     if let Err(e) = vergence_widgets::run(AlbumWall::new(), (1444, 1080)) {
