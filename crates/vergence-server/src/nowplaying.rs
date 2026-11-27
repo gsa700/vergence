@@ -28,7 +28,7 @@ use smithay::reexports::calloop::{
 };
 use vergence_dbus::client::lookup;
 use vergence_dbus::{Message, Value, message};
-use vergence_protocol::tile::{Card, Control, ControlKind, Picture, Tile, TileState};
+use vergence_protocol::tile::{Card, Control, ControlKind, Icon, Picture, Tile, TileState};
 use vergence_seat::keyboard::Media;
 
 use crate::Server;
@@ -172,11 +172,13 @@ pub fn tile(players: &[Player], art: Option<&Picture>, now: Instant) -> Option<T
             rows.push((k.to_string(), short(v, 60)));
         }
     }
-    let button = |id: &str, label: &str| Control { id: id.into(), label: label.into(), kind: ControlKind::Button };
+    // AlbumWall's own transport buttons, in one row (Dave, 2026-11-27).
+    let icon =
+        |id: &str, label: &str, i: Icon| Control { id: id.into(), label: label.into(), kind: ControlKind::Icon(i) };
     let mut controls = vec![
-        button("previous", "Previous"),
-        button("playpause", if p.playing() { "Pause" } else { "Play" }),
-        button("next", "Next"),
+        icon("previous", "Previous", Icon::Previous),
+        if p.playing() { icon("playpause", "Pause", Icon::Pause) } else { icon("playpause", "Play", Icon::Play) },
+        icon("next", "Next", Icon::Next),
     ];
     if p.can_seek && p.length_us > 0 {
         let at = p.position(now);

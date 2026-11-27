@@ -11,6 +11,7 @@ use vergence_albumwall::colors::{Palette, Rgb};
 use vergence_albumwall::covers::{self, Covers};
 use vergence_albumwall::library::Album;
 use vergence_albumwall::panel;
+use vergence_render::transport::Glyph as Transport;
 use vergence_scene::{Color, Point, Rect};
 use vergence_widgets::{
     Align, ButtonLook, Element, Length, Padding, SliderColors, button, column, drawing, label, panel as boxed, picture,
@@ -39,29 +40,26 @@ pub enum Glyph {
     Ending(Ending),
 }
 
-fn tri(scene: &mut vergence_scene::Scene, x: f32, cy: f32, w: f32, h: f32, right: bool, c: Color) {
-    let bands = (h * 2.0).max(8.0) as usize;
-    for k in 0..bands {
-        let t = (k as f32 + 0.5) / bands as f32;
-        let len = w * (1.0 - (2.0 * t - 1.0).abs());
-        let y = cy - h / 2.0 + t * h;
-        let x0 = if right { x } else { x + w - len };
-        scene.fill(Rect::new(x0, y - h / bands as f32 / 2.0, len, h / bands as f32 + 0.05), c);
-    }
-}
-
 /// The Avalonia app's glyphs (BuildTransport, ShowPlayMode), point for
 /// point: paths in a small box, stroked 1.6 wide, the triangles filled.
 pub fn glyph(g: Glyph, s: f32, c: Rgb) -> Element<Msg> {
     let c = color(c);
     drawing(move |scene, _, r: Rect, _| {
+        // The transport's glyphs are shared with the server's cards (vergence-render's transport).
+        let shared = match g {
+            Glyph::Previous => Some(Transport::Previous),
+            Glyph::Play => Some(Transport::Play),
+            Glyph::Pause => Some(Transport::Pause),
+            Glyph::Next => Some(Transport::Next),
+            Glyph::Ending(_) => None,
+        };
+        if let Some(t) = shared {
+            return vergence_render::transport::draw(scene, t, r, c);
+        }
         // Each path's box, centered in the button.
         let (bw, bh) = match g {
-            Glyph::Previous | Glyph::Next => (10.0, 12.0),
-            Glyph::Play => (12.0, 14.0),
-            Glyph::Pause => (11.0, 14.0),
             Glyph::Ending(Ending::RandomAlbum | Ending::ShuffleSongs) => (14.0, 14.0),
-            Glyph::Ending(_) => (14.0, 12.0),
+            _ => (14.0, 12.0),
         };
         let (x0, y0) = (r.x + (r.w - bw) / 2.0, r.y + (r.h - bh) / 2.0);
         let p = |x: f32, y: f32| Point::new(x0 + x, y0 + y);
@@ -70,19 +68,7 @@ pub fn glyph(g: Glyph, s: f32, c: Rgb) -> Element<Msg> {
             scene.line(p(a.0, a.1), p(b.0, b.1), w, c);
         };
         match g {
-            Glyph::Previous => {
-                line(scene, (1.0, 0.0), (1.0, 12.0));
-                tri(scene, x0 + 1.0, y0 + 6.0, 8.0, 12.0, false, c);
-            }
-            Glyph::Next => {
-                line(scene, (9.0, 0.0), (9.0, 12.0));
-                tri(scene, x0 + 1.0, y0 + 6.0, 8.0, 12.0, true, c);
-            }
-            Glyph::Play => tri(scene, x0 + 2.0, y0 + 7.0, 10.0, 14.0, true, c),
-            Glyph::Pause => {
-                line(scene, (2.0, 0.0), (2.0, 14.0));
-                line(scene, (9.0, 0.0), (9.0, 14.0));
-            }
+            Glyph::Previous | Glyph::Play | Glyph::Pause | Glyph::Next => {}
             // Stop shows the next album's arrow, dimmed (the caller's color).
             Glyph::Ending(Ending::Stop | Ending::NextAlbum) => {
                 line(scene, (0.0, 6.0), (11.0, 6.0));

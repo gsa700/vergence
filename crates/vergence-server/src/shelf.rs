@@ -1729,7 +1729,7 @@ impl Server {
     }
 
     /// The dock's opacity setting, 0.3 to 1 (1 if unset).
-    fn shelf_opacity(&self) -> f32 {
+    pub(crate) fn shelf_opacity(&self) -> f32 {
         self.shelf.config.opacity.filter(|o| o.is_finite()).unwrap_or(1.0).clamp(0.3, 1.0)
     }
 

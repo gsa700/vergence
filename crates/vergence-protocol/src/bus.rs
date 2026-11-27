@@ -91,11 +91,13 @@
 //! drawn blurred; the renderers draw it as a picture (vergence-render's layers.rs).
 //! Version 44 (AlbumWall milestone 2, step 6: Now Playing): a tile's card may carry a
 //! `tile::Picture` (the cover art; a camera snapshot, a radar image), drawn by the server.
+//! Version 45 (Now Playing, Dave: AlbumWall's buttons): `tile::ControlKind::Icon`, a round
+//! button with a transport glyph; a run of them stands in one row.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 44;
+pub const VERSION: u32 = 45;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1429,6 +1431,11 @@ mod tests {
                 controls: vec![
                     Control { id: "test".into(), label: "Self-test".into(), kind: ControlKind::Button },
                     Control { id: "beep".into(), label: "Beeper".into(), kind: ControlKind::Switch(true) },
+                    Control {
+                        id: "next".into(),
+                        label: "Next".into(),
+                        kind: ControlKind::Icon(crate::tile::Icon::Next),
+                    },
                     Control {
                         id: "x".into(),
                         label: "X".into(),

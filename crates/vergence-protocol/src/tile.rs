@@ -120,7 +120,25 @@ pub struct Control {
 pub enum ControlKind {
     Button,
     Switch(bool),
-    Slider { value: f64, min: f64, max: f64, step: f64 },
+    Slider {
+        value: f64,
+        min: f64,
+        max: f64,
+        step: f64,
+    },
+    /// A round button with a glyph (its label the words for it): a run of
+    /// them stands in one row (Now Playing's previous, play, next). Sends 1.
+    Icon(Icon),
+}
+
+/// The glyphs an icon button may show: the transport's, AlbumWall's own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Icon {
+    Previous,
+    Play,
+    Pause,
+    Next,
+    Stop,
 }
 
 impl std::hash::Hash for Control {
@@ -132,6 +150,7 @@ impl std::hash::Hash for Control {
             ControlKind::Slider { value, min, max, step } => {
                 (2u8, value.to_bits(), min.to_bits(), max.to_bits(), step.to_bits()).hash(h)
             }
+            ControlKind::Icon(i) => (3u8, i).hash(h),
         }
     }
 }
@@ -214,6 +233,7 @@ impl Tile {
                 ControlKind::Button => e.u8(0),
                 ControlKind::Switch(on) => e.u8(1).bool(on),
                 ControlKind::Slider { value, min, max, step } => e.u8(2).f64(value).f64(min).f64(max).f64(step),
+                ControlKind::Icon(i) => e.u8(3).u8(i as u8),
             };
         }
         match &c.picture {
@@ -254,6 +274,14 @@ impl Tile {
                 0 => ControlKind::Button,
                 1 => ControlKind::Switch(d.bool()?),
                 2 => ControlKind::Slider { value: d.f64()?, min: d.f64()?, max: d.f64()?, step: d.f64()? },
+                3 => ControlKind::Icon(match d.u8()? {
+                    0 => Icon::Previous,
+                    1 => Icon::Play,
+                    2 => Icon::Pause,
+                    3 => Icon::Next,
+                    4 => Icon::Stop,
+                    _ => return Err(WireError::BadValue("icon")),
+                }),
                 _ => return Err(WireError::BadValue("control kind")),
             };
             controls.push(Control { id, label, kind });

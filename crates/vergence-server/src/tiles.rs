@@ -180,6 +180,44 @@ const PICTURE_H: f32 = 160.0;
 const OFF: i32 = 8;
 /// The height of a control's row in a card, and where a slider's track starts.
 const CONTROL_H: f32 = 30.0;
+/// A row of icon buttons (AlbumWall's transport: 36 across, 44 for play or pause).
+const ICON_ROW: f32 = 52.0;
+const ICON: f32 = 36.0;
+const ICON_BIG: f32 = 44.0;
+const ICON_GAP: f32 = 14.0;
+
+/// Where each control stands in a card `w` wide, from the controls' top, and
+/// their height: a row each, but a run of icon buttons shares one row, its
+/// round buttons centered in it.
+fn control_places(controls: &[vergence_protocol::tile::Control], w: f32) -> (Vec<SceneRect>, f32) {
+    use vergence_protocol::tile::Icon;
+    let icon = |k: &vergence_protocol::tile::Control| matches!(k.kind, ControlKind::Icon(_));
+    let mut out = vec![SceneRect::new(0.0, 0.0, 0.0, 0.0); controls.len()];
+    let (mut top, mut i) = (0.0, 0);
+    while i < controls.len() {
+        if !icon(&controls[i]) {
+            out[i] = SceneRect::new(0.0, top, w, CONTROL_H);
+            top += CONTROL_H;
+            i += 1;
+            continue;
+        }
+        let run: Vec<usize> = (i..controls.len()).take_while(|j| icon(&controls[*j])).collect();
+        let size = |j: usize| match controls[j].kind {
+            ControlKind::Icon(Icon::Play | Icon::Pause) => ICON_BIG,
+            _ => ICON,
+        };
+        let total: f32 = run.iter().map(|j| size(*j)).sum::<f32>() + ICON_GAP * (run.len() - 1) as f32;
+        let mut x = ((w - total) / 2.0).round();
+        for &j in &run {
+            let s = size(j);
+            out[j] = SceneRect::new(x, top + ((ICON_ROW - s) / 2.0).round(), s, s);
+            x += s + ICON_GAP;
+        }
+        top += ICON_ROW;
+        i += run.len();
+    }
+    (out, top)
+}
 const TRACK_X: f32 = 92.0;
 
 fn rect(r: Rectangle<i32, Logical>) -> Rect {
@@ -615,7 +653,7 @@ impl Server {
         let Some(&(i, _)) = c.controls.iter().find(|(_, r)| r.to_f64().contains(at)) else { return };
         let Some(control) = self.tiles.list[index].tile.card.controls.get(i).cloned() else { return };
         match control.kind {
-            ControlKind::Button => self.card_act(index, i, 1.0),
+            ControlKind::Button | ControlKind::Icon(_) => self.card_act(index, i, 1.0),
             ControlKind::Switch(on) => self.card_act(index, i, if on { 0.0 } else { 1.0 }),
             ControlKind::Slider { .. } => {
                 if let Some(c) = self.tiles.card.as_mut() {
@@ -722,6 +760,15 @@ impl Server {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         tile.hash(&mut hasher);
         frost.is_some().hash(&mut hasher);
+        // With no frost, the ground is the dock's own see-through (solid with Reduce transparency).
+        let ground = vergence_look::shelf_look(light).menu;
+        let alpha = if frost.is_some() || self.reduce_transparency() {
+            255
+        } else {
+            (self.shelf_opacity() * 255.0).round() as u8
+        };
+        let glass = Color::rgba(ground.0, ground.1, ground.2, alpha);
+        alpha.hash(&mut hasher);
         let key = (hasher.finish(), scale.to_bits(), light);
         let s = vergence_look::shelf_look(light);
         let ink = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
@@ -736,7 +783,10 @@ impl Server {
         // Its height from what it holds.
         let card = &tile.card;
         let pad = 12.0;
-        let mut h = pad + 18.0;
+        // A card with a picture leads with its subject (Now Playing's track):
+        // its title larger, in the words' own ink.
+        let (title_size, title_h) = if card.picture.is_some() { (15.0, 22.0) } else { (12.5, 18.0) };
+        let mut h = pad + title_h;
         // A picture under the title: fitted into the card's width and at most
         // PICTURE_H tall, its shape kept.
         let pic = card.picture.as_ref().map(|p| {
@@ -754,7 +804,8 @@ impl Server {
             h += 44.0;
         }
         let controls_top = h;
-        h += card.controls.len() as f32 * CONTROL_H;
+        let (places, controls_h) = control_places(&card.controls, CARD_W as f32);
+        h += controls_h;
         if !card.controls.is_empty() {
             h += 4.0;
         }
@@ -778,15 +829,18 @@ impl Server {
         let area: Rectangle<i32, Logical> = Rectangle::new((x, y).into(), (wi, hi).into());
         let open = self.tiles.card.as_mut().expect("open");
         open.rect = area;
-        open.title = Rectangle::new((x, y).into(), (wi, (pad + 18.0) as i32).into());
-        open.controls = (0..card.controls.len())
-            // Across the whole card, so a press just past a slider's end still takes it.
-            .map(|i| {
+        open.title = Rectangle::new((x, y).into(), (wi, (pad + title_h) as i32).into());
+        open.controls = places
+            .iter()
+            .enumerate()
+            // A row across the whole card (a press just past a slider's end still
+            // takes it); an icon button, its round button.
+            .map(|(i, r)| {
                 (
                     i,
                     Rectangle::new(
-                        (x, y + (controls_top + i as f32 * CONTROL_H) as i32).into(),
-                        (wi, CONTROL_H as i32).into(),
+                        (x + r.x as i32, y + (controls_top + r.y) as i32).into(),
+                        (r.w as i32, r.h as i32).into(),
                     ),
                 )
             })
@@ -794,7 +848,7 @@ impl Server {
         if open.picture.as_ref().map(|(k, _)| *k) != Some(key) {
             let mut scene = Scene::new(w, h);
             if frost.is_none() {
-                scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, ink(s.menu));
+                scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, glass);
             }
             scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, ink(s.edge));
             let baseline = |fonts: &vergence_text::Fonts, top: f32, line: f32, size: f32| {
@@ -802,17 +856,35 @@ impl Server {
                 (top + (line - (m.ascent + m.descent)) / 2.0 + m.ascent).round()
             };
             let mut top = pad;
+            // Words kept within `room` points, an ellipsis where they are cut (a
+            // long video title ran past the card's edge: Dave's screenshot).
+            let fit = |fonts: &mut vergence_text::Fonts, f, size: f32, text: &str, room: f32| -> String {
+                if fonts.layout(f, size, text).1 <= room {
+                    return text.to_string();
+                }
+                let mut chars: Vec<char> = text.chars().collect();
+                while !chars.is_empty() {
+                    chars.pop();
+                    let t: String = chars.iter().collect::<String>().trim_end().to_string() + "\u{2026}";
+                    if fonts.layout(f, size, &t).1 <= room {
+                        return t;
+                    }
+                }
+                String::new()
+            };
             let title = if tile.page.is_empty() { card.title.clone() } else { format!("{}  \u{203a}", card.title) };
+            let title = fit(fonts, bold, title_size, &title, w - 28.0);
+            let title_ink = if card.picture.is_some() { s.menu_ink } else { s.menu_ink_off };
             vergence_render::text(
                 &mut scene,
                 fonts,
                 bold,
-                12.5,
-                ink(s.menu_ink_off),
-                ScenePoint::new(14.0, baseline(fonts, top, 18.0, 12.5)),
+                title_size,
+                ink(title_ink),
+                ScenePoint::new(14.0, baseline(fonts, top, title_h, title_size)),
                 &title,
             );
-            top += 18.0;
+            top += title_h;
             if let Some((p, pw, ph)) = pic {
                 let image = scene.image(vergence_scene::Image {
                     width: p.width as u32,
@@ -837,6 +909,8 @@ impl Server {
             for (name, value) in &card.rows {
                 let b = baseline(fonts, top, 20.0, 13.0);
                 vergence_render::text(&mut scene, fonts, face, 13.0, ink(s.menu_ink), ScenePoint::new(14.0, b), name);
+                let nw = fonts.layout(face, 13.0, name).1;
+                let value = &fit(fonts, face, 13.0, value, w - 28.0 - nw - 12.0);
                 let vw = fonts.layout(face, 13.0, value).1;
                 vergence_render::text(
                     &mut scene,
@@ -866,10 +940,26 @@ impl Server {
                 top += 44.0;
             }
             // The controls, one row each: a button across the card; a label
-            // with a switch at the end; a label with a slider's track after it.
-            for k in &card.controls {
+            // with a switch at the end; a label with a slider's track after it;
+            // a run of icon buttons, round, side by side.
+            let controls_y = top;
+            for (k, place) in card.controls.iter().zip(&places) {
+                let top = controls_y + place.y;
                 let mid = top + CONTROL_H / 2.0;
                 match k.kind {
+                    ControlKind::Icon(icon) => {
+                        use vergence_render::transport::Glyph;
+                        let r = SceneRect::new(place.x, top, place.w, place.h);
+                        scene.fill_rounded(r, place.w / 2.0, ink(s.hover));
+                        let g = match icon {
+                            vergence_protocol::tile::Icon::Previous => Glyph::Previous,
+                            vergence_protocol::tile::Icon::Play => Glyph::Play,
+                            vergence_protocol::tile::Icon::Pause => Glyph::Pause,
+                            vergence_protocol::tile::Icon::Next => Glyph::Next,
+                            vergence_protocol::tile::Icon::Stop => Glyph::Stop,
+                        };
+                        vergence_render::transport::draw(&mut scene, g, r, ink(s.menu_ink));
+                    }
                     ControlKind::Button => {
                         let r = SceneRect::new(14.0, top + 3.0, w - 28.0, CONTROL_H - 6.0);
                         scene.fill_rounded(r, vergence_look::RADIUS, ink(s.hover));
@@ -922,20 +1012,22 @@ impl Server {
                         scene.stroke(SceneRect::new(at - 7.0, mid - 7.0, 14.0, 14.0), 7.0, 1.0, ink(s.edge));
                     }
                 }
-                top += CONTROL_H;
             }
+            top = controls_y + controls_h;
             if !card.controls.is_empty() {
                 top += 4.0;
             }
             if !card.note.is_empty() {
+                let note = fit(fonts, face, 11.0, &card.note, w - 28.0);
                 vergence_render::text(
                     &mut scene,
                     fonts,
                     face,
                     11.0,
-                    ink(s.menu_ink_off),
+                    // The rows' own ink: the dimmer one was unreadable on the frost (Dave, 2026-11-27).
+                    ink(s.menu_ink),
                     ScenePoint::new(14.0, baseline(fonts, top, 18.0, 11.0)),
-                    &card.note,
+                    &note,
                 );
             }
             let Ok(p) = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) else {
@@ -979,12 +1071,16 @@ impl Server {
         out
     }
 
-    /// The frost under a card or the drawer: as a menu's, with the panel's corners.
+    /// The frost under a card or the drawer: as a menu's, with the panel's
+    /// corners, as see-through as the dock itself (its opacity, Settings > Dock,
+    /// scaled by the Frost step, as the dock's own frost: Dave, 2026-11-27). The
+    /// words keep their contrast however clear it is (`need`).
     pub fn panel_frost(&self, scale: f64) -> crate::backdrop::Look {
         let look = vergence_look::shelf_look(self.light_style());
+        let step = vergence_look::frost_strength(self.look_setting("frost")) / vergence_look::FROST_STRENGTH;
         crate::backdrop::Look {
             tint: crate::backdrop::unit(look.menu),
-            strength: vergence_look::frost_strength(self.look_setting("frost")),
+            strength: (self.shelf_opacity() * step).min(1.0),
             ink: crate::backdrop::unit(look.menu_ink),
             need: 5.0,
             radius: vergence_look::frost_radius(self.look_setting("frost")) * scale as f32,
@@ -992,5 +1088,38 @@ impl Server {
             bottom: false,
             cap: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod control_place_tests {
+    use super::*;
+    use vergence_protocol::tile::{Control, Icon};
+
+    fn c(kind: ControlKind) -> Control {
+        Control { id: "x".into(), label: "x".into(), kind }
+    }
+
+    /// Now Playing's controls: three icon buttons share a row, centered, play
+    /// the largest; the seek bar a row of its own under them.
+    #[test]
+    fn a_run_of_icon_buttons_shares_one_row() {
+        let controls = [
+            c(ControlKind::Icon(Icon::Previous)),
+            c(ControlKind::Icon(Icon::Pause)),
+            c(ControlKind::Icon(Icon::Next)),
+            c(ControlKind::Slider { value: 0.0, min: 0.0, max: 1.0, step: 0.0 }),
+        ];
+        let (p, h) = control_places(&controls, 280.0);
+        assert_eq!(h, ICON_ROW + CONTROL_H);
+        assert_eq!((p[0].w, p[1].w, p[2].w), (ICON, ICON_BIG, ICON));
+        assert!(p[0].y == p[2].y && p[1].y < p[0].y, "centered in their row");
+        let (left, right) = (p[0].x, 280.0 - (p[2].x + p[2].w));
+        assert!((left - right).abs() <= 1.0, "the run centered: {left} {right}");
+        assert!(p[0].x + p[0].w < p[1].x && p[1].x + p[1].w < p[2].x, "side by side, apart");
+        assert_eq!((p[3].x, p[3].y, p[3].w), (0.0, ICON_ROW, 280.0));
+        // Ordinary controls: a row each, across the card.
+        let (p, h) = control_places(&[c(ControlKind::Button), c(ControlKind::Switch(true))], 280.0);
+        assert_eq!((h, p[1].y, p[0].w), (2.0 * CONTROL_H, CONTROL_H, 280.0));
     }
 }

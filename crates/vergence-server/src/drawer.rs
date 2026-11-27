@@ -321,6 +321,9 @@ impl Server {
             self.tiles.list[*i].tile.hash(&mut hasher);
         }
         (scale.to_bits(), light, area.size.w, area.size.h).hash(&mut hasher);
+        // The dock's opacity: the ground's see-through with no frost (solid with Reduce transparency).
+        let solid = if self.reduce_transparency() { 255 } else { (self.shelf_opacity() * 255.0).round() as u8 };
+        solid.hash(&mut hasher);
         let key = hasher.finish();
         if d.picture.as_ref().map(|(k, _)| *k) != Some(key) {
             let s = vergence_look::shelf_look(light);
@@ -335,7 +338,12 @@ impl Server {
             let (w, h) = (area.size.w as f32, area.size.h as f32);
             let mut scene = Scene::new(w, h);
             if frost.is_none() {
-                scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, ink(s.menu));
+                // The dock's own see-through, as the cards.
+                scene.fill_rounded(
+                    SceneRect::new(0.0, 0.0, w, h),
+                    vergence_look::RADIUS,
+                    Color::rgba(s.menu.0, s.menu.1, s.menu.2, solid),
+                );
             }
             scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, ink(s.edge));
             for (name, y) in &headings {

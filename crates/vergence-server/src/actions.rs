@@ -19,7 +19,7 @@ impl Server {
         for p in self.tiles.list.iter().filter(|p| p.owner != crate::tiles::Owner::Desktop) {
             let title = if p.tile.card.title.is_empty() { p.tile.label.clone() } else { p.tile.card.title.clone() };
             for k in &p.tile.card.controls {
-                if matches!(k.kind, ControlKind::Button | ControlKind::Switch(_)) {
+                if matches!(k.kind, ControlKind::Button | ControlKind::Switch(_) | ControlKind::Icon(_)) {
                     let id = format!("tile.{}.{}", p.key(), k.id);
                     let words = format!("{} {} {}", p.tile.label, p.tile.group, p.tile.id);
                     all.push(Action::new(&id, &format!("{title}: {}", k.label), &words));

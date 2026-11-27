@@ -32,6 +32,7 @@ pub mod gpu;
 pub mod layers;
 pub mod round;
 pub mod textlook;
+pub mod transport;
 
 use std::fmt;
 
