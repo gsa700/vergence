@@ -14,6 +14,13 @@ the exception to elevation's question 3 agreed as worded (a yes may cover a
 read-only view while it stays open, never a change); 6, step 1 built now on
 hw-core-grid.
 
+**Control's notes on the vdm side (2026-11-26 19:18, folded in):** the
+lease lives on the connection, not a pid; the Q5 exception is structural (a
+read-lease class, a test keeps changes out); one shared 1 s / 0.1 W power
+sampler, no faster or finer; console only, the prompt names the read, every
+lease logged at start and end; screen lock ends leases inside vdm. The vdm
+parts stay control's.
+
 ## Why
 
 The Hardware app shows the processor, its caches and clocks, the board and
@@ -94,28 +101,33 @@ see more asks for it, as with CPU-Z.
 ## How it works
 
 1. **The lease.** A new elevate action, `hardware.readings`: the prompt says
-   "Let Hardware read the memory's slots and the power counters" and who
-   asks (as every prompt does, from the program's file). On a yes vdm
-   gives the asking program a lease: 128 random bits only vdm and that
-   program know, tied to its pid. vdm ends it when the program goes away,
-   when the program says it is done (its window closed), or when the
-   person's screen locks.
+   "Show memory modules and power readings in Hardware" and who asks (as
+   every prompt does, from the program's file). Same gate as every
+   elevation: a person at a console session only. **The lease lives on the
+   connection, not a pid**: one open socket to vdm, and the lease ends when
+   that socket closes. vdm cannot see windows, so "the window closed" means
+   the program closes that connection; a reconnect asks again. **Screen lock
+   ends every lease inside vdm**, which owns the lock, never on the
+   program's word.
 2. **The reads**, on vdm's elevate socket, each with the lease:
    - `memory.modules`: vdm parses SMBIOS type 17 itself (our own parser, in
      its forked worker, fuzzed; FreeBSD: the table found through `kenv
      hint.smbios.0.mem`, later) and returns, per slot: locator ("DIMM_A2"),
      size, type, speed now and rated, maker, part number. **Never** serial
      numbers, asset tags or the system UUID, lease or not.
-   - `power.package` and `power.graphics`: vdm reads the counters itself,
-     **at most once a second**, and returns the average watts over the last
-     second, rounded to 0.1 W; every lease holder shares the one reading,
-     and vdm reads only while some lease holder asks (nothing while no
-     Advanced part is open: mind the battery).
+   - `power.package` and `power.graphics`: **one shared sampler** in vdm
+     reads the counters at 1 s and returns the average watts over the last
+     second, rounded to 0.1 W, however many leases there are; a caller
+     cannot ask for a faster rate or finer steps (that filtering is why the
+     counters are root-only: PLATYPUS, CVE-2020-8694). vdm samples only
+     while some lease holder asks (nothing while no Advanced part is open:
+     mind the battery).
 3. **vdm still does the reading and the filtering**: the Hardware app never
    runs as root and never sees a raw table or a raw counter. A yes grants
    a view, not a hole.
-4. **Logged** as every elevate request is: the lease (who, which program,
-   yes or no) and its end; not each one-second read.
+4. **Logged** as every elevate request is: every lease at its start (who,
+   which program, yes or no) and at its end (socket closed, lock); not each
+   one-second read.
 
 What it never does: hand out raw tables or serials, read a counter faster
 than once a second, give a lease to anyone not at the machine (elevate's
@@ -128,7 +140,9 @@ Elevation milestone 1, question 3 (Dave, 2026-11-16): "a yes is never
 remembered, every action asks". This plan needs a written exception:
 **a yes may cover a read-only view for as long as it stays open; it never
 covers a change.** Every action that changes something still asks each
-time.
+time. The exception is **structural**, not a flag: vdm's action table gets
+a separate read-lease class; no state-changing action may ever be in it,
+and a test enforces that.
 
 ## Threats, and what answers each
 
@@ -136,9 +150,10 @@ time.
   shared by all; no way to ask for a faster or finer one, lease or not.
 - **Fingerprinting through the memory table**: serials, asset tags and the
   UUID never leave vdm.
-- **A lease stolen or reused**: 128 random bits, tied to the pid that asked;
-  a read from any other process with it is refused and logged; it dies
-  with the program, its window, or the lock.
+- **A lease stolen or reused**: there is nothing to steal; the lease is the
+  open connection itself, never a token passed around. It dies when that
+  socket closes (the program ends or its window closes) or the screen
+  locks, which vdm decides itself.
 - **A program asking to wear the person down**: elevate's existing pause
   (10 s, doubling to 5 minutes after a decline) and one request at a time.
 - **A parser bug in root** (a hostile or broken firmware table): vdm's
@@ -157,8 +172,10 @@ time.
    vergence-settings' look.rs) moves into vergence-widgets, so Hardware and
    any app can use it (the settings app keeps its look; control's call on
    where it sits).
-3. vergence-dm: `hardware.readings` (the prompt's words, the lease and its
-   ends), `memory.modules` (the SMBIOS type 17 parser, fuzzed, in the
+3. vergence-dm (control's part): `hardware.readings` in a read-lease class
+   of the action table, with the test that keeps state-changing actions out
+   of it (the prompt's words, the connection-held lease and its ends, the
+   lock ending leases), `memory.modules` (the SMBIOS type 17 parser, fuzzed, in the
    worker), `power.package` and `power.graphics` (1 s, shared, rounded,
    only while asked), the log lines.
 4. Hardware: the Advanced parts on Memory, Processors and Graphics (the
