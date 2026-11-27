@@ -600,7 +600,15 @@ pub struct Look<'a> {
     /// bar without tabs shows its title as a red tab, white on red (see
     /// docs/look-milestone-1.md).
     pub root: bool,
+    /// The window names itself (`Bar::Brand`): its title in this bold face,
+    /// [`BRAND_SIZE`] points, in the bar's full ink (AlbumWall, as its
+    /// Avalonia app's bar). None: the plain title.
+    pub brand: Option<FaceId>,
 }
+
+/// A brand title's size: the Avalonia AlbumWall's 21 points in its 44-point
+/// bar, in proportion to this bar's height.
+pub const BRAND_SIZE: f32 = 18.0;
 
 /// Draws the bar across the top of the scene.
 pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) {
@@ -824,9 +832,13 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
             if look.root { Rect::new(at, room.y, (room.x + room.w - at - 8.0).max(0.0), room.h) } else { *room },
             0.0,
         );
-        let m = fonts.metrics(face, look.font_size);
+        let (face, size, title_ink) = match look.brand {
+            Some(b) if !look.root => (b, BRAND_SIZE, color(l.ink)),
+            _ => (face, look.font_size, title_ink),
+        };
+        let m = fonts.metrics(face, size);
         let baseline = room.y + ((room.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round() - 1.0;
-        text(scene, fonts, face, look.font_size, title_ink, Point::new(at, baseline), look.title);
+        text(scene, fonts, face, size, title_ink, Point::new(at, baseline), look.title);
         scene.pop_clip();
     }
 }
@@ -1184,6 +1196,7 @@ mod tests {
                     app_icon: None,
                     menu_open: false,
                     root,
+                    brand: None,
                 };
                 let mut scene = Scene::new(640.0, 60.0);
                 draw(&mut scene, &mut fonts, &layout, &look);

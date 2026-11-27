@@ -93,6 +93,8 @@ const PAD_Y: f32 = 4.0;
 /// Room each side of the line numbers.
 const GUTTER_PAD: f32 = 8.0;
 const BAR_W: f32 = 6.0;
+/// The bar the pointer has come for (or holds): wider and darker (ui.rs sets `bar_near`).
+const BAR_W_WIDE: f32 = 11.0;
 const MIN_THUMB: f32 = 24.0;
 /// A text this long or shorter is told whole to a screen reader and to an
 /// agent, which reads it in pages (bus v37; 64 KB before: an editor's longer
@@ -452,6 +454,8 @@ pub struct Doc {
     /// What the layouts were made for: size, wrap width, tab width, font.
     shaped_for: (u32, u32, u32, String),
     geom: Geom,
+    /// The pointer has come for the scroll bar, or holds it (ui.rs): drawn wide.
+    pub(crate) bar_near: bool,
     /// A double or triple click's word or line, kept while dragging.
     unit: (u8, Pos, Pos),
     /// The line endings when last saved (changing them is a change to save).
@@ -509,6 +513,7 @@ impl Doc {
             shaped: vec![None; n],
             shaped_for: (0, 0, 0, String::new()),
             geom: Geom::default(),
+            bar_near: false,
             unit: (1, Pos::default(), Pos::default()),
             saved_ending: Ending::Lf,
             words: Vec::new(),
@@ -2449,10 +2454,11 @@ impl Doc {
         self.geom.thumb = (total > view + 1.0 && view > 0.0).then(|| {
             let th = (v.h * view / total).max(MIN_THUMB).min(v.h);
             let f = (above / (total - view).max(1.0)).clamp(0.0, 1.0);
-            Rect::new(v.x + v.w - BAR_W - 2.0, v.y + (v.h - th) * f, BAR_W, th)
+            let w = if self.bar_near { BAR_W_WIDE } else { BAR_W };
+            Rect::new(v.x + v.w - w - 2.0, v.y + (v.h - th) * f, w, th)
         });
         if let Some(t) = self.geom.thumb {
-            scene.fill_rounded(t, BAR_W / 2.0, alpha(theme.text, 80));
+            scene.fill_rounded(t, t.w / 2.0, alpha(theme.text, if self.bar_near { 115 } else { 80 }));
         }
     }
 }

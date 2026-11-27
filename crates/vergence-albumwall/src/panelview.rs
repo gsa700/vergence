@@ -145,25 +145,25 @@ fn line(
             let number = if t.number > 0 { t.number.to_string() } else { String::new() };
             let num_w = (panel::NUMBER * text).ceil() - 10.0;
             // The track coming out of the speakers: a ▶ where its number was,
-            // pulsing slowly, and its title in semibold. With motion reduced
-            // it holds still ("the marker holds still", the Avalonia app's
-            // Accessibility page).
+            // breathing slowly, and its title in semibold. The Avalonia app's
+            // (MainWindow.Pulse): in the words' color, from full to 35% and
+            // back over 2.2 s, stepped twelve times a second (main.rs, the
+            // PULSE timer, only while it plays with the album open). With
+            // motion reduced it holds still ("the marker holds still", the
+            // Avalonia app's Accessibility page).
             let here = playing == Some(*i);
             let mark: Element<Msg> = if here {
-                let c = color(p.accent);
+                let c = color(p.text);
                 row(vec![
                     space().width(Length::FILL),
                     drawing(move |scene, _, r: Rect, theme| {
                         let pulse = if theme.reduced_motion {
                             1.0
                         } else {
-                            0.55 + 0.45
-                                * (std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .map_or(0.0, |d| d.as_secs_f32())
-                                    * std::f32::consts::PI)
-                                    .sin()
-                                    .abs()
+                            let s = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map_or(0.0, |d| d.as_secs_f64());
+                            (0.675 + 0.325 * (s / 2.2 * std::f64::consts::TAU).cos()) as f32
                         };
                         let (h, w) = (9.0, 8.0);
                         let cy = r.y + r.h / 2.0;

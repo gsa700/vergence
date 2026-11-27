@@ -94,7 +94,12 @@ mod timer {
     pub const METERS: u64 = 4;
     /// The menu's Paste, once the search box has the keyboard.
     pub const PASTE: u64 = 5;
+    /// The playing track's mark breathing (twelve steps a second, only while it shows).
+    pub const PULSE: u64 = 6;
 }
+
+/// The playing mark's step (MainWindow.Pulse: twelve a second, not the display's rate).
+const PULSE_TICK: Duration = Duration::from_millis(83);
 
 #[derive(Debug, Clone)]
 pub enum Msg {
@@ -338,6 +343,8 @@ struct AlbumWall {
     /// The window can be seen (bus v42): while not, the music goes on and
     /// what happens is kept, but nothing is drawn and the meters' tick stops.
     seen: bool,
+    /// The PULSE timer is running (the playing mark breathing).
+    pulsing: bool,
 }
 
 impl AlbumWall {
@@ -415,6 +422,7 @@ impl AlbumWall {
             bar_motion: std::cell::Cell::new(None),
             bar_last: std::cell::Cell::new(None),
             seen: true,
+            pulsing: false,
         }
     }
 
@@ -1440,6 +1448,23 @@ impl AlbumWall {
         playing || self.needles.iter().any(|n| !n.resting())
     }
 
+    /// Whether the playing track's mark breathes now: music playing, its album
+    /// open on the wall, the window seen, motion not reduced (MainWindow.Pulse).
+    fn breathing(&self) -> bool {
+        self.seen
+            && !self.reduced()
+            && self.player.as_ref().and_then(|p| p.state().now).is_some_and(|n| !n.paused)
+            && self.opened.as_ref().is_some_and(|o| self.playing_track(o.index).is_some())
+    }
+
+    /// Starts the breathing's timer when it should run and is not.
+    fn pulse(&mut self, window: &mut Window) {
+        if !self.pulsing && self.breathing() {
+            self.pulsing = true;
+            window.wake_after(timer::PULSE, PULSE_TICK);
+        }
+    }
+
     fn reduced(&self) -> bool {
         self.theme().reduced_motion
     }
@@ -2208,6 +2233,11 @@ impl Program for AlbumWall {
         Some(BarStyle::Dark)
     }
 
+    /// Its name in its bar, bold, as the Avalonia app's (Dave, 2026-11-27).
+    fn bar(&self) -> Option<vergence_ui::Bar> {
+        Some(vergence_ui::Bar::Brand { buttons: Vec::new() })
+    }
+
     fn view(&self, t: &Theme) -> Element<Msg> {
         let Some(lib) = self.libraries.current() else { return self.welcome(t) };
         if let Some((root, albums, files)) = &self.shown
@@ -2403,6 +2433,7 @@ impl Program for AlbumWall {
             self.read(false);
         }
         self.ask_retry(window);
+        self.pulse(window);
         // Progress while a read is under way; covers and the hue as they come.
         // Unseen: nothing drawn (it is drawn whole when seen again).
         self.seen && (asked || reread || chosen || read || self.reader.running() || self.shown.is_some())
@@ -2412,6 +2443,14 @@ impl Program for AlbumWall {
         if id == timer::PASTE {
             if std::mem::take(&mut self.paste_wanted) && self.focus.as_deref() == Some("search") {
                 window.paste();
+            }
+            return true;
+        }
+        if id == timer::PULSE {
+            // One step of the breath; stopped (the mark back at full) once it should not run.
+            self.pulsing = self.breathing();
+            if self.pulsing {
+                window.wake_after(timer::PULSE, PULSE_TICK);
             }
             return true;
         }

@@ -94,11 +94,13 @@
 //! Version 45 (Now Playing, Dave: AlbumWall's buttons): `tile::ControlKind::Icon`, a round
 //! button with a transport glyph; a run of them stands in one row. A tile may show an
 //! icon from the theme (`Tile::icon`) with a glyph over its corner (`Tile::badge`).
+//! Version 46 (AlbumWall's bar as its Avalonia app's, Dave): `window::Bar::Brand`, the title
+//! as the program's name, bold and larger, beside the window's buttons.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 45;
+pub const VERSION: u32 = 46;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

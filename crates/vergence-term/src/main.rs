@@ -216,6 +216,8 @@ struct Terminal {
     /// The window's and the cells' sizes the tabs behind were last fitted to.
     fitted: (f32, f32, f32, f32),
     hover: Option<Part>,
+    /// The pane whose scroll bar the pointer is over (it is drawn wide).
+    bar_near: Option<u64>,
     /// The pane the pointer is over, if it is over one.
     over: Option<u64>,
     maximized: bool,
@@ -354,6 +356,7 @@ impl Terminal {
             fits: (80, 24),
             fitted: (0.0, 0.0, 0.0, 0.0),
             hover: None,
+            bar_near: None,
             over: None,
             maximized: false,
             bar_press: None,

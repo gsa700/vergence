@@ -656,3 +656,16 @@ to check what was built, and the agent interface to try it.
   TargetOffset), the cover in the play bar taking you back to the playing
   album, the wall returning after a minute away, and oblong covers on the bare
   wall (AlbumWall milestone 2's progress).
+- **Scroll bars that widen when the pointer comes for them** (2026-11-27, later
+  the same day): thin while reading, wider and easier to catch when the
+  pointer comes near or onto them, as macOS and GNOME do; the toolkit's and
+  the terminal's.
+- **AlbumWall: the playing track's mark breathing** (2026-11-27): the Avalonia
+  app's slow pulse (full to 35% and back over 2.2 s, stepped twelve times a
+  second, only while playing with the album open, still with reduced motion).
+- **AlbumWall's title bar as the Avalonia app's** (2026-11-27, asked again;
+  the 2026-11-25 handoff's "app-declared bar items"): its 44-point dark bar,
+  "AlbumWall" in bold beside the window buttons, its buttons at the right
+  (compact mode; its own volume is not coming back). The server keeps drawing
+  every bar: an app declares its items (a name in its own type, buttons with
+  glyphs) and the server draws and hit-tests them.

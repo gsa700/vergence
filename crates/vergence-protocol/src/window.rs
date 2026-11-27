@@ -104,6 +104,11 @@ pub enum Bar {
     /// (a sidebar's width), or after the window's buttons if they reach
     /// further (window styles milestone 1: the settings app).
     Tools { buttons: Vec<BarButton>, from: f64 },
+    /// The window's title as the program's name, beside the window's buttons:
+    /// bold and larger, the way an app that draws its own bar names itself
+    /// (AlbumWall: its Avalonia app's bar, Dave 2026-11-27); its own buttons,
+    /// if any, as `Tools`' (a Label at the far end).
+    Brand { buttons: Vec<BarButton> },
 }
 
 /// A program's own button in its bar: an id it chose (unique, not 0), what
@@ -1270,19 +1275,28 @@ fn put_bar(e: &mut Encoder, bar: &Bar) {
             }
         }
         Bar::Tools { buttons, from } => {
-            e.u8(2).count(buttons.len());
-            for b in buttons {
-                e.u32(b.id)
-                    .u8(match b.icon {
-                        BarIcon::Back => 0,
-                        BarIcon::Forward => 1,
-                        BarIcon::Label => 2,
-                    })
-                    .str(&b.name)
-                    .bool(b.enabled);
-            }
+            e.u8(2);
+            put_buttons(e, buttons);
             e.f64(*from);
         }
+        Bar::Brand { buttons } => {
+            e.u8(3);
+            put_buttons(e, buttons);
+        }
+    }
+}
+
+fn put_buttons(e: &mut Encoder, buttons: &[BarButton]) {
+    e.count(buttons.len());
+    for b in buttons {
+        e.u32(b.id)
+            .u8(match b.icon {
+                BarIcon::Back => 0,
+                BarIcon::Forward => 1,
+                BarIcon::Label => 2,
+            })
+            .str(&b.name)
+            .bool(b.enabled);
     }
 }
 
@@ -1328,33 +1342,44 @@ fn get_bar(d: &mut Decoder) -> Result<Bar, WireError> {
             Bar::Tabs { tabs, front, plus, accent, menu }
         }
         2 => {
-            let n = d.count(7)?;
-            if n > MAX_BAR_BUTTONS {
-                return Err(WireError::TooLong(n));
-            }
-            let mut buttons: Vec<BarButton> = Vec::with_capacity(n);
-            for _ in 0..n {
-                let id = d.u32()?;
-                let icon = match d.u8()? {
-                    0 => BarIcon::Back,
-                    1 => BarIcon::Forward,
-                    2 => BarIcon::Label,
-                    _ => return Err(WireError::BadValue("bar button icon")),
-                };
-                let (name, enabled) = (title(d)?, d.bool()?);
-                if id == 0 || buttons.iter().any(|b| b.id == id) {
-                    return Err(WireError::BadValue("bar button id"));
-                }
-                buttons.push(BarButton { id, icon, name, enabled });
-            }
+            let buttons = get_buttons(d)?;
             let from = finite(d.f64()?, "where the title starts")?;
             if !(0.0..=4096.0).contains(&from) {
                 return Err(WireError::BadValue("where the title starts"));
             }
             Bar::Tools { buttons, from }
         }
+        3 => Bar::Brand { buttons: get_buttons(d)? },
         _ => return Err(WireError::BadValue("bar")),
     })
+}
+
+/// A bar's own buttons, checked: at most MAX_BAR_BUTTONS, ids unique and not 0.
+fn get_buttons(d: &mut Decoder) -> Result<Vec<BarButton>, WireError> {
+    let n = d.count(7)?;
+    if n > MAX_BAR_BUTTONS {
+        return Err(WireError::TooLong(n));
+    }
+    let mut buttons: Vec<BarButton> = Vec::with_capacity(n);
+    for _ in 0..n {
+        let id = d.u32()?;
+        let icon = match d.u8()? {
+            0 => BarIcon::Back,
+            1 => BarIcon::Forward,
+            2 => BarIcon::Label,
+            _ => return Err(WireError::BadValue("bar button icon")),
+        };
+        let name = d.str()?;
+        if name.len() > MAX_TAB_TITLE {
+            return Err(WireError::TooLong(name.len()));
+        }
+        let enabled = d.bool()?;
+        if id == 0 || buttons.iter().any(|b| b.id == id) {
+            return Err(WireError::BadValue("bar button id"));
+        }
+        buttons.push(BarButton { id, icon, name, enabled });
+    }
+    Ok(buttons)
 }
 
 fn size(w: u32, h: u32) -> Result<(), WireError> {
@@ -2396,6 +2421,7 @@ mod tests {
             WinRequest::Copy { input_serial: 5, kinds: vec!["text/plain;charset=utf-8".into()] },
             WinRequest::Paste { serial: 8, kind: "text/plain".into() },
             WinRequest::Bar { window: 1, bar: Bar::Plain },
+            WinRequest::Bar { window: 1, bar: Bar::Brand { buttons: vec![] } },
             WinRequest::Bar {
                 window: 1,
                 bar: Bar::Tools {

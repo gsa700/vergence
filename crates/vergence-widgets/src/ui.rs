@@ -210,6 +210,11 @@ const SLOP: f32 = 8.0;
 /// Points scrolled for each unit of the wheel's value (15 a notch).
 const WHEEL: f32 = 2.0;
 const BAR_W: f32 = 6.0;
+/// A scroll bar the pointer has come for: wider and darker, easier to catch
+/// (as macOS and GNOME widen theirs; Dave's wish, 2026-11-27), within
+/// BAR_NEAR points of the place's right edge.
+const BAR_W_WIDE: f32 = 11.0;
+const BAR_NEAR: f32 = 18.0;
 /// The longest text a field holds, in bytes.
 pub(crate) const MAX_FIELD: usize = 4096;
 const ITEM_PAD: f32 = 4.0;
@@ -222,6 +227,8 @@ pub struct Ui<M> {
     hover: Option<Id>,
     /// Where the pointer was last (window points), while it is over the window.
     pointer_pos: Option<(f32, f32)>,
+    /// The scrolling place whose bar the pointer has come for (it is drawn wide).
+    bar_near: Option<Id>,
     pressed: Option<(Id, With)>,
     /// Where the pointer pressed it (a button pulled away starts a drag).
     pressed_at: (f32, f32),
@@ -294,6 +301,7 @@ impl<M> Default for Ui<M> {
             size: (0.0, 0.0),
             hover: None,
             pointer_pos: None,
+            bar_near: None,
             pressed: None,
             pressed_at: (0.0, 0.0),
             fingers: Vec::new(),
@@ -799,7 +807,17 @@ impl<M: Clone> Ui<M> {
         let track = r.y + r.h - top;
         let h = (track * r.h / content).max(24.0).min(track);
         let y = top + (track - h) * offset / (content - r.h);
-        Some(Rect::new(r.x + r.w - BAR_W - 2.0, y, BAR_W, h))
+        let held = matches!(self.drag, Some(Drag::Bar { id, .. }) if id == self.nodes[i].id);
+        let w = if held || self.bar_near == Some(self.nodes[i].id) { BAR_W_WIDE } else { BAR_W };
+        Some(Rect::new(r.x + r.w - w - 2.0, y, w, h))
+    }
+
+    /// The scrolling place whose bar a pointer at (x, y) has come for: over
+    /// the strip along its right edge, when it has a bar.
+    fn bar_near_at(&self, x: f32, y: f32) -> Option<Id> {
+        let s = self.scroller_at(x, y)?;
+        let r = self.shown(s);
+        (x >= r.x + r.w - BAR_NEAR && self.thumb(s).is_some()).then_some(self.nodes[s].id)
     }
 
     /// Scrolls the places around node `i` so that it can be seen.
@@ -1637,6 +1655,9 @@ impl<M: Clone> Ui<M> {
             Input::PointerMoved { x, y } => self.pointer_moved(x, y, &mut r),
             Input::PointerLeft => {
                 self.pointer_pos = None;
+                if self.bar_near.take().is_some() {
+                    r.redraw = true;
+                }
                 if self.hover.take().is_some() {
                     r.redraw = true;
                 }
@@ -1861,6 +1882,29 @@ impl<M: Clone> Ui<M> {
 
     fn pointer_moved(&mut self, x: f32, y: f32, r: &mut Response<M>) {
         self.pointer_pos = Some((x, y));
+        // A scroll bar widens as the pointer comes for it, and narrows as it leaves;
+        // a text area's own bar too (Edit), held wide while it is dragged.
+        let near = self.bar_near_at(x, y);
+        if near != self.bar_near {
+            self.bar_near = near;
+            r.redraw = true;
+        }
+        let area_drag = match self.drag {
+            Some(Drag::AreaBar { id, .. }) => Some(id),
+            _ => None,
+        };
+        for (i, n) in self.nodes.iter().enumerate() {
+            if let What::Area { doc, .. } = &n.what {
+                let shown = self.shown(i);
+                let over = inside(&shown, x, y) && x >= shown.x + shown.w - BAR_NEAR;
+                let wide = area_drag == Some(n.id) || over;
+                let mut d = doc.borrow_mut();
+                if d.bar_near != wide {
+                    d.bar_near = wide;
+                    r.redraw = true;
+                }
+            }
+        }
         // A button held and pulled away: its drag message, and no press.
         if let Some((id, With::Pointer)) = self.pressed
             && ((x - self.pressed_at.0).powi(2) + (y - self.pressed_at.1).powi(2)) > 36.0
@@ -2735,7 +2779,21 @@ impl<M: Clone> Ui<M> {
     fn draw_bar(&self, scene: &mut Scene, i: usize, theme: &Theme) {
         if let Some(t) = self.thumb(i) {
             let held = matches!(self.drag, Some(Drag::Bar { id, .. }) if id == self.nodes[i].id);
-            scene.fill_rounded(t, BAR_W / 2.0, alpha(theme.text, if held { 150 } else { 80 }));
+            let near = self.bar_near == Some(self.nodes[i].id);
+            scene.fill_rounded(
+                t,
+                t.w / 2.0,
+                alpha(
+                    theme.text,
+                    if held {
+                        150
+                    } else if near {
+                        115
+                    } else {
+                        80
+                    },
+                ),
+            );
         }
     }
 

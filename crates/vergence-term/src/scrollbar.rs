@@ -5,10 +5,10 @@ use vergence_scene::Rect;
 
 /// The bar's width, and the width at the right edge that takes hold of it.
 pub const WIDTH: f32 = 5.0;
+/// Its width under the pointer or while held (drawn toward the text; the
+/// grab strip is already this wide and more).
+pub const WIDE: f32 = 9.0;
 pub const GRAB: f32 = 12.0;
-/// Its ends' radius: the window's one radius, as far as a bar this narrow
-/// can take it (half its width, where its ends are half circles).
-pub const RADIUS: f32 = vergence_look::RADIUS.min(WIDTH / 2.0);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Scrollbar {

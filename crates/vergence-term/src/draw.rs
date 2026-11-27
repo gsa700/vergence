@@ -153,6 +153,7 @@ impl Terminal {
                     app_icon: None,
                     menu_open: false,
                     root: false,
+                    brand: None,
                 },
             );
         }
@@ -185,6 +186,7 @@ impl Terminal {
                 size,
                 keyboard: active && self.focused,
                 thumb_held: active && matches!(self.held, Some(Held::Thumb(_))),
+                bar_near: self.bar_near == Some(*id),
                 above,
                 cursor: self.cursor_shape,
                 cursor_on: !self.blink || self.blink_on,
@@ -251,6 +253,8 @@ struct PaneLook<'a> {
     keyboard: bool,
     /// The scrollbar's thumb is held.
     thumb_held: bool,
+    /// The pointer is over this pane's scroll bar: drawn wide.
+    bar_near: bool,
     /// How much room above the pane lies under the window's bar: filled with
     /// the lines before the top row (none on the alternate screen).
     above: f32,
@@ -411,8 +415,18 @@ fn draw_pane(
         }
     }
     // The scrollbar: faint at the live screen, clearer while scrolled back or held.
-    if let Some(bar) = s.scrollbar(area) {
-        scene.fill_rounded(bar.track, scrollbar::RADIUS, Color::rgba(p.fg.r, p.fg.g, p.fg.b, 15));
+    if let Some(mut bar) = s.scrollbar(area) {
+        // Under the pointer or held, wider (toward the text) and easier to catch.
+        if look.thumb_held || look.bar_near {
+            let grow = scrollbar::WIDE - scrollbar::WIDTH;
+            for r in [&mut bar.track, &mut bar.thumb] {
+                r.x -= grow;
+                r.w += grow;
+            }
+        }
+        // Its ends: the window's one radius, as far as a bar this narrow can take it.
+        let radius = vergence_look::RADIUS.min(bar.thumb.w / 2.0);
+        scene.fill_rounded(bar.track, radius, Color::rgba(p.fg.r, p.fg.g, p.fg.b, 15));
         let alpha = if look.thumb_held {
             166
         } else if s.scroll > 0 {
@@ -420,7 +434,7 @@ fn draw_pane(
         } else {
             64
         };
-        scene.fill_rounded(bar.thumb, scrollbar::RADIUS, Color::rgba(p.fg.r, p.fg.g, p.fg.b, alpha));
+        scene.fill_rounded(bar.thumb, radius, Color::rgba(p.fg.r, p.fg.g, p.fg.b, alpha));
     }
     // Scrolled back: how far, in the top right corner (left of the scrollbar).
     if s.scroll > 0 {

@@ -175,6 +175,9 @@ impl Terminal {
         let part = self.bar_at(x, y);
         let pane = if part.is_none() && y >= self.bar_h { self.pane_at(x, y) } else { None };
         self.over = pane.map(|(id, _)| id);
+        if pane.is_none() && self.bar_near.take().is_some() {
+            window.redraw();
+        }
         let divider = if part.is_none() { self.areas().1.into_iter().find(|d| d.holds(x, y)) } else { None };
         let cursor = if let Some(d) = divider {
             Cursor::Resize(if d.axis == Axis::Side {
@@ -185,6 +188,12 @@ impl Terminal {
         } else if let Some((id, area)) = pane {
             // The scrollbar's edge and a program that has the mouse get the arrow; text, the text bar.
             let on_bar = self.scrollbar(id, area).is_some_and(|bar| bar.holds(x, y));
+            // The bar widens under the pointer, as the toolkit's do (Dave's wish, 2026-11-27).
+            let near = on_bar.then_some(id);
+            if near != self.bar_near {
+                self.bar_near = near;
+                window.redraw();
+            }
             let theirs = !on_bar
                 && !self.shift
                 && self.report(id, area, mouse::Action::Motion(None), x, y, Modifiers::default());

@@ -1250,9 +1250,10 @@ impl Server {
                         active,
                         hover,
                         format!(
-                            "{layout_text}{tools:?}{tool_names:?}{menu_open}{} h{}{grants:?}",
+                            "{layout_text}{tools:?}{tool_names:?}{menu_open}{} h{}{grants:?}{}",
                             app_icon.is_some(),
-                            f.title.size.h
+                            f.title.size.h,
+                            brand_of(&w)
                         ),
                         titles.clone(),
                         shown,
@@ -1325,6 +1326,13 @@ impl Server {
                             }),
                             menu_open,
                             root,
+                            brand: brand_of(&w)
+                                .then(|| {
+                                    fonts
+                                        .face("sans-serif", 700, false)
+                                        .or_else(|| fonts.face("sans-serif", 600, false))
+                                })
+                                .flatten(),
                         };
                         // Rounded: the bar's top corners cut to the one radius (its bottom goes on into the window).
                         if rounded {
@@ -1963,23 +1971,30 @@ fn tabs_of(w: &Win) -> Option<Tabs> {
 /// A native window's own bar buttons (window styles milestone 1): where the
 /// title starts, and each button's icon, whether it can be pressed, id and name.
 fn tools_of(w: &Win) -> Option<(f32, Vec<(vergence_bar::ToolIcon, bool, u32, String)>)> {
+    let own = |buttons: &[vergence_protocol::window::BarButton]| {
+        buttons
+            .iter()
+            .map(|b| {
+                let icon = match b.icon {
+                    vergence_protocol::window::BarIcon::Back => vergence_bar::ToolIcon::Back,
+                    vergence_protocol::window::BarIcon::Forward => vergence_bar::ToolIcon::Forward,
+                    vergence_protocol::window::BarIcon::Label => vergence_bar::ToolIcon::Label,
+                };
+                (icon, b.enabled, b.id, b.name.clone())
+            })
+            .collect()
+    };
     match w.native()?.bar()? {
-        vergence_protocol::window::Bar::Tools { buttons, from } => Some((
-            from as f32,
-            buttons
-                .iter()
-                .map(|b| {
-                    let icon = match b.icon {
-                        vergence_protocol::window::BarIcon::Back => vergence_bar::ToolIcon::Back,
-                        vergence_protocol::window::BarIcon::Forward => vergence_bar::ToolIcon::Forward,
-                        vergence_protocol::window::BarIcon::Label => vergence_bar::ToolIcon::Label,
-                    };
-                    (icon, b.enabled, b.id, b.name.clone())
-                })
-                .collect(),
-        )),
+        vergence_protocol::window::Bar::Tools { buttons, from } => Some((from as f32, own(&buttons))),
+        // A brand bar's title starts after the window's buttons, its own buttons as Tools'.
+        vergence_protocol::window::Bar::Brand { buttons } => Some((0.0, own(&buttons))),
         _ => None,
     }
+}
+
+/// The window names itself in its bar (Bar::Brand): its title bold and larger.
+fn brand_of(w: &Win) -> bool {
+    matches!(w.native().and_then(|n| n.bar()), Some(vergence_protocol::window::Bar::Brand { .. }))
 }
 
 /// Where the title starts and each own button's width for the layout: None

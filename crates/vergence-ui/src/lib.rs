@@ -2090,6 +2090,9 @@ impl<'a> Runner<'a> {
             app_icon: None,
             menu_open: false,
             root: as_root(),
+            // The brand title is the server's (Bar::Brand); a bar drawn here, on
+            // the Wayland road, keeps the plain one.
+            brand: None,
         };
         bar::draw(scene, &mut self.fonts, &layout, &look);
     }
