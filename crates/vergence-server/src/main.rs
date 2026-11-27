@@ -80,6 +80,7 @@ mod monitors;
 mod native;
 mod network;
 mod notify;
+mod nowplaying;
 mod opened;
 mod overview;
 mod picker;
@@ -142,6 +143,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !greeter() {
         state.start_network();
         state.start_applets();
+        state.nowplaying_start();
         state.start_lock();
         state.start_battery_history();
     }

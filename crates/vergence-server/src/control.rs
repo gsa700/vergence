@@ -424,6 +424,12 @@ impl Server {
                         "Super" => vec![125],
                         // The key above Tab (KEY_GRAVE), for Alt+`.
                         "grave" => vec![41],
+                        // The media keys (KEY_PLAYPAUSE, PAUSECD, NEXTSONG, PREVIOUSSONG, STOPCD).
+                        "XF86AudioPlay" => vec![164],
+                        "XF86AudioPause" => vec![201],
+                        "XF86AudioNext" => vec![163],
+                        "XF86AudioPrev" => vec![165],
+                        "XF86AudioStop" => vec![166],
                         // The function keys (KEY_F1..F10 are 59..68, F11 and F12 87 and 88).
                         f if f.len() >= 2 && f.starts_with('F') && f[1..].parse::<u32>().is_ok_and(|n| (1..=12).contains(&n)) => {
                             let n: u32 = f[1..].parse().unwrap();

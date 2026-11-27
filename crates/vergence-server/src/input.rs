@@ -174,6 +174,7 @@ impl Server {
                 }
             }
             KeyOut::Volume(step) => self.volume_key(step),
+            KeyOut::Media(m) => self.media_key(m),
             KeyOut::Switch(s) => self.switch_key(s),
             // Super with an arrow (snap.rs).
             KeyOut::Window(k) => self.window_key(k),

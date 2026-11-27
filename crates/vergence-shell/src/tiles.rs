@@ -277,7 +277,9 @@ pub fn power(p: &vergence_power::Power) -> Option<Tile> {
 
 /// The tiles that stand on the dock when the user has not said: the
 /// desktop's own. Every other tile starts in the drawer.
-pub const DOCKED: [&str; 4] = ["sound", "network", "power", "clock"];
+/// Vergence's own tiles stand on the dock (Dockworkers principle 6); Now
+/// Playing among them, there only while something plays or is paused.
+pub const DOCKED: [&str; 5] = ["sound", "network", "power", "nowplaying", "clock"];
 
 /// Whether a tile stands on the dock: the user put it there (`docked`,
 /// desktop.toml `[shelf]` tiles, else [`DOCKED`]), or it is in trouble and

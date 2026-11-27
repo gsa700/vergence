@@ -2561,6 +2561,7 @@ pub fn remote_tile(state: &mut Server) {
                 chart: Vec::new(),
                 controls: vec![Control { id: "end".into(), label: "End".into(), kind: ControlKind::Button }],
                 note: "Vergence Remote, over SSH. End stops it at once.".into(),
+                picture: None,
             },
             page: String::new(),
         },

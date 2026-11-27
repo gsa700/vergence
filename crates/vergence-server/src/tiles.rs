@@ -113,6 +113,13 @@ pub struct Tiles {
     pub drawer_frost: crate::backdrop::Slot,
 }
 
+impl Tiles {
+    /// The tile whose card is open (by its key), if any.
+    pub fn open_card(&self) -> Option<&str> {
+        self.card.as_ref().map(|c| c.id.as_str())
+    }
+}
+
 /// ~/.local/state/vergence/applets.toml: every applet seen, for the settings
 /// app's Dock page (its Applets list, each with a switch).
 fn applets_path() -> Option<std::path::PathBuf> {
@@ -167,6 +174,8 @@ fn write_applets(known: &std::collections::BTreeMap<String, (String, String)>) -
 const REST: std::time::Duration = std::time::Duration::from_millis(250);
 const AWAY: std::time::Duration = std::time::Duration::from_millis(200);
 const CARD_W: i32 = 280;
+/// The tallest a card's picture is drawn, in points.
+const PICTURE_H: f32 = 160.0;
 /// From the dock to a card, in points.
 const OFF: i32 = 8;
 /// The height of a control's row in a card, and where a slider's track starts.
@@ -231,6 +240,7 @@ impl Server {
                     (Owner::Desktop, "sound") => 0,
                     (Owner::Desktop, "network") => 1,
                     (Owner::Desktop, "power") => 2,
+                    (Owner::Desktop, "nowplaying") => 3,
                     (Owner::Desktop, "clock") => 9,
                     (Owner::Desktop, _) => 3,
                     (Owner::Client(_), _) => 5,
@@ -311,7 +321,7 @@ impl Server {
             .iter()
             .map(|p| {
                 format!(
-                    "{} {:?} {:?} {:?} {:?} group {:?} page {:?} rows {} chart {} controls {} title {:?}",
+                    "{} {:?} {:?} {:?} {:?} group {:?} page {:?} rows {} chart {} controls {} picture {} title {:?}",
                     p.key(),
                     p.owner,
                     p.tile.value,
@@ -322,6 +332,7 @@ impl Server {
                     p.tile.card.rows.len(),
                     p.tile.card.chart.len(),
                     p.tile.card.controls.len(),
+                    p.tile.card.picture.as_ref().map_or("none".to_string(), |x| format!("{}x{}", x.width, x.height)),
                     p.tile.card.title
                 )
             })
@@ -345,6 +356,7 @@ impl Server {
             (Owner::Desktop, "sound") => "Sound".to_string(),
             (Owner::Desktop, "network") => "Network".to_string(),
             (Owner::Desktop, "power") => "Battery".to_string(),
+            (Owner::Desktop, "nowplaying") => "Now Playing".to_string(),
             _ if !tile.card.title.is_empty() => tile.card.title.clone(),
             _ => tile.label.clone(),
         };
@@ -725,6 +737,15 @@ impl Server {
         let card = &tile.card;
         let pad = 12.0;
         let mut h = pad + 18.0;
+        // A picture under the title: fitted into the card's width and at most
+        // PICTURE_H tall, its shape kept.
+        let pic = card.picture.as_ref().map(|p| {
+            let k = ((CARD_W as f32 - 28.0) / p.width as f32).min(PICTURE_H / p.height as f32);
+            (p, (p.width as f32 * k).round(), (p.height as f32 * k).round())
+        });
+        if let Some((_, _, ph)) = pic {
+            h += ph + 8.0;
+        }
         if !card.big.is_empty() {
             h += 40.0;
         }
@@ -792,6 +813,15 @@ impl Server {
                 &title,
             );
             top += 18.0;
+            if let Some((p, pw, ph)) = pic {
+                let image = scene.image(vergence_scene::Image {
+                    width: p.width as u32,
+                    height: p.height as u32,
+                    rgba: (*p.rgba).clone(),
+                });
+                scene.draw_image(image, SceneRect::new(((w - pw) / 2.0).round(), top + 4.0, pw, ph), 1.0);
+                top += ph + 8.0;
+            }
             if !card.big.is_empty() {
                 vergence_render::text(
                     &mut scene,

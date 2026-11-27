@@ -1271,6 +1271,7 @@ impl Server {
                 chart: Vec::new(),
                 controls,
                 note: "Settings > Privacy > Agents takes it back.".into(),
+                picture: None,
             },
             page: "agents".into(),
         };

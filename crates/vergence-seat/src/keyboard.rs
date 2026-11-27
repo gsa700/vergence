@@ -46,6 +46,8 @@ pub enum Key {
     VolumeUp,
     VolumeDown,
     Mute,
+    /// The media keys: XF86AudioPlay (play or pause), Pause, Next, Prev, Stop.
+    Media(Media),
     /// The key for console n (1 to 12): XF86Switch_VT_n.
     Vt(u8),
     Tab,
@@ -129,6 +131,16 @@ pub struct Mods {
     pub logo: bool,
 }
 
+/// What a media key asks of the player that is Now Playing (the server's nowplaying.rs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Media {
+    PlayPause,
+    Pause,
+    Next,
+    Previous,
+    Stop,
+}
+
 /// What a key does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyOut {
@@ -150,6 +162,8 @@ pub enum KeyOut {
     OpenAppMenu(WinId),
     /// The default output's volume: +5, -5, or 0 to mute or unmute.
     Volume(i8),
+    /// A media key, for the player Now Playing (passes while locked, as the volume does).
+    Media(Media),
     /// Alt+Tab's switching.
     Switch(Switch),
     /// Super with an arrow.
@@ -288,6 +302,7 @@ impl Seat {
                 Key::VolumeUp if pressed => KeyOut::Volume(5),
                 Key::VolumeDown if pressed => KeyOut::Volume(-5),
                 Key::Mute if pressed => KeyOut::Volume(0),
+                Key::Media(m) if pressed => KeyOut::Media(m),
                 Key::Vt(n) if pressed && (1..=12).contains(&n) => KeyOut::Vt(n),
                 _ => KeyOut::Locked,
             };
@@ -380,6 +395,7 @@ impl Seat {
                 Key::VolumeUp => return KeyOut::Volume(5),
                 Key::VolumeDown => return KeyOut::Volume(-5),
                 Key::Mute => return KeyOut::Volume(0),
+                Key::Media(m) => return KeyOut::Media(m),
                 Key::Vt(n) if (1..=12).contains(&n) => return KeyOut::Vt(n),
                 _ => {}
             }

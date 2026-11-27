@@ -42,7 +42,7 @@ use vergence_dbus::{
     BUS_NAME, BUS_PATH, Message, Value,
     auth::{Auth, Step},
     matchrule::MatchRule,
-    message::{self, METHOD_CALL, NO_REPLY_EXPECTED, SIGNAL},
+    message::{self, ERROR, METHOD_CALL, METHOD_RETURN, NO_REPLY_EXPECTED, SIGNAL},
 };
 
 use crate::Server;
@@ -436,6 +436,10 @@ impl Server {
         match m.destination.clone() {
             Some(dest) => match self.dbus_owner(&dest) {
                 Some(EDGE) => {
+                    // A reply to a call the edge made itself (Now Playing asking a player).
+                    if (m.kind == METHOD_RETURN || m.kind == ERROR) && self.nowplaying_answer(id, &m) {
+                        return;
+                    }
                     if m.kind == METHOD_CALL {
                         if m.path.as_deref() == Some(NOTIFY_PATH) {
                             self.dbus_notifications(id, &m);
@@ -467,7 +471,15 @@ impl Server {
                 }
                 None => {}
             },
-            None if m.kind == SIGNAL && self.dbus.fds.is_empty() => self.dbus_broadcast(&m),
+            None if m.kind == SIGNAL && self.dbus.fds.is_empty() => {
+                // A player's news, heard by Now Playing as it goes by (no rule of its own).
+                if m.path.as_deref() == Some(crate::nowplaying::PATH)
+                    && matches!(m.member.as_deref(), Some("PropertiesChanged" | "Seeked"))
+                {
+                    self.nowplaying_signal(id, &m);
+                }
+                self.dbus_broadcast(&m)
+            }
             None => {
                 if m.kind == METHOD_CALL && m.flags & NO_REPLY_EXPECTED == 0 {
                     self.dbus_reply(
@@ -546,6 +558,19 @@ impl Server {
     fn dbus_next_serial(&mut self) -> u32 {
         self.dbus.serial = self.dbus.serial.wrapping_add(1).max(1);
         self.dbus.serial
+    }
+
+    /// A method call from the edge (":1.0") to whoever owns `dest`: its serial,
+    /// for the reply that comes back to the edge (Now Playing's calls). None
+    /// when nobody owns it.
+    pub fn dbus_edge_call(&mut self, dest: &str, path: &str, iface: &str, member: &str, args: &[Value]) -> Option<u32> {
+        let to = self.dbus_owner(dest).filter(|t| *t != EDGE)?;
+        let mut m = Message::method_call(dest, path, iface, member, args);
+        m.sender = Some(EDGE_UNIQUE.into());
+        m.serial = self.dbus_next_serial();
+        let bytes = m.serialize();
+        self.dbus_send_raw(to, &bytes);
+        Some(m.serial)
     }
 
     /// A message from the bus itself to connection `to`.
@@ -774,6 +799,9 @@ impl Server {
             match *e {
                 NameEvent::Lost(id) => self.dbus_bus_signal("NameLost", &[Value::Str(name.into())], Some(id)),
                 NameEvent::Changed { old, new } => {
+                    if name.starts_with(crate::nowplaying::PREFIX) {
+                        self.nowplaying_owner(name, new.filter(|n| *n != EDGE));
+                    }
                     let old = old.map(|o| self.dbus_unique(o)).unwrap_or_default();
                     let new = new.map(|n| self.dbus_unique(n)).unwrap_or_default();
                     tracing::info!(

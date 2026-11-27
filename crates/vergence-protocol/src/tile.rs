@@ -43,11 +43,62 @@ pub struct Card {
     pub chart: Vec<f32>,
     pub controls: Vec<Control>,
     pub note: String,
+    /// A picture beside the card's words (Now Playing's cover; a camera
+    /// snapshot, a radar image: the Dockworkers principles' next piece).
+    pub picture: Option<Picture>,
+}
+
+/// A picture on a card: straight (not premultiplied) RGBA, at most
+/// [`MAX_PICTURE`] pixels a side, drawn by the server at the card's scale,
+/// with words for what it shows. Its bytes are hashed once, when made, so
+/// the card's drawing is not hashed again at every frame.
+#[derive(Debug, Clone)]
+pub struct Picture {
+    pub width: u16,
+    pub height: u16,
+    pub rgba: std::sync::Arc<Vec<u8>>,
+    /// What it shows, in words ("the cover of Wish You Were Here").
+    pub alt: String,
+    key: u64,
+}
+
+impl Picture {
+    /// None unless `rgba` holds exactly `width` × `height` pixels within the limits.
+    pub fn new(width: u16, height: u16, rgba: Vec<u8>, alt: String) -> Option<Picture> {
+        let (w, h) = (width as usize, height as usize);
+        if w == 0 || h == 0 || w > MAX_PICTURE || h > MAX_PICTURE || rgba.len() != w * h * 4 {
+            return None;
+        }
+        // FNV-1a over the bytes: a cheap key, made once.
+        let mut key: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in rgba.iter().chain(&width.to_le_bytes()).chain(&height.to_le_bytes()) {
+            key = (key ^ *b as u64).wrapping_mul(0x100_0000_01b3);
+        }
+        Some(Picture { width, height, rgba: std::sync::Arc::new(rgba), alt, key })
+    }
+
+    /// The key its bytes were hashed to.
+    pub fn key(&self) -> u64 {
+        self.key
+    }
+}
+
+impl PartialEq for Picture {
+    fn eq(&self, o: &Picture) -> bool {
+        (self.width, self.height, self.key, &self.alt) == (o.width, o.height, o.key, &o.alt)
+            && (std::sync::Arc::ptr_eq(&self.rgba, &o.rgba) || self.rgba == o.rgba)
+    }
+}
+
+impl std::hash::Hash for Picture {
+    fn hash<H: std::hash::Hasher>(&self, h: &mut H) {
+        (self.width, self.height, self.key, &self.alt).hash(h);
+    }
 }
 
 impl std::hash::Hash for Card {
     fn hash<H: std::hash::Hasher>(&self, h: &mut H) {
-        (&self.title, &self.big, &self.rows, &self.note, &self.controls).hash(h);
+        (&self.title, &self.big, &self.rows, &self.note, &self.controls, &self.picture).hash(h);
         for v in &self.chart {
             v.to_bits().hash(h);
         }
@@ -94,6 +145,8 @@ pub const MAX_CONTROLS: usize = 8;
 pub const MAX_ID: usize = 64;
 pub const MAX_SHORT: usize = 24;
 pub const MAX_TEXT: usize = 200;
+/// A card's picture: at most this many pixels a side (256 KiB of RGBA).
+pub const MAX_PICTURE: usize = 256;
 
 impl Tile {
     /// Whether the server takes this tile, and if not, why.
@@ -113,6 +166,9 @@ impl Tile {
         long("title", &c.title, MAX_TEXT)?;
         long("big", &c.big, MAX_SHORT)?;
         long("note", &c.note, MAX_TEXT)?;
+        if let Some(p) = &c.picture {
+            long("picture's words", &p.alt, MAX_TEXT)?;
+        }
         if c.rows.len() > MAX_ROWS || c.chart.len() > MAX_CHART || c.controls.len() > MAX_CONTROLS {
             return Err(format!("more than {MAX_ROWS} rows, {MAX_CHART} chart values or {MAX_CONTROLS} controls"));
         }
@@ -160,6 +216,10 @@ impl Tile {
                 ControlKind::Slider { value, min, max, step } => e.u8(2).f64(value).f64(min).f64(max).f64(step),
             };
         }
+        match &c.picture {
+            None => e.u8(0),
+            Some(p) => e.u8(1).u16(p.width).u16(p.height).str(&p.alt).bytes(&p.rgba),
+        };
     }
 
     pub fn decode(d: &mut crate::wire::Decoder) -> Result<Tile, crate::wire::WireError> {
@@ -198,6 +258,23 @@ impl Tile {
             };
             controls.push(Control { id, label, kind });
         }
-        Ok(Tile { id, value, label, state, group, page, card: Card { title, big, rows, chart, controls, note } })
+        let picture = match d.u8()? {
+            0 => None,
+            1 => {
+                let (w, h, alt) = (d.u16()?, d.u16()?, d.str()?);
+                let rgba = d.bytes()?.to_vec();
+                Some(Picture::new(w, h, rgba, alt).ok_or(WireError::BadValue("picture"))?)
+            }
+            _ => return Err(WireError::BadValue("picture")),
+        };
+        Ok(Tile {
+            id,
+            value,
+            label,
+            state,
+            group,
+            page,
+            card: Card { title, big, rows, chart, controls, note, picture },
+        })
     }
 }

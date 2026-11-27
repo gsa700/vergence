@@ -145,6 +145,8 @@ impl Server {
                 }
                 self.sound_tile_now();
             }
+            // Now Playing's card (nowplaying.rs).
+            (crate::nowplaying::TILE, _) => self.nowplaying_action(control, value),
             // An agent's timed grant, one more span (agents.rs).
             ("agent", "extend") => self.agent_extend(),
             // Vergence Remote: whoever is at the desk ends it (remote milestone 1).

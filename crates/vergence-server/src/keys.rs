@@ -107,6 +107,11 @@ pub fn seat_key(sym: u32, code: u32) -> vergence_seat::keyboard::Key {
         k::KEY_XF86AudioRaiseVolume => Key::VolumeUp,
         k::KEY_XF86AudioLowerVolume => Key::VolumeDown,
         k::KEY_XF86AudioMute => Key::Mute,
+        k::KEY_XF86AudioPlay => Key::Media(vergence_seat::keyboard::Media::PlayPause),
+        k::KEY_XF86AudioPause => Key::Media(vergence_seat::keyboard::Media::Pause),
+        k::KEY_XF86AudioNext => Key::Media(vergence_seat::keyboard::Media::Next),
+        k::KEY_XF86AudioPrev => Key::Media(vergence_seat::keyboard::Media::Previous),
+        k::KEY_XF86AudioStop => Key::Media(vergence_seat::keyboard::Media::Stop),
         // Shift+Tab is ISO_Left_Tab in most keymaps.
         k::KEY_Tab | k::KEY_ISO_Left_Tab => Key::Tab,
         k::KEY_Alt_L | k::KEY_Alt_R => Key::Alt,

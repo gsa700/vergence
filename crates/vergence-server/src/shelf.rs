@@ -1710,6 +1710,21 @@ impl Server {
                 if item.focused { " focused" } else { "" }
             ));
         }
+        // The tiles on the dock and where each sits (a test hovers one to open its card).
+        for (i, place) in self.dock_places().iter().enumerate() {
+            if let crate::tiles::Place::Tile(t) = place
+                && let Some(p) = self.tiles.list.get(*t)
+            {
+                let at = vergence_shell::tiles::slot(
+                    rect(dock),
+                    self.shelf.names.len(),
+                    i,
+                    self.shelf.config.placement().upright(),
+                )
+                .map_or("no room".to_string(), |s| format!("{},{} {}x{}", s.x, s.y, s.w, s.h));
+                out.push_str(&format!("\ntile {} at {at}", p.key()));
+            }
+        }
         out
     }
 

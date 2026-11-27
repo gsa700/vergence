@@ -163,6 +163,8 @@ pub struct Server {
     pub remote: crate::remote::Remotes,
     /// The D-Bus edge (dbus.rs).
     pub dbus: crate::dbus::DBus,
+    /// MPRIS players on the session bus, and the one Now Playing (nowplaying.rs).
+    pub nowplaying: crate::nowplaying::NowPlaying,
     /// The desktop settings (settings.rs).
     pub settings: crate::settings::SettingsState,
     /// Notifications on screen (notify.rs).
@@ -378,6 +380,7 @@ impl Server {
             bus: Default::default(),
             remote: Default::default(),
             dbus: Default::default(),
+            nowplaying: Default::default(),
             settings: Default::default(),
             notes: Default::default(),
             tiles: Default::default(),

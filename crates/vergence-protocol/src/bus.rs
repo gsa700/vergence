@@ -89,11 +89,13 @@
 //! Version 43 (AlbumWall's lyrics, as the Avalonia app's): scenes gain
 //! `PushBlur` / `PopBlur` (vergence-scene wire opcodes 9 and 10), a group
 //! drawn blurred; the renderers draw it as a picture (vergence-render's layers.rs).
+//! Version 44 (AlbumWall milestone 2, step 6: Now Playing): a tile's card may carry a
+//! `tile::Picture` (the cover art; a camera snapshot, a radar image), drawn by the server.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 43;
+pub const VERSION: u32 = 44;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1434,6 +1436,8 @@ mod tests {
                     },
                 ],
                 note: "sample".into(),
+                // Two pixels, red and green: a picture survives the wire whole.
+                picture: crate::tile::Picture::new(2, 1, vec![255, 0, 0, 255, 0, 255, 0, 255], "two dots".into()),
             },
         }
     }
@@ -1459,6 +1463,13 @@ mod tests {
         let mut t = sample_tile();
         t.id = "a\nb".into();
         assert!(t.check().is_err());
+        // A picture whose bytes do not fill it, or larger than a card's, is never made.
+        assert!(crate::tile::Picture::new(2, 2, vec![0; 8], String::new()).is_none());
+        assert!(crate::tile::Picture::new(257, 1, vec![0; 257 * 4], String::new()).is_none());
+        // Its key follows its bytes.
+        let a = crate::tile::Picture::new(1, 1, vec![1, 2, 3, 4], String::new()).unwrap();
+        let b = crate::tile::Picture::new(1, 1, vec![1, 2, 3, 5], String::new()).unwrap();
+        assert_ne!(a.key(), b.key());
     }
 
     #[test]

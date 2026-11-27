@@ -366,3 +366,35 @@ program can use it):
   with gdbus monitor), a second start's --play and --pause, no second
   window, --quit, the name let go, --next with nothing running; through
   the headless session's own bus (its address now in `vergence-headless env`).
+- **Step 6, Now Playing for the whole desktop** (2026-11-27):
+  `vergence-server/src/nowplaying.rs`. The edge (dbus.rs) learned to make
+  calls of its own as `:1.0` (`dbus_edge_call`, the reply routed back by
+  serial and checked to come from the connection asked), to hear players'
+  PropertiesChanged and Seeked as they are broadcast, and to tell Now Playing
+  when an `org.mpris.MediaPlayer2.*` name comes or goes. Each player's
+  status, track, length, art and position are kept (the position run on by
+  the clock while playing, held when paused); Now Playing is the one most
+  recently playing, else the most recent. Its **tile** (Vergence's own, on
+  the dock before the clock: `DOCKED`) shows the track and Playing or
+  Paused, and is away while nothing plays or is paused; its **card**: the
+  cover, Artist / Album / Player, Previous, Play or Pause, Next, a seek bar
+  with "0:42 of 3:07" (SetPosition), the other players in its note; the
+  position asked once a second only while the card is open (principle 7).
+  The **picture primitive** (bus v44, `tile::Picture`): straight RGBA up to
+  256 a side with words for what it shows, hashed once, drawn under the
+  card's title at most 160 points tall; the cover from the player's
+  `mpris:artUrl` when it is a local file, decoded in vergence-decode's
+  confined helper on a thread (nothing fetched from the network). The
+  **media keys** (XF86AudioPlay, Pause, Next, Prev, Stop) through the seat,
+  passing while locked as the volume keys do, and the actions
+  `media.play-pause`, `media.next`, `media.previous`, `media.stop`.
+  `vctl key` knows the media keys; `vctl shelf` lists the dock's tiles and
+  their places; `vctl tiles` a card's picture. Display suite 36: no tile
+  while nothing plays; playing, the tile, its controls and the album's cover
+  on the card (opened by the pointer resting on the tile); media.play-pause
+  and the play key reach AlbumWall; the card's Next; AlbumWall gone, the
+  tile gone. Not in it: that player's volume row (the sound code has no
+  per-app streams yet: a mixer step of its own); a row of buttons for
+  ⏮ ⏯ ⏭ (cards stack every button full width today; a new piece of the
+  vocabulary); players on another bus when DBUS_SESSION_BUS_ADDRESS named
+  one at start.

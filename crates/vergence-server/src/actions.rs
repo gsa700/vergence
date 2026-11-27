@@ -45,6 +45,10 @@ impl Server {
                 self.desktop_tile_action("sound", "mute", if id == "sound.mute" { 1.0 } else { 0.0 })
             }
             "sound.up" => self.volume_key(5),
+            "media.play-pause" => self.media_key(vergence_seat::keyboard::Media::PlayPause),
+            "media.next" => self.media_key(vergence_seat::keyboard::Media::Next),
+            "media.previous" => self.media_key(vergence_seat::keyboard::Media::Previous),
+            "media.stop" => self.media_key(vergence_seat::keyboard::Media::Stop),
             "sound.down" => self.volume_key(-5),
             // After a moment: the key that ran it, let go, is input and would wake them.
             "screens.off" => {
