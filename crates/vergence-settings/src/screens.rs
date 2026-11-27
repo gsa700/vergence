@@ -280,7 +280,7 @@ impl App {
                         .step(1.0)
                         .width(Length::Fixed(220.0))
                         // A laptop's panel by what it is, as the Display tile says.
-                        .name(&format!(
+                        .name(format!(
                             "{} brightness",
                             if vergence_dm::brightness::is_internal(&o.name) {
                                 "Built-in display".to_string()
