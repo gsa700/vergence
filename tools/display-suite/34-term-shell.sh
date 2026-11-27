@@ -53,4 +53,10 @@ scenario() {
     check "$(yes_if "! cmp -s '$OUT/live.png' '$OUT/up1.png'")" "Ctrl+Shift+Up scrolls back to a prompt"
     check "$(yes_if "! cmp -s '$OUT/up1.png' '$OUT/up2.png'")" "again: the prompt before that one"
     check "$(yes_if "cmp -s '$OUT/live.png' '$OUT/down.png'")" "Ctrl+Shift+Down comes back to the live screen"
+    # The profile is shared by the scenarios: the next ones' terminals get no
+    # zsh setup (it titles windows by their folder; 19 finds "Terminal"). An
+    # empty ~/.zshrc, not none: zsh would greet a home without one with its
+    # new-user questions.
+    : > "$home/.zshrc"
+    rm -rf "$home/vg-shell"
 }
