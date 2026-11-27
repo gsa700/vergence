@@ -83,6 +83,14 @@ by the kernel, not by us, and never by us as root.
   critical-warning bits or a SMART attribute past its threshold), then
   power-on hours, data written, available spare, media errors, unsafe
   shutdowns, temperature history if the drive keeps it.
+- **The window's bar goes the alarm red while the lease is held** (Dave,
+  2026-11-26: "that is a good way to see the window has elevated
+  privileges. We should use that for the Advanced functions in Vergence
+  when called"), the superuser's mark the server already draws on a root
+  program's windows and the terminal's root tabs. The program is not root,
+  so vdm tells the server which connection holds a lease (it already talks
+  to the server for every prompt), the server marks that program's windows
+  until the lease ends, and no program can set or clear the mark itself.
 - Never: a self-test started (later, question 6), a raw log handed out,
   the drive's serial or WWN added beyond what sysfs already shows.
 
