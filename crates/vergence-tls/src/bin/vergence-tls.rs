@@ -69,6 +69,8 @@ const POLLHUP: i16 = 0x10;
 const SSL_VERIFY_PEER: c_int = 1;
 const SSL_CTRL_SET_TLSEXT_HOSTNAME: c_int = 55;
 const SSL_CTRL_SET_MIN_PROTO_VERSION: c_int = 123;
+const SSL_CTRL_CLEAR_MODE: c_int = 78;
+const SSL_MODE_AUTO_RETRY: c_long = 0x4;
 const TLS1_2_VERSION: c_long = 0x0303;
 const SSL_ERROR_WANT_READ: c_int = 2;
 const SSL_ERROR_WANT_WRITE: c_int = 3;
@@ -160,6 +162,13 @@ fn main() {
         }
         SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, std::ptr::null());
         SSL_CTX_ctrl(ctx, SSL_CTRL_SET_MIN_PROTO_VERSION, TLS1_2_VERSION, std::ptr::null_mut());
+        // No auto-retry: after a record that is not the program's data (TLS
+        // 1.3's session tickets, sent just after the handshake) SSL_read says
+        // "nothing yet" instead of waiting on the server for more, so the
+        // relay goes back to waiting on both sides. With it, the helper sat
+        // in SSL_read while the program's request waited unread, and the
+        // server waited for the request (now and then, on techbench).
+        SSL_CTX_ctrl(ctx, SSL_CTRL_CLEAR_MODE, SSL_MODE_AUTO_RETRY, std::ptr::null_mut());
     }
     vergence_decode::confine_allowing(24 * 3600, &[7, 39, 271]);
     // The handshake, confined.

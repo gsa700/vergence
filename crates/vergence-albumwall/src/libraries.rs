@@ -7,15 +7,22 @@
 //! comment, the library on the wall, then one library a line, its kind, name
 //! and folder separated by tabs. The folder is the line's last field, so a
 //! tab in a folder's name survives; a newline cannot be kept and is refused.
+//!
+//! A music server (milestone 2) is a line of its own: `server`, its name,
+//! address, user, salt and token, and the server's library chosen (empty for
+//! all). No password is kept (question 3), but the token signs in to that
+//! server, so the file is readable by its owner only.
 
 use std::path::{Path, PathBuf};
 
-/// One library: a music folder (a local disk, an external drive, a share).
+/// One library: a music folder (a local disk, an external drive, a share),
+/// or a music server (`server`; its `folder` is then the server's key).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Library {
     /// What the picker shows: the folder's own name unless renamed.
     pub name: String,
     pub folder: PathBuf,
+    pub server: Option<crate::subsonic::Login>,
 }
 
 /// Every library, and which one is on the wall.
@@ -48,16 +55,41 @@ impl Libraries {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| folder.to_string_lossy().into_owned())
             .replace(['\t', '\n'], " ");
-        self.list.push(Library { name, folder: folder.to_path_buf() });
+        self.list.push(Library { name, folder: folder.to_path_buf(), server: None });
         self.current = self.list.len() - 1;
         Ok(())
+    }
+
+    /// A music server added and put on the wall (one already known, the same
+    /// user and library, has its sign-in renewed and is put on the wall).
+    pub fn add_server(&mut self, name: &str, login: crate::subsonic::Login) {
+        let key = login.key();
+        let name = name.replace(['\t', '\n'], " ");
+        if let Some(i) = self.list.iter().position(|l| l.folder == key) {
+            self.list[i].server = Some(login);
+            self.current = i;
+            return;
+        }
+        self.list.push(Library { name, folder: key, server: Some(login) });
+        self.current = self.list.len() - 1;
     }
 
     /// The file's text.
     pub fn to_text(&self) -> String {
         let mut s = format!("{HEADER}\ncurrent\t{}\n", self.current);
         for l in &self.list {
-            s.push_str(&format!("folder\t{}\t{}\n", l.name, l.folder.to_string_lossy()));
+            match &l.server {
+                Some(g) => s.push_str(&format!(
+                    "server\t{}\t{}\t{}\t{}\t{}\t{}\n",
+                    l.name,
+                    g.address,
+                    g.user.replace(['\t', '\n'], " "),
+                    g.salt,
+                    g.token,
+                    g.folder.as_deref().unwrap_or("")
+                )),
+                None => s.push_str(&format!("folder\t{}\t{}\n", l.name, l.folder.to_string_lossy())),
+            }
         }
         s
     }
@@ -70,11 +102,25 @@ impl Libraries {
             if line.starts_with('#') {
                 continue;
             }
+            if let Some(rest) = line.strip_prefix("server\t") {
+                let f: Vec<&str> = rest.split('\t').collect();
+                if f.len() == 6 && !f[1].is_empty() && !f[2].is_empty() && !f[4].is_empty() {
+                    let login = crate::subsonic::Login {
+                        address: f[1].into(),
+                        user: f[2].into(),
+                        salt: f[3].into(),
+                        token: f[4].into(),
+                        folder: Some(f[5].to_string()).filter(|x| !x.is_empty()),
+                    };
+                    libs.list.push(Library { name: f[0].into(), folder: login.key(), server: Some(login) });
+                }
+                continue;
+            }
             let mut parts = line.splitn(3, '\t');
             match (parts.next(), parts.next(), parts.next()) {
                 (Some("current"), Some(n), None) => libs.current = n.trim().parse().unwrap_or(0),
                 (Some("folder"), Some(name), Some(folder)) if !folder.is_empty() => {
-                    libs.list.push(Library { name: name.to_string(), folder: PathBuf::from(folder) })
+                    libs.list.push(Library { name: name.to_string(), folder: PathBuf::from(folder), server: None })
                 }
                 _ => {}
             }
@@ -97,7 +143,14 @@ impl Libraries {
             std::fs::create_dir_all(dir)?;
         }
         let tmp = path.with_extension("new");
-        std::fs::write(&tmp, self.to_text())?;
+        // Readable by its owner only: a server's token is in it.
+        {
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+            f.write_all(self.to_text().as_bytes())?;
+        }
+        std::fs::set_permissions(&tmp, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
         std::fs::rename(&tmp, path)
     }
 }
@@ -143,6 +196,34 @@ mod tests {
         let libs = Libraries::from_text("# x\ncurrent\t7\nserver\tNAS\thttp://x\nfolder\tM\t/m\nfolder\tEmpty\t\n");
         assert_eq!(libs.list.len(), 1);
         assert_eq!(libs.current, 0);
+    }
+
+    #[test]
+    fn a_server_round_trips_and_the_file_is_its_owners() {
+        let mut libs = Libraries::default();
+        libs.add_folder(Path::new("/music")).unwrap();
+        let login = crate::subsonic::Login {
+            address: "http://10.0.1.5:4533".into(),
+            user: "dave".into(),
+            salt: "c19b2d00aa11".into(),
+            token: "26719a1196d2a940705a59634eb18eab".into(),
+            folder: Some("2".into()),
+        };
+        libs.add_server("MusicServer", login.clone());
+        assert_eq!(libs.current, 1);
+        assert_eq!(libs.list[1].folder, Path::new("navidrome://dave@10.0.1.5:4533/folder/2"));
+        let back = Libraries::from_text(&libs.to_text());
+        assert_eq!(back, libs);
+        // Signed in again: the same library, its sign-in renewed.
+        libs.add_server("x", crate::subsonic::Login { token: "new".into(), ..login });
+        assert_eq!(libs.list.len(), 2);
+        assert_eq!(libs.list[1].server.as_ref().unwrap().token, "new");
+        let dir = std::env::temp_dir().join(format!("albumwall-libs-mode-{}", std::process::id()));
+        let path = dir.join("libraries");
+        libs.save(&path).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

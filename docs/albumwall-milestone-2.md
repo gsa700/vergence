@@ -213,3 +213,27 @@ program can use it):
   connected; another address, refused ("IP address mismatch"); not
   vouched for, refused ("self-signed certificate"). Tests 1192/1192/1180.
 
+- **Step 2, the music server as a library** (2026-11-26): `json` in
+  vergence-http (our own reader, depth-limited, random bytes in the tests);
+  `md5.rs` (RFC 1321, its test suite and Subsonic's own example);
+  `subsonic.rs`: the sign-in (a salt from the system's random source, the
+  token the MD5 of the password and the salt, the password dropped), the
+  server's libraries, every album (getAlbumList2) and song (search3) in
+  pages of 500, covers six at a time into a folder named for the library,
+  the stream's address made when it is needed; a track's path is
+  `navidrome://user@host:port/song/<id>.<ext>`, no sign-in in it. The
+  library list gains `server` lines and is written readable by its owner
+  only. The reader shows what is kept of a server at once, then asks it;
+  one not answering keeps its wall and says so in its own words. The
+  sign-in window (serverwin.rs: Server, User name, Password, the server's
+  libraries to tick, the plain-HTTP warning outside the local network with
+  "Add anyway"), from the welcome's second half, Settings › Library's "Add
+  a music server…" and File's menu; a server's settings page with its
+  address and Forget (its list and covers deleted with it). Checked
+  headless on Hubble against a small Subsonic server of our own: signed in,
+  one of two libraries ticked, 24 albums and 72 tracks on the wall with
+  their covers, the list file `-rw-------` holding salt and token only.
+  Found and fixed in the TLS helper: with OpenSSL's auto-retry, TLS 1.3's
+  session tickets could keep it in SSL_read while the program's request
+  waited (now and then, on techbench); auto-retry is off. Playing from a
+  server is step 3.

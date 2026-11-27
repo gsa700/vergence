@@ -84,7 +84,7 @@ fn https_with_a_trusted_certificate_and_its_name() {
     let url = vergence_http::Url::parse(&format!("https://localhost:{port}/")).unwrap();
     let r = vergence_http::get(&url, &tls(Some(cert.clone()))).expect("a trusted certificate");
     assert_eq!(r.status(), 200);
-    let body = String::from_utf8_lossy(&r.bytes().unwrap_or_default()).to_string();
+    let body = String::from_utf8_lossy(&r.bytes().expect("the status page")).to_string();
     assert!(body.contains("s_server") || body.contains("Ciphers"), "{body}");
     // Not the name in it (an address the certificate does not hold).
     let url = vergence_http::Url::parse(&format!("https://127.0.0.1:{port}/")).unwrap();

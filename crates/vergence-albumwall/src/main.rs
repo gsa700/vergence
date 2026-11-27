@@ -16,6 +16,7 @@ mod panelview;
 mod playbar;
 mod prefswin;
 mod reading;
+mod serverwin;
 mod vumeter;
 mod wallview;
 
@@ -42,6 +43,12 @@ use vergence_widgets::{
 };
 
 const SECTION: &str = vergence_albumwall::settings::SECTION;
+
+/// HTTPS for a music server: the system's OpenSSL in the confined helper,
+/// if it is installed.
+pub fn tls() -> Option<Arc<dyn vergence_http::Connector>> {
+    vergence_tls::Tls::system().map(|t| Arc::new(t) as Arc<dyn vergence_http::Connector>)
+}
 const APP_ID: &str = "vergence-albumwall";
 /// A library that cannot be reached is looked for again this often.
 const RETRY: Duration = Duration::from_secs(30);
@@ -58,6 +65,7 @@ mod cmd {
     pub const METERS: u32 = 9;
     pub const GO_TO_PLAYING: u32 = 10;
     pub const KEYS: u32 = 11;
+    pub const ADD_SERVER: u32 = 12;
     pub const PLAY_PAUSE: u32 = 20;
     pub const NEXT: u32 = 21;
     pub const PREVIOUS: u32 = 22;
@@ -87,6 +95,8 @@ mod timer {
 #[derive(Debug, Clone)]
 pub enum Msg {
     ChooseFolder,
+    /// A music server: the sign-in window.
+    AddServer,
     TryAgain,
     /// A tile pressed: its album unfolds (or folds, if it is the open one).
     Open(usize),
@@ -368,7 +378,13 @@ impl AlbumWall {
             return;
         }
         self.reading = Some(root.clone());
-        self.reader.start(root, rescan, self.waker.clone());
+        // A music server: its login, and HTTPS through the helper.
+        let server = self
+            .libraries
+            .current()
+            .and_then(|l| l.server.clone())
+            .and_then(|login| vergence_albumwall::subsonic::Server::new(login, tls()).ok());
+        self.reader.start(root, rescan, self.waker.clone(), server);
     }
 
     /// A finished read taken in: the wall, or "cannot be reached" (a wall of
@@ -430,6 +446,19 @@ impl AlbumWall {
         .padding(Padding::hv(20.0, 22.0))
         .radius(10.0)
         .width(Length::Fixed(420.0));
+        // The other half (milestone 2): a music server.
+        let server = panel(
+            column(vec![
+                label("On a music server").size(15.0).weight(600),
+                label("Navidrome, or any server that speaks Subsonic.").size(13.0).dim().wrap(),
+                button(label("Sign in to a server…")).look(ButtonLook::Normal).on_press(Msg::AddServer),
+            ])
+            .spacing(14.0),
+        )
+        .padding(Padding::hv(20.0, 22.0))
+        .radius(10.0)
+        .width(Length::Fixed(420.0));
+        let card = row(vec![card, server]).spacing(18.0);
         let mut lines = vec![
             label("AlbumWall").size(40.0).weight(700).align(Align::Center).width(Length::FILL),
             label("A wall of every album you own. Where is your music?")
@@ -438,6 +467,12 @@ impl AlbumWall {
                 .width(Length::FILL)
                 .wrap(),
             card,
+            label("You can add more, and switch between them, in Settings › Library. AlbumWall never fetches anything from the internet, and changes your files only if you tell it to.")
+                .size(13.0)
+                .dim()
+                .align(Align::Center)
+                .wrap()
+                .max_width(620.0),
         ];
         if let Some(p) = &self.problem {
             lines.push(label(p.clone()).size(13.0).color(t.accent).wrap());
@@ -482,6 +517,31 @@ impl AlbumWall {
     fn unreachable_view(&self, why: &Unreachable, held: usize) -> Element<Msg> {
         let lib = self.libraries.current().expect("a library");
         let root = lib.folder.to_string_lossy().into_owned();
+        // A music server, in its own words: its address, why, looked for again.
+        if let Some(login) = &lib.server {
+            let why = match why {
+                Unreachable::Failed(w) => w.clone(),
+                _ => "no answer".into(),
+            };
+            let text = format!(
+                "The server at {} is not answering ({why}). Nothing about the library has been forgotten, and it is looked for again every 30 seconds.",
+                login.address
+            );
+            return centered(
+                column(vec![
+                    label(format!("{} cannot be reached", lib.name))
+                        .size(21.0)
+                        .weight(600)
+                        .align(Align::Center)
+                        .width(Length::FILL),
+                    label(text).size(13.0).dim().wrap().align(Align::Center).max_width(620.0),
+                    row(vec![button(label("Try again")).look(ButtonLook::Normal).on_press(Msg::TryAgain)])
+                        .spacing(10.0),
+                ])
+                .spacing(14.0)
+                .align(Align::Center),
+            );
+        }
         let (title, text, choose) = if held > 0 {
             let after = " Nothing about the library has been forgotten, and it is looked for again every 30 seconds.";
             let text = match why {
@@ -871,6 +931,12 @@ impl AlbumWall {
         }
     }
 
+    /// The sign-in window for a music server.
+    fn add_server(&mut self, window: &mut Window) {
+        self.tell_link();
+        window.open_window(vergence_widgets::window(serverwin::ServerWindow::new(self.link.clone(), APP_ID)));
+    }
+
     /// Forward or back in the track playing, kept within it.
     fn seek_by(&mut self, step: f64) {
         if let Some(n) = self.player.as_ref().and_then(|p| p.state().now) {
@@ -993,7 +1059,11 @@ impl AlbumWall {
             .libraries
             .list
             .iter()
-            .map(|x| prefswin::Line { name: x.name.clone(), folder: x.folder.clone() })
+            .map(|x| prefswin::Line {
+                name: x.name.clone(),
+                folder: x.folder.clone(),
+                server: x.server.as_ref().map(|s| s.address.clone()),
+            })
             .collect();
         let reading = self.reader.running();
         let live = self.stats.clone().filter(|(f, _)| Some(f) == root.as_ref());
@@ -1025,6 +1095,13 @@ impl AlbumWall {
                 }
                 Ask::SwitchTo(i) => self.update(Msg::Library(i), window),
                 Ask::AddFolder => self.choose_folder(window),
+                Ask::AddServers(list) => {
+                    for (name, login) in list {
+                        self.libraries.add_server(&name, login);
+                    }
+                    self.keep_libraries();
+                    self.read(false);
+                }
                 Ask::Rescan => {
                     let files = self.shown.as_ref().map(|s| s.2);
                     self.link.borrow_mut().rescanned = files.map(|n| format!("Reading {} files again…", group(n)));
@@ -1064,7 +1141,14 @@ impl AlbumWall {
             return;
         }
         let was_current = i == self.libraries.current;
-        self.libraries.list.remove(i);
+        let gone = self.libraries.list.remove(i);
+        // A server's kept list and covers go with it (its sign-in went with the line).
+        if gone.server.is_some()
+            && let Some((list, covers)) = vergence_albumwall::subsonic::cache_paths(&gone.folder)
+        {
+            let _ = std::fs::remove_file(list);
+            let _ = std::fs::remove_dir_all(covers);
+        }
         if self.libraries.current > i || self.libraries.current >= self.libraries.list.len() {
             self.libraries.current = self.libraries.current.saturating_sub(1);
         }
@@ -1771,6 +1855,7 @@ impl Program for AlbumWall {
     fn update(&mut self, message: Msg, window: &mut Window) {
         match message {
             Msg::ChooseFolder => self.choose_folder(window),
+            Msg::AddServer => self.add_server(window),
             Msg::TryAgain => self.read(false),
             // A click: the keyboard's ring goes (a click never shows it).
             Msg::Open(i) => {
@@ -1938,6 +2023,7 @@ impl Program for AlbumWall {
         let loaded = self.player.as_ref().and_then(|p| p.state().now).is_some();
         let mut list = vec![
             C::own(cmd::ADD_FOLDER, "File", "Add a folder…", "Ctrl+O").featured(),
+            C::own(cmd::ADD_SERVER, "File", "Add a music server…", ""),
             C::own(cmd::RESCAN, "File", "Rescan the library", "Ctrl+R").enabled(self.libraries.current().is_some()),
             C::role(cmd::CLOSE, Role::CloseWindow),
             C::role(cmd::PASTE, Role::Paste).enabled(wall),
@@ -2002,6 +2088,7 @@ impl Program for AlbumWall {
             cmd::METERS => self.write_settings(Settings { meters: !self.settings.meters, ..self.settings.clone() }),
             cmd::GO_TO_PLAYING => self.update(Msg::GoToPlaying, window),
             cmd::KEYS => self.open_settings(Some(prefswin::Page::Keys), window),
+            cmd::ADD_SERVER => self.add_server(window),
             cmd::STATISTICS => self.open_settings(Some(prefswin::Page::Library), window),
             cmd::PLAY_PAUSE => self.update(Msg::PlayPause, window),
             cmd::NEXT => self.update(Msg::Next, window),

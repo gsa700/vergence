@@ -66,6 +66,8 @@ impl Page {
 pub struct Line {
     pub name: String,
     pub folder: PathBuf,
+    /// A music server's address (its folder is then the server's key).
+    pub server: Option<String>,
 }
 
 /// What the window asks of the wall.
@@ -81,6 +83,8 @@ pub enum Ask {
     Search(String),
     /// desktop.toml changed: read it again.
     Reread,
+    /// Music servers signed in to: each a library, named.
+    AddServers(Vec<(String, vergence_albumwall::subsonic::Login)>),
 }
 
 /// Shared between the wall and its settings windows (one thread: the
@@ -223,6 +227,7 @@ pub enum Msg {
     SwitchTo(usize),
     LibrarySettings(usize),
     AddFolder,
+    AddServer,
     Search(String),
 }
 
@@ -512,7 +517,11 @@ impl Prefs {
             let name = if shown { format!("{}  — on the wall", lib.name) } else { lib.name.clone() };
             let mut parts = vec![
                 label(name).size(13.0).weight(if shown { 600 } else { 400 }),
-                label(lib.folder.to_string_lossy().into_owned()).size(12.0).dim().elide().width(Length::FILL),
+                label(lib.server.clone().unwrap_or_else(|| lib.folder.to_string_lossy().into_owned()))
+                    .size(12.0)
+                    .dim()
+                    .elide()
+                    .width(Length::FILL),
             ];
             if shown && l.reading {
                 parts.push(label("reading…").size(12.0).dim());
@@ -547,7 +556,11 @@ impl Prefs {
                 "The wall shows one library at a time and never mixes them. Switch to puts a library on the wall, as the name in the bottom bar does. Settings is everything about one library; click a line to see its numbers below.",
             ),
             column(lines).spacing(4.0).width(Length::FILL),
-            row(vec![panel_button("Add a folder…").on_press(Msg::AddFolder)]).spacing(9.0),
+            row(vec![
+                panel_button("Add a folder…").on_press(Msg::AddFolder),
+                panel_button("Add a music server…").on_press(Msg::AddServer),
+            ])
+            .spacing(9.0),
         ];
         if let Some(folder) = picked_folder {
             let name = l.libraries.iter().find(|x| x.folder == folder).map(|x| x.name.clone()).unwrap_or_default();
@@ -995,6 +1008,10 @@ impl Program for Prefs {
                 }
             }
             Msg::AddFolder => Link::ask(&self.link, Ask::AddFolder),
+            Msg::AddServer => window.open_window(vergence_widgets::window(crate::serverwin::ServerWindow::new(
+                self.link.clone(),
+                &self.app_id,
+            ))),
             Msg::Search(q) => Link::ask(&self.link, Ask::Search(q)),
         }
         window.redraw();
@@ -1152,15 +1169,22 @@ impl Program for LibrarySettings {
             .spacing(10.0)
             .align(Align::Center)
             .width(Length::FILL),
-            panel(label(lib.folder.to_string_lossy().into_owned()).size(12.0).wrap().width(Length::FILL))
-                .color(t.card)
-                .edge(t.line, 1.0)
-                .radius(4.0)
-                .padding(Padding::hv(6.0, 10.0))
-                .width(Length::FILL),
-            note(
-                "Everything under this folder is scanned. Album art is taken from the tags, or from a cover file beside the tracks if there is none.",
-            ),
+            panel(
+                label(lib.server.clone().unwrap_or_else(|| lib.folder.to_string_lossy().into_owned()))
+                    .size(12.0)
+                    .wrap()
+                    .width(Length::FILL),
+            )
+            .color(t.card)
+            .edge(t.line, 1.0)
+            .radius(4.0)
+            .padding(Padding::hv(6.0, 10.0))
+            .width(Length::FILL),
+            note(if lib.server.is_some() {
+                "The albums are the server's, and so is the art. The files are played as they are, and nothing on the server is changed. Its album list and covers are kept on this computer so the wall opens at once."
+            } else {
+                "Everything under this folder is scanned. Album art is taken from the tags, or from a cover file beside the tracks if there is none."
+            }),
         ];
         if on_wall {
             v.push(row(vec![
@@ -1177,7 +1201,11 @@ impl Program for LibrarySettings {
         }
         v.push(panel(space().height(Length::Fixed(1.0))).color(t.line).width(Length::FILL).height(Length::Fixed(1.0)));
         v.push(row(vec![panel_button("Forget this library").on_press(LibMsg::Forget)]));
-        v.push(note("Removes it from the list. Nothing on disk is touched."));
+        v.push(note(if lib.server.is_some() {
+            "Removes it from the list, with its sign-in and the covers kept here. Nothing on the server is touched."
+        } else {
+            "Removes it from the list. Nothing on disk is touched."
+        }));
         v.push(
             row(vec![
                 space().width(Length::FILL),

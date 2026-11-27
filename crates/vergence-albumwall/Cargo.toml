@@ -20,6 +20,8 @@ vergence-text.workspace = true
 vergence-render.workspace = true
 vergence-ui.workspace = true
 vergence-widgets.workspace = true
+vergence-http.workspace = true
+vergence-tls.workspace = true
 
 [lib]
 path = "src/lib.rs"

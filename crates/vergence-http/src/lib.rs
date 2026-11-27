@@ -15,6 +15,8 @@
 //!
 //! No dependencies (whitepaper §8, "Our own parts").
 
+pub mod json;
+
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};

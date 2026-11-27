@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use vergence_albumwall::index::{self, Index};
 use vergence_albumwall::library::Album;
 use vergence_albumwall::scan::{self, Progress, Unreachable};
+use vergence_albumwall::subsonic::{self, Listing, Server};
 use vergence_widgets::Waker;
 
 /// What a finished read found.
@@ -41,8 +42,9 @@ pub struct Reader {
 
 impl Reader {
     /// Reads `root` on a thread of its own (`rescan`: every file opened, the
-    /// index not trusted). Nothing if a read is under way.
-    pub fn start(&mut self, root: PathBuf, rescan: bool, waker: Option<Waker>) {
+    /// index not trusted). Nothing if a read is under way. A music server
+    /// (`server`) is read from what is kept of it first, then asked.
+    pub fn start(&mut self, root: PathBuf, rescan: bool, waker: Option<Waker>, server: Option<Server>) {
         {
             let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
             if s.running {
@@ -56,6 +58,16 @@ impl Reader {
         std::thread::Builder::new()
             .name("scan".into())
             .spawn(move || {
+                if let Some(srv) = server {
+                    read_server(&root, srv, &state, &cancel, waker.as_ref());
+                    let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
+                    s.running = false;
+                    drop(s);
+                    if let Some(w) = &waker {
+                        w.wake();
+                    }
+                    return;
+                }
                 let index_path = index::path_for(&root);
                 let mut idx = index_path.as_deref().map(Index::load).unwrap_or_default();
                 let held = idx.tracks.keys().filter(|p| p.starts_with(&root)).count();
@@ -108,5 +120,54 @@ impl Reader {
     /// Stops a read under way between files (another library chosen).
     pub fn stop(&self) {
         self.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// A music server's library: what is kept of it shown at once, then the
+/// server asked (every album and song, the covers not yet kept); its answer
+/// replaces what was shown and is kept. A server that does not answer leaves
+/// what was kept on the wall (`held`: its songs), as a sleeping drive does.
+fn read_server(
+    root: &std::path::Path,
+    srv: Server,
+    state: &Arc<Mutex<State>>,
+    cancel: &AtomicBool,
+    waker: Option<&Waker>,
+) {
+    let wake = || {
+        if let Some(w) = waker {
+            w.wake();
+        }
+    };
+    let Some((list_path, cover_dir)) = subsonic::cache_paths(root) else { return };
+    let kept = Listing::load(&list_path);
+    let held = kept.as_ref().map_or(0, |l| l.songs.len());
+    if let Some(l) = &kept {
+        let albums = subsonic::albums(root, l, &cover_dir);
+        let files = l.songs.len();
+        state.lock().unwrap_or_else(|e| e.into_inner()).outcome = Some(Outcome::Albums { albums, files });
+        wake();
+    }
+    let progress = |songs: usize| {
+        state.lock().unwrap_or_else(|e| e.into_inner()).progress =
+            Some(Progress { done: songs, total: songs, opened: songs });
+        wake();
+    };
+    match srv.listing(cancel, progress) {
+        Ok(l) => {
+            srv.fetch_covers(&l, &cover_dir, cancel, |done, of| {
+                state.lock().unwrap_or_else(|e| e.into_inner()).progress =
+                    Some(Progress { done, total: of, opened: done });
+                wake();
+            });
+            let _ = l.save(&list_path);
+            let albums = subsonic::albums(root, &l, &cover_dir);
+            let files = l.songs.len();
+            state.lock().unwrap_or_else(|e| e.into_inner()).outcome = Some(Outcome::Albums { albums, files });
+        }
+        Err(e) => {
+            let why = Unreachable::Failed(e.to_string());
+            state.lock().unwrap_or_else(|e| e.into_inner()).outcome = Some(Outcome::Unreachable { why, held });
+        }
     }
 }
