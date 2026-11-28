@@ -238,3 +238,21 @@ AT-SPI bus. Milestone 1 sets no bus: pages then publish nothing.
   Safari fills that strip with the page's own background; a refinement for
   later. The patch is in `packaging/void/srcpkgs/wpewebkit/patches/`
   (built into the next package; 2.54.3_1 lacks it).
+- Steps 2, 4 and 5, first cut (2026-11-28, techbench): **crates/vergence-web**
+  with our own WPE platform in Rust and the test window
+  `vergence-web-view [--size WxH] URL`. WebKit is loaded at run time
+  (dlopen, `VERGENCE_WEBKIT_LIB` for a lab build), never linked, so the
+  workspace builds and tests on Hubble and kepler, which have no WebKit.
+  ffi.rs: our own binding, only the calls used. platform.rs: WPEDisplay,
+  WPEView and WPEToplevel subclassed (GType registration; each class's
+  size checked against g_type_query before any slot is written, so a
+  WebKit of another layout is refused); WPE headless's frame contract
+  (render_buffer, then released/rendered at the server's frame callback).
+  No EGL display is offered yet, so WebKit draws on the processor into
+  shared memory, which goes to the server as the window's picture as it
+  is. Seen in a headless session on techbench: a local page, and
+  https://wpewebkit.org/ over TLS, fonts and images right, the window
+  titled from the page; a click on a link, typing into a field (keys
+  through xkb), Page Down scrolling a page. Not yet: the wheel (the control
+  socket cannot send one; try by hand), GPU buffers (dmabuf) for the
+  frames, the display suite scenario, a live session.
