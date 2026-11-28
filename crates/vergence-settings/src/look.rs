@@ -53,7 +53,19 @@ impl App {
     /// A page: what it is for, then its groups, scrolling as one; its name
     /// (the sidebar's) names the scroll for Contract 3.
     pub(crate) fn page_layout(&self, title: &str, description: &str, items: Vec<Element<Message>>) -> Element<Message> {
-        let mut all = vec![self.intro(None, description)];
+        self.page_layout_headed(title, None, description, items)
+    }
+
+    /// A page as above with something before its description (About's logo).
+    pub(crate) fn page_layout_headed(
+        &self,
+        title: &str,
+        head: Option<Element<Message>>,
+        description: &str,
+        items: Vec<Element<Message>>,
+    ) -> Element<Message> {
+        let mut all: Vec<Element<Message>> = head.into_iter().collect();
+        all.push(self.intro(None, description));
         all.extend(items);
         // The page scrolls up under the frosted bar (look milestone 1's content under the bar).
         let top = self.top.get();

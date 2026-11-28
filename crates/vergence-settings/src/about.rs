@@ -120,7 +120,41 @@ fn screen_text(o: &OutputInfo) -> String {
     t
 }
 
+/// The Vergence mark (the logo Dave chose 2026-11-27; masters on techbench in
+/// ~/Documents/Projects/Vergence/Logo): a V of one stroke with round ends and
+/// a round point, and a focal dot below it, on a 64 grid, `size` across. Its
+/// colors follow light or dark as the masters' two versions do.
+fn logo_mark<M: 'static>(size: f32) -> Element<M> {
+    drawing(move |scene: &mut Scene, _: &mut Fonts, r: Rect, theme: &Theme| {
+        let k = size / 64.0;
+        let (x, y) = (r.x + (r.w - size) / 2.0, r.y + (r.h - size) / 2.0);
+        let p = |gx: f32, gy: f32| Point::new(x + gx * k, y + gy * k);
+        let (v, dot) = if theme.dark {
+            (Color::rgb(0xc9, 0xc4, 0xff), Color::rgb(0xff, 0xff, 0xff))
+        } else {
+            (Color::rgb(0x2d, 0x2f, 0x5c), Color::rgb(0x5b, 0x56, 0xb0))
+        };
+        // Lines have round ends, so the two meeting at the point make the
+        // master's round join.
+        scene.line(p(14.0, 10.5), p(32.0, 41.5), 7.5 * k, v);
+        scene.line(p(32.0, 41.5), p(50.0, 10.5), 7.5 * k, v);
+        let d = 4.8 * k;
+        scene.fill_rounded(Rect::new(x + 32.0 * k - d, y + 52.5 * k - d, 2.0 * d, 2.0 * d), d, dot);
+    })
+    .width(Length::Fixed(size))
+    .height(Length::Fixed(size))
+}
+
 impl App {
+    /// The lockup at the top of About: the mark and "vergence" in Inter 600,
+    /// in the masters' proportions (mark 64, text 44 starting at 72).
+    fn lockup(&self) -> Element<Message> {
+        let ink = if self.theme().dark { Color::rgb(0xe9, 0xe7, 0xff) } else { Color::rgb(0x1a, 0x1d, 0x3a) };
+        row(vec![logo_mark(48.0), label("vergence").size(33.0).weight(600).color(ink)])
+            .spacing(6.0)
+            .align(Align::Center)
+    }
+
     /// The summary's lines, name and value, as shown and as copied.
     fn summary(&self) -> Vec<(&'static str, String)> {
         let f = facts();
@@ -183,8 +217,9 @@ impl App {
             ])
             .spacing(8.0),
         ));
-        self.page_layout(
+        self.page_layout_headed(
             "About",
+            Some(self.lockup()),
             "Vergence: every app the right size, in the right place and readable, on any monitor setup.",
             vec![
                 self.group(Some("This computer"), rows),
