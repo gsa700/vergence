@@ -3,8 +3,8 @@
 *Drafted 2026-11-28 on Control, after web milestone 1 (pages in a window of
 their own, vergence-web's own WPE platform, GPU frames; Dave: "lag is gone")
 and the browser decisions of the same night (docs/web-milestone-1.md, "The
-browser's form and the component's shape"). The questions below wait for
-Dave's answers; nothing is built.*
+browser's form and the component's shape"). **Answered 2026-11-28 01:42**
+(see "Dave's answers").*
 
 **Decided already (Dave, 2026-11-27 and 11-28):**
 - vergence-web is a **service process**: any program places a **web view**
@@ -113,3 +113,16 @@ three things are new:
 7. **The browser's name** in the launcher and its window: (a) "Web";
    (b) "Browser"; (c) a name of its own. *Lean: (a), as GNOME's; plain
    names are Vergence's way (FileView aside).*
+
+## Dave's answers (2026-11-28, 01:42)
+
+1. **(a)** The server composites the page into the program's window.
+2. **(a)** vergence-web's own socket; the server's token ties a view to a
+   region.
+3. **(a)** On demand: started by the first program that wants a view, gone
+   a while after the last closes.
+4. **(a)** One vergence-web per session.
+5. **(a)** Context menus and select lists drawn by the program's toolkit.
+6. **(a)** The browser skeleton, and a small test program for the suite.
+7. **(c) A name of its own**, chosen later; built meanwhile as
+   `vergence-browser`, titled with a placeholder.
