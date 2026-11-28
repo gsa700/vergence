@@ -1,0 +1,46 @@
+--- a/Source/WebKit/UIProcess/API/glib/WebKitWebView.cpp
++++ b/Source/WebKit/UIProcess/API/glib/WebKitWebView.cpp
+@@ -78,6 +78,7 @@
+ #include "WebPageMessages.h"
+ #include <JavaScriptCore/APICast.h>
+ #include <JavaScriptCore/JSRetainPtr.h>
++#include <WebCore/BoxExtents.h>
+ #include <WebCore/CertificateInfo.h>
+ #include <WebCore/FloatPoint.h>
+ #include <WebCore/FloatSize.h>
+@@ -3419,6 +3420,19 @@
+ 
+     return webView->priv->view->wpeView();
+ }
++
++/**
++ * webkit_web_view_set_obscured_content_insets:
++ * @web_view: a #WebKitWebView
++ *
++ * Vergence spike: the view's edges covered by the program's own bars, in
++ * points; the page lays out and scrolls as if its edges started inside them.
++ */
++void webkit_web_view_set_obscured_content_insets(WebKitWebView* webView, double top, double right, double bottom, double left)
++{
++    g_return_if_fail(WEBKIT_IS_WEB_VIEW(webView));
++    getPage(webView).setObscuredContentInsets(WebCore::FloatBoxExtent(float(top), float(right), float(bottom), float(left)));
++}
+ #endif
+ #endif
+ 
+--- a/Source/WebKit/UIProcess/API/glib/WebKitWebView.h.in
++++ b/Source/WebKit/UIProcess/API/glib/WebKitWebView.h.in
+@@ -488,6 +488,13 @@
+ webkit_web_view_get_wpe_view                         (WebKitWebView             *web_view);
+ 
+ WEBKIT_API void
++webkit_web_view_set_obscured_content_insets          (WebKitWebView             *web_view,
++                                                      double                     top,
++                                                      double                     right,
++                                                      double                     bottom,
++                                                      double                     left);
++
++WEBKIT_API void
+ webkit_web_view_toggle_inspector                     (WebKitWebView             *web_view);
+ #endif
+ #endif

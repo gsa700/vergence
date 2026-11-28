@@ -219,3 +219,22 @@ AT-SPI bus. Milestone 1 sets no bus: pages then publish nothing.
   run-time dependencies hold no Wayland, libinput, X11 or ATK: the
   platform switches did what they should. Not yet installed anywhere; the
   rebuild script for security releases is still to come.
+- Inset spike (2026-11-28, techbench, Dave's ask): **frost under the
+  toolbar works with WebKit.** WPE 2.54.3 built with a small patch (21 lines: one function, its declaration, an include)
+  exposing `webkit_web_view_set_obscured_content_insets()` (WebKit's own
+  `WebPageProxy::setObscuredContentInsets`, which on non-Cocoa ports
+  already reaches the web process); a headless 800x600 view, the frames
+  WebKit hands the platform read through WPEView's `buffer-rendered`.
+  With a top inset of 80: at the top the page starts below the band (a
+  `position: fixed; top: 0` header drawn at y 80, the document's first
+  block right under it, the scroll bar only beside the unobscured part);
+  scrolled, the rows pass up through the band (what the frost blurs) and
+  the fixed header stays pinned at 80; the page reports innerHeight 520 of
+  600 and scrolls 80 further, so its bottom is reachable. The band is
+  opaque black where the page has nothing (above the document at the top);
+  with the view's background set transparent it is transparent, so the
+  server shows the window's ground there (frosted), and vergence-web lays
+  white under the page itself for pages with no background of their own.
+  Safari fills that strip with the page's own background; a refinement for
+  later. The patch is in `packaging/void/srcpkgs/wpewebkit/patches/`
+  (built into the next package; 2.54.3_1 lacks it).
