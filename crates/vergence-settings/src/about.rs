@@ -200,8 +200,24 @@ impl App {
     }
 
     pub(crate) fn about(&self) -> Element<Message> {
-        let mut rows: Vec<Element<Message>> =
-            self.summary().into_iter().map(|(n, v)| setting(n, "", label(v).dim())).collect();
+        // A summary line keeps its name and wraps its value: a setting row's
+        // value takes its whole width first, so a long one (a laptop's maker,
+        // model and firmware) squeezed the name to nothing and ran off the
+        // page's edge.
+        let line = |name: &str, value: String| -> Element<Message> {
+            panel(
+                row(vec![
+                    label(name).width(Length::Fixed(110.0)),
+                    label(value).dim().wrap().width(Length::FILL).align(Align::End),
+                ])
+                .spacing(16.0)
+                .align(Align::Center)
+                .width(Length::FILL),
+            )
+            .padding(Padding::hv(8.0, 12.0))
+            .width(Length::FILL)
+        };
+        let mut rows: Vec<Element<Message>> = self.summary().into_iter().map(|(n, v)| line(n, v)).collect();
         rows.push(setting(
             "Share",
             "These lines as plain text, for a bug report or a question.",
