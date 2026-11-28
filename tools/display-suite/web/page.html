@@ -1,0 +1,17 @@
+<!doctype html><meta charset=utf-8><title>web suite</title>
+<!-- The display suite's page for vergence-web-view (42-web-view.sh): colored
+     blocks where the scenario looks for them, a link and a field that write
+     what happened into the title, and length enough to scroll. -->
+<style>
+body { margin: 0; font: 20px sans-serif; background: #ffffff }
+#red { position: absolute; left: 0; top: 0; width: 200px; height: 100px; background: #e02020 }
+#blue { position: absolute; left: 600px; top: 0; width: 200px; height: 100px; background: #2060ff }
+#link { position: absolute; left: 40px; top: 160px; width: 200px; height: 60px; background: #20a040; color: #fff }
+#field { position: absolute; left: 40px; top: 260px; width: 300px; height: 40px; font-size: 20px }
+#tall { height: 4000px }
+</style>
+<div id=red></div><div id=blue></div>
+<a id=link href="#" onclick="document.title = 'clicked'; return false">click me</a>
+<input id=field oninput="document.title = 'typed:' + this.value">
+<div id=tall></div>
+<script>addEventListener('scroll', () => { document.title = 'scrolled:' + Math.round(scrollY) })</script>

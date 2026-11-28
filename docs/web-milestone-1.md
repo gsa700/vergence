@@ -266,3 +266,18 @@ AT-SPI bus. Milestone 1 sets no bus: pages then publish nothing.
   page and wpewebkit.org drawn right, click, typing and Page Down as on
   the processor. Dave tried the processor build live on techbench: the
   wheel steps by notches, "really responsive, a little lag but not bad".
+- Step 1 finished, step 6 (2026-11-28): wpewebkit **2.54.3_2** (with the
+  inset patch) built on techbench and installed on techbench and Hubble,
+  so the web view needs no lab paths. Display-suite scenario
+  **42-web-view** (tools/display-suite/web/page.html): on the GPU and on
+  the processor, the window titled from the page, the picture its size,
+  the page's blocks and ground where the page puts them, a click, typing,
+  Page Down; skipped where WebKit is not installed. 16 of 16 on techbench
+  and on Hubble.
+- Dave, 2026-11-28 01:20: building WebKit inside Vergence, or a Vergence
+  port of WebKit, considered and set aside: WPE is one of WebKit's own
+  ports (the same repository as Safari's), our platform is about 1,400
+  lines against WPE's ~30,000 of platform code and ~13,000 of WPE-only
+  glue we would otherwise carry and merge every release; we pin and build
+  WPE ourselves, a stalled WPE would mean forking only its slice, and
+  Servo stays the real hedge. "ok, agree."

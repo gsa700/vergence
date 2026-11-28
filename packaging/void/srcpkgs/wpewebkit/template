@@ -11,13 +11,14 @@
 #
 # Built on techbench (~/.cache/vergence-lab/void-packages): about 18 minutes
 # with -j16, dependencies included. The WPE Platform API is inside
-# libWPEWebKit-2.0.so.1 (wpe-platform-2.0.pc names the same library). Before
-# a package that links it (vergence-web) is built, the build box's
-# common/shlibs needs the line "libWPEWebKit-2.0.so.1 wpewebkit-2.54.3_1",
-# or xbps-src cannot work out that dependency.
+# libWPEWebKit-2.0.so.1 (wpe-platform-2.0.pc names the same library).
+# vergence-web loads it at run time (dlopen), so xbps cannot see that
+# dependency: the vergence package lists wpewebkit in its depends.
+# patches/obscured-content-insets.patch exposes WebKit's own obscured content
+# insets (pages scrolling under a frosted toolbar; the inset spike, 2026-11-28).
 pkgname=wpewebkit
 version=2.54.3
-revision=1
+revision=2
 build_style=cmake
 configure_args="-DPORT=WPE -DCMAKE_SKIP_RPATH=ON
  -DENABLE_DOCUMENTATION=OFF -DENABLE_INTROSPECTION=OFF
