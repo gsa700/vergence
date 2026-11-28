@@ -109,6 +109,64 @@ meaning tree for agents, the magnifier and screen readers); 4, the browser
 6. **(a)** Rust, with our own small binding to the GObject calls needed.
 7. **(a)** Void first; FreeBSD once techbench runs it.
 
+## The browser's form and the component's shape (Dave, 2026-11-28)
+
+**The browser's look:** a plain Vergence window. The server draws its tab
+bar (Bar::Tabs: tabs dragged between windows, the tab menu, the alarm red
+for a superuser's tab, as Terminal's), and under it one toolbar the browser
+draws: back, forward, reload, the address field, Protection's shield, the
+menu. No status bar by default: a hovered link's address shows in a small
+overlay at the page's bottom left while the pointer is on it; View > Status
+Bar turns on a real bar (as Safari's switch). Not chosen: Safari's compact
+bar (the browser drawing its own tabs, outside the server's) and the
+address in a server-drawn bar.
+
+**Frost under the toolbar (Dave asked; milestone 2):** the page scrolls up
+under the tab bar and toolbar, frosted, as the terminal's lines do under
+its bar. The server composites the page's pixels, so it can blur them; the
+browser never sees them. Two pieces: (1) the native protocol lets a window
+declare a glass band taller than the bar (the bar plus its toolbar): the
+server frosts it and the browser draws its controls with no ground of
+their own (a bus version step); (2) the page lays out with its top below
+that band, so its top and any fixed header are not hidden at the start:
+WebKit has this inside (WebPageProxy::setObscuredContentInsets, how Safari
+scrolls pages under its toolbar) but WPE's API does not offer it, so a
+small patch in our package and a spike to see WPE's scrolling honor it.
+In the neutral interface it is a "top inset"; an engine without it gets
+the page starting below the toolbar and plain glass.
+
+**The component's shape: two interfaces, vergence-web between them.**
+
+1. *Apps to vergence-web: a protocol on Vergence's bus.* An app places a
+   web view in its native window as one more node of its window tree;
+   vergence-web fills it with pixels (composited by the server) and gets
+   its input. Asked, in our own terms: open a view with a policy (scripts
+   on or off, network on or off, Protection on, which profile), load an
+   address or an HTML string, back, forward, reload, stop, find, zoom, top
+   inset. Told: title, address, load progress, connection security, the
+   site's icon, the hovered link, requests for a new tab or window,
+   downloads, permission requests (camera, location, notifications), and
+   context menus and select lists, which the app or the server draws in
+   Vergence's look. Our apps use a small Rust client crate; any other
+   language speaks the protocol.
+2. *vergence-web to an engine: a Rust trait inside vergence-web.*
+   `engine-webkit` implements it now (through our GObject binding,
+   question 6), `engine-servo` later (Servo is a Rust crate). Chosen per
+   view, so two engines can run side by side. The trait includes per-site
+   data clearing (Protection's Forget on Close needs it; WebKit's website
+   data manager has it; any engine must).
+
+History, bookmarks, site permissions and Protection's lists live in
+vergence-web's own stores, never the engine's; the engine holds cookies
+and site data while in use, cleared through the trait. The conformance
+suite drives the app protocol, so the same checks judge any engine.
+Processes: one vergence-web per session hosts every view; pages run in the
+engine's own confined processes (WebKit's web and network processes).
+
+*Later:* the server knows which part of a window is web content, so it can
+add its own mark of the true site beside the address field, which no page
+can fake.
+
 ## Research (2026-11-27, from the WPE WebKit 2.54.3 source)
 
 **How a platform of our own registers: in code, no module needed.**
