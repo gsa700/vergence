@@ -110,11 +110,13 @@ Energy setting), a night light (warmer at night), an ambient light sensor.
   kept by its monitor's identity (~/.local/state/vergence/brightness.toml)
   and set again 0.3 s after login. Settings > Screens has the slider.
   Display suite 41 on a stand-in backlight.
-- **Step 5 (2026-11-27): written, not yet tried on a monitor.** Our own
+- **Step 5 (2026-11-27): built, and tried on techbench's LG 27" 4K (DP-1,
+  `i2c-9`)**: vdm read it at 100%, set 70% and read 70% back, and Dave's
+  session showed its slider ("it worked"). Our own
   DDC/CI client (vergence-dm ddc.rs: Get and Set VCP feature for Luminance,
   0x10, on the connector's own I²C line, its frames checked in unit tests);
   vdm lists external screens whose monitors answer and sets them in their
   own range; the server asks for their levels at start and every minute.
   The package and install.sh load `i2c-dev` (now, and at boot through
-  modules-load.d). To try on techbench's LG.
+  modules-load.d). FreeBSD's DDC/CI waits for drm-kmod's I²C to be seen working.
 
