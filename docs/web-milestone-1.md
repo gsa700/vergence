@@ -5,7 +5,7 @@ memory 01M8DFXCH2CA9BDMAQCYQHJZJJ, the web plan; 01M8DGMVR6FB30Y6WWW2S9KZAQ,
 the browser's Protection design) and the roadmap's "The web component"
 (docs/apps-roadmap.md). Dave: "webkit in a buildable component model. So we
 can include it with any of our apps and others could too." The questions
-below wait for his answers; nothing is built.*
+below were answered 2026-11-27 (see "Dave's answers"); nothing is built.*
 
 **Decided already (Dave, 2026-11-21 and 11-26):**
 - The engine is **WPE WebKit** now, and vergence-web is built so the engine
@@ -92,6 +92,22 @@ meaning tree for agents, the magnifier and screen readers); 4, the browser
 7. **FreeBSD in milestone 1:** (a) Void first, FreeBSD once techbench runs
    it (the 13900K builds WebKit in minutes; kepler would take hours and
    leaves within a week); (b) try a FreeBSD build on kepler now. *Lean: (a).*
+
+## Dave's answers (2026-11-27, 23:45)
+
+1. **(a)** We build and package WPE WebKit ourselves: Void now, FreeBSD
+   later.
+2. **(a)** A service process.
+3. **(a)** No video or audio in the first version.
+4. **(b) The browser comes first**, not Mail. The browser's window is a
+   native app around a web region, so the order is milestone 1 (pages in a
+   test window), milestone 2 (web regions inside other windows), then the
+   browser (tabs, history, bookmarks, downloads, Protection) ahead of
+   meaning (milestone 3). Mail's message view follows.
+5. Decided when the browser's Protection work starts (with the browser
+   first, that comes sooner).
+6. **(a)** Rust, with our own small binding to the GObject calls needed.
+7. **(a)** Void first; FreeBSD once techbench runs it.
 
 **Research before building:** whether WPE Platform offers a direct way to
 read a page's accessibility tree (milestone 3), or only AT-SPI; how a
