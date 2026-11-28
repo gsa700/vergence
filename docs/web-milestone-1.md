@@ -163,6 +163,13 @@ suite drives the app protocol, so the same checks judge any engine.
 Processes: one vergence-web per session hosts every view; pages run in the
 engine's own confined processes (WebKit's web and network processes).
 
+**The protocol's versions (Dave, 2026-11-28, packaging milestone 2
+question 4):** the app-facing web protocol takes a window of versions from
+its first release: vergence-web accepts apps speaking any version from the
+oldest it supports up to its own, changes inside the window only add, a
+breaking change raises the floor. vergence-web is its own package,
+depending on wpewebkit, updated at its own pace.
+
 *Later:* the server knows which part of a window is web content, so it can
 add its own mark of the true site beside the address field, which no page
 can fake.

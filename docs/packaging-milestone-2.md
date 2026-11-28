@@ -3,7 +3,9 @@
 *Drafted 2026-11-28 on Control from Dave's word that night: "you shouldn't
 have to download 500 MB just to get the latest calculator or Edit
 version", then "likewise, vergence-web will update more often than
-AlbumWall". The questions below wait for his answers; nothing is built.
+AlbumWall". **Answered 2026-11-28 01:38: Dave took the lean on all five
+questions** ("agree with your leans on all five"); nothing is built yet,
+and CONTRIBUTING's bus rule changes when step 1 is.
 For after the browser's first milestones, or before going public,
 whichever comes first.*
 
