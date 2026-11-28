@@ -124,5 +124,8 @@ three things are new:
 4. **(a)** One vergence-web per session.
 5. **(a)** Context menus and select lists drawn by the program's toolkit.
 6. **(a)** The browser skeleton, and a small test program for the suite.
-7. **(c) A name of its own**, chosen later; built meanwhile as
-   `vergence-browser`, titled with a placeholder.
+7. **(c) A name of its own: Navigate** (Dave, 02:12, barring conflicts;
+   memory 01M8GKCQCKHEV4B14VMRYK2FZQ). The program stays
+   `vergence-browser`; Navigate is its title and display name. Open
+   before going public: two live USPTO NAVIGATE records with unknown goods
+   (Reg. 4799259, Serial 97906457), to check for Class 9/42 software.
