@@ -129,3 +129,26 @@ three things are new:
    `vergence-browser`; Navigate is its title and display name. Open
    before going public: two live USPTO NAVIGATE records with unknown goods
    (Reg. 4799259, Serial 97906457), to check for Class 9/42 software.
+
+## Progress
+
+- Step 1a (2026-11-28, bus v49): embedded regions. `WinRequest::Embed`
+  (made on first use, moved and resized after; zero size hides),
+  `EmbedRemove`, `EmbedJoin` (answered `Created`, so the joining program
+  treats the region as a window of its own), `WinEvent::EmbedToken`,
+  `EmbedState`. Server (native.rs): a joined region is a native window
+  that is never placed on the desktop, drawn inside its host
+  (decor.rs, `embed_elements`, in front of the host's picture for now),
+  told the region's size and the host's scale, paced by the host's frames;
+  the pointer over a region goes to it (an implicit grab while a button is
+  held), the host hands its keyboard to the region last clicked (and back
+  when its own part is clicked), the pointer's shape is the region's; a
+  host closing tells its regions' windows to close, a region's program
+  ending empties the region and tells the host. Test modes: `vnative
+  --region X,Y,W,H --embed-run CMD` and `vergence-web-view --embed TOKEN`.
+  Seen headless on techbench: the suite's page inside a vnative window's
+  region, a click and typing reaching it, the page's I-beam over its field.
+  Tests 1281/1281/1266 (techbench, Hubble, kepler); display suite 42/42 on
+  techbench and Hubble. Not yet: a host's rounded bottom corners over a
+  region reaching them (the region is square), regions in `vctl picture`
+  and thumbnails.

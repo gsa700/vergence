@@ -382,6 +382,62 @@ pub fn picture_elements(
     Some((vec![e], size))
 }
 
+/// The pictures of the windows filling a native window's regions (web
+/// milestone 2), front to back (the last region made in front), each drawn
+/// one pixel for one into its rectangle; `top` is the host picture's top
+/// left corner, from the screen's. A picture larger than its region (drawn
+/// before a resize reached it) is cropped, never squeezed.
+pub(crate) fn embed_elements(
+    renderer: &mut GlesRenderer,
+    host: &crate::native::NativeWindow,
+    top: Point<i32, Logical>,
+    scale: f64,
+) -> Vec<SceneElement> {
+    let mut out = Vec::new();
+    for r in host.regions().iter().rev() {
+        let Some(w) = r.joined.as_ref() else { continue };
+        if r.rect.size.w <= 0 || r.rect.size.h <= 0 {
+            continue;
+        }
+        let Some(p) = w.native().and_then(|e| e.picture()) else { continue };
+        let at = top + r.rect.loc;
+        let at_f = at.to_f64().to_physical(scale);
+        let cover = edges_px(at, r.rect.size, scale);
+        let src = shown_px((p.px.w, p.px.h), cover.size);
+        match &p.content {
+            crate::native::Content::Memory(buffer) => {
+                match MemoryRenderBufferRenderElement::from_buffer(
+                    renderer,
+                    at_f,
+                    buffer,
+                    None,
+                    Some(src),
+                    Some(r.rect.size),
+                    Kind::Unspecified,
+                ) {
+                    Ok(e) => out.push(SceneElement::Memory(e)),
+                    Err(e) => tracing::warn!("embedded picture: {e:?}"),
+                }
+            }
+            crate::native::Content::Gpu(_) => {
+                if let Some((t, _, _, _)) = native_texture(renderer, w) {
+                    out.push(SceneElement::Texture(
+                        smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer(
+                            at_f,
+                            &t,
+                            None,
+                            Some(src),
+                            Some(r.rect.size),
+                            Kind::Unspecified,
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+    out
+}
+
 /// The serial of a native window's GPU picture (GpuPicture::serial), 0 for
 /// any other.
 fn native_serial(w: &Win) -> u64 {
@@ -1644,6 +1700,10 @@ impl Server {
                 let sharp = self.zoom_sharp(out).unwrap_or(1.0);
                 let density = scale * sharp;
                 let alt = if (density - n.scale()).abs() > 1e-3 { self.scene_alt(renderer, n, density) } else { None };
+                // Its regions' windows (web milestone 2), in front of its own
+                // picture, each in its rectangle of the picture's points.
+                let top = Point::<i32, Logical>::from((loc.x, loc.y - n.inset()));
+                elements.extend(embed_elements(renderer, n, top - out.loc, scale));
                 if let Some(p) = n.picture() {
                     // A window that draws under its bar starts that much higher.
                     let top = Point::<i32, Logical>::from((loc.x, loc.y - n.inset()));

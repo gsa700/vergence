@@ -1,7 +1,10 @@
 //! vergence-web-view: one web page in a plain Vergence window (web milestone
 //! 1, step 5), for trying vergence-web's platform and for the checks.
 //!
-//!     vergence-web-view [--size WxH] [URL]
+//!     vergence-web-view [--size WxH] [--embed TOKEN] [URL]
+//!
+//! `--embed TOKEN` fills another program's region (bus v49, web milestone
+//! 2: `vnative --region ... --embed-run`) instead of opening a window.
 //!
 //! A native window (as vnative's) whose picture is WebKit's frame: each frame
 //! WebKit finishes is attached with the rectangles that changed, a GPU
@@ -132,8 +135,14 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut size = (1024.0, 768.0);
     let mut url = "about:blank".to_string();
+    let mut embed: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
+        if args[i] == "--embed" {
+            embed = args.get(i + 1).cloned();
+            i += 2;
+            continue;
+        }
         if args[i] == "--size" {
             if let Some((w, h)) = args.get(i + 1).and_then(|s| s.split_once('x')) {
                 size = (w.parse().unwrap_or(size.0), h.parse().unwrap_or(size.1));
@@ -166,8 +175,9 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let created = client.borrow_mut().request(|serial| {
-        ClientMsg::Window(WinRequest::Create {
+    let created = client.borrow_mut().request(|serial| match &embed {
+        Some(token) => ClientMsg::Window(WinRequest::EmbedJoin { serial, window: WINDOW, token: token.clone() }),
+        None => ClientMsg::Window(WinRequest::Create {
             serial,
             window: WINDOW,
             role: "main".into(),
@@ -177,7 +187,7 @@ fn main() {
             height: size.1,
             parent: 0,
             place: Place::Anywhere,
-        })
+        }),
     });
     if let Err(e) = created {
         eprintln!("vergence-web-view: the server refused the window: {e:?}");

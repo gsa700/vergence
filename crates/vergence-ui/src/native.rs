@@ -867,6 +867,9 @@ impl<'a> Native<'a> {
             WinEvent::Seen { window, seen } => {
                 self.with_window(window, |app, w| app.seen(seen, w))?;
             }
+            // Regions for other programs (bus v49): the toolkit's web view
+            // element takes these in web milestone 2, step 4.
+            WinEvent::EmbedToken { .. } | WinEvent::EmbedState { .. } => {}
             // The tabs agents hold a grant for (bus v39).
             WinEvent::AgentTabs { window, tabs } => {
                 let tabs: Vec<(u64, String, bool)> = tabs.into_iter().map(|t| (t.node, t.agent, t.typing)).collect();

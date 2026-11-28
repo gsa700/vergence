@@ -501,6 +501,37 @@ pub enum WinRequest {
         window: u32,
         on: bool,
     },
+    /// A region of this window another program may fill (bus v49, web
+    /// milestone 2: a web view in a browser's window): made with its first
+    /// `Embed`, moved and resized by later ones, in the window's points;
+    /// zero width or height hides it. Answered once, when made, with
+    /// [`WinEvent::EmbedToken`]: whoever presents the token
+    /// ([`WinRequest::EmbedJoin`]) fills the region. The server composites it
+    /// inside the window, and sends the pointer over it, and the keyboard
+    /// while it has the focus, to the program that filled it.
+    Embed {
+        window: u32,
+        region: u32,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    },
+    /// The region is gone; whoever filled it is told to close it.
+    EmbedRemove {
+        window: u32,
+        region: u32,
+    },
+    /// Fill another program's region (bus v49): `token` from its
+    /// `EmbedToken`, handed over by that program; `window` the id this
+    /// connection gives the region, used from then on as its own window's
+    /// (Configure with the region's size and scale, Attach, Frame, input).
+    /// Answered `Created` with this serial, or refused; a token works once.
+    EmbedJoin {
+        serial: u32,
+        window: u32,
+        token: String,
+    },
     /// Every key to this window while it has the keyboard, the server's own
     /// shortcuts included (bus v40, remote milestone 1: Vergence Remote's
     /// viewer), or no longer. The server answers [`WinEvent::KeysCaptured`];
@@ -1029,6 +1060,20 @@ pub enum WinEvent {
         window: u32,
         seen: bool,
     },
+    /// A region made with `Embed` (bus v49): the token another program
+    /// presents to fill it (one use).
+    EmbedToken {
+        window: u32,
+        region: u32,
+        token: String,
+    },
+    /// Whether a program fills the region now (joined), or has stopped
+    /// (closed it, or its connection ended).
+    EmbedState {
+        window: u32,
+        region: u32,
+        joined: bool,
+    },
     /// Send the text of meaning node `node` (its value, else its name) from
     /// character `offset`, at most `len` characters (bus v37, paged reading:
     /// the tree cuts every text at [`MEANING_TEXT_MAX`] characters). Answered
@@ -1094,6 +1139,9 @@ pub(crate) mod op {
     pub const REVOKE_AGENT: u16 = 129;
     pub const CAPTURE_KEYS: u16 = 130;
     pub const FULLSCREEN: u16 = 131;
+    pub const EMBED: u16 = 132;
+    pub const EMBED_REMOVE: u16 = 133;
+    pub const EMBED_JOIN: u16 = 134;
     // Server to client.
     pub const CREATED: u16 = 100;
     pub const CONFIGURE: u16 = 101;
@@ -1137,6 +1185,8 @@ pub(crate) mod op {
     pub const AGENT_TABS: u16 = 139;
     pub const KEYS_CAPTURED: u16 = 140;
     pub const SEEN: u16 = 141;
+    pub const EMBED_TOKEN: u16 = 142;
+    pub const EMBED_STATE: u16 = 143;
 
     /// Whether an opcode is a window message's (either way).
     pub fn is_window(opcode: u16) -> bool {
@@ -1634,6 +1684,21 @@ impl WinRequest {
                 e.u32(*window).bool(*on);
                 e
             }
+            WinRequest::Embed { window, region, x, y, width, height } => {
+                let mut e = Encoder::frame(op::EMBED);
+                e.u32(*window).u32(*region).f64(*x).f64(*y).f64(*width).f64(*height);
+                e
+            }
+            WinRequest::EmbedRemove { window, region } => {
+                let mut e = Encoder::frame(op::EMBED_REMOVE);
+                e.u32(*window).u32(*region);
+                e
+            }
+            WinRequest::EmbedJoin { serial, window, token } => {
+                let mut e = Encoder::frame(op::EMBED_JOIN);
+                e.u32(*serial).u32(*window).str(token);
+                e
+            }
             WinRequest::TextPage { window, serial, node, found, offset, total, text } => {
                 let mut e = Encoder::frame(op::TEXT_PAGE);
                 e.u32(*window).u32(*serial).u64(*node).bool(*found).u32(*offset).u32(*total).str(text);
@@ -1837,6 +1902,16 @@ impl WinRequest {
             op::REVOKE_AGENT => WinRequest::RevokeAgent { window: d.u32()?, node: d.u64()?, agent: d.str()? },
             op::CAPTURE_KEYS => WinRequest::CaptureKeys { window: d.u32()?, on: d.bool()? },
             op::FULLSCREEN => WinRequest::Fullscreen { window: d.u32()?, on: d.bool()? },
+            op::EMBED => WinRequest::Embed {
+                window: d.u32()?,
+                region: d.u32()?,
+                x: d.f64()?,
+                y: d.f64()?,
+                width: d.f64()?,
+                height: d.f64()?,
+            },
+            op::EMBED_REMOVE => WinRequest::EmbedRemove { window: d.u32()?, region: d.u32()? },
+            op::EMBED_JOIN => WinRequest::EmbedJoin { serial: d.u32()?, window: d.u32()?, token: d.str()? },
             op::TEXT_PAGE => {
                 let (window, serial, node, found, offset, total) =
                     (d.u32()?, d.u32()?, d.u64()?, d.bool()?, d.u32()?, d.u32()?);
@@ -2079,6 +2154,16 @@ impl WinEvent {
                 e.u32(*window).bool(*seen);
                 e
             }
+            WinEvent::EmbedToken { window, region, token } => {
+                let mut e = Encoder::frame(op::EMBED_TOKEN);
+                e.u32(*window).u32(*region).str(token);
+                e
+            }
+            WinEvent::EmbedState { window, region, joined } => {
+                let mut e = Encoder::frame(op::EMBED_STATE);
+                e.u32(*window).u32(*region).bool(*joined);
+                e
+            }
             WinEvent::AgentTabs { window, tabs } => {
                 let mut e = Encoder::frame(op::AGENT_TABS);
                 e.u32(*window).count(tabs.len());
@@ -2243,6 +2328,8 @@ impl WinEvent {
             op::AGENT_ACTING => WinEvent::AgentActing { window: d.u32()?, node: d.u64()?, agent: d.str()? },
             op::KEYS_CAPTURED => WinEvent::KeysCaptured { window: d.u32()?, on: d.bool()? },
             op::SEEN => WinEvent::Seen { window: d.u32()?, seen: d.bool()? },
+            op::EMBED_TOKEN => WinEvent::EmbedToken { window: d.u32()?, region: d.u32()?, token: d.str()? },
+            op::EMBED_STATE => WinEvent::EmbedState { window: d.u32()?, region: d.u32()?, joined: d.bool()? },
             op::AGENT_TABS => {
                 let window = d.u32()?;
                 let n = d.count(13)?;
@@ -2577,6 +2664,10 @@ mod tests {
             WinRequest::CaptureKeys { window: 3, on: true },
             WinRequest::Fullscreen { window: 3, on: true },
             WinRequest::Fullscreen { window: 4, on: false },
+            WinRequest::Embed { window: 1, region: 2, x: 0.0, y: 72.5, width: 800.0, height: 527.5 },
+            WinRequest::Embed { window: 1, region: 2, x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
+            WinRequest::EmbedRemove { window: 1, region: 2 },
+            WinRequest::EmbedJoin { serial: 9, window: 7, token: "0123456789abcdef0123456789abcdef".into() },
             WinRequest::TextPage {
                 window: 1,
                 serial: 9,
@@ -2721,6 +2812,9 @@ mod tests {
             WinEvent::AgentTabs { window: 1, tabs: vec![] },
             WinEvent::KeysCaptured { window: 1, on: false },
             WinEvent::Seen { window: 1, seen: false },
+            WinEvent::EmbedToken { window: 1, region: 2, token: "0123456789abcdef0123456789abcdef".into() },
+            WinEvent::EmbedState { window: 1, region: 2, joined: true },
+            WinEvent::EmbedState { window: 1, region: 2, joined: false },
             WinEvent::AgentTabs {
                 window: 1,
                 tabs: vec![

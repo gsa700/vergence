@@ -22,6 +22,12 @@
 //! The clipboard: `c` copies a line of text, `v` pastes and prints what
 //! came; offers and requests are printed.
 //!
+//! Embedded regions (bus v49, web milestone 2): `--region X,Y,W,H` asks for
+//! a region of the window (in its points) for another program to fill, and
+//! `--embed-run CMD` runs CMD (by sh -c) once the token comes, `{token}` in
+//! it replaced: `vnative --region 40,60,400,300 --embed-run
+//! 'vergence-web-view --embed {token} page.html'`.
+//!
 //! Placement (Contract 2): `--role` gives the window another identity (so
 //! window memory has no place for it yet), `--place` asks for a point of a
 //! monitor by its id (`vbus outputs` lists them) when it opens, and `p`
@@ -271,6 +277,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let ServerMsg::Window(WinEvent::Created { token, .. }) = &reply {
         println!("created, token {token:?}");
     }
+    // A region for another program (web milestone 2).
+    let region = arg("--region").and_then(|r| {
+        let v: Vec<f64> = r.split(',').filter_map(|n| n.trim().parse().ok()).collect();
+        (v.len() == 4).then(|| (v[0], v[1], v[2], v[3]))
+    });
+    let embed_run = arg("--embed-run");
+    if let Some((x, y, width, height)) = region {
+        c.send(&ClientMsg::Window(WinRequest::Embed { window: WINDOW, region: 1, x, y, width, height }))?;
+    }
 
     let mut picture: Option<Picture> = None;
     // Where the pointer is (None: not on the window), and the square last drawn.
@@ -407,6 +422,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let s = c.next_serial();
                     c.send(&ClientMsg::Window(WinRequest::Paste { serial: s, kind: TEXT.into() }))?;
                 }
+            }
+            WinEvent::EmbedToken { region, token, .. } => {
+                println!("region {region}: token {token}");
+                if let Some(cmd) = &embed_run {
+                    let cmd = cmd.replace("{token}", &token);
+                    match std::process::Command::new("sh").arg("-c").arg(&cmd).spawn() {
+                        Ok(_) => println!("ran: {cmd}"),
+                        Err(e) => println!("could not run {cmd}: {e}"),
+                    }
+                }
+            }
+            WinEvent::EmbedState { region, joined, .. } => {
+                println!("region {region}: {}", if joined { "filled" } else { "empty" })
             }
             WinEvent::ClipboardOffer { kinds } => println!("clipboard offers {kinds:?}"),
             WinEvent::ClipboardSend { kind, fd } => {

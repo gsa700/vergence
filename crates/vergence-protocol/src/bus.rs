@@ -101,11 +101,15 @@
 //! Version 48 (AlbumWall's wordmark, Dave: "our logo in place of the standard title"):
 //! `BrandLook::mark`, the name as lettering in place of the title, and `lead`, its first
 //! letter's color.
+//! Version 49 (web milestone 2: web views inside other programs' windows):
+//! `WinRequest::Embed`, `EmbedRemove` and `EmbedJoin`, `WinEvent::EmbedToken` and
+//! `EmbedState`: a region of one program's window that another fills, the server
+//! compositing it and routing the input over it.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 48;
+pub const VERSION: u32 = 49;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

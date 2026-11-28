@@ -44,6 +44,15 @@
 // it on the same terms. Meaning (Contract 3, step 6): each window's tree as
 // it last sent it, kept for `vctl tree`; nothing else reads it yet, and a
 // secret field's text never arrives (the toolkit keeps it).
+//
+// Embedded regions (web milestone 2, bus v49): a window names a region of
+// its picture (`Embed`) and is given a one-time token; whoever presents it
+// (`EmbedJoin`, another connection: vergence-web for a web view) gets a
+// window of its own that is never placed on the desktop but drawn inside the
+// region (decor.rs, embed_elements), told the region's size and the host's
+// scale, paced by the host's frames. The pointer over a region goes to it
+// (an implicit grab while a button is held); the host hands its keyboard to
+// the region last clicked, until its own widgets are clicked again.
 
 use std::{
     os::{fd::AsFd, unix::fs::FileExt},
@@ -67,6 +76,28 @@ use crate::{Server, win::Win};
 
 /// Most windows one client may have open.
 const MAX_WINDOWS: usize = 64;
+/// The most regions one window may have for others to fill.
+const MAX_REGIONS: usize = 16;
+
+/// A region of a native window another program fills (web milestone 2).
+#[derive(Clone)]
+pub(crate) struct Region {
+    pub id: u32,
+    /// In the window's points, from its picture's top left corner.
+    pub rect: Rectangle<i32, Logical>,
+    /// Presented once to fill it; cleared when used.
+    token: String,
+    /// The window of whoever fills it.
+    pub joined: Option<Win>,
+}
+
+/// Where an embedded window is drawn: its host window and region.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EmbedLink {
+    pub host_client: u32,
+    pub host: u32,
+    pub region: u32,
+}
 /// The smallest size a window is given, in reference units.
 const MIN_SIDE: i32 = 32;
 
@@ -148,6 +179,8 @@ pub struct NativeWindow {
     /// then goes by the token; otherwise by numbering, as for programs that
     /// keep none, so they leave no token behind in the store.
     pub keeps_token: bool,
+    /// Drawn inside another window's region, never on the desktop itself.
+    pub embed_of: Option<EmbedLink>,
     alive: AtomicBool,
     state: Mutex<State>,
     user_data: UserDataMap,
@@ -208,6 +241,55 @@ struct State {
     /// The server stopped drawing its scenes (step 6), and why: it sends
     /// pixels from then on (told by `ScenesOff`).
     scenes_off: Option<String>,
+    /// Its regions for other programs to fill, in order (later ones in front).
+    regions: Vec<Region>,
+    /// The region its keyboard goes to (the last clicked), the one the
+    /// pointer is over, and the one a held button keeps.
+    focus_region: Option<u32>,
+    pointer_region: Option<u32>,
+    grab_region: Option<u32>,
+}
+
+impl State {
+    /// A window's state when it is made.
+    fn new(title: String, size: Size<i32, Logical>, parent: u32) -> State {
+        State {
+            title,
+            size,
+            scale: 1.0,
+            text: 1.0,
+            maximized: false,
+            activated: false,
+            sent_serial: 0,
+            acked_serial: 0,
+            pending: None,
+            place: Point::default(),
+            place_maximized: false,
+            shown: false,
+            picture: None,
+            frame_wanted: false,
+            cursor: smithay::input::pointer::CursorIcon::Default,
+            meaning: None,
+            bar: None,
+            under_bar: false,
+            inset: 0,
+            parent,
+            style: None,
+            commands: Vec::new(),
+            terminal: false,
+            bar_style: Default::default(),
+            scene: None,
+            scene_images: std::collections::HashMap::new(),
+            scene_image_bytes: 0,
+            scenes: 0,
+            scene_refused: None,
+            scenes_off: None,
+            regions: Vec::new(),
+            focus_region: None,
+            pointer_region: None,
+            grab_region: None,
+        }
+    }
 }
 
 /// A keyed scene read against the pictures a window keeps (`images`, their
@@ -481,7 +563,53 @@ impl NativeWindow {
         &self.user_data
     }
 
+    /// Its regions for other programs to fill (decor.rs draws them).
+    pub(crate) fn regions(&self) -> Vec<Region> {
+        self.state.lock().unwrap().regions.clone()
+    }
+
+    /// The window filling region `id`, if one does.
+    fn region_window(&self, id: u32) -> Option<Arc<NativeWindow>> {
+        let s = self.state.lock().unwrap();
+        match s.regions.iter().find(|r| r.id == id)?.joined.as_ref()? {
+            Win::Native(e) => Some(e.clone()),
+            _ => None,
+        }
+    }
+
+    /// The windows filling its regions.
+    fn region_windows(&self) -> Vec<Arc<NativeWindow>> {
+        let s = self.state.lock().unwrap();
+        s.regions
+            .iter()
+            .filter_map(|r| match r.joined.as_ref()? {
+                Win::Native(e) => Some(e.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The program its keyboard goes to (the clipboard's rule).
+    fn key_client(&self) -> u32 {
+        let focus = self.state.lock().unwrap().focus_region;
+        focus.and_then(|r| self.region_window(r)).map_or(self.client, |e| e.client)
+    }
+
+    /// Where its keyboard goes: the region last clicked, if filled, else itself.
+    fn key_target(self: &Arc<Self>) -> Arc<NativeWindow> {
+        let focus = self.state.lock().unwrap().focus_region;
+        focus.and_then(|r| self.region_window(r)).unwrap_or_else(|| self.clone())
+    }
+
     pub fn cursor(&self) -> smithay::input::pointer::CursorIcon {
+        // Over a region: the shape its own program asked for.
+        let over = {
+            let s = self.state.lock().unwrap();
+            s.grab_region.or(s.pointer_region)
+        };
+        if let Some(e) = over.and_then(|r| self.region_window(r)) {
+            return e.cursor();
+        }
         self.state.lock().unwrap().cursor
     }
 
@@ -615,39 +743,9 @@ impl Server {
                     role: role.clone(),
                     token: token.clone(),
                     keeps_token,
+                    embed_of: None,
                     alive: AtomicBool::new(true),
-                    state: Mutex::new(State {
-                        title,
-                        size: asked,
-                        scale: 1.0,
-                        text: 1.0,
-                        maximized: false,
-                        activated: false,
-                        sent_serial: 0,
-                        acked_serial: 0,
-                        pending: None,
-                        place: Point::default(),
-                        place_maximized: false,
-                        shown: false,
-                        picture: None,
-                        frame_wanted: false,
-                        cursor: smithay::input::pointer::CursorIcon::Default,
-                        meaning: None,
-                        bar: None,
-                        under_bar: false,
-                        inset: 0,
-                        parent,
-                        style: None,
-                        commands: Vec::new(),
-                        terminal: false,
-                        bar_style: Default::default(),
-                        scene: None,
-                        scene_images: std::collections::HashMap::new(),
-                        scene_image_bytes: 0,
-                        scenes: 0,
-                        scene_refused: None,
-                        scenes_off: None,
-                    }),
+                    state: Mutex::new(State::new(title, asked, parent)),
                     user_data: UserDataMap::new(),
                 });
                 let w = Win::Native(n.clone());
@@ -708,6 +806,112 @@ impl Server {
             // The program closed the window itself: the user closed it, for good.
             // (A program that goes away, or a session that ends, sends no Destroy:
             // its windows are remembered for next time.)
+            WinRequest::Embed { window, region, x, y, width, height } => {
+                let Some(Win::Native(host)) = self.natives.get(&(client, window)).cloned() else { return };
+                // No regions inside regions.
+                if host.embed_of.is_some() {
+                    return;
+                }
+                let v = |a: f64| if a.is_finite() { a.round().clamp(0.0, 16_384.0) as i32 } else { 0 };
+                let rect = Rectangle::<i32, Logical>::new((v(x), v(y)).into(), (v(width), v(height)).into());
+                let (made, resize) = {
+                    let mut s = host.state.lock().unwrap();
+                    if let Some(r) = s.regions.iter_mut().find(|r| r.id == region) {
+                        let resized = r.rect.size != rect.size;
+                        r.rect = rect;
+                        (None, if resized { r.joined.clone() } else { None })
+                    } else {
+                        if s.regions.len() >= MAX_REGIONS {
+                            return tracing::warn!(
+                                "native: client {client} window {window}: more than {MAX_REGIONS} regions"
+                            );
+                        }
+                        let token = new_token();
+                        s.regions.push(Region { id: region, rect, token: token.clone(), joined: None });
+                        (Some(token), None)
+                    }
+                };
+                if let Some(token) = made {
+                    self.bus_send(client, ServerMsg::Window(WinEvent::EmbedToken { window, region, token }));
+                }
+                if let Some(Win::Native(e)) = resize
+                    && rect.size.w > 0
+                    && rect.size.h > 0
+                {
+                    self.native_configure(&e, rect.size, false);
+                }
+            }
+            WinRequest::EmbedRemove { window, region } => {
+                let Some(Win::Native(host)) = self.natives.get(&(client, window)).cloned() else { return };
+                let gone = {
+                    let mut s = host.state.lock().unwrap();
+                    s.regions.iter().position(|r| r.id == region).map(|i| s.regions.remove(i))
+                };
+                if let Some(r) = gone {
+                    self.region_gone(&host, &r);
+                }
+            }
+            WinRequest::EmbedJoin { serial, window, token } => {
+                if window == 0 || self.natives.contains_key(&(client, window)) {
+                    return self.native_refuse(
+                        client,
+                        serial,
+                        ErrorCode::BadMessage,
+                        format!("window id {window} is 0 or in use"),
+                    );
+                }
+                // A token is 32 hex digits and works once.
+                let found = (token.len() == 32)
+                    .then(|| {
+                        self.natives.iter().find_map(|((hc, hid), w)| {
+                            let Win::Native(h) = w else { return None };
+                            let s = h.state.lock().unwrap();
+                            s.regions
+                                .iter()
+                                .find(|r| r.joined.is_none() && r.token == token)
+                                .map(|r| (*hc, *hid, r.id, r.rect, h.clone()))
+                        })
+                    })
+                    .flatten();
+                let Some((hc, hid, rid, rect, host)) = found else {
+                    return self.native_refuse(client, serial, ErrorCode::Denied, "no region has that token".into());
+                };
+                let size: Size<i32, Logical> = (rect.size.w.max(1), rect.size.h.max(1)).into();
+                let (scale, text) = {
+                    let s = host.state.lock().unwrap();
+                    (s.scale, s.text)
+                };
+                let n = Arc::new(NativeWindow {
+                    client,
+                    id: window,
+                    app_id: self.bus_app_id(client),
+                    role: "embed".into(),
+                    token: new_token(),
+                    keeps_token: false,
+                    embed_of: Some(EmbedLink { host_client: hc, host: hid, region: rid }),
+                    alive: AtomicBool::new(true),
+                    state: Mutex::new(State::new(String::new(), size, 0)),
+                    user_data: UserDataMap::new(),
+                });
+                {
+                    // Shown inside the host, never placed on the desktop.
+                    let mut s = n.state.lock().unwrap();
+                    (s.scale, s.text, s.shown) = (scale, text, true);
+                }
+                let w = Win::Native(n.clone());
+                {
+                    let mut s = host.state.lock().unwrap();
+                    if let Some(r) = s.regions.iter_mut().find(|r| r.id == rid) {
+                        r.joined = Some(w.clone());
+                        r.token.clear();
+                    }
+                }
+                self.natives.insert((client, window), w);
+                tracing::info!("native: {:?} fills region {rid} of window {hid} as its window {window}", n.app_id);
+                self.bus_send(client, ServerMsg::Window(WinEvent::Created { serial, window, token: String::new() }));
+                self.native_send_configure(&n);
+                self.bus_send(hc, ServerMsg::Window(WinEvent::EmbedState { window: hid, region: rid, joined: true }));
+            }
             WinRequest::Destroy { window } => {
                 if let Some(w) = self.natives.remove(&(client, window)) {
                     self.native_drop(&w);
@@ -949,11 +1153,23 @@ impl Server {
             WinRequest::Cursor { window, shape } => {
                 if let Some(Win::Native(n)) = self.natives.get(&(client, window)).cloned() {
                     n.state.lock().unwrap().cursor = cursor_icon(shape);
-                    // Shown at once if the pointer is on it.
-                    let id = self.win_id(&Win::Native(n.clone()));
-                    if self.input.seat.pointer_focus() == Some(vergence_seat::Target::Native(id)) {
-                        self.pointer_image.status =
-                            smithay::input::pointer::CursorImageStatus::Named(cursor_icon(shape));
+                    // Shown at once if the pointer is on it (an embedded window's:
+                    // on its host, over its region).
+                    let on = match n.embed_of {
+                        Some(link) => self.natives.get(&(link.host_client, link.host)).cloned().filter(|h| {
+                            h.native().is_some_and(|h| {
+                                let s = h.state.lock().unwrap();
+                                s.grab_region.or(s.pointer_region) == Some(link.region)
+                            })
+                        }),
+                        None => Some(Win::Native(n.clone())),
+                    };
+                    if let Some(on) = on {
+                        let id = self.win_id(&on);
+                        if self.input.seat.pointer_focus() == Some(vergence_seat::Target::Native(id)) {
+                            self.pointer_image.status =
+                                smithay::input::pointer::CursorImageStatus::Named(cursor_icon(shape));
+                        }
                     }
                 }
             }
@@ -1481,6 +1697,19 @@ impl Server {
     /// The window is gone: remembered, taken off the screen, forgotten.
     fn native_drop(&mut self, w: &Win) {
         let Win::Native(n) = w else { return };
+        if let Some(link) = n.embed_of {
+            self.embed_dropped(n, link);
+            n.kill();
+            self.scenes_forget(n.client, n.id);
+            return;
+        }
+        // Whoever fills its regions is told to close them.
+        let regions = std::mem::take(&mut n.state.lock().unwrap().regions);
+        for r in &regions {
+            if let Some(Win::Native(e)) = &r.joined {
+                self.native_close(e);
+            }
+        }
         if n.state.lock().unwrap().shown {
             self.remember(w);
         }
@@ -1529,12 +1758,85 @@ impl Server {
         }
     }
 
+    /// An embedded window is gone (closed, or its program's connection
+    /// ended): its region is empty again, its host told; the keyboard, if it
+    /// had it, goes back to the host.
+    fn embed_dropped(&mut self, n: &Arc<NativeWindow>, link: EmbedLink) {
+        let Some(Win::Native(host)) = self.natives.get(&(link.host_client, link.host)).cloned() else { return };
+        let had_keys = {
+            let mut s = host.state.lock().unwrap();
+            let Some(r) = s.regions.iter_mut().find(|r| r.id == link.region) else { return };
+            if !r.joined.as_ref().is_some_and(|j| j.native().is_some_and(|j| std::ptr::eq(j, Arc::as_ptr(n)))) {
+                return;
+            }
+            r.joined = None;
+            if s.pointer_region == Some(link.region) {
+                s.pointer_region = None;
+            }
+            if s.grab_region == Some(link.region) {
+                s.grab_region = None;
+            }
+            s.focus_region == Some(link.region) && {
+                s.focus_region = None;
+                true
+            }
+        };
+        if had_keys
+            && self
+                .input
+                .keyboard_native
+                .as_ref()
+                .is_some_and(|k| k.native().is_some_and(|k| std::ptr::eq(k, Arc::as_ptr(&host))))
+        {
+            let serial = smithay::utils::SERIAL_COUNTER.next_serial().into();
+            self.keys_enter(&host, serial);
+        }
+        self.bus_send(
+            link.host_client,
+            ServerMsg::Window(WinEvent::EmbedState { window: link.host, region: link.region, joined: false }),
+        );
+    }
+
+    /// A region its window removed: whoever filled it is told to close it,
+    /// and the keyboard comes back to the window if the region had it.
+    fn region_gone(&mut self, host: &Arc<NativeWindow>, r: &Region) {
+        let had_keys = {
+            let mut s = host.state.lock().unwrap();
+            if s.pointer_region == Some(r.id) {
+                s.pointer_region = None;
+            }
+            if s.grab_region == Some(r.id) {
+                s.grab_region = None;
+            }
+            s.focus_region == Some(r.id) && {
+                s.focus_region = None;
+                true
+            }
+        };
+        if let Some(Win::Native(e)) = &r.joined {
+            if had_keys {
+                self.bus_send(e.client, ServerMsg::Window(WinEvent::KeyboardLeave { window: e.id }));
+                if self
+                    .input
+                    .keyboard_native
+                    .as_ref()
+                    .is_some_and(|k| k.native().is_some_and(|k| std::ptr::eq(k, Arc::as_ptr(host))))
+                {
+                    let serial = smithay::utils::SERIAL_COUNTER.next_serial().into();
+                    self.keys_enter(host, serial);
+                }
+            }
+            self.native_close(e);
+        }
+    }
+
     /// Tell the window its size, scale and state (paced: one configure waits
     /// for the client to acknowledge the last).
     pub fn native_configure(&mut self, n: &NativeWindow, size: Size<i32, Logical>, maximized: bool) {
         // On whole pixels at a fractional scale (grid.rs); a maximized
         // window fills its work area as it is.
-        let on_grid = !maximized && self.natives.get(&(n.client, n.id)).is_some_and(|w| self.on_grid(w));
+        let on_grid =
+            !maximized && n.embed_of.is_none() && self.natives.get(&(n.client, n.id)).is_some_and(|w| self.on_grid(w));
         let size = if on_grid { Self::grid_size(size, n.scale()) } else { size };
         {
             let mut s = n.state.lock().unwrap();
@@ -1609,6 +1911,12 @@ impl Server {
             if std::mem::take(&mut n.state.lock().unwrap().frame_wanted) {
                 self.bus_send(n.client, ServerMsg::Window(WinEvent::Frame { window: n.id, time_ms }));
             }
+            // The windows in its regions go at its pace.
+            for e in n.region_windows() {
+                if std::mem::take(&mut e.state.lock().unwrap().frame_wanted) {
+                    self.bus_send(e.client, ServerMsg::Window(WinEvent::Frame { window: e.id, time_ms }));
+                }
+            }
             let Some(geo) = self.space.element_geometry(&w) else { continue };
             let (scale, text) = self.screen_at(geo);
             let changed = {
@@ -1621,6 +1929,14 @@ impl Server {
             };
             if changed {
                 tracing::info!("native: {:?} window {} now at scale {scale:.4}, text {text:.3}", n.app_id, n.id);
+                // Its regions' windows are drawn at its scale.
+                for e in n.region_windows() {
+                    {
+                        let mut s = e.state.lock().unwrap();
+                        (s.scale, s.text) = (scale, text);
+                    }
+                    self.native_send_configure(&e);
+                }
                 // On the new screen's grid (grid.rs): its size again, then its place.
                 let (size, maximized) = {
                     let s = n.state.lock().unwrap();
@@ -1687,22 +2003,67 @@ impl Server {
     /// The pointer came onto a native window (the seat's Enter, dispatch.rs).
     pub fn native_enter(&mut self, w: &Win, pos: Point<f64, Logical>) {
         let Win::Native(n) = w else { return };
-        let (x, y) = self.native_local(n, pos);
+        let over = self.region_at(n, pos);
+        n.state.lock().unwrap().pointer_region = over.as_ref().map(|(r, _, _)| *r);
+        match over {
+            Some((_, e, (x, y))) => self.pointer_enter_to(&e, x, y),
+            None => {
+                let (x, y) = self.native_local(n, pos);
+                self.pointer_enter_to(n, x, y);
+            }
+        }
+    }
+
+    fn pointer_enter_to(&mut self, n: &Arc<NativeWindow>, x: f64, y: f64) {
         let serial = smithay::utils::SERIAL_COUNTER.next_serial().into();
         self.bus_send(n.client, ServerMsg::Window(WinEvent::PointerEnter { window: n.id, serial, x, y }));
     }
 
-    /// The pointer left it.
+    /// The pointer left it (from its region, if it was over one).
     pub fn native_leave(&mut self, w: &Win) {
         let Win::Native(n) = w else { return };
-        self.bus_send(n.client, ServerMsg::Window(WinEvent::PointerLeave { window: n.id }));
+        let was = {
+            let mut s = n.state.lock().unwrap();
+            s.grab_region = None;
+            s.pointer_region.take()
+        };
+        let to = was.and_then(|r| n.region_window(r)).unwrap_or_else(|| n.clone());
+        self.bus_send(to.client, ServerMsg::Window(WinEvent::PointerLeave { window: to.id }));
     }
 
-    /// The pointer moved on it (or anywhere, while a button pressed on it is held).
+    /// The pointer moved on it (or anywhere, while a button pressed on it is
+    /// held): to the region it is over, or the one a held button keeps,
+    /// with leave and enter when it crosses a region's edge.
     pub fn native_motion(&mut self, w: &Win, pos: Point<f64, Logical>, time_ms: u32) {
         let Win::Native(n) = w else { return };
-        let (x, y) = self.native_local(n, pos);
-        self.bus_send(n.client, ServerMsg::Window(WinEvent::PointerMotion { window: n.id, time_ms, x, y }));
+        let (grab, was) = {
+            let s = n.state.lock().unwrap();
+            (s.grab_region, s.pointer_region)
+        };
+        if let Some(g) = grab
+            && let Some((e, (x, y))) = self.region_local(n, g, pos)
+        {
+            return self.bus_send(e.client, ServerMsg::Window(WinEvent::PointerMotion { window: e.id, time_ms, x, y }));
+        }
+        let over = self.region_at(n, pos);
+        let now = over.as_ref().map(|(r, _, _)| *r);
+        if now != was {
+            let from = was.and_then(|r| n.region_window(r)).unwrap_or_else(|| n.clone());
+            self.bus_send(from.client, ServerMsg::Window(WinEvent::PointerLeave { window: from.id }));
+            n.state.lock().unwrap().pointer_region = now;
+            match &over {
+                Some((_, e, (x, y))) => self.pointer_enter_to(e, *x, *y),
+                None => {
+                    let (x, y) = self.native_local(n, pos);
+                    self.pointer_enter_to(n, x, y);
+                }
+            }
+        }
+        let (to, (x, y)) = match over {
+            Some((_, e, xy)) => (e, xy),
+            None => (n.clone(), self.native_local(n, pos)),
+        };
+        self.bus_send(to.client, ServerMsg::Window(WinEvent::PointerMotion { window: to.id, time_ms, x, y }));
     }
 
     /// A point of the desktop in a native window's reference units.
@@ -1711,21 +2072,96 @@ impl Server {
         (pos.x - loc.x as f64, pos.y - loc.y as f64)
     }
 
-    /// A button, pressed or let go, for it.
-    pub fn native_button(&mut self, w: &Win, button: u32, pressed: bool, serial: u32, time_ms: u32) {
-        let Win::Native(n) = w else { return };
-        self.bus_send(
-            n.client,
-            ServerMsg::Window(WinEvent::PointerButton { window: n.id, serial, time_ms, button, pressed }),
-        );
+    /// The filled region of `host` at a point of the desktop (the last made
+    /// in front), its window, and the point in that window's units. Regions
+    /// are in the host's picture's points, which start `inset` above the
+    /// place the server's bar leaves for the window.
+    fn region_at(
+        &self,
+        host: &Arc<NativeWindow>,
+        pos: Point<f64, Logical>,
+    ) -> Option<(u32, Arc<NativeWindow>, (f64, f64))> {
+        let (x, y) = self.native_local(host, pos);
+        let y = y + host.inset() as f64;
+        let s = host.state.lock().unwrap();
+        s.regions.iter().rev().find_map(|r| {
+            let Some(Win::Native(e)) = &r.joined else { return None };
+            let (rx, ry) = (r.rect.loc.x as f64, r.rect.loc.y as f64);
+            let (rw, rh) = (r.rect.size.w as f64, r.rect.size.h as f64);
+            (x >= rx && x < rx + rw && y >= ry && y < ry + rh).then(|| (r.id, e.clone(), (x - rx, y - ry)))
+        })
     }
 
-    /// The wheel or a touchpad's scroll, for it.
+    /// A point of the desktop in region `id`'s window's units, wherever it
+    /// is (a button held from inside the region).
+    fn region_local(
+        &self,
+        host: &Arc<NativeWindow>,
+        id: u32,
+        pos: Point<f64, Logical>,
+    ) -> Option<(Arc<NativeWindow>, (f64, f64))> {
+        let (x, y) = self.native_local(host, pos);
+        let y = y + host.inset() as f64;
+        let s = host.state.lock().unwrap();
+        let r = s.regions.iter().find(|r| r.id == id)?;
+        let Some(Win::Native(e)) = &r.joined else { return None };
+        Some((e.clone(), (x - r.rect.loc.x as f64, y - r.rect.loc.y as f64)))
+    }
+
+    /// A button, pressed or let go, for it: to the region under the pointer
+    /// (kept until let go). A press moves the window's keyboard to the
+    /// region, or back to the window itself.
+    pub fn native_button(&mut self, w: &Win, button: u32, pressed: bool, serial: u32, time_ms: u32) {
+        let Win::Native(n) = w else { return };
+        let (grab, over, focus) = {
+            let s = n.state.lock().unwrap();
+            (s.grab_region, s.pointer_region, s.focus_region)
+        };
+        let at = grab.or(over);
+        if pressed {
+            {
+                let mut s = n.state.lock().unwrap();
+                if s.grab_region.is_none() {
+                    s.grab_region = over;
+                }
+            }
+            if at != focus {
+                let has_keys = self
+                    .input
+                    .keyboard_native
+                    .as_ref()
+                    .is_some_and(|k| k.native().is_some_and(|k| std::ptr::eq(k, Arc::as_ptr(n))));
+                if has_keys {
+                    let from = n.key_target();
+                    self.bus_send(from.client, ServerMsg::Window(WinEvent::KeyboardLeave { window: from.id }));
+                }
+                n.state.lock().unwrap().focus_region = at.filter(|r| n.region_window(*r).is_some());
+                if has_keys {
+                    self.keys_enter(n, serial);
+                }
+            }
+        }
+        let to = at.and_then(|r| n.region_window(r)).unwrap_or_else(|| n.clone());
+        self.bus_send(
+            to.client,
+            ServerMsg::Window(WinEvent::PointerButton { window: to.id, serial, time_ms, button, pressed }),
+        );
+        if !pressed {
+            n.state.lock().unwrap().grab_region = None;
+        }
+    }
+
+    /// The wheel or a touchpad's scroll, for it (or the region under the pointer).
     pub fn native_axis(&mut self, w: &Win, time_ms: u32, source: u8, dx: f64, dy: f64, v120x: i32, v120y: i32) {
         let Win::Native(n) = w else { return };
+        let at = {
+            let s = n.state.lock().unwrap();
+            s.grab_region.or(s.pointer_region)
+        };
+        let to = at.and_then(|r| n.region_window(r)).unwrap_or_else(|| n.clone());
         self.bus_send(
-            n.client,
-            ServerMsg::Window(WinEvent::PointerAxis { window: n.id, time_ms, source, dx, dy, v120x, v120y }),
+            to.client,
+            ServerMsg::Window(WinEvent::PointerAxis { window: to.id, time_ms, source, dx, dy, v120x, v120y }),
         );
     }
 
@@ -1738,6 +2174,14 @@ impl Server {
     /// keymap first, if this client hasn't had it, and the repeat, then enter.
     pub fn native_keyboard_enter(&mut self, w: &Win, serial: u32) {
         let Win::Native(n) = w else { return };
+        self.keys_enter(n, serial);
+    }
+
+    /// The keyboard comes to a window, or to the region it hands its
+    /// keyboard to: the keymap and repeat first if that program hasn't had
+    /// them, then enter and the modifiers now.
+    fn keys_enter(&mut self, host: &Arc<NativeWindow>, serial: u32) {
+        let n = host.key_target();
         if self.native_input.keymap_sent.insert(n.client) {
             match self.native_keymap() {
                 Ok((fd, size)) => self.bus_send(n.client, ServerMsg::Window(WinEvent::Keymap { fd, size })),
@@ -1747,16 +2191,23 @@ impl Server {
             self.bus_send(n.client, ServerMsg::Window(WinEvent::Repeat { rate, delay }));
         }
         self.bus_send(n.client, ServerMsg::Window(WinEvent::KeyboardEnter { window: n.id, serial }));
+        if !Arc::ptr_eq(&n, host)
+            && let Some((depressed, latched, locked, group)) = self.input.keys.as_ref().map(|k| k.serialized())
+        {
+            self.bus_send(n.client, ServerMsg::Window(WinEvent::Modifiers { depressed, latched, locked, group }));
+        }
     }
 
     pub fn native_keyboard_leave(&mut self, w: &Win) {
         let Win::Native(n) = w else { return };
+        let n = n.key_target();
         self.bus_send(n.client, ServerMsg::Window(WinEvent::KeyboardLeave { window: n.id }));
     }
 
     /// A key: the evdev code (xkb's minus 8), as Wayland sends it.
     pub fn native_key(&mut self, w: &Win, xkb_code: u32, pressed: bool, serial: u32, time_ms: u32) {
         let Win::Native(n) = w else { return };
+        let n = n.key_target();
         let key = xkb_code.saturating_sub(8);
         self.bus_send(n.client, ServerMsg::Window(WinEvent::Key { window: n.id, serial, time_ms, key, pressed }));
     }
@@ -1764,6 +2215,7 @@ impl Server {
     /// The modifiers now, from our own xkb state (keys.rs).
     pub fn native_modifiers(&mut self, w: &Win) {
         let Win::Native(n) = w else { return };
+        let n = n.key_target();
         let Some((depressed, latched, locked, group)) = self.input.keys.as_ref().map(|k| k.serialized()) else {
             return;
         };
@@ -1794,8 +2246,12 @@ impl Server {
     /// 3 canceled, at a point of the desktop given in the window's units.
     pub fn native_touch(&mut self, w: &Win, id: i32, phase: u8, at: Point<f64, Logical>, time_ms: u32) {
         let Win::Native(n) = w else { return };
-        let (x, y) = self.native_local(n, at);
-        self.bus_send(n.client, ServerMsg::Window(WinEvent::Touch { window: n.id, time_ms, id, phase, x, y }));
+        // To the region under the finger, if any.
+        let (to, (x, y)) = match self.region_at(n, at) {
+            Some((_, e, xy)) => (e, xy),
+            None => (n.clone(), self.native_local(n, at)),
+        };
+        self.bus_send(to.client, ServerMsg::Window(WinEvent::Touch { window: to.id, time_ms, id, phase, x, y }));
     }
 
     /// A native client copies: what it offers becomes the clipboard, for
@@ -1819,7 +2275,7 @@ impl Server {
     /// rule for both ends of the clipboard (§7.3, read only on the user's
     /// paste or by the focused app).
     fn native_has_keyboard(&self, client: u32) -> bool {
-        clipboard_allowed(self.keyboard_window().and_then(|w| w.native().map(|n| n.client)), client)
+        clipboard_allowed(self.keyboard_window().and_then(|w| w.native().map(|n| n.key_client())), client)
     }
 
     /// The server puts text on the clipboard itself (Copy or Cut in the app
