@@ -1,0 +1,83 @@
+# Template file for 'wpewebkit'
+#
+# WPE WebKit for vergence-web (docs/web-milestone-1.md). Void ships no
+# wpewebkit, so we build it: the settings are the techbench spike's of
+# 2026-11-26, with WPE's Wayland and DRM platforms off (vergence-web brings
+# a platform of its own on Vergence's protocol; they would pull in libinput,
+# udev, Wacom and Lua) and the headless platform kept for tests. No video or
+# audio (Dave, 2026-11-27: no GStreamer in the first version). ATK is off:
+# page accessibility comes from the web process over AT-SPI (always built),
+# read on vergence-web's own bus, never through the host's ATK.
+#
+# Built on techbench (~/.cache/vergence-lab/void-packages): about 18 minutes
+# with -j16, dependencies included. The WPE Platform API is inside
+# libWPEWebKit-2.0.so.1 (wpe-platform-2.0.pc names the same library). Before
+# a package that links it (vergence-web) is built, the build box's
+# common/shlibs needs the line "libWPEWebKit-2.0.so.1 wpewebkit-2.54.3_1",
+# or xbps-src cannot work out that dependency.
+pkgname=wpewebkit
+version=2.54.3
+revision=1
+build_style=cmake
+configure_args="-DPORT=WPE -DCMAKE_SKIP_RPATH=ON
+ -DENABLE_DOCUMENTATION=OFF -DENABLE_INTROSPECTION=OFF
+ -DENABLE_JOURNALD_LOG=OFF
+ -DENABLE_WPE_LEGACY_API=OFF -DENABLE_WPE_PLATFORM=ON
+ -DENABLE_WPE_PLATFORM_WAYLAND=OFF -DENABLE_WPE_PLATFORM_DRM=OFF
+ -DENABLE_WPE_PLATFORM_HEADLESS=ON
+ -DUSE_ATK=OFF -DUSE_FLITE=OFF -DUSE_LIBHYPHEN=OFF -DUSE_LIBBACKTRACE=OFF
+ -DUSE_SYSPROF_CAPTURE=OFF
+ -DENABLE_BUBBLEWRAP_SANDBOX=OFF -DENABLE_SPEECH_SYNTHESIS=OFF
+ -DENABLE_VIDEO=OFF -DENABLE_WEB_AUDIO=OFF -DENABLE_MEDIA_STREAM=OFF
+ -DENABLE_WEB_CODECS=OFF -DUSE_GSTREAMER=OFF
+ -DENABLE_MINIBROWSER=OFF -DENABLE_SPELLCHECK=OFF -DENABLE_GAMEPAD=OFF
+ -DENABLE_WEBDRIVER=ON"
+# which: keeps WebKit's ccache detection from wrapping the compiler (as in
+# Void's libwebkit2gtk41).
+hostmakedepends="perl python3 ruby pkg-config gperf unifdef gettext
+ glib-devel which"
+makedepends="glib-devel harfbuzz-devel icu-devel libjpeg-turbo-devel
+ libepoxy-devel libgcrypt-devel libsoup3-devel libtasn1-devel
+ libxkbcommon-devel libxml2-devel libxslt-devel libpng-devel sqlite-devel
+ libwebp-devel zlib-devel freetype-devel fontconfig-devel woff2-devel
+ libavif-devel libjxl-devel lcms2-devel MesaLib-devel libdrm-devel"
+# TLS for libsoup at run time.
+depends="glib-networking"
+short_desc="WPE port of the WebKit browser engine (for vergence-web)"
+maintainer="Vergence <298062495+gsa700@users.noreply.github.com>"
+license="LGPL-2.1-or-later, BSD-2-Clause"
+homepage="https://wpewebkit.org/"
+distfiles="https://wpewebkit.org/releases/wpewebkit-${version}.tar.xz"
+checksum=787afd32ae23eac061621465390f44a462e874a9ebaba0b65521d7237fa8a5e4
+make_check=no # WebKit's own test suites need its developer mode
+
+export CFLAGS="-DNDEBUG"
+export CXXFLAGS="$CFLAGS"
+export CCACHE_SLOPPINESS=time_macros,include_file_mtime
+
+case "$XBPS_TARGET_MACHINE" in
+	x86_64*|aarch64*) ;;
+	*) configure_args+=" -DENABLE_WEBASSEMBLY=OFF -DENABLE_C_LOOP=ON" ;;
+esac
+
+pre_configure() {
+	# Full debug info makes the libraries enormous.
+	export CFLAGS="${CFLAGS/-g/-g1}"
+	export CXXFLAGS="${CXXFLAGS/-g/-g1}"
+}
+
+post_install() {
+	vlicense Source/WebCore/LICENSE-APPLE
+	vlicense Source/WebCore/LICENSE-LGPL-2.1
+	vlicense Source/WebCore/LICENSE-LGPL-2
+}
+
+wpewebkit-devel_package() {
+	depends="glib-devel libsoup3-devel ${sourcepkg}>=${version}_${revision}"
+	short_desc+=" - development files"
+	pkg_install() {
+		vmove usr/include
+		vmove usr/lib/pkgconfig
+		vmove "usr/lib/*.so"
+	}
+}

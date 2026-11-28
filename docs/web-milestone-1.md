@@ -148,3 +148,16 @@ name) and sends change events only to listeners registered with an
 bus of our own inside vergence-web, or a borrowed dbus-daemon (Dave's
 call when milestone 3 comes). Nothing of this reaches the session's real
 AT-SPI bus. Milestone 1 sets no bus: pages then publish nothing.
+
+## Progress
+
+- Step 1 (2026-11-28): the template `packaging/void/srcpkgs/wpewebkit`
+  (and `-devel`), WPE WebKit 2.54.3, checksum matching wpewebkit.org's,
+  built on techbench with xbps-src in ~/.cache/vergence-lab/void-packages
+  in about 18 minutes: `wpewebkit` 42 MB (117 MB installed:
+  libWPEWebKit-2.0.so.1 with the WPE Platform API inside it, the web,
+  network and GPU processes, WPEWebDriver), `wpewebkit-devel` (129 headers,
+  pkg-config for wpe-webkit, wpe-platform and wpe-platform-headless). Its
+  run-time dependencies hold no Wayland, libinput, X11 or ATK: the
+  platform switches did what they should. Not yet installed anywhere; the
+  rebuild script for security releases is still to come.
