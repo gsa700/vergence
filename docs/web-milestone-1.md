@@ -281,3 +281,14 @@ AT-SPI bus. Milestone 1 sets no bus: pages then publish nothing.
   glue we would otherwise carry and merge every release; we pin and build
   WPE ourselves, a stalled WPE would mean forking only its slice, and
   Servo stays the real hedge. "ok, agree."
+- Security releases (2026-11-28): `tools/lab/wpewebkit-update.sh`
+  (from Control): finds the newest stable WPE release on wpewebkit.org
+  (even minor numbers only), takes the newest of our series and only
+  reports a new series unless `--series` (a new series may change WPE's
+  class layouts or the patch), takes upstream's sha256 from its .sums
+  file, updates the template, builds on techbench and adds the package to
+  techbench's and Hubble's local repositories, then prints the install and
+  display-suite commands. `--check` only reports. Tried: `--check` (2.54.3
+  current), and with the template set back to 2.54.1 it found 2.54.3; the
+  build half is the sequence run by hand tonight, not yet run by the
+  script itself (it will be at the next release).
