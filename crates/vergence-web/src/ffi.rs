@@ -121,6 +121,8 @@ calls! {
     g_object_unref: unsafe extern "C" fn(GPointer);
     g_signal_connect_data: unsafe extern "C" fn(GPointer, *const c_char, Callback, GPointer, GPointer, c_uint) -> u64;
     g_error_free: unsafe extern "C" fn(*mut GError);
+    g_quark_from_static_string: unsafe extern "C" fn(*const c_char) -> u32;
+    g_set_error_literal: unsafe extern "C" fn(*mut *mut GError, u32, c_int, *const c_char);
     // GLib's main loop.
     g_main_loop_new: unsafe extern "C" fn(GPointer, Gboolean) -> GPointer;
     g_main_loop_run: unsafe extern "C" fn(GPointer);
@@ -132,6 +134,14 @@ calls! {
     wpe_view_get_type: unsafe extern "C" fn() -> GType;
     wpe_toplevel_get_type: unsafe extern "C" fn() -> GType;
     wpe_buffer_shm_get_type: unsafe extern "C" fn() -> GType;
+    wpe_buffer_dma_buf_get_type: unsafe extern "C" fn() -> GType;
+    wpe_buffer_dma_buf_get_n_planes: unsafe extern "C" fn(GPointer) -> u32;
+    wpe_buffer_dma_buf_get_fd: unsafe extern "C" fn(GPointer, u32) -> c_int;
+    wpe_buffer_dma_buf_get_offset: unsafe extern "C" fn(GPointer, u32) -> u32;
+    wpe_buffer_dma_buf_get_stride: unsafe extern "C" fn(GPointer, u32) -> u32;
+    wpe_buffer_dma_buf_get_format: unsafe extern "C" fn(GPointer) -> u32;
+    wpe_buffer_dma_buf_get_modifier: unsafe extern "C" fn(GPointer) -> u64;
+    wpe_drm_device_new: unsafe extern "C" fn(*const c_char, *const c_char) -> GPointer;
     wpe_display_connect: unsafe extern "C" fn(GPointer, *mut *mut GError) -> Gboolean;
     wpe_buffer_get_width: unsafe extern "C" fn(GPointer) -> c_int;
     wpe_buffer_get_height: unsafe extern "C" fn(GPointer) -> c_int;
@@ -208,5 +218,78 @@ impl Lib {
             (self.g_error_free)(e);
             m
         }
+    }
+}
+
+/// The GPU side WebKit needs from a platform: a GBM device on a render node
+/// and an EGL display on it (as WPE's headless platform makes), from the
+/// system's libgbm and libEGL, loaded at run time like WebKit itself.
+pub struct Gpu {
+    pub egl_display: GPointer,
+    pub render_node: CString,
+    pub primary_node: Option<CString>,
+}
+
+const EGL_PLATFORM_GBM_KHR: u32 = 0x31D7;
+
+fn open_lib(name: &str) -> Option<*mut c_void> {
+    let c = CString::new(name).ok()?;
+    // SAFETY: dlopen with a C string.
+    let h = unsafe { dlopen(c.as_ptr(), RTLD_NOW | RTLD_GLOBAL) };
+    (!h.is_null()).then_some(h)
+}
+
+fn sym(handle: *mut c_void, name: &str) -> Option<*mut c_void> {
+    let c = CString::new(name).ok()?;
+    // SAFETY: dlsym with a live handle and a C string.
+    let p = unsafe { dlsym(handle, c.as_ptr()) };
+    (!p.is_null()).then_some(p)
+}
+
+/// The card (primary node) a render node belongs to, from sysfs (Linux);
+/// None where there is no sysfs (FreeBSD: WebKit then finds it itself).
+fn primary_for(render: u32) -> Option<CString> {
+    let dir = std::fs::read_dir(format!("/sys/class/drm/renderD{render}/device/drm")).ok()?;
+    dir.flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .find(|n| n.starts_with("card"))
+        .and_then(|n| CString::new(format!("/dev/dri/{n}")).ok())
+}
+
+impl Gpu {
+    /// The first render node that gives a GBM device and an EGL display, as
+    /// the toolkit's GPU renderer chooses (vergence-render's open_display),
+    /// so web frames come from the GPU the rest of the desktop draws on.
+    /// None: no GPU, and WebKit draws on the processor.
+    pub fn open() -> Option<Gpu> {
+        use std::os::fd::IntoRawFd;
+        let gbm = open_lib("libgbm.so.1")?;
+        let egl = open_lib("libEGL.so.1")?;
+        // SAFETY: the C functions of these names (gbm.h, EGL 1.5).
+        let create_device: unsafe extern "C" fn(c_int) -> GPointer =
+            unsafe { std::mem::transmute(sym(gbm, "gbm_create_device")?) };
+        let get_platform_display: unsafe extern "C" fn(u32, GPointer, *const isize) -> GPointer =
+            unsafe { std::mem::transmute(sym(egl, "eglGetPlatformDisplay")?) };
+        for n in 128..136u32 {
+            let path = format!("/dev/dri/renderD{n}");
+            let Ok(file) = std::fs::OpenOptions::new().read(true).write(true).open(&path) else { continue };
+            // The device keeps the descriptor for as long as the process lives.
+            let fd = file.into_raw_fd();
+            // SAFETY: a descriptor we own; results checked.
+            let device = unsafe { create_device(fd) };
+            if device.is_null() {
+                continue;
+            }
+            // SAFETY: a GBM device just made.
+            let display = unsafe { get_platform_display(EGL_PLATFORM_GBM_KHR, device, std::ptr::null()) };
+            if !display.is_null() {
+                return Some(Gpu {
+                    egl_display: display,
+                    render_node: CString::new(path).ok()?,
+                    primary_node: primary_for(n),
+                });
+            }
+        }
+        None
     }
 }

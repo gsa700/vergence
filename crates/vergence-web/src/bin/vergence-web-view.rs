@@ -4,8 +4,9 @@
 //!     vergence-web-view [--size WxH] [URL]
 //!
 //! A native window (as vnative's) whose picture is WebKit's frame: each frame
-//! WebKit finishes is copied into shared memory and attached with the
-//! rectangles that changed; the server's frame callback tells WebKit it may
+//! WebKit finishes is attached with the rectangles that changed, a GPU
+//! buffer as it is, or copied into shared memory when WebKit draws on the
+//! processor (no GPU, or VERGENCE_WEB_CPU=1); the server's frame callback tells WebKit it may
 //! draw the next. Pointer, wheel (a notch is one step) and keys go to the
 //! page; the page's title becomes the window's.
 //!
@@ -18,9 +19,9 @@ use vergence_protocol::{
     Client,
     bus::{ClientMsg, ServerMsg},
     shm::ShmFile,
-    window::{Buffer, Damage, Fd, Place, SHM_ARGB8888, WinEvent, WinRequest},
+    window::{Buffer, Damage, Fd, Place, Plane, SHM_ARGB8888, WinEvent, WinRequest},
 };
-use vergence_web::{Frame, Host, Platform, WebView};
+use vergence_web::{Frame, GpuFrame, Host, Platform, WebView};
 
 const WINDOW: u32 = 1;
 
@@ -100,6 +101,24 @@ impl Host for Window {
             self.client.borrow_mut().send(&ClientMsg::Window(WinRequest::Attach { window: WINDOW, buffer, damage }));
     }
 
+    fn gpu_frame(&mut self, f: GpuFrame) {
+        use std::os::fd::BorrowedFd;
+        let mut planes = Vec::new();
+        for (fd, offset, stride) in f.planes {
+            // SAFETY: WebKit's descriptor, open while its buffer lives; the
+            // message carries a copy of its own.
+            let Ok(own) = unsafe { BorrowedFd::borrow_raw(fd) }.try_clone_to_owned() else { return };
+            planes.push(Plane { fd: Fd(std::sync::Arc::new(own)), offset, stride });
+        }
+        // The picture is the GPU buffer itself: no shared memory now.
+        self.picture = None;
+        let damage = f.damage.iter().map(|&(x, y, w, h)| Damage { x, y, w, h }).collect();
+        let buffer =
+            Buffer::Dmabuf { planes, width: f.width, height: f.height, format: f.format, modifier: f.modifier };
+        let _ =
+            self.client.borrow_mut().send(&ClientMsg::Window(WinRequest::Attach { window: WINDOW, buffer, damage }));
+    }
+
     fn cursor(&mut self, name: &str) {
         let shape = cursor_shape(name);
         if shape != self.cursor {
@@ -165,6 +184,10 @@ fn main() {
         std::process::exit(1);
     }
     let view = Rc::new(RefCell::new(platform.web_view()));
+    eprintln!(
+        "vergence-web-view: drawing on the {}",
+        if vergence_web::on_gpu() { "GPU (dmabuf)" } else { "processor (shared memory)" }
+    );
     view.borrow().load(&url);
 
     let fd = client.borrow().raw_fd();

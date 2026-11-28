@@ -20,7 +20,7 @@ use std::ffi::{CStr, CString, c_int, c_uint};
 pub use ffi::LIB_NAME;
 use ffi::{GPointer, wpe_enum};
 use platform::lib;
-pub use platform::{Frame, Host, Platform};
+pub use platform::{Frame, GpuFrame, Host, Platform, on_gpu};
 
 /// One web view and its WPE view.
 pub struct WebView {

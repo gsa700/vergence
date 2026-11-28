@@ -256,3 +256,13 @@ AT-SPI bus. Milestone 1 sets no bus: pages then publish nothing.
   through xkb), Page Down scrolling a page. Not yet: the wheel (the control
   socket cannot send one; try by hand), GPU buffers (dmabuf) for the
   frames, the display suite scenario, a live session.
+- Step 3, GPU frames (2026-11-28, techbench): our display offers WebKit
+  an EGL display on a GBM device (the first render node that works, as the
+  toolkit's GPU renderer picks) and the matching DRM device; WebKit then
+  draws on the GPU into dmabuf buffers, attached to the window as they are
+  (no copy; a buffer is released once a later one is attached and a frame
+  has followed, the protocol's rule). Without a GPU, or with
+  `VERGENCE_WEB_CPU=1`, shared memory as before. Seen headless: the local
+  page and wpewebkit.org drawn right, click, typing and Page Down as on
+  the processor. Dave tried the processor build live on techbench: the
+  wheel steps by notches, "really responsive, a little lag but not bad".

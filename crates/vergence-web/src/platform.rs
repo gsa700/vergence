@@ -10,10 +10,11 @@
 //! The contract is WPE's headless platform's (WPEViewHeadless.cpp): WebKit
 //! calls `render_buffer` with a finished frame; when the server says that
 //! frame is on the screen we tell WebKit the frame before it is released and
-//! this one rendered, and only then does it draw the next. This first cut
-//! offers WebKit no EGL display, so it draws on the processor into shared
-//! memory (WPEBufferSHM), which the native protocol's shared-memory pictures
-//! take as they are; GPU buffers (dmabuf) come next.
+//! this one rendered, and only then does it draw the next. On a GPU (an EGL
+//! display on a GBM device, as WPE's headless platform makes) WebKit draws
+//! into GPU buffers (WPEBufferDMABuf), attached to the window as they are;
+//! without one (or with VERGENCE_WEB_CPU=1) it draws on the processor into
+//! shared memory (WPEBufferSHM), which the server copies.
 
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char, c_int, c_uint};
@@ -44,7 +45,9 @@ pub(crate) const fn vfunc_offset(index: usize) -> usize {
 // The virtual functions we fill, by their place in each class.
 const DISPLAY_CONNECT: usize = 0;
 const DISPLAY_CREATE_VIEW: usize = 1;
+const DISPLAY_GET_EGL_DISPLAY: usize = 2;
 const DISPLAY_GET_KEYMAP: usize = 3;
+const DISPLAY_GET_DRM_DEVICE: usize = 8;
 const DISPLAY_CREATE_TOPLEVEL: usize = 11;
 const VIEW_RENDER_BUFFER: usize = 1;
 const VIEW_SET_CURSOR_FROM_NAME: usize = 4;
@@ -61,10 +64,24 @@ pub struct Frame<'a> {
     pub damage: Vec<(i32, i32, i32, i32)>,
 }
 
+/// A finished frame from WebKit in GPU memory (linux-dmabuf's terms): its
+/// planes (descriptor, offset, stride), owned by WebKit's buffer and valid
+/// until the server has shown a later frame, and the rectangles that changed.
+pub struct GpuFrame {
+    pub planes: Vec<(std::os::fd::RawFd, u32, u32)>,
+    pub width: u32,
+    pub height: u32,
+    pub format: u32,
+    pub modifier: u64,
+    pub damage: Vec<(i32, i32, i32, i32)>,
+}
+
 /// Whoever shows the web view (the test window now; vergence-web's regions
 /// in milestone 2).
 pub trait Host {
     fn frame(&mut self, frame: Frame);
+    /// A GPU frame: attached as it is, no copy.
+    fn gpu_frame(&mut self, frame: GpuFrame);
     /// The pointer's shape, by its CSS name ("pointer", "text", ...).
     fn cursor(&mut self, name: &str);
 }
@@ -84,6 +101,24 @@ thread_local! {
     /// one on the screen now: each holds a reference until released.
     static FRAMES: RefCell<(GPointer, GPointer)> = const { RefCell::new((std::ptr::null_mut(), std::ptr::null_mut())) };
     static KEYMAP: RefCell<GPointer> = const { RefCell::new(std::ptr::null_mut()) };
+    /// The GPU WebKit draws on (None: the processor), found once.
+    static GPU: std::cell::OnceCell<Option<crate::ffi::Gpu>> = const { std::cell::OnceCell::new() };
+    static DRM_DEVICE: RefCell<GPointer> = const { RefCell::new(std::ptr::null_mut()) };
+}
+
+/// The GPU, unless `VERGENCE_WEB_CPU=1` asks for drawing on the processor.
+fn with_gpu<R>(f: impl FnOnce(Option<&crate::ffi::Gpu>) -> R) -> R {
+    GPU.with(|g| {
+        let g = g.get_or_init(|| {
+            if std::env::var("VERGENCE_WEB_CPU").is_ok_and(|v| v == "1") { None } else { crate::ffi::Gpu::open() }
+        });
+        f(g.as_ref())
+    })
+}
+
+/// Whether frames come from the GPU.
+pub fn on_gpu() -> bool {
+    with_gpu(|g| g.is_some())
 }
 
 pub(crate) fn lib() -> &'static Lib {
@@ -110,6 +145,8 @@ unsafe extern "C" fn display_class_init(class: GPointer, _: GPointer) {
         set_vfunc(class, DISPLAY_CONNECT, display_connect as *const ());
         set_vfunc(class, DISPLAY_CREATE_VIEW, display_create_view as *const ());
         set_vfunc(class, DISPLAY_GET_KEYMAP, display_get_keymap as *const ());
+        set_vfunc(class, DISPLAY_GET_EGL_DISPLAY, display_get_egl_display as *const ());
+        set_vfunc(class, DISPLAY_GET_DRM_DEVICE, display_get_drm_device as *const ());
         set_vfunc(class, DISPLAY_CREATE_TOPLEVEL, display_create_toplevel as *const ());
     }
 }
@@ -235,6 +272,41 @@ unsafe extern "C" fn display_get_keymap(_: GPointer) -> GPointer {
     })
 }
 
+unsafe extern "C" fn display_get_egl_display(_: GPointer, error: *mut *mut GError) -> GPointer {
+    match with_gpu(|g| g.map(|g| g.egl_display)) {
+        Some(d) => d,
+        None => {
+            // No GPU (or VERGENCE_WEB_CPU=1): WebKit draws into shared memory.
+            let lib = lib();
+            let (domain, msg) = (cstr("vergence-web"), cstr("no GPU: drawing on the processor"));
+            // SAFETY: GLib's error setter with C strings; `error` is WebKit's.
+            unsafe {
+                (lib.g_set_error_literal)(error, (lib.g_quark_from_static_string)(domain.as_ptr()), 0, msg.as_ptr())
+            };
+            std::ptr::null_mut()
+        }
+    }
+}
+
+unsafe extern "C" fn display_get_drm_device(_: GPointer) -> GPointer {
+    DRM_DEVICE.with(|d| {
+        let mut d = d.borrow_mut();
+        if d.is_null() {
+            *d = with_gpu(|g| match g {
+                // SAFETY: C strings for the nodes; the display keeps the device.
+                Some(g) => unsafe {
+                    (lib().wpe_drm_device_new)(
+                        g.primary_node.as_ref().map_or(std::ptr::null(), |p| p.as_ptr()),
+                        g.render_node.as_ptr(),
+                    )
+                },
+                None => std::ptr::null_mut(),
+            });
+        }
+        *d
+    })
+}
+
 /// The display's keymap (WPE's xkb one), made on first use.
 ///
 /// # Safety
@@ -266,8 +338,40 @@ unsafe extern "C" fn view_render_buffer(
     // SAFETY: the buffer WebKit hands us, alive for this call; the type check
     // comes before any SHM call.
     unsafe {
+        let damage: Vec<(i32, i32, i32, i32)> = (0..n_rects as usize)
+            .map(|i| {
+                let r = *rects.add(i);
+                (r[0], r[1], r[2], r[3])
+            })
+            .collect();
+        if (lib.g_type_check_instance_is_a)(buffer, (lib.wpe_buffer_dma_buf_get_type)()) != 0 {
+            let n = (lib.wpe_buffer_dma_buf_get_n_planes)(buffer);
+            let planes = (0..n)
+                .map(|p| {
+                    (
+                        (lib.wpe_buffer_dma_buf_get_fd)(buffer, p),
+                        (lib.wpe_buffer_dma_buf_get_offset)(buffer, p),
+                        (lib.wpe_buffer_dma_buf_get_stride)(buffer, p),
+                    )
+                })
+                .collect();
+            let frame = GpuFrame {
+                planes,
+                width: (lib.wpe_buffer_get_width)(buffer).max(0) as u32,
+                height: (lib.wpe_buffer_get_height)(buffer).max(0) as u32,
+                format: (lib.wpe_buffer_dma_buf_get_format)(buffer),
+                modifier: (lib.wpe_buffer_dma_buf_get_modifier)(buffer),
+                damage,
+            };
+            HOST.with(|host| {
+                if let Some(host) = host.borrow_mut().as_mut() {
+                    host.gpu_frame(frame);
+                }
+            });
+            hold(buffer);
+            return 1;
+        }
         if (lib.g_type_check_instance_is_a)(buffer, (lib.wpe_buffer_shm_get_type)()) == 0 {
-            // No EGL display is offered, so WebKit sends shared memory only.
             return 0;
         }
         let bytes = (lib.wpe_buffer_shm_get_data)(buffer);
@@ -278,12 +382,6 @@ unsafe extern "C" fn view_render_buffer(
         if data.is_null() || w <= 0 || h <= 0 || (stride as usize) * (h as usize) > len {
             return 0;
         }
-        let damage = (0..n_rects as usize)
-            .map(|i| {
-                let r = *rects.add(i);
-                (r[0], r[1], r[2], r[3])
-            })
-            .collect();
         let frame =
             Frame { pixels: std::slice::from_raw_parts(data, len), width: w as u32, height: h as u32, stride, damage };
         HOST.with(|host| {
@@ -291,19 +389,29 @@ unsafe extern "C" fn view_render_buffer(
                 host.frame(frame);
             }
         });
-        // Kept until the server has shown it (frame_done).
-        (lib.g_object_ref)(buffer);
-        FRAMES.with(|f| {
-            let mut f = f.borrow_mut();
-            if !f.0.is_null() {
-                // A newer frame before the last was shown: dropped unshown,
-                // as WPE's headless view drops its pending one.
-                (lib.g_object_unref)(f.0);
-            }
-            f.0 = buffer;
-        });
+        hold(buffer);
     }
     1
+}
+
+/// Keeps WebKit's buffer until the server has shown it (frame_done).
+///
+/// # Safety
+/// `buffer` is the WPEBuffer WebKit just handed us.
+unsafe fn hold(buffer: GPointer) {
+    let lib = lib();
+    // SAFETY: per the contract; references balanced in frame_done.
+    unsafe { (lib.g_object_ref)(buffer) };
+    FRAMES.with(|f| {
+        let mut f = f.borrow_mut();
+        if !f.0.is_null() {
+            // A newer frame before the last was shown: dropped unshown, as
+            // WPE's headless view drops its pending one.
+            // SAFETY: the reference taken when it was held.
+            unsafe { (lib.g_object_unref)(f.0) };
+        }
+        f.0 = buffer;
+    });
 }
 
 unsafe extern "C" fn view_set_cursor_from_name(_: GPointer, name: *const c_char) {
