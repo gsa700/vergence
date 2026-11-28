@@ -239,6 +239,8 @@ impl Server {
             "gpus" => self.describe_gpus(),
             // What a GPU hang does to the drawing (a new GL context), on purpose: for tests.
             "renew-gpu" => self.renew_gpu(),
+            // The displays set up again from scratch, as after a GPU hang (drm.rs).
+            "reset-displays" => self.reset_displays_now(),
             // The order of use, most recent first, and the focused window (Alt+Tab's order).
             "used" => self.order_of_use_report(),
             // Alt+Tab's list: what it holds, which row is stepped to, whether it shows.

@@ -278,7 +278,13 @@ pub struct Backend {
     /// Remote views (remote milestone 1, step 1): screens drawn again at a
     /// viewer's size and scale, for Vergence Remote.
     remotes: Vec<RemoteView>,
+    /// Page flips refused in a row (any screen): past FLIPS_REFUSED, the
+    /// displays are set up again (reset_displays).
+    refused: u32,
 }
+
+/// Page flips refused in a row before the displays are set up again.
+const FLIPS_REFUSED: u32 = 5;
 
 pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(), Box<dyn std::error::Error>> {
     let (session, notifier) = LibSeatSession::new()?;
@@ -407,6 +413,7 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
         waiting: Vec::new(),
         probed,
         remotes: Vec::new(),
+        refused: 0,
     });
     state.session = Some(session.clone());
 
@@ -1093,6 +1100,14 @@ fn render(state: &mut Server, crtc: Key) {
         tracing::warn!("GPU hang suspected (frame blocked {ms} ms)");
         renew_renderer(&mut backend);
         state.scenes_renew();
+        // And the displays set up again from scratch: after three hangs in a
+        // row on kepler (UHD 630, FreeBSD, 2026-11-27 14:08) the new context
+        // drew and its page flips were taken, the server saw nothing wrong for
+        // six minutes, and the monitor kept showing the frame before the hang,
+        // pointer and all, until the session was ended. Only a modeset (as a
+        // console switch does) brings such a display back, and nothing tells
+        // the server it is needed, so it is done after every hang.
+        reset_displays(&mut backend);
     }
     state.backend = Some(backend);
 }
@@ -1108,6 +1123,37 @@ impl Server {
         self.scenes_renew();
         "renew-gpu: drawing with a new GL context".into()
     }
+
+    /// The control socket's `reset-displays`: the displays set up again from
+    /// scratch, as after a GPU hang (tests of reset_displays: each screen goes
+    /// dark for a moment and comes back drawing).
+    pub fn reset_displays_now(&mut self) -> String {
+        let Some(mut b) = self.backend.take() else { return "reset-displays: only with --drm".into() };
+        let crtcs: Vec<Key> = b.surfaces.keys().copied().filter(|k| k.0 != MEMORY).collect();
+        reset_displays(&mut b);
+        self.backend = Some(b);
+        for c in crtcs {
+            render(self, c);
+        }
+        "reset-displays: every display set up again".into()
+    }
+}
+
+/// Set every display up again from scratch, as coming back from another
+/// console does, but with every connector and plane turned off first, so the
+/// next frame of each screen is a full modeset (Smithay's activate(true)),
+/// not a page flip onto whatever state the kernel kept: what brings back a
+/// monitor left showing an old frame after a GPU reset. The screens go dark
+/// for a moment.
+fn reset_displays(b: &mut Backend) {
+    for d in &mut b.devices {
+        d.manager.pause();
+        if let Err(e) = d.manager.lock().activate(true) {
+            tracing::error!("displays: {} could not be set up again: {e:?}", d.path);
+        }
+    }
+    b.redraw_all();
+    tracing::warn!("displays: set up again from scratch (modeset)");
 }
 
 /// Replace the renderer with one on a new EGL context, and draw every monitor in full.
@@ -1276,9 +1322,17 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
             if queued.is_ok() {
                 let name = s.connector.clone();
                 state.lock_frame_queued(name);
+                b.refused = 0;
             }
             if let Err(e) = queued {
                 tracing::warn!("queue frame: {e:?}");
+                // Refused again and again (EBUSY after a GPU reset, a CRTC
+                // the kernel left in a state of its own): set up from scratch.
+                b.refused += 1;
+                if b.refused >= FLIPS_REFUSED {
+                    b.refused = 0;
+                    reset_displays(b);
+                }
                 let _ = state.loop_handle.insert_source(
                     Timer::from_duration(Duration::from_millis(100)),
                     move |_, _, st| {
@@ -1521,6 +1575,7 @@ pub fn run_headless(
         waiting: Vec::new(),
         probed,
         remotes: Vec::new(),
+        refused: 0,
     });
     state.session = None;
     watchdog(event_loop)?;
