@@ -28,6 +28,11 @@
 //! it replaced: `vnative --region 40,60,400,300 --embed-run
 //! 'vergence-web-view --embed {token} page.html'`.
 //!
+//! `--glass H` (bus v50): the window draws under its bar, and its top H
+//! points are glass the server frosts: the picture leaves the glass and its
+//! region clear but for three squares standing in for a toolbar's buttons,
+//! and stays still (no moving bar).
+//!
 //! Placement (Contract 2): `--role` gives the window another identity (so
 //! window memory has no place for it yet), `--place` asks for a point of a
 //! monitor by its id (`vbus outputs` lists them) when it opens, and `p`
@@ -173,6 +178,33 @@ impl Picture {
         }
     }
 
+    /// A rectangle of the picture left clear (a region another program
+    /// fills, the glass's ground), in points.
+    fn clear(&mut self, x: f64, y: f64, w: f64, h: f64) {
+        let s = self.scale;
+        let (x0, y0) = ((x * s).round() as i32, (y * s).round() as i32);
+        let (x1, y1) = (((x + w) * s).round() as i32, ((y + h) * s).round() as i32);
+        for yy in y0.max(0)..y1.min(self.h) {
+            for xx in x0.max(0)..x1.min(self.w) {
+                let i = (yy as usize * self.w as usize + xx as usize) * 4;
+                self.shm.bytes()[i..i + 4].copy_from_slice(&[0, 0, 0, 0]);
+            }
+        }
+    }
+
+    /// An opaque square at (x, y) points, `side` across: a stand-in for a
+    /// control on the glass.
+    fn square(&mut self, x: f64, y: f64, side: f64, c: (u8, u8, u8)) {
+        let s = self.scale;
+        for yy in (y * s) as i32..((y + side) * s) as i32 {
+            for xx in (x * s) as i32..((x + side) * s) as i32 {
+                if xx >= 0 && yy >= 0 && xx < self.w && yy < self.h {
+                    self.put(xx, yy, c);
+                }
+            }
+        }
+    }
+
     /// The pointer's square at (x, y) reference units; returns it in pixels.
     fn dot(&mut self, x: f64, y: f64) -> Damage {
         let side = (DOT * self.scale).round() as i32;
@@ -283,6 +315,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (v.len() == 4).then(|| (v[0], v[1], v[2], v[3]))
     });
     let embed_run = arg("--embed-run");
+    let glass: Option<f64> = arg("--glass").and_then(|g| g.parse().ok());
+    if let Some(height) = glass {
+        c.send(&ClientMsg::Window(WinRequest::UnderBar { window: WINDOW }))?;
+        c.send(&ClientMsg::Window(WinRequest::Glass { window: WINDOW, height }))?;
+    }
     if let Some((x, y, width, height)) = region {
         c.send(&ClientMsg::Window(WinRequest::Embed { window: WINDOW, region: 1, x, y, width, height }))?;
     }
@@ -306,7 +343,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ => continue,
         };
         match ev {
-            WinEvent::Configure { serial, width, height, scale, maximized, activated, .. } => {
+            WinEvent::Configure { serial, width, height, scale, maximized, activated, inset, .. } => {
                 last_dot = None;
                 println!(
                     "configure {serial}: {width}x{height} at scale {scale:.4}{}{}",
@@ -317,6 +354,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     g.configure(width, height, scale)?;
                     c.send(&ClientMsg::Window(WinRequest::AckConfigure { window: WINDOW, serial }))?;
                     g.draw(&mut c, step, pointer)?;
+                    continue;
+                }
+                if let Some(g) = glass {
+                    // Under its bar: the picture is the inset taller.
+                    let mut p = Picture::new(width, height + inset, scale)?;
+                    if let Some((x, y, w, h)) = region {
+                        p.clear(x, y, w, h);
+                    }
+                    p.clear(0.0, 0.0, width, g);
+                    for i in 0..3 {
+                        p.square(12.0 + i as f64 * 40.0, inset + 8.0, 28.0, (40, 90, 160));
+                    }
+                    c.send(&ClientMsg::Window(WinRequest::AckConfigure { window: WINDOW, serial }))?;
+                    attach(&mut c, &p, Vec::new(), false)?;
+                    picture = Some(p);
                     continue;
                 }
                 let mut p = Picture::new(width, height, scale)?;
@@ -337,6 +389,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(g) = gpu.as_mut() {
                     step += 1;
                     g.draw(&mut c, step, pointer)?;
+                    continue;
+                }
+                // Glass: a still picture.
+                if glass.is_some() {
                     continue;
                 }
                 let Some(p) = picture.as_mut() else { continue };

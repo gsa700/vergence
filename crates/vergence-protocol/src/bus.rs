@@ -105,11 +105,14 @@
 //! `WinRequest::Embed`, `EmbedRemove` and `EmbedJoin`, `WinEvent::EmbedToken` and
 //! `EmbedState`: a region of one program's window that another fills, the server
 //! compositing it and routing the input over it.
+//! Version 50 (web milestone 2, the browser's frosted tabs and toolbar):
+//! `WinRequest::Glass`, the top of a window's picture frosted by the server over
+//! whatever shows there, its regions drawn behind the picture.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 49;
+pub const VERSION: u32 = 50;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

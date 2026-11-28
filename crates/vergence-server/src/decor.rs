@@ -102,7 +102,7 @@ pub enum Hit {
 
 /// The ids of one window's bar parts, for damage tracking, and its title rasters.
 pub struct Decor {
-    ids: [Id; 11],
+    ids: [Id; 12],
     commit: CommitCounter,
     active: bool,
     /// The style it was last drawn in (its border's color follows it).
@@ -114,6 +114,8 @@ pub struct Decor {
     corners: std::collections::HashMap<u64, ([u8; 3], [MemoryRenderBuffer; 4])>,
     /// The frost behind a Wayland or X11 window's bar (look milestone 1, step 5).
     backdrop: crate::backdrop::Slot,
+    /// The frost of a glass window's band below its bar (web milestone 2, bus v50).
+    band: crate::backdrop::Slot,
     /// The frost of its own top strip, and its picture with rounded corners.
     frost: crate::backdrop::ShadedSlot,
     round: crate::backdrop::ShadedSlot,
@@ -176,6 +178,7 @@ impl Decor {
             bars: Default::default(),
             corners: Default::default(),
             backdrop: None,
+            band: None,
             frost: Default::default(),
             round: Default::default(),
             mark: Id::new(),
@@ -1126,6 +1129,9 @@ impl Server {
             // A window whose glass is its own, under its bar: the picture's own sharp
             // strip is left out (the glass strip shows it blurred where the frost can).
             let mut glass_cut = false;
+            // A glass window's bar look (web milestone 2): its band below the bar
+            // is frosted the same.
+            let mut bar_look: Option<crate::backdrop::Look> = None;
             // This window's own bar style (bar_light).
             let light = self.bar_light(&w, light);
             let shaded = vergence_look::bar_look_shaded(light, self.bar_shade());
@@ -1294,12 +1300,17 @@ impl Server {
                 // 1, step 6b, to look like the Mac's; see docs/preview-milestone-1.md): one frost of what is
                 // behind it under its bar and its whole body, as Quick Look's.
                 let ground_frosted = w.native().is_some_and(|n| n.frosted());
+                // A window whose picture's top is glass (bus v50, web milestone 2: a
+                // browser's tabs and toolbar over the page): its bar is frosted over
+                // what is behind it, as a Wayland window's, since its regions show
+                // there; the band below the bar is frosted after its picture.
+                let glass_band = w.native().map_or(0, |n| n.glass());
                 // A native window that draws under its bar, with its picture on the
                 // GPU: the strip at the picture's top is frosted into the bar (not a
                 // frosted window's: its strip is clear, the frost behind shows).
                 let under = frost
                     .as_ref()
-                    .filter(|_| !ground_frosted && w.native().is_some_and(|n| n.inset() > 0))
+                    .filter(|_| !ground_frosted && glass_band == 0 && w.native().is_some_and(|n| n.inset() > 0))
                     .and_then(|_| native_texture(renderer, &w));
                 // A frosted window whose glass is its own (the terminal's, frost
                 // milestone 1), with its picture on the GPU: the strip at the picture's
@@ -1310,7 +1321,7 @@ impl Server {
                     .filter(|_| ground_frosted && w.native().is_some_and(|n| n.inset() > 0))
                     .and_then(|_| native_texture(renderer, &w));
                 // A Wayland or X11 window's bar: frosted over what is behind it.
-                let behind = frost.is_some() && w.native().is_none();
+                let behind = frost.is_some() && (w.native().is_none() || glass_band > 0);
                 if let Some(f) = frame {
                     // A program's own ground is solid, as its own bar was.
                     let frosted = brand.is_none() && (under.is_some() || behind || (ground_frosted && frost.is_some()));
@@ -1552,6 +1563,7 @@ impl Server {
                             cap: light,
                         };
                         let dst = bar_px;
+                        bar_look = Some(look);
                         if let Some(e) = crate::backdrop::element(renderer, &mut d.backdrop, dst, program, &look) {
                             elements.push(SceneElement::Backdrop(e));
                         }
@@ -1702,8 +1714,17 @@ impl Server {
                 let alt = if (density - n.scale()).abs() > 1e-3 { self.scene_alt(renderer, n, density) } else { None };
                 // Its regions' windows (web milestone 2), in front of its own
                 // picture, each in its rectangle of the picture's points.
+                // With glass (bus v50) they go behind its picture, under the band's
+                // frost, the program having left them clear.
                 let top = Point::<i32, Logical>::from((loc.x, loc.y - n.inset()));
-                elements.extend(embed_elements(renderer, n, top - out.loc, scale));
+                let embeds = embed_elements(renderer, n, top - out.loc, scale);
+                let glass_h = n.glass();
+                let mut behind_picture = Vec::new();
+                if glass_h > 0 {
+                    behind_picture = embeds;
+                } else {
+                    elements.extend(embeds);
+                }
                 if let Some(p) = n.picture() {
                     // A window that draws under its bar starts that much higher.
                     let top = Point::<i32, Logical>::from((loc.x, loc.y - n.inset()));
@@ -1811,6 +1832,36 @@ impl Server {
                             }
                         }
                     }
+                    // A glass window's band below its bar (bus v50): behind its picture
+                    // (whose controls stand on it) and in front of its regions, frosted
+                    // as its bar is, or the bar's ground where there is no frost.
+                    if glass_h > n.inset() {
+                        let band = edges_px(
+                            Point::from((top.x, top.y + n.inset())) - out.loc,
+                            (p.logical.w, (glass_h - n.inset()).min(p.logical.h)).into(),
+                            scale,
+                        );
+                        let d = self.decor.entry(w.clone()).or_insert_with(Decor::new);
+                        match (frost.clone(), bar_look) {
+                            (Some(program), Some(look)) => {
+                                if let Some(e) = crate::backdrop::element(renderer, &mut d.band, band, program, &look) {
+                                    elements.push(SceneElement::Backdrop(e));
+                                }
+                            }
+                            _ => {
+                                let g = style.ground;
+                                let c = [g.0 as f32 / 255.0, g.1 as f32 / 255.0, g.2 as f32 / 255.0, 1.0];
+                                elements.push(SceneElement::Solid(SolidColorRenderElement::new(
+                                    d.ids[11].clone(),
+                                    band,
+                                    d.commit,
+                                    c,
+                                    Kind::Unspecified,
+                                )));
+                            }
+                        }
+                    }
+                    elements.extend(behind_picture.drain(..));
                     // Behind the picture (elements run front to back) and in front of
                     // whatever is behind the window: a frosted window's frost, over its
                     // bar and its body as one surface (preview milestone 1, step 6b).

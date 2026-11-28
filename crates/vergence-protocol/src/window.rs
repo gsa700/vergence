@@ -532,6 +532,16 @@ pub enum WinRequest {
         window: u32,
         token: String,
     },
+    /// The top `height` points of the window's picture are glass (bus v50,
+    /// web milestone 2: a browser's tabs and toolbar): the server frosts
+    /// whatever shows there, the window's regions included, in its bar's
+    /// colors, and draws the regions behind the picture, so the program
+    /// leaves its regions (and the glass's ground) clear and its controls
+    /// stand sharp on the frost. For a window drawing under its bar; 0: none.
+    Glass {
+        window: u32,
+        height: f64,
+    },
     /// Every key to this window while it has the keyboard, the server's own
     /// shortcuts included (bus v40, remote milestone 1: Vergence Remote's
     /// viewer), or no longer. The server answers [`WinEvent::KeysCaptured`];
@@ -1142,6 +1152,7 @@ pub(crate) mod op {
     pub const EMBED: u16 = 132;
     pub const EMBED_REMOVE: u16 = 133;
     pub const EMBED_JOIN: u16 = 134;
+    pub const GLASS: u16 = 135;
     // Server to client.
     pub const CREATED: u16 = 100;
     pub const CONFIGURE: u16 = 101;
@@ -1699,6 +1710,11 @@ impl WinRequest {
                 e.u32(*serial).u32(*window).str(token);
                 e
             }
+            WinRequest::Glass { window, height } => {
+                let mut e = Encoder::frame(op::GLASS);
+                e.u32(*window).f64(*height);
+                e
+            }
             WinRequest::TextPage { window, serial, node, found, offset, total, text } => {
                 let mut e = Encoder::frame(op::TEXT_PAGE);
                 e.u32(*window).u32(*serial).u64(*node).bool(*found).u32(*offset).u32(*total).str(text);
@@ -1912,6 +1928,7 @@ impl WinRequest {
             },
             op::EMBED_REMOVE => WinRequest::EmbedRemove { window: d.u32()?, region: d.u32()? },
             op::EMBED_JOIN => WinRequest::EmbedJoin { serial: d.u32()?, window: d.u32()?, token: d.str()? },
+            op::GLASS => WinRequest::Glass { window: d.u32()?, height: d.f64()? },
             op::TEXT_PAGE => {
                 let (window, serial, node, found, offset, total) =
                     (d.u32()?, d.u32()?, d.u64()?, d.bool()?, d.u32()?, d.u32()?);
@@ -2667,6 +2684,8 @@ mod tests {
             WinRequest::Embed { window: 1, region: 2, x: 0.0, y: 72.5, width: 800.0, height: 527.5 },
             WinRequest::Embed { window: 1, region: 2, x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
             WinRequest::EmbedRemove { window: 1, region: 2 },
+            WinRequest::Glass { window: 1, height: 84.0 },
+            WinRequest::Glass { window: 1, height: 0.0 },
             WinRequest::EmbedJoin { serial: 9, window: 7, token: "0123456789abcdef0123456789abcdef".into() },
             WinRequest::TextPage {
                 window: 1,

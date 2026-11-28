@@ -248,6 +248,8 @@ struct State {
     focus_region: Option<u32>,
     pointer_region: Option<u32>,
     grab_region: Option<u32>,
+    /// The top of its picture that is glass, in points (bus v50; 0: none).
+    glass: i32,
 }
 
 impl State {
@@ -288,6 +290,7 @@ impl State {
             focus_region: None,
             pointer_region: None,
             grab_region: None,
+            glass: 0,
         }
     }
 }
@@ -589,6 +592,13 @@ impl NativeWindow {
             .collect()
     }
 
+    /// The top of its picture the server frosts (bus v50), in points; 0 for
+    /// none, or for a window not drawing under its bar.
+    pub fn glass(&self) -> i32 {
+        let s = self.state.lock().unwrap();
+        if s.under_bar { s.glass } else { 0 }
+    }
+
     /// The program its keyboard goes to (the clipboard's rule).
     fn key_client(&self) -> u32 {
         let focus = self.state.lock().unwrap().focus_region;
@@ -839,6 +849,12 @@ impl Server {
                     && rect.size.h > 0
                 {
                     self.native_configure(&e, rect.size, false);
+                }
+            }
+            WinRequest::Glass { window, height } => {
+                if let Some(Win::Native(n)) = self.natives.get(&(client, window)) {
+                    let h = if height.is_finite() { height.round().clamp(0.0, 16_384.0) as i32 } else { 0 };
+                    n.state.lock().unwrap().glass = h;
                 }
             }
             WinRequest::EmbedRemove { window, region } => {

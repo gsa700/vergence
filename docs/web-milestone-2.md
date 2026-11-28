@@ -68,12 +68,20 @@ three things are new:
    keeps the region in step with the layout, passes the token, turns the
    protocol's events into the program's messages, draws context menus and
    select lists as the toolkit's own menus (question 5).
-5. **A browser skeleton** (question 6): `vergence-browser`, a window with
+5. **A browser skeleton** (question 6): `vergence-browser` (Navigate), a window with
    the server's tabs (each tab a web view), the toolbar (back, forward,
    reload, the address field, the shield placeholder, the menu), the
    hovered link's overlay, the glass band over tabs and toolbar with the
    page's top inset under it. No bookmarks, history or Protection yet
-   (milestone 4).
+   (milestone 4). **Its icon and throbber** (Dave, 2026-11-28 02:15 and
+   02:17, a nod to Netscape Navigator): the icon a **sextant**, navigating
+   by the stars (the 60-degree arc, the index arm, a star; simple enough
+   for 16 px), on the mood of Netscape's night-blue sky over a horizon,
+   never its N or ship's wheel; fallbacks an octant, or the pole star with
+   a small arc; no compass (Safari's), no ship's wheel. The throbber: while
+   a page loads the index arm sweeps slowly across the arc, as if taking a
+   sight, and when the page has come a star glints and it settles (in the
+   toolbar or on the tab; driven by `Progress`); our own drawing.
 6. **Checks:** protocol round-trip and fuzz tests for the new bus messages
    and the web protocol; a display-suite scenario: a program with a web view
    region (the page's blocks inside its window at the right place, the
@@ -152,3 +160,16 @@ three things are new:
   techbench and Hubble. Not yet: a host's rounded bottom corners over a
   region reaching them (the region is square), regions in `vctl picture`
   and thumbnails.
+- Step 1b (2026-11-28, bus v50): the glass band. `WinRequest::Glass
+  { window, height }`: for a window drawing under its bar, the top
+  `height` points of its picture are frosted by the server over whatever
+  shows there; its regions are then drawn behind its picture (which leaves
+  them and the glass's ground clear), its bar is frosted over what is
+  behind it (as a Wayland window's, not from its own picture), and the band
+  below the bar gets a frost of its own in the bar's look (decor.rs; the
+  bar's ground where there is no frost). `vnative --glass H` tries it.
+  Seen headless on techbench: a page filling a window's whole picture, its
+  red and blue blocks frosted under the tabs and the toolbar as one glass,
+  three stand-in buttons sharp on it, the page crisp below; a click and
+  typing still reach the page. Tests 1281/1281/1266; display suite 42/42 on
+  techbench and Hubble.
