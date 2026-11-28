@@ -21,6 +21,7 @@
 //! never logged; a frame is checked against its maximum length before it is read.
 
 pub mod brightness;
+pub mod ddc;
 pub mod elevate;
 pub mod encryption;
 pub mod keyboard;

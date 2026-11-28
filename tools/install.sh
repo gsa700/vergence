@@ -129,7 +129,7 @@ if [ -n "$uninstall" ]; then
     # link in /var/service, the person's choice, is left).
     if [ -z "$destdir" ]; then
         for f in /etc/fonts/conf.d/90-vergence-fonts.conf /usr/local/etc/fonts/conf.d/90-vergence-fonts.conf \
-            /etc/zzz.d/suspend/50-vdm /etc/polkit-1/rules.d/50-vergence-drives.rules; do
+            /etc/zzz.d/suspend/50-vdm /etc/polkit-1/rules.d/50-vergence-drives.rules /etc/modules-load.d/vergence-i2c.conf; do
             ours "$f" && rm -f "$f"
         done
         [ -f /etc/sv/vdm/run ] && grep -q "$prefix/sbin/vdm" /etc/sv/vdm/run && rm -rf /etc/sv/vdm/run /etc/sv/vdm/log
@@ -532,6 +532,16 @@ elif command -v udisksctl >/dev/null || [ -x /usr/libexec/udisks2/udisksd ] || [
         echo "drives: polkit lets the $group group mount removable drives (/etc/polkit-1/rules.d/50-vergence-drives.rules)"
         dbus-send --system --type=method_call --dest=org.freedesktop.DBus / org.freedesktop.DBus.ReloadConfig 2>/dev/null || true
     fi
+fi
+# ---- system setup: external screens' brightness (brightness milestone 1) ----
+# vdm reaches a monitor over DDC/CI on its I2C line (/dev/i2c-N), which
+# needs the i2c-dev module: loaded now, and at every boot.
+if [ "$(uname -s)" = Linux ] && [ -z "$destdir" ]; then
+    mkdir -p /etc/modules-load.d
+    { echo "# Written by Vergence's tools/install.sh (removed by --uninstall)."; cat "$here/linux/vergence-i2c.conf"; } > /etc/modules-load.d/vergence-i2c.conf
+    chmod 644 /etc/modules-load.d/vergence-i2c.conf
+    modprobe i2c-dev 2>/dev/null || true
+    echo "brightness: i2c-dev loads at boot (/etc/modules-load.d/vergence-i2c.conf), for external screens over DDC/CI"
 fi
 # ---- system setup: Wi-Fi (settings milestone 1, step 4) ----
 # wpa_supplicant is enabled where there is a Wi-Fi card and nothing else

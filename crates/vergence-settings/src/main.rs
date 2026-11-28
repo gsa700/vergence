@@ -414,6 +414,8 @@ struct App {
     /// Each screen with a brightness control (its connector) and its level
     /// (brightness milestone 1); set through vdm on a thread of its own.
     brightness: Vec<(String, u32)>,
+    /// The levels the desktop keeps by monitor identity (external screens').
+    brightness_kept: std::collections::HashMap<String, u32>,
     brightness_jobs: Option<std::sync::mpsc::Sender<(String, u32)>>,
     /// About's summary was just copied (the button says so until the page changes).
     about_copied: bool,
@@ -560,6 +562,7 @@ impl App {
             prefs_open: std::rc::Rc::new(std::cell::Cell::new(false)),
             outputs: Vec::new(),
             brightness: screens::brightness_now(),
+            brightness_kept: screens::brightness_kept(),
             brightness_jobs: None,
             about_copied: false,
             inputs: Vec::new(),
@@ -902,6 +905,7 @@ impl App {
                 self.outputs = outputs;
                 self.setup = setup;
                 self.brightness = screens::brightness_now();
+                self.brightness_kept = screens::brightness_kept();
                 self.arrange_drag = None;
                 // Keep the same screen's page if it is still there.
                 if let Page::Screen(_) = self.page {

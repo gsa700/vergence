@@ -40,6 +40,9 @@ pub const TILE: &str = "display";
 const SHOWN_MS: i32 = 1500;
 /// How often the levels are read when nothing was set.
 const LOOK_EVERY: Duration = Duration::from_secs(4);
+/// External screens' levels are asked of their monitors every this many
+/// looks (a minute): a monitor's own buttons are seldom used, and DDC/CI is slow.
+const EXTERNALS_EVERY: u32 = 15;
 
 /// The brightness, as the main loop knows it.
 #[derive(Default)]
@@ -126,6 +129,10 @@ fn read(root: &std::path::Path) -> Vec<(String, u32)> {
 fn work(jobs: mpsc::Receiver<Job>, tx: channel::Sender<Vec<(String, u32)>>) {
     let (root, standin) = root();
     let mut wait = Duration::from_millis(300);
+    // External screens over DDC/CI (vdm asks their monitors: slow): asked at
+    // the start and every EXTERNALS_EVERY looks, and what was set here counts.
+    let mut externals: Vec<(String, u32)> = Vec::new();
+    let mut looks = 0u32;
     loop {
         // The first look soon after starting: by then the screens are the
         // server's outputs, and a kept level comes back at once after login.
@@ -159,13 +166,29 @@ fn work(jobs: mpsc::Receiver<Job>, tx: channel::Sender<Vec<(String, u32)>>) {
                 vergence_dm::brightness::ask(&connector, level)
             };
             match result {
-                Ok(()) => tracing::info!("brightness: {connector} {level}%"),
+                Ok(()) => {
+                    tracing::info!("brightness: {connector} {level}%");
+                    if let Some(e) = externals.iter_mut().find(|(c, _)| *c == connector) {
+                        e.1 = level;
+                    }
+                }
                 Err(e) => tracing::warn!("brightness: {connector} {level}%: {e}"),
             }
         }
+        if !standin && looks.is_multiple_of(EXTERNALS_EVERY) {
+            match vergence_dm::brightness::ask_externals() {
+                Ok(e) => externals = e,
+                Err(e) => tracing::debug!("brightness: external screens: {e}"),
+            }
+        }
+        looks = looks.wrapping_add(1);
         // Sent each time, changed or not: a screen that became an output
         // since (its level waiting to be set again) is seen to.
-        if tx.send(read(&root)).is_err() {
+        let mut now = read(&root);
+        let more: Vec<(String, u32)> =
+            externals.iter().filter(|(c, _)| !now.iter().any(|(p, _)| p == c)).cloned().collect();
+        now.extend(more);
+        if tx.send(now).is_err() {
             return;
         }
     }

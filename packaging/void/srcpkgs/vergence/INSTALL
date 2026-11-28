@@ -2,6 +2,9 @@
 # The first install only: what to do next (an update needs no reminder).
 case "$ACTION" in
 post)
+	# External screens' brightness over DDC/CI needs i2c-dev now, not only
+	# from the next boot (usr/lib/modules-load.d/vergence-i2c.conf).
+	modprobe i2c-dev 2>/dev/null || true
 	if [ "$UPDATE" != "yes" ]; then
 		cat <<'MSG'
 

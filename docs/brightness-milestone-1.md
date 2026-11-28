@@ -97,3 +97,24 @@ own screen, and wanted many times a minute with the keys.
 
 **Later, not milestone 1:** dimming before the screen blanks when idle (an
 Energy setting), a night light (warmer at night), an ambient light sensor.
+
+## Progress
+
+- **Steps 1 to 4, and 6 (2026-11-27):** built and tried on Hubble's panel.
+  vergence-dm's brightness.rs finds the controls and maps percents above a
+  1% floor; vdm takes `brightness <connector> <percent>` and
+  `brightness-list` on its power socket, each on a thread (at most four at
+  once), for root and anyone with a session at the machine. The server's
+  brightness.rs: the keys (5%, 1% with Shift, the level shown as the
+  volume's), the Display tile (a slider per screen), each screen's level
+  kept by its monitor's identity (~/.local/state/vergence/brightness.toml)
+  and set again 0.3 s after login. Settings > Screens has the slider.
+  Display suite 41 on a stand-in backlight.
+- **Step 5 (2026-11-27): written, not yet tried on a monitor.** Our own
+  DDC/CI client (vergence-dm ddc.rs: Get and Set VCP feature for Luminance,
+  0x10, on the connector's own I²C line, its frames checked in unit tests);
+  vdm lists external screens whose monitors answer and sets them in their
+  own range; the server asks for their levels at start and every minute.
+  The package and install.sh load `i2c-dev` (now, and at boot through
+  modules-load.d). To try on techbench's LG.
+

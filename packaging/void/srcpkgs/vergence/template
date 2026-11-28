@@ -56,6 +56,7 @@ do_install() {
 	vsv vdm
 	vinstall "${FILESDIR}/50-vdm" 755 etc/zzz.d/suspend
 	vinstall tools/linux/50-vergence-drives.rules 644 usr/share/polkit-1/rules.d
+	vinstall tools/linux/vergence-i2c.conf 644 usr/lib/modules-load.d
 	vinstall "${FILESDIR}/90-vergence-fonts.conf" 644 usr/share/fontconfig/conf.avail
 	vmkdir etc/fonts/conf.d
 	ln -s /usr/share/fontconfig/conf.avail/90-vergence-fonts.conf \

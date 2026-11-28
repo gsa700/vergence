@@ -95,6 +95,11 @@ const WNOHANG: c_int = 1;
 /// (auth.notice), with standard error /dev/null: daemon(8) reading vdm's
 /// output waited for every process holding it, a running session's worker
 /// among them, so `service vdm restart` hung.
+/// Brightness requests being carried out (each on a thread of its own: a
+/// monitor over DDC/CI is slow), and how many may be at once.
+static BRIGHTNESS_BUSY: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+const BRIGHTNESS_AT_ONCE: usize = 4;
+
 fn log(msg: &str) {
     #[cfg(target_os = "freebsd")]
     {
@@ -2160,84 +2165,97 @@ fn main() {
                 |u: u32| sessions.iter().any(|(x, _)| *x == u) || logins.values().any(|l| l.yes && l.uid == u);
             let others = |u: u32| sessions.iter().any(|(x, _)| *x != u) || logins.values().any(|l| l.yes && l.uid != u);
             let who = uid.map(|u| user_name(u).unwrap_or_else(|| u.to_string())).unwrap_or_else(|| "?".into());
-            let answer = match line.trim() {
-                // What the settings app's Login page shows (anyone may ask).
-                "login-state" => {
-                    let auto = std::fs::read_to_string(paths::autologin_file())
-                        .ok()
-                        .map(|t| t.trim().to_string())
-                        .filter(|t| !t.is_empty());
-                    format!(
-                        "login-screen={}\tautologin={}\tallowed={}",
-                        if paths::login_screen_file().is_file() { "on" } else { "off" },
-                        auto.as_deref().unwrap_or("-"),
-                        match allowed_cached(&mut allowed_cache) {
-                            Ok(u) => u,
-                            Err(why) => format!("no: {why}"),
-                        }
-                    )
-                }
-                // A screen's brightness (brightness milestone 1): for root and
-                // anyone with a session here, as Sleep; the screen named by its
-                // connector, its control found again here.
-                words if words.starts_with("brightness ") => {
-                    let parts: Vec<&str> = words.split_whitespace().collect();
-                    match (uid, parts.as_slice()) {
-                        (Some(u), ["brightness", connector, percent])
-                            if u == 0 || (u >= paths::MIN_UID && has_session(u)) =>
-                        {
-                            match vergence_dm::brightness::set_named(connector, percent) {
+            // A screen's brightness (brightness milestone 1): for root and
+            // anyone with a session here, as Sleep; the screen named by its
+            // connector, its control found again in vergence_dm. On a thread:
+            // a monitor over DDC/CI takes its time, and vdm's loop must not wait.
+            if line.trim().starts_with("brightness") {
+                let parts: Vec<String> = line.split_whitespace().map(str::to_string).collect();
+                let allowed = uid.is_some_and(|u| u == 0 || (u >= paths::MIN_UID && has_session(u)));
+                let known = (parts.len() == 1 && parts[0] == "brightness-list")
+                    || (parts.len() == 3 && parts[0] == "brightness");
+                if !known {
+                    let _ = s.write_all(b"no: not understood\n");
+                } else if !allowed {
+                    log(&format!("brightness for {who}: refused (no session here)"));
+                    let _ = s.write_all(b"no: only someone logged in at this machine can do that\n");
+                } else if BRIGHTNESS_BUSY.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= BRIGHTNESS_AT_ONCE {
+                    // A program asking faster than monitors answer: not a thread each.
+                    BRIGHTNESS_BUSY.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    let _ = s.write_all(b"no: busy\n");
+                } else {
+                    std::thread::spawn(move || {
+                        let answer = if parts[0] == "brightness-list" {
+                            format!("ok {}", vergence_dm::brightness::list_externals())
+                        } else {
+                            match vergence_dm::brightness::set_named(&parts[1], &parts[2]) {
                                 Ok(()) => "ok".to_string(),
                                 Err(why) => {
-                                    log(&format!("brightness: {connector} {percent} for {who}: {why}"));
+                                    log(&format!("brightness: {} {} for {who}: {why}", parts[1], parts[2]));
                                     format!("no: {why}")
                                 }
                             }
-                        }
-                        (Some(_), ["brightness", _, _]) => {
-                            log(&format!("brightness for {who}: refused (no session here)"));
-                            "no: only someone logged in at this machine can do that".to_string()
-                        }
-                        _ => "no: not understood".to_string(),
-                    }
+                        };
+                        let _ = s.write_all(format!("{answer}\n").as_bytes());
+                        BRIGHTNESS_BUSY.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    });
                 }
-                word => match (vergence_dm::power::Power::from_word(word), uid) {
-                    (None, _) | (_, None) => "no: not understood".to_string(),
-                    (Some(p), Some(u)) => {
-                        let allowed = u == 0
-                            || (Some(u) == greeter_uid && !logins.values().any(|l| l.yes))
-                            || (u >= paths::MIN_UID && has_session(u));
-                        if !allowed {
-                            log(&format!("power: {} for {who}: refused (no session here)", p.word()));
-                            "no: only someone logged in at this machine can do that".to_string()
-                        } else if p != vergence_dm::power::Power::Sleep && u != 0 && others(u) {
-                            log(&format!("power: {} for {who}: refused (someone else is logged in)", p.word()));
-                            "no: someone else is logged in".to_string()
-                        } else {
-                            let (cmd, args) = p.command();
-                            let started = std::process::Command::new(cmd)
-                                .args(args)
-                                .env_clear()
-                                .env("PATH", SYSTEM_PATH)
-                                .stdin(std::process::Stdio::null())
-                                .stdout(std::process::Stdio::null())
-                                .stderr(std::process::Stdio::null())
-                                .spawn();
-                            match started {
-                                Ok(_) => {
-                                    log(&format!("power: {} for {who} ({cmd})", p.word()));
-                                    "ok".to_string()
-                                }
-                                Err(e) => {
-                                    log(&format!("power: {} for {who}: {cmd}: {e}", p.word()));
-                                    format!("no: {cmd}: {e}")
+            } else {
+                let answer = match line.trim() {
+                    // What the settings app's Login page shows (anyone may ask).
+                    "login-state" => {
+                        let auto = std::fs::read_to_string(paths::autologin_file())
+                            .ok()
+                            .map(|t| t.trim().to_string())
+                            .filter(|t| !t.is_empty());
+                        format!(
+                            "login-screen={}\tautologin={}\tallowed={}",
+                            if paths::login_screen_file().is_file() { "on" } else { "off" },
+                            auto.as_deref().unwrap_or("-"),
+                            match allowed_cached(&mut allowed_cache) {
+                                Ok(u) => u,
+                                Err(why) => format!("no: {why}"),
+                            }
+                        )
+                    }
+                    word => match (vergence_dm::power::Power::from_word(word), uid) {
+                        (None, _) | (_, None) => "no: not understood".to_string(),
+                        (Some(p), Some(u)) => {
+                            let allowed = u == 0
+                                || (Some(u) == greeter_uid && !logins.values().any(|l| l.yes))
+                                || (u >= paths::MIN_UID && has_session(u));
+                            if !allowed {
+                                log(&format!("power: {} for {who}: refused (no session here)", p.word()));
+                                "no: only someone logged in at this machine can do that".to_string()
+                            } else if p != vergence_dm::power::Power::Sleep && u != 0 && others(u) {
+                                log(&format!("power: {} for {who}: refused (someone else is logged in)", p.word()));
+                                "no: someone else is logged in".to_string()
+                            } else {
+                                let (cmd, args) = p.command();
+                                let started = std::process::Command::new(cmd)
+                                    .args(args)
+                                    .env_clear()
+                                    .env("PATH", SYSTEM_PATH)
+                                    .stdin(std::process::Stdio::null())
+                                    .stdout(std::process::Stdio::null())
+                                    .stderr(std::process::Stdio::null())
+                                    .spawn();
+                                match started {
+                                    Ok(_) => {
+                                        log(&format!("power: {} for {who} ({cmd})", p.word()));
+                                        "ok".to_string()
+                                    }
+                                    Err(e) => {
+                                        log(&format!("power: {} for {who}: {cmd}: {e}", p.word()));
+                                        format!("no: {cmd}: {e}")
+                                    }
                                 }
                             }
                         }
-                    }
-                },
-            };
-            let _ = s.write_all(format!("{answer}\n").as_bytes());
+                    },
+                };
+                let _ = s.write_all(format!("{answer}\n").as_bytes());
+            }
         }
         // Elevation prompts that waited too long: over.
         let now = std::time::Instant::now();

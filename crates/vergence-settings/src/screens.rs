@@ -272,7 +272,14 @@ impl App {
             let mode_rows = self.mode_rows(o);
             let mut rows = vec![setting("Scale", &note, scale_slider(self.scale, o, &marks))];
             // Its brightness, where it has a control (brightness milestone 1).
-            if let Some((connector, level)) = self.brightness.iter().find(|(c, _)| *c == o.name).cloned() {
+            // A panel's level read now; an external screen's as the desktop last
+            // knew it (its monitor answered DDC/CI: the server keeps it by the
+            // monitor's identity; asking the monitor here would hold the window up).
+            let level = self.brightness.iter().find(|(c, _)| *c == o.name).map(|(_, l)| *l).or_else(|| {
+                self.brightness_kept.get(&o.id).copied().filter(|_| !vergence_dm::brightness::is_internal(&o.name))
+            });
+            if let Some(level) = level {
+                let connector = o.name.clone();
                 rows.push(setting(
                     "Brightness",
                     &format!("{level}%"),
@@ -396,8 +403,11 @@ impl App {
         match m {
             Message::Brightness(connector, v) => {
                 let level = v.round().clamp(0.0, 100.0) as u32;
-                let Some(entry) = self.brightness.iter_mut().find(|(c, _)| *c == connector) else { return };
-                entry.1 = level;
+                match self.brightness.iter_mut().find(|(c, _)| *c == connector) {
+                    Some(entry) => entry.1 = level,
+                    // An external screen's first move this time.
+                    None => self.brightness.push((connector.clone(), level)),
+                }
                 let jobs = self.brightness_jobs.get_or_insert_with(|| {
                     let (tx, rx) = std::sync::mpsc::channel::<(String, u32)>();
                     let _ = std::thread::Builder::new().name("brightness".into()).spawn(move || brightness_work(rx));
@@ -592,4 +602,23 @@ fn brightness_work(jobs: std::sync::mpsc::Receiver<(String, u32)>) {
             }
         }
     }
+}
+
+/// The levels the desktop keeps (the server's brightness.toml): a monitor's
+/// identity = its percent.
+pub(crate) fn brightness_kept() -> std::collections::HashMap<String, u32> {
+    let file = std::env::var_os("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")))
+        .map(|b| b.join("vergence/brightness.toml"));
+    file.and_then(|f| std::fs::read_to_string(f).ok())
+        .and_then(|t| t.parse::<toml::Table>().ok())
+        .and_then(|t| t.get("levels").and_then(|l| l.as_table()).cloned())
+        .map(|l| {
+            l.into_iter()
+                .filter_map(|(k, v)| v.as_integer().filter(|v| (0..=100).contains(v)).map(|v| (k, v as u32)))
+                .collect()
+        })
+        .unwrap_or_default()
 }

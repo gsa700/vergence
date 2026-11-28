@@ -90,21 +90,86 @@ pub fn set_named(connector: &str, percent: &str) -> Result<(), String> {
         return Err("not a screen".into());
     }
     let percent: u32 = percent.parse().ok().filter(|p| *p <= 100).ok_or("not a level from 0 to 100")?;
-    let c = controls().into_iter().find(|c| c.connector == connector).ok_or("that screen has no brightness control")?;
-    set(&c, percent)
+    if let Some(c) = controls().into_iter().find(|c| c.connector == connector) {
+        return set(&c, percent);
+    }
+    // An external screen: its monitor over DDC/CI, in the monitor's own range
+    // (a monitor at 0 is dim, not dark: no floor).
+    let (_, bus) = externals_in(Path::new("/"))
+        .into_iter()
+        .find(|(c, _)| c == connector)
+        .ok_or("that screen has no brightness control")?;
+    let (_, max) = crate::ddc::get_luminance(&bus)?;
+    crate::ddc::set_luminance(&bus, ((percent * max as u32 + 50) / 100) as u16)
+}
+
+/// vdm's half of `brightness-list`: each external screen whose monitor
+/// answers DDC/CI, and its level in percent ("DP-1=40 HDMI-A-1=75").
+pub fn list_externals() -> String {
+    externals_in(Path::new("/"))
+        .into_iter()
+        .filter_map(|(c, bus)| {
+            crate::ddc::get_luminance(&bus)
+                .ok()
+                .map(|(now, max)| format!("{c}={}", (now as u32 * 100 + max as u32 / 2) / max as u32))
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The external screens with a monitor on them and an I²C line for DDC/CI:
+/// (connector, `/dev/i2c-N`). Whether the monitor answers is known only by
+/// asking it (vdm, as root).
+pub fn externals_in(root: &Path) -> Vec<(String, PathBuf)> {
+    let mut entries: Vec<String> = std::fs::read_dir(root.join("sys/class/drm"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    entries.sort();
+    entries
+        .into_iter()
+        .filter_map(|name| {
+            let (card, conn) = name.split_once('-')?;
+            if !card.starts_with("card") || !valid_connector(conn) || is_internal(conn) {
+                return None;
+            }
+            crate::ddc::bus_of(root, &name).map(|bus| (conn.to_string(), bus))
+        })
+        .collect()
+}
+
+/// One line to vdm on its power socket, one line back.
+fn ask_vdm(line: &str, wait: Duration) -> Result<String, String> {
+    let mut s = UnixStream::connect(crate::paths::POWER_SOCKET).map_err(|e| format!("vdm is not running ({e})"))?;
+    let _ = s.set_read_timeout(Some(wait));
+    s.write_all(format!("{line}\n").as_bytes()).map_err(|e| e.to_string())?;
+    let mut answer = String::new();
+    BufReader::new(&s).read_line(&mut answer).map_err(|e| e.to_string())?;
+    let answer = answer.trim();
+    match answer.strip_prefix("ok") {
+        Some(rest) => Ok(rest.trim().to_string()),
+        None => Err(answer.strip_prefix("no: ").unwrap_or(answer).to_string()),
+    }
 }
 
 /// Ask vdm to set a screen's brightness (the server, the settings app).
 pub fn ask(connector: &str, percent: u32) -> Result<(), String> {
-    let mut s = UnixStream::connect(crate::paths::POWER_SOCKET).map_err(|e| format!("vdm is not running ({e})"))?;
-    let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
-    s.write_all(format!("brightness {connector} {}\n", percent.min(100)).as_bytes()).map_err(|e| e.to_string())?;
-    let mut line = String::new();
-    BufReader::new(&s).read_line(&mut line).map_err(|e| e.to_string())?;
-    match line.trim() {
-        "ok" => Ok(()),
-        other => Err(other.strip_prefix("no: ").unwrap_or(other).to_string()),
-    }
+    ask_vdm(&format!("brightness {connector} {}", percent.min(100)), Duration::from_secs(5)).map(|_| ())
+}
+
+/// Ask vdm for the external screens' levels (DDC/CI: slow, a second or more
+/// with several monitors; never during a frame).
+pub fn ask_externals() -> Result<Vec<(String, u32)>, String> {
+    let text = ask_vdm("brightness-list", Duration::from_secs(10))?;
+    Ok(text
+        .split_whitespace()
+        .filter_map(|w| {
+            let (c, l) = w.split_once('=')?;
+            Some((c.to_string(), l.parse::<u32>().ok()?.min(100))).filter(|(c, _)| valid_connector(c))
+        })
+        .collect())
 }
 
 /// A device level as a percent of its range, the floor counted as 0.
