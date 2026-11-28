@@ -109,6 +109,42 @@ meaning tree for agents, the magnifier and screen readers); 4, the browser
 6. **(a)** Rust, with our own small binding to the GObject calls needed.
 7. **(a)** Void first; FreeBSD once techbench runs it.
 
-**Research before building:** whether WPE Platform offers a direct way to
-read a page's accessibility tree (milestone 3), or only AT-SPI; how a
-platform of our own registers (a loadable module, or set in code).
+## Research (2026-11-27, from the WPE WebKit 2.54.3 source)
+
+**How a platform of our own registers: in code, no module needed.**
+WPE looks for platforms as GIO modules (in its module folder or
+`WPE_PLATFORMS_PATH`, chosen by `WPE_PLATFORM`), but that is only for
+programs that take the default display (`wpe_display_get_default`).
+vergence-web is the program WebKit runs in, so it registers its own
+`WPEDisplay` subclass as an ordinary GType, connects it, and hands it to
+each web view through the construct-only `display` property of
+`WebKitWebView` (there since 2.44). No .so in WebKit's folders and no
+environment variables.
+
+**What the platform implements** (the headless platform, the smallest
+reference, is 482 lines of C++): `WPEDisplay` (connect, create_view,
+create_toplevel, EGL display, DRM render device, preferred buffer formats,
+screens, keymap, clipboard, input method; gamepads optional), `WPEView`
+(render_buffer: a frame in, as a dmabuf or shared-memory buffer;
+buffers_changed, cursor by name or bytes, opaque rectangles, pointer lock,
+get_accessible), `WPEToplevel` (title, size, maximize/fullscreen/minimize,
+screen). A Rust binding for question 6 needs GType registration of
+subclasses with class vfuncs, GObject properties and signals for these
+few types: small, as leaned.
+
+**Page accessibility: AT-SPI only, but on a bus we choose.** Each web
+process publishes its page's accessibility tree itself, as AT-SPI objects
+on a D-Bus message bus (WebCore's own AT-SPI code, not ATK); the program
+hosting WebKit only receives a "plug id" (bus name and object path) for
+each view's root (`WPEViewAccessible`'s `bind`). There is no other hook.
+The bus is whatever `AT_SPI_BUS_ADDRESS` (or `WEBKIT_A11Y_BUS_ADDRESS`)
+names when vergence-web starts the web processes; with none, WebKit asks
+the session's `org.a11y.Bus`. So for milestone 3: vergence-web runs a
+**private bus of its own**, only its web processes on it, reads each
+page's tree there with vergence-dbus, and translates it into the meaning
+tree. The web process needs a real message bus (it calls Hello and owns a
+name) and sends change events only to listeners registered with an
+`org.a11y.atspi.Registry`, so that private bus answers as both: a small
+bus of our own inside vergence-web, or a borrowed dbus-daemon (Dave's
+call when milestone 3 comes). Nothing of this reaches the session's real
+AT-SPI bus. Milestone 1 sets no bus: pages then publish nothing.
